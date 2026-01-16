@@ -4,6 +4,7 @@ from typing import Optional
 from fastmcp import FastMCP
 
 from .tools.find_chat import find_chat_impl
+from .tools.get_messages import get_messages_impl
 
 mcp = FastMCP("iMessage MCP")
 
@@ -35,6 +36,51 @@ def find_chat(
         contains_recent=contains_recent,
         is_group=is_group,
         limit=limit,
+    )
+
+
+@mcp.tool()
+def get_messages(
+    chat_id: Optional[str] = None,
+    participants: Optional[list[str]] = None,
+    since: Optional[str] = None,
+    before: Optional[str] = None,
+    limit: int = 50,
+    from_person: Optional[str] = None,
+    contains: Optional[str] = None,
+    has: Optional[str] = None,
+    include_reactions: bool = True,
+    cursor: Optional[str] = None,
+) -> dict:
+    """
+    Get messages from a chat with flexible filtering.
+
+    Args:
+        chat_id: Chat identifier from find_chat
+        participants: Alternative - find chat by participants
+        since: Time bound (ISO, relative like "24h", or natural like "yesterday")
+        before: Upper time bound
+        limit: Max messages (default 50, max 200)
+        from_person: Filter to messages from specific person (or "me")
+        contains: Text search within messages
+        has: Filter by content type (links, attachments, images)
+        include_reactions: Include reaction data (default True)
+        cursor: Pagination cursor from previous response
+
+    Returns:
+        Messages with chat info and people map for compact references
+    """
+    return get_messages_impl(
+        chat_id=chat_id,
+        participants=participants,
+        since=since,
+        before=before,
+        limit=min(limit, 200),
+        from_person=from_person,
+        contains=contains,
+        has=has,
+        include_reactions=include_reactions,
+        cursor=cursor,
     )
 
 
