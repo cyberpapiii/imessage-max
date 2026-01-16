@@ -215,3 +215,17 @@ def test_list_attachments_limit_boundaries(attachments_db):
     # Test max boundary
     result = list_attachments_impl(limit=200, db_path=str(attachments_db))
     assert len(result.get("attachments", [])) <= 100
+
+
+def test_list_attachments_from_person_special_chars(attachments_db):
+    """Test that special LIKE characters in from_person are escaped."""
+    result = list_attachments_impl(from_person="100%_test", db_path=str(attachments_db))
+    # Should not cause SQL errors
+    assert "error" not in result
+
+
+def test_list_attachments_invalid_chat_id_format(attachments_db):
+    """Test that invalid chat_id format returns an error."""
+    result = list_attachments_impl(chat_id="chat_invalid", db_path=str(attachments_db))
+    assert "error" in result
+    assert result["error"] == "invalid_id"

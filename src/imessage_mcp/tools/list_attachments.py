@@ -22,6 +22,11 @@ def _format_file_size(bytes_size: Optional[int]) -> str:
     return f"{size:.1f} TB"
 
 
+def _escape_like(s: str) -> str:
+    """Escape SQL LIKE special characters."""
+    return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 def _get_attachment_type(mime_type: Optional[str], uti: Optional[str]) -> str:
     """Determine attachment type from MIME type or UTI."""
     if not mime_type and not uti:
@@ -117,15 +122,19 @@ def list_attachments_impl(
                     query += " AND c.ROWID = ?"
                     params.append(int(cid))
                 except ValueError:
-                    pass
+                    # If chat_id is invalid format, return error
+                    return {
+                        "error": "invalid_id",
+                        "message": f"Invalid chat ID format: {chat_id}",
+                    }
 
             # From filter
             if from_person:
                 if from_person.lower() == "me":
                     query += " AND m.is_from_me = 1"
                 else:
-                    query += " AND h.id LIKE ?"
-                    params.append(f"%{from_person}%")
+                    query += " AND h.id LIKE ? ESCAPE '\\'"
+                    params.append(f"%{_escape_like(from_person)}%")
 
             # Time filters
             if since:
