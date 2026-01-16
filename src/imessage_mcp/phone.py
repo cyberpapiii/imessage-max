@@ -49,7 +49,7 @@ def format_phone_display(e164: str) -> str:
     try:
         parsed = phonenumbers.parse(e164)
         return phonenumbers.format_number(parsed, PhoneNumberFormat.NATIONAL)
-    except:
+    except Exception:
         return e164
 
 
@@ -63,7 +63,7 @@ def format_phone_international(e164: str) -> str:
     try:
         parsed = phonenumbers.parse(e164)
         return phonenumbers.format_number(parsed, PhoneNumberFormat.INTERNATIONAL)
-    except:
+    except Exception:
         return e164
 
 
