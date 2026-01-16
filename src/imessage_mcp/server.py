@@ -5,7 +5,7 @@ from fastmcp import FastMCP
 mcp = FastMCP("iMessage MCP")
 
 
-def main():
+def main() -> None:
     """Run the MCP server."""
     mcp.run()
 

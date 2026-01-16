@@ -1,0 +1,14 @@
+# iMessage MCP Pro - Prototype Dependencies
+# Python 3.10+ required (PyObjC 12.x dropped 3.9 support)
+
+# MCP Framework - pin to <3 to avoid breaking changes
+fastmcp<3
+
+# macOS Contacts framework bindings
+pyobjc-framework-Contacts>=12.1
+
+# Phone number parsing and normalization
+phonenumbers>=8.13
+
+# Date/time utilities
+python-dateutil>=2.8
