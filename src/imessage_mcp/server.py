@@ -6,6 +6,7 @@ from fastmcp import FastMCP
 from .tools.find_chat import find_chat_impl
 from .tools.get_messages import get_messages_impl
 from .tools.list_chats import list_chats_impl
+from .tools.search import search_impl
 
 mcp = FastMCP("iMessage MCP")
 
@@ -115,6 +116,54 @@ def list_chats(
         min_participants=min_participants,
         max_participants=max_participants,
         sort=sort,
+    )
+
+
+@mcp.tool()
+def search(
+    query: str,
+    from_person: Optional[str] = None,
+    in_chat: Optional[str] = None,
+    is_group: Optional[bool] = None,
+    has: Optional[str] = None,
+    since: Optional[str] = None,
+    before: Optional[str] = None,
+    limit: int = 20,
+    sort: str = "recent_first",
+    format: str = "flat",
+    include_context: bool = False,
+) -> dict:
+    """
+    Full-text search across messages with advanced filtering.
+
+    Args:
+        query: Text to search for
+        from_person: Filter to messages from this person (or "me")
+        in_chat: Chat ID to search within
+        is_group: True for groups only, False for DMs only
+        has: Content type filter: "link", "image", "video", "attachment"
+        since: Time bound (ISO, relative like "24h", or natural like "yesterday")
+        before: Upper time bound
+        limit: Max results (default 20, max 100)
+        sort: "recent_first" (default) or "oldest_first"
+        format: "flat" (default) or "grouped_by_chat"
+        include_context: Include messages before/after each result
+
+    Returns:
+        Search results with people map
+    """
+    return search_impl(
+        query=query,
+        from_person=from_person,
+        in_chat=in_chat,
+        is_group=is_group,
+        has=has,
+        since=since,
+        before=before,
+        limit=limit,
+        sort=sort,
+        format=format,
+        include_context=include_context,
     )
 
 
