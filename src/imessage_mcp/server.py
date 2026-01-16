@@ -5,6 +5,7 @@ from fastmcp import FastMCP
 
 from .tools.find_chat import find_chat_impl
 from .tools.get_messages import get_messages_impl
+from .tools.list_chats import list_chats_impl
 
 mcp = FastMCP("iMessage MCP")
 
@@ -81,6 +82,39 @@ def get_messages(
         has=has,
         include_reactions=include_reactions,
         cursor=cursor,
+    )
+
+
+@mcp.tool()
+def list_chats(
+    limit: int = 20,
+    since: Optional[str] = None,
+    is_group: Optional[bool] = None,
+    min_participants: Optional[int] = None,
+    max_participants: Optional[int] = None,
+    sort: str = "recent",
+) -> dict:
+    """
+    List recent chats with previews.
+
+    Args:
+        limit: Max chats to return (default 20)
+        since: Only chats with activity since this time
+        is_group: True for groups only, False for DMs only
+        min_participants: Filter to chats with at least N participants
+        max_participants: Filter to chats with at most N participants
+        sort: "recent" (default), "alphabetical", or "most_active"
+
+    Returns:
+        List of chats with last message previews
+    """
+    return list_chats_impl(
+        limit=limit,
+        since=since,
+        is_group=is_group,
+        min_participants=min_participants,
+        max_participants=max_participants,
+        sort=sort,
     )
 
 
