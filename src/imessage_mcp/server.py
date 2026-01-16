@@ -10,6 +10,7 @@ from .tools.search import search_impl
 from .tools.get_context import get_context_impl
 from .tools.get_active import get_active_conversations_impl
 from .tools.list_attachments import list_attachments_impl
+from .tools.get_unread import get_unread_impl
 
 mcp = FastMCP("iMessage MCP")
 
@@ -263,6 +264,34 @@ def list_attachments(
         before=before,
         limit=limit,
         sort=sort,
+    )
+
+
+@mcp.tool()
+def get_unread(
+    chat_id: Optional[str] = None,
+    format: str = "messages",
+    limit: int = 50,
+    cursor: Optional[str] = None,
+) -> dict:
+    """
+    Get all unread messages across chats, or unread count summary.
+
+    Args:
+        chat_id: Filter to specific chat (e.g., "chat123")
+        format: "messages" (default) returns full unread messages,
+                "summary" returns unread counts by chat
+        limit: Max messages to return in "messages" format (default 50, max 100)
+        cursor: Pagination cursor from previous response
+
+    Returns:
+        Unread messages with chat info and people map, or summary breakdown
+    """
+    return get_unread_impl(
+        chat_id=chat_id,
+        format=format,
+        limit=min(limit, 100),
+        cursor=cursor,
     )
 
 
