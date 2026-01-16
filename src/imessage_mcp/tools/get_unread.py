@@ -10,6 +10,11 @@ from ..phone import format_phone_display
 from ..parsing import get_message_text
 
 
+def _escape_like(s: str) -> str:
+    """Escape SQL LIKE special characters."""
+    return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 def get_unread_impl(
     chat_id: Optional[str] = None,
     format: str = "messages",
@@ -51,8 +56,8 @@ def get_unread_impl(
                 if numeric_chat_id is None:
                     # Try to find by GUID
                     cursor_obj = conn.execute(
-                        "SELECT ROWID FROM chat WHERE guid LIKE ?",
-                        (f"%{chat_id}%",)
+                        "SELECT ROWID FROM chat WHERE guid LIKE ? ESCAPE '\\'",
+                        (f"%{_escape_like(chat_id)}%",)
                     )
                     row = cursor_obj.fetchone()
                     if row:
@@ -177,14 +182,16 @@ def _get_unread_messages(
                 people[key] = format_phone_display(sender_handle)
                 handle_to_key[sender_handle] = key
 
+        # Ensure participants are cached for this chat
+        if msg_chat_id not in chat_participants_cache:
+            chat_participants_cache[msg_chat_id] = get_chat_participants(
+                conn, msg_chat_id, resolver
+            )
+
         # Get chat display name
         chat_display_name = row['chat_display_name']
         if not chat_display_name:
             # Generate from participants
-            if msg_chat_id not in chat_participants_cache:
-                chat_participants_cache[msg_chat_id] = get_chat_participants(
-                    conn, msg_chat_id, resolver
-                )
             participant_rows = chat_participants_cache[msg_chat_id]
             participant_objs = [
                 Participant(handle=p['handle'], name=p['name'])
@@ -192,11 +199,7 @@ def _get_unread_messages(
             ]
             chat_display_name = generate_display_name(participant_objs)
 
-        # Determine if group chat
-        if msg_chat_id not in chat_participants_cache:
-            chat_participants_cache[msg_chat_id] = get_chat_participants(
-                conn, msg_chat_id, resolver
-            )
+        # Determine if group chat (use already-cached data)
         is_group = len(chat_participants_cache[msg_chat_id]) > 1
 
         # Build message

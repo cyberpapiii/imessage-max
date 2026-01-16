@@ -261,3 +261,12 @@ def test_get_unread_summary_sorted_by_count(unread_db):
     # First chat should have more unread than second
     if len(breakdown) >= 2:
         assert breakdown[0]["unread_count"] >= breakdown[1]["unread_count"]
+
+
+def test_get_unread_chat_id_special_chars(unread_db):
+    """Test that special LIKE characters in chat_id are escaped."""
+    from imessage_mcp.tools.get_unread import get_unread_impl
+
+    result = get_unread_impl(chat_id="100%_test", db_path=str(unread_db))
+    # Should not cause SQL errors
+    assert "error" not in result or result.get("error") == "chat_not_found"
