@@ -5,6 +5,7 @@ from datetime import datetime, timezone, timedelta
 from imessage_mcp.time_utils import (
     parse_time_input,
     format_relative_time,
+    format_compact_relative,
 )
 
 
@@ -61,3 +62,33 @@ class TestFormatRelativeTime:
 
     def test_none_returns_empty(self):
         assert format_relative_time(None) == ""
+
+
+class TestFormatCompactRelative:
+    def test_now(self):
+        dt = datetime.now(timezone.utc)
+        result = format_compact_relative(dt)
+        assert result == "now"
+
+    def test_minutes_ago(self):
+        dt = datetime.now(timezone.utc) - timedelta(minutes=15)
+        result = format_compact_relative(dt)
+        assert result == "15m ago"
+
+    def test_hours_ago(self):
+        dt = datetime.now(timezone.utc) - timedelta(hours=5)
+        result = format_compact_relative(dt)
+        assert result == "5h ago"
+
+    def test_days_ago(self):
+        dt = datetime.now(timezone.utc) - timedelta(days=3)
+        result = format_compact_relative(dt)
+        assert result == "3d ago"
+
+    def test_weeks_ago(self):
+        dt = datetime.now(timezone.utc) - timedelta(weeks=2)
+        result = format_compact_relative(dt)
+        assert result == "2w ago"
+
+    def test_none_returns_empty(self):
+        assert format_compact_relative(None) == ""
