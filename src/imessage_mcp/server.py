@@ -9,6 +9,7 @@ from .tools.list_chats import list_chats_impl
 from .tools.search import search_impl
 from .tools.get_context import get_context_impl
 from .tools.get_active import get_active_conversations_impl
+from .tools.list_attachments import list_attachments_impl
 
 mcp = FastMCP("iMessage MCP")
 
@@ -226,6 +227,42 @@ def get_active_conversations(
         min_exchanges=min_exchanges,
         is_group=is_group,
         limit=limit,
+    )
+
+
+@mcp.tool()
+def list_attachments(
+    chat_id: Optional[str] = None,
+    from_person: Optional[str] = None,
+    type: Optional[str] = None,
+    since: Optional[str] = None,
+    before: Optional[str] = None,
+    limit: int = 50,
+    sort: str = "recent_first",
+) -> dict:
+    """
+    List attachments with metadata.
+
+    Args:
+        chat_id: Filter to specific chat
+        from_person: Filter to attachments from specific person (or "me")
+        type: Filter by type: "image", "video", "audio", "pdf", "document", "any"
+        since: Time bound (ISO, relative like "24h", or natural like "yesterday")
+        before: Upper time bound
+        limit: Max results (default 50, max 100)
+        sort: "recent_first" (default), "oldest_first", "largest_first"
+
+    Returns:
+        Attachments with metadata and people map
+    """
+    return list_attachments_impl(
+        chat_id=chat_id,
+        from_person=from_person,
+        type=type,
+        since=since,
+        before=before,
+        limit=limit,
+        sort=sort,
     )
 
 
