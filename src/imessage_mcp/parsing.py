@@ -49,7 +49,7 @@ def extract_text_from_attributed_body(blob: bytes) -> Optional[str]:
     except UnicodeDecodeError:
         try:
             return blob[idx:idx+length].decode('utf-8', errors='replace')
-        except:
+        except Exception:
             return None
 
 
@@ -64,7 +64,7 @@ def get_message_text(text: Optional[str], attributed_body: Optional[bytes] = Non
     return None
 
 
-def extract_links(text: str) -> list[str]:
+def extract_links(text: Optional[str]) -> list[str]:
     """Extract URLs from message text."""
     if not text:
         return []
@@ -73,7 +73,7 @@ def extract_links(text: str) -> list[str]:
     return re.findall(url_pattern, text)
 
 
-def is_reaction_message(associated_message_type: int) -> bool:
+def is_reaction_message(associated_message_type: Optional[int]) -> bool:
     """Check if a message is a reaction/tapback."""
     if associated_message_type is None:
         return False
