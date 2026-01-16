@@ -6,6 +6,71 @@ from ..contacts import ContactResolver
 from ..time_utils import parse_time_input, format_compact_relative
 from ..parsing import get_message_text
 
+# 24 hours in Apple timestamp format (nanoseconds)
+TWENTY_FOUR_HOURS_NS = 24 * 60 * 60 * 1_000_000_000
+
+
+def _looks_like_question(text: str) -> bool:
+    """Check if a message appears to expect a response.
+
+    Args:
+        text: The message text to check
+
+    Returns:
+        True if the message looks like it expects a response
+    """
+    if not text:
+        return False
+
+    text_lower = text.lower().strip()
+
+    # Contains question mark
+    if '?' in text:
+        return True
+
+    # Ends with common question/request patterns
+    question_endings = [
+        "what do you think",
+        "let me know",
+        "thoughts",
+        "can you",
+        "could you",
+        "would you",
+        "will you",
+        "please",
+        "lmk",
+    ]
+    for ending in question_endings:
+        if text_lower.endswith(ending):
+            return True
+
+    return False
+
+
+def _has_reply_within_24h(conn, chat_id: int, message_date: int) -> bool:
+    """Check if there's a reply from someone else within 24 hours.
+
+    Args:
+        conn: Database connection
+        chat_id: Chat ROWID
+        message_date: Apple timestamp of the original message
+
+    Returns:
+        True if there is a reply within 24 hours
+    """
+    cursor = conn.execute("""
+        SELECT 1 FROM message m
+        JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
+        WHERE cmj.chat_id = ?
+        AND m.date > ?
+        AND m.date <= ?
+        AND m.is_from_me = 0
+        AND m.associated_message_type = 0
+        LIMIT 1
+    """, (chat_id, message_date, message_date + TWENTY_FOUR_HOURS_NS))
+
+    return cursor.fetchone() is not None
+
 
 def _escape_like(s: str) -> str:
     """Escape SQL LIKE special characters."""
@@ -24,6 +89,7 @@ def search_impl(
     sort: str = "recent_first",
     format: str = "flat",
     include_context: bool = False,
+    unanswered: bool = False,
     db_path: str = DB_PATH,
 ) -> dict[str, Any]:
     """
@@ -41,6 +107,7 @@ def search_impl(
         sort: "recent_first" (default) or "oldest_first"
         format: "flat" (default) or "grouped_by_chat"
         include_context: Include messages before/after each result
+        unanswered: Only return messages from me that didn't receive a reply within 24h
         db_path: Path to chat.db (for testing)
 
     Returns:
@@ -111,8 +178,10 @@ def search_impl(
                     base_query += " AND c.guid LIKE ? ESCAPE '\\'"
                     params.append(f"%{_escape_like(in_chat)}%")
 
-            # From filter
-            if from_person:
+            # From filter (unanswered implies from_me)
+            if unanswered:
+                base_query += " AND m.is_from_me = 1"
+            elif from_person:
                 if from_person.lower() == "me":
                     base_query += " AND m.is_from_me = 1"
                 else:
@@ -150,11 +219,28 @@ def search_impl(
             else:
                 base_query += " ORDER BY m.date ASC"
 
+            # For unanswered filtering, fetch more results initially since we'll filter some out
+            fetch_limit = limit * 3 if unanswered else limit
             base_query += " LIMIT ?"
-            params.append(limit)
+            params.append(fetch_limit)
 
             cursor_obj = conn.execute(base_query, params)
             rows = cursor_obj.fetchall()
+
+            # Filter for unanswered messages if requested
+            if unanswered:
+                filtered_rows = []
+                for row in rows:
+                    text = get_message_text(row["text"], row["attributedBody"])
+                    # Check if message looks like a question and has no reply within 24h
+                    if _looks_like_question(text) and not _has_reply_within_24h(
+                        conn, row["chat_id"], row["date"]
+                    ):
+                        filtered_rows.append(row)
+                        # Stop once we have enough
+                        if len(filtered_rows) >= limit:
+                            break
+                rows = filtered_rows
 
             if format == "grouped_by_chat":
                 return _build_grouped_response(rows, query, resolver)

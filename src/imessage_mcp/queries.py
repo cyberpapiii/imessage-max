@@ -212,6 +212,7 @@ def get_messages_for_chat(
     since_apple: Optional[int] = None,
     before_apple: Optional[int] = None,
     from_handle: Optional[str] = None,
+    from_me_only: bool = False,
     contains: Optional[str] = None,
 ) -> list[dict]:
     """Get messages from a chat with optional filters.
@@ -223,6 +224,7 @@ def get_messages_for_chat(
         since_apple: Filter messages after this Apple timestamp
         before_apple: Filter messages before this Apple timestamp
         from_handle: Filter by sender handle
+        from_me_only: Filter to only messages from "me" (is_from_me = 1)
         contains: Filter by text content (case-insensitive LIKE)
 
     Returns:
@@ -252,7 +254,9 @@ def get_messages_for_chat(
     if before_apple is not None:
         qb.where("m.date < ?", before_apple)
 
-    if from_handle is not None:
+    if from_me_only:
+        qb.where("m.is_from_me = 1")
+    elif from_handle is not None:
         qb.where("h.id = ?", from_handle)
 
     if contains is not None:

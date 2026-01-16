@@ -95,15 +95,29 @@ def populated_db(mock_db_path):
             (2, 2);
 
         -- Messages: Apple epoch nanoseconds (2026-01-16 = ~789100000000000000)
+        -- 24 hours = 86400 seconds = 86400000000000 nanoseconds
         INSERT INTO message (ROWID, guid, text, handle_id, date, is_from_me, associated_message_type) VALUES
             (1, 'msg1', 'Hello world', 1, 789100000000000000, 0, 0),
             (2, 'msg2', 'How are you?', NULL, 789100100000000000, 1, 0),
-            (3, 'msg3', NULL, 1, 789100200000000000, 0, 2000);
+            (3, 'msg3', NULL, 1, 789100200000000000, 0, 2000),
+            -- Unanswered question (no reply within 24h - reply comes after 48h)
+            (4, 'msg4', 'Can you help me with this?', NULL, 789200000000000000, 1, 0),
+            (5, 'msg5', 'Sure, what do you need?', 1, 789400000000000000, 0, 0),
+            -- Answered question (reply within 24h)
+            (6, 'msg6', 'What time is the meeting?', NULL, 789500000000000000, 1, 0),
+            (7, 'msg7', 'It is at 3pm', 1, 789500100000000000, 0, 0),
+            -- Unanswered message with "let me know" (no reply)
+            (8, 'msg8', 'Check out this link and let me know', NULL, 789600000000000000, 1, 0);
 
         INSERT INTO chat_message_join (chat_id, message_id) VALUES
             (1, 1),
             (1, 2),
-            (1, 3);
+            (1, 3),
+            (1, 4),
+            (1, 5),
+            (1, 6),
+            (1, 7),
+            (1, 8);
     """)
     conn.close()
 

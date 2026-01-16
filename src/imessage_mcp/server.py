@@ -11,6 +11,7 @@ from .tools.get_context import get_context_impl
 from .tools.get_active import get_active_conversations_impl
 from .tools.list_attachments import list_attachments_impl
 from .tools.get_unread import get_unread_impl
+from .tools.send import send_impl
 
 mcp = FastMCP("iMessage MCP")
 
@@ -57,6 +58,7 @@ def get_messages(
     has: Optional[str] = None,
     include_reactions: bool = True,
     cursor: Optional[str] = None,
+    unanswered: bool = False,
 ) -> dict:
     """
     Get messages from a chat with flexible filtering.
@@ -72,6 +74,7 @@ def get_messages(
         has: Filter by content type (links, attachments, images)
         include_reactions: Include reaction data (default True)
         cursor: Pagination cursor from previous response
+        unanswered: Only return messages from me that didn't receive a reply within 24h
 
     Returns:
         Messages with chat info and people map for compact references
@@ -87,6 +90,7 @@ def get_messages(
         has=has,
         include_reactions=include_reactions,
         cursor=cursor,
+        unanswered=unanswered,
     )
 
 
@@ -136,6 +140,7 @@ def search(
     sort: str = "recent_first",
     format: str = "flat",
     include_context: bool = False,
+    unanswered: bool = False,
 ) -> dict:
     """
     Full-text search across messages with advanced filtering.
@@ -152,6 +157,7 @@ def search(
         sort: "recent_first" (default) or "oldest_first"
         format: "flat" (default) or "grouped_by_chat"
         include_context: Include messages before/after each result
+        unanswered: Only return messages from me that didn't receive a reply within 24h
 
     Returns:
         Search results with people map
@@ -168,6 +174,7 @@ def search(
         sort=sort,
         format=format,
         include_context=include_context,
+        unanswered=unanswered,
     )
 
 
@@ -292,6 +299,34 @@ def get_unread(
         format=format,
         limit=min(limit, 100),
         cursor=cursor,
+    )
+
+
+@mcp.tool()
+def send(
+    to: Optional[str] = None,
+    chat_id: Optional[str] = None,
+    text: Optional[str] = None,
+    reply_to: Optional[str] = None,
+) -> dict:
+    """
+    Send a message to a person or group chat.
+
+    Args:
+        to: Contact name, phone number, or email (required if chat_id not provided)
+        chat_id: Existing chat ID for group chats or when 'to' is ambiguous
+        text: Message content (required)
+        reply_to: Message ID to reply to (not implemented yet)
+
+    Returns:
+        Success info with message_id, chat_id, timestamp, and delivered_to list.
+        If recipient is ambiguous, returns candidates for disambiguation.
+    """
+    return send_impl(
+        to=to,
+        chat_id=chat_id,
+        text=text,
+        reply_to=reply_to,
     )
 
 

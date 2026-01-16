@@ -9,6 +9,71 @@ from ..parsing import get_message_text, get_reaction_type, reaction_to_emoji, ex
 from ..time_utils import parse_time_input
 from ..models import Participant, generate_display_name
 
+# 24 hours in Apple timestamp format (nanoseconds)
+TWENTY_FOUR_HOURS_NS = 24 * 60 * 60 * 1_000_000_000
+
+
+def _looks_like_question(text: str) -> bool:
+    """Check if a message appears to expect a response.
+
+    Args:
+        text: The message text to check
+
+    Returns:
+        True if the message looks like it expects a response
+    """
+    if not text:
+        return False
+
+    text_lower = text.lower().strip()
+
+    # Contains question mark
+    if '?' in text:
+        return True
+
+    # Ends with common question/request patterns
+    question_endings = [
+        "what do you think",
+        "let me know",
+        "thoughts",
+        "can you",
+        "could you",
+        "would you",
+        "will you",
+        "please",
+        "lmk",
+    ]
+    for ending in question_endings:
+        if text_lower.endswith(ending):
+            return True
+
+    return False
+
+
+def _has_reply_within_24h(conn, chat_id: int, message_date: int) -> bool:
+    """Check if there's a reply from someone else within 24 hours.
+
+    Args:
+        conn: Database connection
+        chat_id: Chat ROWID
+        message_date: Apple timestamp of the original message
+
+    Returns:
+        True if there is a reply within 24 hours
+    """
+    cursor = conn.execute("""
+        SELECT 1 FROM message m
+        JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
+        WHERE cmj.chat_id = ?
+        AND m.date > ?
+        AND m.date <= ?
+        AND m.is_from_me = 0
+        AND m.associated_message_type = 0
+        LIMIT 1
+    """, (chat_id, message_date, message_date + TWENTY_FOUR_HOURS_NS))
+
+    return cursor.fetchone() is not None
+
 
 def get_messages_impl(
     chat_id: Optional[str] = None,
@@ -21,6 +86,7 @@ def get_messages_impl(
     has: Optional[str] = None,
     include_reactions: bool = True,
     cursor: Optional[str] = None,
+    unanswered: bool = False,
     db_path: str = DB_PATH,
 ) -> dict[str, Any]:
     """
@@ -39,6 +105,7 @@ def get_messages_impl(
         has: Filter by content type ("links", "attachments", etc.)
         include_reactions: Include reaction data (default True)
         cursor: Pagination cursor for continuing retrieval
+        unanswered: Only return messages from me that didn't receive a reply within 24h
         db_path: Path to chat.db (for testing)
 
     Returns:
@@ -134,29 +201,53 @@ def get_messages_impl(
 
             # Resolve from_person to handle
             from_handle = None
-            if from_person:
+            from_me_only = False
+
+            # unanswered implies from_me_only (only my messages can be unanswered)
+            if unanswered:
+                from_me_only = True
+            elif from_person:
                 if from_person.lower() == "me":
-                    # Special handling for "me" - filter by is_from_me later
-                    pass
+                    from_me_only = True
                 else:
                     from_handle = normalize_to_e164(from_person)
                     if not from_handle and resolver.is_available:
                         resolver.initialize()
-                        for handle, name in (resolver._lookup or {}).items():
-                            if from_person.lower() in name.lower():
-                                from_handle = handle
-                                break
+                        # Use public search_by_name method instead of private _lookup
+                        matches = resolver.search_by_name(from_person)
+                        if matches:
+                            from_handle = matches[0][0]
+
+            # For unanswered filtering, we need to fetch more messages initially
+            # since we'll filter some out, then apply limit after filtering
+            fetch_limit = limit * 3 if unanswered else limit
 
             # Get messages
             message_rows = get_messages_for_chat(
                 conn,
                 numeric_chat_id,
-                limit=limit,
+                limit=fetch_limit,
                 since_apple=since_apple,
                 before_apple=before_apple,
                 from_handle=from_handle,
+                from_me_only=from_me_only,
                 contains=contains,
             )
+
+            # Filter for unanswered messages if requested
+            if unanswered:
+                filtered_rows = []
+                for row in message_rows:
+                    text = get_message_text(row['text'], row.get('attributedBody'))
+                    # Check if message looks like a question and has no reply within 24h
+                    if _looks_like_question(text) and not _has_reply_within_24h(
+                        conn, numeric_chat_id, row['date']
+                    ):
+                        filtered_rows.append(row)
+                        # Stop once we have enough
+                        if len(filtered_rows) >= limit:
+                            break
+                message_rows = filtered_rows
 
             # Get reactions for messages
             reactions_map = {}

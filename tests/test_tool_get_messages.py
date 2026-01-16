@@ -226,3 +226,145 @@ def test_get_messages_timestamp_format(populated_db):
         if msg.get("ts"):
             # Should contain ISO format indicators
             assert "T" in msg["ts"] or "-" in msg["ts"]
+
+
+def test_get_messages_from_person_me(populated_db):
+    """Test filtering messages from 'me' only."""
+    result = get_messages_impl(
+        chat_id="chat1",
+        from_person="me",
+        db_path=str(populated_db),
+    )
+
+    assert "messages" in result
+    # All messages should be from "me"
+    for msg in result["messages"]:
+        assert msg.get("from") == "me", f"Expected from='me', got {msg.get('from')}"
+
+
+def test_get_messages_from_person_me_case_insensitive(populated_db):
+    """Test that 'me' filter is case-insensitive."""
+    result_lower = get_messages_impl(
+        chat_id="chat1",
+        from_person="me",
+        db_path=str(populated_db),
+    )
+    result_upper = get_messages_impl(
+        chat_id="chat1",
+        from_person="ME",
+        db_path=str(populated_db),
+    )
+    result_mixed = get_messages_impl(
+        chat_id="chat1",
+        from_person="Me",
+        db_path=str(populated_db),
+    )
+
+    # All variations should return the same messages
+    assert len(result_lower["messages"]) == len(result_upper["messages"])
+    assert len(result_lower["messages"]) == len(result_mixed["messages"])
+
+
+def test_get_messages_from_person_me_excludes_others(populated_db):
+    """Test that from_person='me' excludes messages from others."""
+    # Get all messages first
+    all_result = get_messages_impl(
+        chat_id="chat1",
+        db_path=str(populated_db),
+    )
+
+    # Get only "me" messages
+    me_result = get_messages_impl(
+        chat_id="chat1",
+        from_person="me",
+        db_path=str(populated_db),
+    )
+
+    # Count messages from "me" in all_result
+    me_count_in_all = sum(1 for msg in all_result["messages"] if msg.get("from") == "me")
+
+    # Should match the count of messages returned with from_person="me"
+    assert len(me_result["messages"]) == me_count_in_all
+
+
+def test_get_messages_unanswered_basic(populated_db):
+    """Test unanswered filter returns only unanswered questions."""
+    result = get_messages_impl(
+        chat_id="chat1",
+        unanswered=True,
+        db_path=str(populated_db),
+    )
+
+    assert "messages" in result
+    assert "error" not in result
+    # All returned messages should be from me
+    for msg in result.get("messages", []):
+        assert msg.get("from") == "me"
+
+
+def test_get_messages_unanswered_implies_from_me(populated_db):
+    """Test that unanswered=True implies from_person='me'."""
+    result = get_messages_impl(
+        chat_id="chat1",
+        unanswered=True,
+        db_path=str(populated_db),
+    )
+
+    # Should not error, should only return my messages
+    assert "error" not in result
+    # All messages should be from "me"
+    for msg in result.get("messages", []):
+        assert msg.get("from") == "me", f"Expected from='me', got {msg.get('from')}"
+
+
+def test_get_messages_unanswered_returns_questions_only(populated_db):
+    """Test that unanswered filter only returns question-like messages."""
+    result = get_messages_impl(
+        chat_id="chat1",
+        unanswered=True,
+        db_path=str(populated_db),
+    )
+
+    assert "messages" in result
+    # All messages should contain a question mark or end with question phrases
+    for msg in result.get("messages", []):
+        text = msg.get("text", "") or ""
+        # Check that the message looks like a question
+        has_question_mark = "?" in text
+        text_lower = text.lower()
+        has_question_ending = any(
+            text_lower.endswith(ending)
+            for ending in ["let me know", "lmk", "thoughts", "please",
+                          "can you", "could you", "would you", "will you",
+                          "what do you think"]
+        )
+        assert has_question_mark or has_question_ending, f"Message '{text}' does not look like a question"
+
+
+def test_get_messages_unanswered_excludes_answered(populated_db):
+    """Test that unanswered filter excludes messages that got replies within 24h."""
+    result = get_messages_impl(
+        chat_id="chat1",
+        unanswered=True,
+        db_path=str(populated_db),
+    )
+
+    assert "messages" in result
+    # Should not include "What time is the meeting?" since it got a reply within 24h
+    texts = [msg.get("text", "") for msg in result.get("messages", [])]
+    assert not any("meeting" in (t or "").lower() for t in texts), \
+        "Should not include answered question about meeting"
+
+
+def test_get_messages_unanswered_empty_chat(populated_db):
+    """Test unanswered filter on chat with no unanswered questions."""
+    # Chat 2 has no messages with unanswered questions
+    result = get_messages_impl(
+        chat_id="chat2",
+        unanswered=True,
+        db_path=str(populated_db),
+    )
+
+    assert "error" not in result
+    assert "messages" in result
+    # May return empty list if no unanswered questions exist

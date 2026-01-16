@@ -163,3 +163,82 @@ def test_search_cursor_field(populated_db):
     result = search_impl(query="Hello", db_path=str(populated_db))
 
     assert "cursor" in result
+
+
+def test_search_unanswered(populated_db):
+    """Test search with unanswered filter."""
+    result = search_impl(
+        query="?",
+        unanswered=True,
+        db_path=str(populated_db),
+    )
+
+    assert "error" not in result
+    assert "results" in result
+    # All results should be from "me"
+    for msg in result.get("results", []):
+        assert msg.get("from") == "me"
+
+
+def test_search_unanswered_implies_from_me(populated_db):
+    """Test that unanswered=True forces from_me filter."""
+    result = search_impl(
+        query="help",
+        unanswered=True,
+        db_path=str(populated_db),
+    )
+
+    assert "error" not in result
+    # All results should be from "me"
+    for msg in result.get("results", []):
+        assert msg.get("from") == "me", f"Expected from='me', got {msg.get('from')}"
+
+
+def test_search_unanswered_returns_questions(populated_db):
+    """Test that unanswered filter only returns question-like messages."""
+    result = search_impl(
+        query="?",
+        unanswered=True,
+        db_path=str(populated_db),
+    )
+
+    assert "results" in result
+    # All messages should look like questions
+    for msg in result.get("results", []):
+        text = msg.get("text", "") or ""
+        has_question_mark = "?" in text
+        text_lower = text.lower()
+        has_question_ending = any(
+            text_lower.endswith(ending)
+            for ending in ["let me know", "lmk", "thoughts", "please",
+                          "can you", "could you", "would you", "will you",
+                          "what do you think"]
+        )
+        assert has_question_mark or has_question_ending, f"Message '{text}' does not look like a question"
+
+
+def test_search_unanswered_excludes_answered(populated_db):
+    """Test that unanswered filter excludes messages with replies within 24h."""
+    result = search_impl(
+        query="time",
+        unanswered=True,
+        db_path=str(populated_db),
+    )
+
+    # Should not include "What time is the meeting?" since it got a quick reply
+    texts = [msg.get("text", "") for msg in result.get("results", [])]
+    assert not any("meeting" in (t or "").lower() for t in texts), \
+        "Should not include answered question about meeting"
+
+
+def test_search_unanswered_with_grouped_format(populated_db):
+    """Test unanswered filter with grouped_by_chat format."""
+    result = search_impl(
+        query="?",
+        unanswered=True,
+        format="grouped_by_chat",
+        db_path=str(populated_db),
+    )
+
+    assert "error" not in result
+    assert "chats" in result

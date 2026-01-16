@@ -210,7 +210,8 @@ class TestMessageQueries:
         with get_db_connection(populated_db) as conn:
             messages = get_messages_for_chat(conn, 1)
             # Should return messages excluding reactions (associated_message_type = 0)
-            assert len(messages) == 2  # 2 regular messages, 1 reaction excluded
+            # 8 total messages in chat1, 1 reaction (msg3) excluded = 7 regular messages
+            assert len(messages) == 7
             assert all(m['associated_message_type'] == 0 for m in messages)
 
     def test_get_messages_for_chat_with_limit(self, populated_db):
