@@ -151,6 +151,18 @@ class ContactResolver:
 
         return resolve_handle(handle, self._lookup)
 
+    def search_by_name(self, query: str) -> list[tuple[str, str]]:
+        """Search contacts by name. Returns list of (handle, name) tuples."""
+        if self._lookup is None:
+            self.initialize()
+
+        if not self._lookup:
+            return []
+
+        query_lower = query.lower()
+        return [(handle, name) for handle, name in self._lookup.items()
+                if query_lower in name.lower()]
+
     def get_stats(self) -> dict:
         """Get statistics about the contact cache."""
         if self._lookup is None:
