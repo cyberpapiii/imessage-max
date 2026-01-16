@@ -5,6 +5,7 @@ from .get_messages import get_messages_impl
 from .list_chats import list_chats_impl
 from .search import search_impl
 from .get_context import get_context_impl
+from .get_active import get_active_conversations_impl
 
 __all__ = [
     "find_chat_impl",
@@ -12,4 +13,5 @@ __all__ = [
     "list_chats_impl",
     "search_impl",
     "get_context_impl",
+    "get_active_conversations_impl",
 ]

@@ -8,6 +8,7 @@ from .tools.get_messages import get_messages_impl
 from .tools.list_chats import list_chats_impl
 from .tools.search import search_impl
 from .tools.get_context import get_context_impl
+from .tools.get_active import get_active_conversations_impl
 
 mcp = FastMCP("iMessage MCP")
 
@@ -195,6 +196,36 @@ def get_context(
         contains=contains,
         before=before,
         after=after,
+    )
+
+
+@mcp.tool()
+def get_active_conversations(
+    hours: int = 24,
+    min_exchanges: int = 2,
+    is_group: Optional[bool] = None,
+    limit: int = 10,
+) -> dict:
+    """
+    Find conversations with recent bidirectional activity.
+
+    Identifies chats with actual back-and-forth exchanges (not just received
+    messages), useful for finding ongoing conversations that need attention.
+
+    Args:
+        hours: Time window to consider (default 24, max 168 = 1 week)
+        min_exchanges: Minimum back-and-forth exchanges to qualify (default 2)
+        is_group: True for groups only, False for DMs only
+        limit: Max results (default 10)
+
+    Returns:
+        Active conversations with activity summaries and awaiting_reply flags
+    """
+    return get_active_conversations_impl(
+        hours=hours,
+        min_exchanges=min_exchanges,
+        is_group=is_group,
+        limit=limit,
     )
 
 
