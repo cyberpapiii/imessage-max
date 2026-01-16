@@ -7,6 +7,7 @@ from .tools.find_chat import find_chat_impl
 from .tools.get_messages import get_messages_impl
 from .tools.list_chats import list_chats_impl
 from .tools.search import search_impl
+from .tools.get_context import get_context_impl
 
 mcp = FastMCP("iMessage MCP")
 
@@ -164,6 +165,36 @@ def search(
         sort=sort,
         format=format,
         include_context=include_context,
+    )
+
+
+@mcp.tool()
+def get_context(
+    message_id: Optional[str] = None,
+    chat_id: Optional[str] = None,
+    contains: Optional[str] = None,
+    before: int = 5,
+    after: int = 10,
+) -> dict:
+    """
+    Get messages surrounding a specific message.
+
+    Args:
+        message_id: Specific message ID to get context around
+        chat_id: Chat ID (required if using contains)
+        contains: Find message containing this text, then get context
+        before: Number of messages before target (default 5)
+        after: Number of messages after target (default 10)
+
+    Returns:
+        Target message with surrounding context and people map
+    """
+    return get_context_impl(
+        message_id=message_id,
+        chat_id=chat_id,
+        contains=contains,
+        before=before,
+        after=after,
     )
 
 
