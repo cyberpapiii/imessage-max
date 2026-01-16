@@ -178,3 +178,53 @@ def attachments_db(mock_db_path):
     conn.close()
 
     return mock_db_path
+
+
+@pytest.fixture
+def db_with_session_gaps(mock_db_path):
+    """Create a mock database with messages that have 4+ hour gaps for session testing."""
+    conn = sqlite3.connect(mock_db_path)
+
+    # Insert sample handles
+    conn.executescript("""
+        INSERT INTO handle (ROWID, id, service) VALUES
+            (1, '+19175551234', 'iMessage'),
+            (2, '+15625559876', 'iMessage');
+
+        INSERT INTO chat (ROWID, guid, display_name, service_name) VALUES
+            (1, 'iMessage;+;chat123', NULL, 'iMessage');
+
+        INSERT INTO chat_handle_join (chat_id, handle_id) VALUES
+            (1, 1);
+
+        -- Messages with specific gaps:
+        -- 4 hours = 14400 seconds = 14400000000000 nanoseconds
+        -- Base timestamp: 789100000000000000
+        -- Session 1: Messages 1-3 (within 1 hour of each other)
+        -- Session 2: Messages 4-5 (5 hours gap from message 3, within 1 hour of each other)
+        -- Session 3: Messages 6-7 (6 hours gap from message 5, within 30 min of each other)
+
+        INSERT INTO message (ROWID, guid, text, handle_id, date, is_from_me, associated_message_type) VALUES
+            -- Session 1
+            (1, 'msg1', 'First message', 1, 789100000000000000, 0, 0),
+            (2, 'msg2', 'Reply soon after', NULL, 789100500000000000, 1, 0),
+            (3, 'msg3', 'Another reply', 1, 789101000000000000, 0, 0),
+            -- Session 2 (5 hours gap = 18000 seconds = 18000000000000 ns)
+            (4, 'msg4', 'New topic hours later', NULL, 789119000000000000, 1, 0),
+            (5, 'msg5', 'Quick response', 1, 789119500000000000, 0, 0),
+            -- Session 3 (6 hours gap = 21600 seconds = 21600000000000 ns)
+            (6, 'msg6', 'Much later conversation', 1, 789141100000000000, 0, 0),
+            (7, 'msg7', 'Final message', NULL, 789141600000000000, 1, 0);
+
+        INSERT INTO chat_message_join (chat_id, message_id) VALUES
+            (1, 1),
+            (1, 2),
+            (1, 3),
+            (1, 4),
+            (1, 5),
+            (1, 6),
+            (1, 7);
+    """)
+    conn.close()
+
+    return mock_db_path

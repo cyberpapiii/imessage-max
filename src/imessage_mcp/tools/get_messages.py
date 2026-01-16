@@ -12,6 +12,10 @@ from ..models import Participant, generate_display_name
 # 24 hours in Apple timestamp format (nanoseconds)
 TWENTY_FOUR_HOURS_NS = 24 * 60 * 60 * 1_000_000_000
 
+# Session detection: 4 hours gap starts a new session
+SESSION_GAP_HOURS = 4
+SESSION_GAP_NS = SESSION_GAP_HOURS * 60 * 60 * 1_000_000_000
+
 
 def _looks_like_question(text: str) -> bool:
     """Check if a message appears to expect a response.
@@ -75,6 +79,81 @@ def _has_reply_within_24h(conn, chat_id: int, message_date: int) -> bool:
     return cursor.fetchone() is not None
 
 
+def _assign_sessions(
+    messages: list[dict[str, Any]], message_rows: list[dict]
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Assign session IDs to messages and build sessions summary.
+
+    A new session starts when there's a gap of 4+ hours between messages.
+
+    Args:
+        messages: List of formatted message dicts (in DESC order - most recent first)
+        message_rows: List of raw message rows with 'date' field (same order as messages)
+
+    Returns:
+        Tuple of (messages with session info, sessions summary list)
+    """
+    if not messages:
+        return messages, []
+
+    sessions = []
+    current_session = 1
+    session_message_count = 0
+    session_start_ts = None
+
+    # Messages are in DESC order (most recent first)
+    # Reverse to process oldest first for session assignment
+    reversed_indices = list(range(len(messages) - 1, -1, -1))
+
+    for i, idx in enumerate(reversed_indices):
+        msg = messages[idx]
+        row = message_rows[idx]
+        msg_date = row['date'] if row['date'] else 0
+
+        # Check if new session (gap from previous)
+        if i > 0:
+            prev_idx = reversed_indices[i - 1]
+            prev_date = message_rows[prev_idx]['date'] if message_rows[prev_idx]['date'] else 0
+            gap = msg_date - prev_date
+
+            if gap >= SESSION_GAP_NS:
+                # Save previous session
+                sessions.append({
+                    "session_id": f"session_{current_session}",
+                    "started": session_start_ts,
+                    "message_count": session_message_count
+                })
+                current_session += 1
+                session_message_count = 0
+
+                # Mark this message as session start
+                msg["session_start"] = True
+                msg["session_gap_hours"] = round(gap / (60 * 60 * 1_000_000_000), 1)
+            else:
+                msg["session_start"] = False
+        else:
+            # First message (oldest)
+            msg["session_start"] = True
+
+        msg["session_id"] = f"session_{current_session}"
+        session_message_count += 1
+
+        if msg["session_start"]:
+            session_start_ts = apple_to_datetime(msg_date).isoformat() if msg_date else None
+
+    # Save final session
+    sessions.append({
+        "session_id": f"session_{current_session}",
+        "started": session_start_ts,
+        "message_count": session_message_count
+    })
+
+    # Reverse sessions so most recent is first
+    sessions.reverse()
+
+    return messages, sessions
+
+
 def get_messages_impl(
     chat_id: Optional[str] = None,
     participants: Optional[list[str]] = None,
@@ -87,6 +166,7 @@ def get_messages_impl(
     include_reactions: bool = True,
     cursor: Optional[str] = None,
     unanswered: bool = False,
+    session: Optional[str] = None,
     db_path: str = DB_PATH,
 ) -> dict[str, Any]:
     """
@@ -106,10 +186,11 @@ def get_messages_impl(
         include_reactions: Include reaction data (default True)
         cursor: Pagination cursor for continuing retrieval
         unanswered: Only return messages from me that didn't receive a reply within 24h
+        session: Filter to specific session ID (e.g., "session_1", "session_2")
         db_path: Path to chat.db (for testing)
 
     Returns:
-        Dict with chat info, people map, and messages
+        Dict with chat info, people map, messages, and sessions summary
     """
     if not chat_id and not participants:
         return {
@@ -295,6 +376,15 @@ def get_messages_impl(
 
                 messages.append(msg)
 
+            # Assign session IDs to messages
+            messages, sessions_summary = _assign_sessions(messages, message_rows)
+
+            # Filter by session if requested
+            if session:
+                messages = [m for m in messages if m.get("session_id") == session]
+                # Also filter sessions summary to only include the requested session
+                sessions_summary = [s for s in sessions_summary if s["session_id"] == session]
+
             # Build chat info
             participant_objs = [
                 Participant(handle=p['handle'], name=p['name'])
@@ -309,6 +399,7 @@ def get_messages_impl(
                 },
                 "people": people,
                 "messages": messages,
+                "sessions": sessions_summary,
                 "more": len(messages) == limit,
                 "cursor": None,
             }

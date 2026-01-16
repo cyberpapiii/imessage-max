@@ -59,6 +59,7 @@ def get_messages(
     include_reactions: bool = True,
     cursor: Optional[str] = None,
     unanswered: bool = False,
+    session: Optional[str] = None,
 ) -> dict:
     """
     Get messages from a chat with flexible filtering.
@@ -75,9 +76,10 @@ def get_messages(
         include_reactions: Include reaction data (default True)
         cursor: Pagination cursor from previous response
         unanswered: Only return messages from me that didn't receive a reply within 24h
+        session: Filter to specific session ID (e.g., "session_1")
 
     Returns:
-        Messages with chat info and people map for compact references
+        Messages with chat info, people map, and sessions summary
     """
     return get_messages_impl(
         chat_id=chat_id,
@@ -91,6 +93,7 @@ def get_messages(
         include_reactions=include_reactions,
         cursor=cursor,
         unanswered=unanswered,
+        session=session,
     )
 
 
