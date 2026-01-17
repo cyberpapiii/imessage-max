@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="icon.png" alt="iMessage Max" width="128">
+</p>
+
 # iMessage Max
 
 An MCP (Model Context Protocol) server for iMessage that lets AI assistants read and search your messages with proper contact resolution.
