@@ -4,6 +4,47 @@ import pytest
 import sqlite3
 
 
+# ============================================================================
+# Pytest Configuration for Integration Tests
+# ============================================================================
+
+def pytest_addoption(parser):
+    """Add custom command line options for pytest."""
+    parser.addoption(
+        "--real-db",
+        action="store_true",
+        default=False,
+        help="Run integration tests against real ~/Library/Messages/chat.db",
+    )
+
+
+def pytest_configure(config):
+    """Register custom markers."""
+    config.addinivalue_line(
+        "markers",
+        "integration: marks tests as integration tests that require real database (deselect with '-m \"not integration\"')",
+    )
+
+
+def pytest_collection_modifyitems(config, items):
+    """Skip integration tests unless --real-db is provided."""
+    if config.getoption("--real-db"):
+        # --real-db given: do not skip integration tests
+        return
+
+    skip_integration = pytest.mark.skip(
+        reason="Integration tests require --real-db option to run"
+    )
+    for item in items:
+        if "integration" in item.keywords:
+            item.add_marker(skip_integration)
+
+
+# ============================================================================
+# Test Fixtures
+# ============================================================================
+
+
 @pytest.fixture
 def mock_db_path(tmp_path):
     """Create a temporary mock chat.db for testing."""
