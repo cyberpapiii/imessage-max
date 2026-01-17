@@ -1,7 +1,7 @@
 """get_unread tool implementation."""
 
 from typing import Optional, Any
-from ..db import get_db_connection, apple_to_datetime, DB_PATH
+from ..db import get_db_connection, apple_to_datetime, escape_like, DB_PATH
 from ..contacts import ContactResolver
 from ..queries import get_chat_participants
 from ..time_utils import format_compact_relative
@@ -10,9 +10,8 @@ from ..phone import format_phone_display
 from ..parsing import get_message_text
 
 
-def _escape_like(s: str) -> str:
-    """Escape SQL LIKE special characters."""
-    return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+# Use escape_like from db module (aliased for local use)
+_escape_like = escape_like
 
 
 def get_unread_impl(
@@ -41,6 +40,8 @@ def get_unread_impl(
     limit = max(1, min(limit, 100))  # Clamp to 1-100
 
     resolver = ContactResolver()
+    if resolver.is_available:
+        resolver.initialize()  # Explicitly initialize to trigger auth check
 
     try:
         with get_db_connection(db_path) as conn:

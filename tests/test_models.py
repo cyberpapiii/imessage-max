@@ -3,7 +3,7 @@
 import pytest
 from datetime import datetime, timezone
 
-from imessage_mcp.models import (
+from imessage_max.models import (
     Participant,
     ChatInfo,
     Message,

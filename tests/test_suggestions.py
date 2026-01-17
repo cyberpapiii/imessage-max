@@ -2,7 +2,7 @@
 
 import pytest
 import sqlite3
-from imessage_mcp.suggestions import (
+from imessage_max.suggestions import (
     get_chat_suggestions,
     get_message_suggestions,
     find_similar_names,
@@ -95,7 +95,7 @@ class TestFindSimilarNames:
 
     def test_finds_similar_chat_names(self, suggestions_db):
         """Test finding chats with similar names."""
-        from imessage_mcp.db import get_db_connection
+        from imessage_max.db import get_db_connection
 
         with get_db_connection(str(suggestions_db)) as conn:
             results = find_similar_names(conn, "Ski Trip")
@@ -107,7 +107,7 @@ class TestFindSimilarNames:
 
     def test_fuzzy_matches_partial_names(self, suggestions_db):
         """Test that fuzzy matching works for partial names."""
-        from imessage_mcp.db import get_db_connection
+        from imessage_max.db import get_db_connection
 
         with get_db_connection(str(suggestions_db)) as conn:
             results = find_similar_names(conn, "tahoe")
@@ -118,7 +118,7 @@ class TestFindSimilarNames:
 
     def test_returns_empty_for_no_matches(self, suggestions_db):
         """Test returns empty list when no similar names found."""
-        from imessage_mcp.db import get_db_connection
+        from imessage_max.db import get_db_connection
 
         with get_db_connection(str(suggestions_db)) as conn:
             results = find_similar_names(conn, "CompletelyRandomName12345XYZ")
@@ -127,7 +127,7 @@ class TestFindSimilarNames:
 
     def test_limits_results(self, suggestions_db):
         """Test that results are limited."""
-        from imessage_mcp.db import get_db_connection
+        from imessage_max.db import get_db_connection
 
         with get_db_connection(str(suggestions_db)) as conn:
             results = find_similar_names(conn, "group", limit=1)
@@ -140,7 +140,7 @@ class TestFindByParticipants:
 
     def test_finds_chats_by_partial_name(self, suggestions_db):
         """Test finding chats by participant handle patterns."""
-        from imessage_mcp.db import get_db_connection
+        from imessage_max.db import get_db_connection
 
         with get_db_connection(str(suggestions_db)) as conn:
             # Search for chats containing someone with '917' in their number
@@ -152,7 +152,7 @@ class TestFindByParticipants:
 
     def test_returns_empty_for_no_matches(self, suggestions_db):
         """Test returns empty when no participant matches."""
-        from imessage_mcp.db import get_db_connection
+        from imessage_max.db import get_db_connection
 
         with get_db_connection(str(suggestions_db)) as conn:
             results = find_by_participants(conn, "+1999999999")
@@ -165,7 +165,7 @@ class TestFindByContent:
 
     def test_finds_chats_by_message_content(self, suggestions_db):
         """Test finding chats containing specific message content."""
-        from imessage_mcp.db import get_db_connection
+        from imessage_max.db import get_db_connection
 
         with get_db_connection(str(suggestions_db)) as conn:
             results = find_by_content(conn, "ski trip")
@@ -175,7 +175,7 @@ class TestFindByContent:
 
     def test_returns_match_count(self, suggestions_db):
         """Test that match count is included in results."""
-        from imessage_mcp.db import get_db_connection
+        from imessage_max.db import get_db_connection
 
         with get_db_connection(str(suggestions_db)) as conn:
             results = find_by_content(conn, "ski trip")
@@ -187,7 +187,7 @@ class TestFindByContent:
 
     def test_returns_empty_for_no_matches(self, suggestions_db):
         """Test returns empty when no content matches."""
-        from imessage_mcp.db import get_db_connection
+        from imessage_max.db import get_db_connection
 
         with get_db_connection(str(suggestions_db)) as conn:
             results = find_by_content(conn, "xyznonexistent12345")
@@ -200,7 +200,7 @@ class TestSuggestExpandedTime:
 
     def test_suggests_wider_time_range(self, suggestions_db):
         """Test suggesting wider time range when narrow range returns nothing."""
-        from imessage_mcp.db import get_db_connection
+        from imessage_max.db import get_db_connection
 
         with get_db_connection(str(suggestions_db)) as conn:
             result = suggest_expanded_time(
@@ -218,7 +218,7 @@ class TestSuggestExpandedTime:
 
     def test_returns_none_when_no_additional_results(self, suggestions_db):
         """Test returns None when expanding wouldn't help."""
-        from imessage_mcp.db import get_db_connection
+        from imessage_max.db import get_db_connection
 
         with get_db_connection(str(suggestions_db)) as conn:
             result = suggest_expanded_time(
@@ -237,7 +237,7 @@ class TestSuggestSimilarQuery:
 
     def test_suggests_nickname_when_full_name_not_found(self, suggestions_db):
         """Test suggesting nickname when full name search returns nothing."""
-        from imessage_mcp.db import get_db_connection
+        from imessage_max.db import get_db_connection
 
         with get_db_connection(str(suggestions_db)) as conn:
             # Search for "Michael" but we have "mike@example.com"
@@ -250,7 +250,7 @@ class TestSuggestSimilarQuery:
 
     def test_returns_none_for_good_query(self, suggestions_db):
         """Test returns None when query already has good matches."""
-        from imessage_mcp.db import get_db_connection
+        from imessage_max.db import get_db_connection
 
         with get_db_connection(str(suggestions_db)) as conn:
             result = suggest_similar_query(conn, "ski")
@@ -265,7 +265,7 @@ class TestSuggestOtherChats:
 
     def test_finds_matches_in_other_chats(self, suggestions_db):
         """Test finding query matches in chats other than the specified one."""
-        from imessage_mcp.db import get_db_connection
+        from imessage_max.db import get_db_connection
 
         with get_db_connection(str(suggestions_db)) as conn:
             # Search for "ski" in chat 5 (Family Group - no ski messages)
@@ -280,7 +280,7 @@ class TestSuggestOtherChats:
 
     def test_excludes_specified_chat(self, suggestions_db):
         """Test that the specified chat is excluded from results."""
-        from imessage_mcp.db import get_db_connection
+        from imessage_max.db import get_db_connection
 
         with get_db_connection(str(suggestions_db)) as conn:
             results = suggest_other_chats(conn, "ski", exclude_chat_id=4)
@@ -300,7 +300,7 @@ class TestSuggestRenamedChat:
 
     def test_suggest_renamed_chat_returns_empty_list(self, suggestions_db):
         """Test that renamed_chat returns empty (not implemented due to db limitations)."""
-        from imessage_mcp.db import get_db_connection
+        from imessage_max.db import get_db_connection
 
         with get_db_connection(str(suggestions_db)) as conn:
             result = suggest_renamed_chat(conn, "Old Chat Name")
@@ -308,7 +308,7 @@ class TestSuggestRenamedChat:
 
     def test_suggest_renamed_chat_with_known_chat_name(self, suggestions_db):
         """Test that renamed_chat returns empty even for names that exist."""
-        from imessage_mcp.db import get_db_connection
+        from imessage_max.db import get_db_connection
 
         with get_db_connection(str(suggestions_db)) as conn:
             # Even searching for a name similar to existing chats returns empty
@@ -318,7 +318,7 @@ class TestSuggestRenamedChat:
 
     def test_suggest_renamed_chat_returns_list_type(self, suggestions_db):
         """Test that renamed_chat always returns a list (not None)."""
-        from imessage_mcp.db import get_db_connection
+        from imessage_max.db import get_db_connection
 
         with get_db_connection(str(suggestions_db)) as conn:
             result = suggest_renamed_chat(conn, "Any Name")
@@ -330,7 +330,7 @@ class TestGetChatSuggestions:
 
     def test_returns_suggestions_dict(self, suggestions_db):
         """Test that get_chat_suggestions returns a suggestions dict."""
-        from imessage_mcp.db import get_db_connection
+        from imessage_max.db import get_db_connection
 
         with get_db_connection(str(suggestions_db)) as conn:
             result = get_chat_suggestions(
@@ -344,7 +344,7 @@ class TestGetChatSuggestions:
 
     def test_includes_similar_names_for_name_search(self, suggestions_db):
         """Test that similar_names is included when searching by name."""
-        from imessage_mcp.db import get_db_connection
+        from imessage_max.db import get_db_connection
 
         with get_db_connection(str(suggestions_db)) as conn:
             result = get_chat_suggestions(
@@ -359,7 +359,7 @@ class TestGetChatSuggestions:
 
     def test_includes_by_content_for_content_search(self, suggestions_db):
         """Test that by_content suggestions are included."""
-        from imessage_mcp.db import get_db_connection
+        from imessage_max.db import get_db_connection
 
         with get_db_connection(str(suggestions_db)) as conn:
             result = get_chat_suggestions(
@@ -374,7 +374,7 @@ class TestGetChatSuggestions:
 
     def test_graceful_handling_of_errors(self, suggestions_db):
         """Test that errors in suggestion generation are handled gracefully."""
-        from imessage_mcp.db import get_db_connection
+        from imessage_max.db import get_db_connection
 
         with get_db_connection(str(suggestions_db)) as conn:
             # Should not raise, even with unusual inputs
@@ -394,7 +394,7 @@ class TestGetMessageSuggestions:
 
     def test_returns_suggestions_dict(self, suggestions_db):
         """Test that get_message_suggestions returns a suggestions dict."""
-        from imessage_mcp.db import get_db_connection
+        from imessage_max.db import get_db_connection
 
         with get_db_connection(str(suggestions_db)) as conn:
             result = get_message_suggestions(
@@ -408,7 +408,7 @@ class TestGetMessageSuggestions:
 
     def test_suggests_expanded_time(self, suggestions_db):
         """Test that expanded_time suggestion is included."""
-        from imessage_mcp.db import get_db_connection
+        from imessage_max.db import get_db_connection
 
         with get_db_connection(str(suggestions_db)) as conn:
             result = get_message_suggestions(
@@ -424,7 +424,7 @@ class TestGetMessageSuggestions:
 
     def test_suggests_other_chats(self, suggestions_db):
         """Test that other_chats suggestions are included."""
-        from imessage_mcp.db import get_db_connection
+        from imessage_max.db import get_db_connection
 
         with get_db_connection(str(suggestions_db)) as conn:
             result = get_message_suggestions(
@@ -442,7 +442,7 @@ class TestGetMessageSuggestions:
 
     def test_limits_suggestions_to_three(self, suggestions_db):
         """Test that each suggestion type is limited to 3 items."""
-        from imessage_mcp.db import get_db_connection
+        from imessage_max.db import get_db_connection
 
         with get_db_connection(str(suggestions_db)) as conn:
             result = get_message_suggestions(
@@ -457,7 +457,7 @@ class TestGetMessageSuggestions:
 
     def test_graceful_handling_of_errors(self, suggestions_db):
         """Test that errors in suggestion generation are handled gracefully."""
-        from imessage_mcp.db import get_db_connection
+        from imessage_max.db import get_db_connection
 
         with get_db_connection(str(suggestions_db)) as conn:
             # Should not raise, even with unusual inputs
@@ -476,7 +476,7 @@ class TestSuggestionIntegration:
 
     def test_find_chat_includes_suggestions_when_empty(self, suggestions_db):
         """Test that find_chat includes suggestions when no results."""
-        from imessage_mcp.tools.find_chat import find_chat_impl
+        from imessage_max.tools.find_chat import find_chat_impl
 
         result = find_chat_impl(
             name="NonexistentGroup12345XYZ",
@@ -490,7 +490,7 @@ class TestSuggestionIntegration:
 
     def test_find_chat_no_suggestions_when_results_found(self, suggestions_db):
         """Test that find_chat doesn't include suggestions when results found."""
-        from imessage_mcp.tools.find_chat import find_chat_impl
+        from imessage_max.tools.find_chat import find_chat_impl
 
         result = find_chat_impl(
             name="Tahoe",
@@ -504,7 +504,7 @@ class TestSuggestionIntegration:
 
     def test_get_messages_includes_suggestions_when_empty(self, suggestions_db):
         """Test that get_messages includes suggestions when no results."""
-        from imessage_mcp.tools.get_messages import get_messages_impl
+        from imessage_max.tools.get_messages import get_messages_impl
 
         result = get_messages_impl(
             chat_id="chat5",  # Family Group
@@ -518,7 +518,7 @@ class TestSuggestionIntegration:
 
     def test_search_includes_suggestions_when_empty(self, suggestions_db):
         """Test that search includes suggestions when no results."""
-        from imessage_mcp.tools.search import search_impl
+        from imessage_max.tools.search import search_impl
 
         result = search_impl(
             query="xyznonexistent12345",

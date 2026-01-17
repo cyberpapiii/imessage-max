@@ -1,7 +1,7 @@
 """Tests for list_chats tool."""
 
 import pytest
-from imessage_mcp.tools.list_chats import list_chats_impl
+from imessage_max.tools.list_chats import list_chats_impl
 
 
 def test_list_chats_basic(populated_db):

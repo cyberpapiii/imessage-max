@@ -8,6 +8,7 @@ from ..queries import get_chat_participants, get_messages_for_chat, get_reaction
 from ..parsing import get_message_text, get_reaction_type, reaction_to_emoji, extract_links
 from ..time_utils import parse_time_input
 from ..models import Participant, generate_display_name
+from ..suggestions import get_message_suggestions
 
 # 24 hours in Apple timestamp format (nanoseconds)
 TWENTY_FOUR_HOURS_NS = 24 * 60 * 60 * 1_000_000_000
@@ -199,6 +200,8 @@ def get_messages_impl(
         }
 
     resolver = ContactResolver()
+    if resolver.is_available:
+        resolver.initialize()  # Explicitly initialize to trigger auth check
 
     try:
         with get_db_connection(db_path) as conn:
@@ -392,7 +395,7 @@ def get_messages_impl(
             ]
             display_name = chat_row['display_name'] or generate_display_name(participant_objs)
 
-            return {
+            response = {
                 "chat": {
                     "id": f"chat{numeric_chat_id}",
                     "name": display_name,
@@ -403,6 +406,21 @@ def get_messages_impl(
                 "more": len(messages) == limit,
                 "cursor": None,
             }
+
+            # Add suggestions when no messages found
+            if not messages:
+                suggestions = get_message_suggestions(
+                    conn,
+                    resolver,
+                    query=contains,
+                    chat_id=numeric_chat_id,
+                    since=since,
+                    from_person=from_person,
+                )
+                if suggestions:
+                    response["suggestions"] = suggestions
+
+            return response
 
     except FileNotFoundError:
         return {

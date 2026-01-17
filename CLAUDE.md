@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is the **iMessage MCP Pro** project - a new MCP (Model Context Protocol) server for iMessage designed specifically for AI assistant consumption. The project is currently in the specification/planning phase with a detailed PRD (`imessage-mcp-prd-v1.3.md`).
+This is **iMessage Max** - an MCP (Model Context Protocol) server for iMessage designed specifically for AI assistant consumption.
 
 The core goal is to reduce tool calls per user intent from 3-5 down to 1-2 by providing intent-aligned tools rather than exposing raw database structures.
 
@@ -19,7 +19,7 @@ The core goal is to reduce tool calls per user intent from 3-5 down to 1-2 by pr
 ### Key Data Sources
 ```
 ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│  Claude/AI      │◄───►│  iMessage MCP   │◄───►│  chat.db        │
+│  Claude/AI      │◄───►│  iMessage Max   │◄───►│  chat.db        │
 │  Assistant      │     │  Server         │     │  (SQLite)       │
 └─────────────────┘     └────────┬────────┘     └─────────────────┘
                                 │

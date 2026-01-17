@@ -83,6 +83,8 @@ def _resolve_recipient(
     """
     if resolver is None:
         resolver = ContactResolver()
+        if resolver.is_available:
+            resolver.initialize()  # Explicitly initialize to trigger auth check
 
     # Check if it's a phone number
     if is_phone_number(to) or to.startswith('+'):
@@ -257,6 +259,8 @@ def send_impl(
         }
 
     resolver = ContactResolver()
+    if resolver.is_available:
+        resolver.initialize()  # Explicitly initialize to trigger auth check
     recipient_handle = None
     target_chat_id = None
     delivered_to = []

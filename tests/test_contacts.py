@@ -1,7 +1,7 @@
 """Tests for contact resolution."""
 
 import pytest
-from imessage_mcp.contacts import (
+from imessage_max.contacts import (
     ContactResolver,
     resolve_handle,
     PYOBJC_AVAILABLE,

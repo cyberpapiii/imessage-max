@@ -1,5 +1,7 @@
 """Contact resolution via CNContactStore (PyObjC)."""
 
+import sys
+import threading
 from typing import Optional
 from .phone import normalize_to_e164
 
@@ -7,6 +9,8 @@ PYOBJC_AVAILABLE = False
 CNContactStore = None
 CNContactFetchRequest = None
 CNEntityTypeContacts = None
+CNAuthorizationStatusNotDetermined = 0
+CNAuthorizationStatusAuthorized = 3
 
 try:
     from Contacts import (
@@ -48,13 +52,69 @@ def check_contacts_authorization() -> tuple[bool, str]:
     return is_authorized, status_name
 
 
+def request_contacts_access(timeout: float = 30.0) -> tuple[bool, str]:
+    """
+    Request Contacts access if not already determined.
+    
+    This will trigger the macOS permission dialog if status is 'not_determined'.
+    Call this on server startup to ensure users get prompted for access.
+    
+    Args:
+        timeout: Max seconds to wait for user response (default 30)
+        
+    Returns:
+        Tuple of (granted: bool, status: str)
+    """
+    if not PYOBJC_AVAILABLE:
+        return False, "pyobjc_not_available"
+    
+    auth_status = CNContactStore.authorizationStatusForEntityType_(CNEntityTypeContacts)
+    
+    # Already determined - return current status
+    if auth_status != CNAuthorizationStatusNotDetermined:
+        is_authorized, status = check_contacts_authorization()
+        return is_authorized, status
+    
+    # Request access - this triggers the macOS permission dialog
+    print("[Contacts] Requesting access (you may see a macOS permission dialog)...", file=sys.stderr, flush=True)
+    
+    result = {"granted": False, "error": None}
+    event = threading.Event()
+    
+    def completion_handler(granted, error):
+        result["granted"] = granted
+        result["error"] = str(error) if error else None
+        event.set()
+    
+    store = CNContactStore.alloc().init()
+    store.requestAccessForEntityType_completionHandler_(
+        CNEntityTypeContacts, 
+        completion_handler
+    )
+    
+    # Wait for user response (with timeout)
+    if event.wait(timeout=timeout):
+        if result["granted"]:
+            print("[Contacts] Access granted!", file=sys.stderr, flush=True)
+            return True, "authorized"
+        else:
+            print(f"[Contacts] Access denied: {result['error']}", file=sys.stderr, flush=True)
+            return False, "denied"
+    else:
+        print("[Contacts] Permission request timed out", file=sys.stderr, flush=True)
+        # Check status again in case it changed
+        return check_contacts_authorization()
+
+
 def build_contact_lookup() -> dict[str, str]:
     """Build phone/email -> name lookup table from Contacts."""
     if not PYOBJC_AVAILABLE:
+        print("[ContactResolver] PyObjC not available", file=sys.stderr, flush=True)
         return {}
 
     is_authorized, status = check_contacts_authorization()
     if not is_authorized:
+        print(f"[ContactResolver] Contacts not authorized: {status}", file=sys.stderr, flush=True)
         return {}
 
     store = CNContactStore.new()
@@ -96,9 +156,11 @@ def build_contact_lookup() -> dict[str, str]:
         store.enumerateContactsWithFetchRequest_error_usingBlock_(
             fetch_request, error, process_contact
         )
-    except Exception:
+    except Exception as e:
+        print(f"[ContactResolver] Error enumerating contacts: {e}", file=sys.stderr, flush=True)
         return {}
 
+    print(f"[ContactResolver] Successfully loaded {len(lookup)} handles from contacts", file=sys.stderr, flush=True)
     return lookup
 
 

@@ -1,7 +1,7 @@
 """Tests for list_attachments tool."""
 
 import pytest
-from imessage_mcp.tools.list_attachments import list_attachments_impl
+from imessage_max.tools.list_attachments import list_attachments_impl
 
 
 def test_list_attachments_basic(attachments_db):

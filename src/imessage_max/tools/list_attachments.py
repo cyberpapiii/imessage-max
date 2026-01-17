@@ -1,7 +1,7 @@
 """list_attachments tool implementation."""
 
 from typing import Optional, Any
-from ..db import get_db_connection, apple_to_datetime, datetime_to_apple, DB_PATH
+from ..db import get_db_connection, apple_to_datetime, datetime_to_apple, escape_like, DB_PATH
 from ..contacts import ContactResolver
 from ..time_utils import parse_time_input, format_compact_relative
 from ..parsing import get_message_text
@@ -22,9 +22,8 @@ def _format_file_size(bytes_size: Optional[int]) -> str:
     return f"{size:.1f} TB"
 
 
-def _escape_like(s: str) -> str:
-    """Escape SQL LIKE special characters."""
-    return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+# Use escape_like from db module (aliased for local use)
+_escape_like = escape_like
 
 
 def _get_attachment_type(mime_type: Optional[str], uti: Optional[str]) -> str:
@@ -85,6 +84,8 @@ def list_attachments_impl(
         type = None  # Treat invalid type as "any"
 
     resolver = ContactResolver()
+    if resolver.is_available:
+        resolver.initialize()  # Explicitly initialize to trigger auth check
 
     try:
         with get_db_connection(db_path) as conn:

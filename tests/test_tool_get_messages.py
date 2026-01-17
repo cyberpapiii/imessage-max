@@ -1,7 +1,7 @@
 """Tests for get_messages tool."""
 
 import pytest
-from imessage_mcp.tools.get_messages import get_messages_impl
+from imessage_max.tools.get_messages import get_messages_impl
 
 
 def test_get_messages_by_chat_id(populated_db):

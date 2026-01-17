@@ -3,6 +3,7 @@
 import sqlite3
 from typing import Any, Optional
 from .contacts import ContactResolver
+from .db import escape_like
 
 
 class QueryBuilder:
@@ -260,7 +261,7 @@ def get_messages_for_chat(
         qb.where("h.id = ?", from_handle)
 
     if contains is not None:
-        qb.where("m.text LIKE ?", f"%{contains}%")
+        qb.where("m.text LIKE ? ESCAPE '\\'", f"%{escape_like(contains)}%")
 
     qb.order_by("m.date DESC")
     qb.limit(limit)

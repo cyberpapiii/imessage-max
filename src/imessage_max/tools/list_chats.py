@@ -7,6 +7,7 @@ from ..queries import get_chat_participants
 from ..time_utils import parse_time_input, format_compact_relative
 from ..models import Participant, generate_display_name
 from ..phone import format_phone_display
+from ..parsing import get_message_text
 
 
 def list_chats_impl(
@@ -41,6 +42,8 @@ def list_chats_impl(
         sort = "recent"  # Default to recent for invalid values
 
     resolver = ContactResolver()
+    if resolver.is_available:
+        resolver.initialize()  # Explicitly initialize to trigger auth check
 
     try:
         with get_db_connection(db_path) as conn:
@@ -134,7 +137,7 @@ def list_chats_impl(
 
                 # Get last message
                 last_cursor = conn.execute("""
-                    SELECT m.text, m.is_from_me, h.id as sender_handle, m.date
+                    SELECT m.text, m.attributedBody, m.is_from_me, h.id as sender_handle, m.date
                     FROM message m
                     JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
                     LEFT JOIN handle h ON m.handle_id = h.ROWID
@@ -166,9 +169,10 @@ def list_chats_impl(
                         sender = "unknown"
 
                     last_dt = apple_to_datetime(last_msg['date'])
+                    msg_text = get_message_text(last_msg['text'], last_msg['attributedBody']) or ""
                     chat_info["last"] = {
                         "from": sender,
-                        "text": (last_msg['text'] or "")[:50],
+                        "text": msg_text[:50],
                         "ago": format_compact_relative(last_dt),
                     }
 

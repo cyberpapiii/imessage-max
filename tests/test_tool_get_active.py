@@ -1,7 +1,7 @@
 """Tests for get_active_conversations tool."""
 
 import pytest
-from imessage_mcp.tools.get_active import get_active_conversations_impl
+from imessage_max.tools.get_active import get_active_conversations_impl
 
 
 def test_get_active_basic(populated_db):

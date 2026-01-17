@@ -20,6 +20,7 @@ from .contacts import (
     ContactResolver,
     resolve_handle,
     check_contacts_authorization,
+    request_contacts_access,
     PYOBJC_AVAILABLE,
 )
 from .parsing import (
@@ -60,6 +61,7 @@ __all__ = [
     "ContactResolver",
     "resolve_handle",
     "check_contacts_authorization",
+    "request_contacts_access",
     "PYOBJC_AVAILABLE",
     # Parsing
     "get_message_text",

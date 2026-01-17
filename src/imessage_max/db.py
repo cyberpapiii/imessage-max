@@ -56,6 +56,21 @@ def get_db_connection(db_path: str = DB_PATH) -> Generator[sqlite3.Connection, N
         conn.close()
 
 
+def escape_like(s: str) -> str:
+    """Escape SQL LIKE special characters.
+
+    Use with ESCAPE '\\\\' clause in SQL:
+        WHERE column LIKE ? ESCAPE '\\\\'
+
+    Args:
+        s: String to escape
+
+    Returns:
+        Escaped string safe for LIKE patterns
+    """
+    return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 def detect_schema_capabilities(conn: sqlite3.Connection) -> dict:
     """Detect which columns/features are available in this database."""
     capabilities = {

@@ -4,7 +4,7 @@ import pytest
 from unittest.mock import patch, MagicMock
 import sqlite3
 
-from imessage_mcp.tools.send import (
+from imessage_max.tools.send import (
     send_impl,
     _escape_applescript,
     _send_via_applescript,
@@ -181,7 +181,7 @@ class TestSendImpl:
         assert 'error' in result
         assert result['error'] == 'validation_error'
 
-    @patch('imessage_mcp.tools.send._send_via_applescript')
+    @patch('imessage_max.tools.send._send_via_applescript')
     def test_send_with_to(self, mock_send, populated_db):
         """Test sending with 'to' parameter."""
         mock_send.return_value = {'success': True}
@@ -195,7 +195,7 @@ class TestSendImpl:
         assert result['success'] is True
         mock_send.assert_called_once()
 
-    @patch('imessage_mcp.tools.send._send_via_applescript')
+    @patch('imessage_max.tools.send._send_via_applescript')
     def test_send_with_chat_id(self, mock_send, populated_db):
         """Test sending with chat_id parameter."""
         mock_send.return_value = {'success': True}
@@ -231,7 +231,7 @@ class TestSendImpl:
         assert 'error' in result
         assert result['error'] == 'recipient_not_found'
 
-    @patch('imessage_mcp.tools.send._send_via_applescript')
+    @patch('imessage_max.tools.send._send_via_applescript')
     def test_send_returns_chat_id(self, mock_send, populated_db):
         """Test that successful send returns chat_id."""
         mock_send.return_value = {'success': True}
@@ -245,7 +245,7 @@ class TestSendImpl:
         assert 'chat_id' in result
         assert result['chat_id'].startswith('chat')
 
-    @patch('imessage_mcp.tools.send._send_via_applescript')
+    @patch('imessage_max.tools.send._send_via_applescript')
     def test_send_returns_timestamp(self, mock_send, populated_db):
         """Test that successful send returns timestamp."""
         mock_send.return_value = {'success': True}
@@ -260,7 +260,7 @@ class TestSendImpl:
         # Should be ISO format
         assert 'T' in result['timestamp']
 
-    @patch('imessage_mcp.tools.send._send_via_applescript')
+    @patch('imessage_max.tools.send._send_via_applescript')
     def test_send_returns_delivered_to(self, mock_send, populated_db):
         """Test that successful send returns delivered_to list."""
         mock_send.return_value = {'success': True}
@@ -277,7 +277,7 @@ class TestSendImpl:
     def test_send_reply_to_param_accepted(self, populated_db):
         """Test that reply_to parameter is accepted (future feature)."""
         # This should not raise an error even though reply_to is not implemented
-        with patch('imessage_mcp.tools.send._send_via_applescript') as mock_send:
+        with patch('imessage_max.tools.send._send_via_applescript') as mock_send:
             mock_send.return_value = {'success': True}
 
             result = send_impl(
@@ -323,7 +323,7 @@ class TestAmbiguousRecipient:
         conn.close()
         return mock_db_path
 
-    @patch('imessage_mcp.tools.send.ContactResolver')
+    @patch('imessage_max.tools.send.ContactResolver')
     def test_ambiguous_recipient_returns_candidates(self, mock_resolver_class, ambiguous_db):
         """Test that ambiguous name returns candidate list."""
         # Mock contact resolver to return multiple matches for "Nick"
@@ -350,7 +350,7 @@ class TestAmbiguousRecipient:
         assert 'candidates' in result
         assert len(result['candidates']) == 2
 
-    @patch('imessage_mcp.tools.send.ContactResolver')
+    @patch('imessage_max.tools.send.ContactResolver')
     def test_ambiguous_candidates_have_required_fields(self, mock_resolver_class, ambiguous_db):
         """Test that ambiguous candidates include required fields."""
         mock_resolver = MagicMock()
@@ -412,7 +412,7 @@ class TestAmbiguousRecipient:
         conn.close()
         return mock_db_path
 
-    @patch('imessage_mcp.tools.send.ContactResolver')
+    @patch('imessage_max.tools.send.ContactResolver')
     def test_ambiguous_candidates_sorted_by_recent(self, mock_resolver_class, ambiguous_db_with_different_times):
         """Test that candidates are sorted by most recent contact (newest first)."""
         mock_resolver = MagicMock()

@@ -53,6 +53,8 @@ def get_context_impl(
         }
 
     resolver = ContactResolver()
+    if resolver.is_available:
+        resolver.initialize()  # Explicitly initialize to trigger auth check
 
     try:
         with get_db_connection(db_path) as conn:

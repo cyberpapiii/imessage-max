@@ -38,6 +38,8 @@ def get_active_conversations_impl(
     limit = max(1, min(limit, 50))
 
     resolver = ContactResolver()
+    if resolver.is_available:
+        resolver.initialize()  # Explicitly initialize to trigger auth check
     now = datetime.now(timezone.utc)
     window_start = now - timedelta(hours=hours)
     window_start_apple = datetime_to_apple(window_start)

@@ -1,7 +1,7 @@
 """Tests for find_chat tool."""
 
 import pytest
-from imessage_mcp.tools.find_chat import find_chat_impl
+from imessage_max.tools.find_chat import find_chat_impl
 
 
 def test_find_chat_by_participants(populated_db):

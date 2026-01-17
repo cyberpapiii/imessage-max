@@ -1,15 +1,90 @@
 """find_chat tool implementation."""
 
 from typing import Optional, Any
-from ..db import get_db_connection, apple_to_datetime, DB_PATH
+from ..db import get_db_connection, apple_to_datetime, escape_like, DB_PATH
 from ..contacts import ContactResolver
 from ..phone import normalize_to_e164, format_phone_display
-from ..queries import (
-    get_chat_participants,
-    find_chats_by_handles,
-)
+from ..queries import get_chat_participants
 from ..models import Participant, generate_display_name
 from ..time_utils import format_compact_relative
+from ..suggestions import get_chat_suggestions
+from ..parsing import get_message_text
+
+
+def _find_chats_by_handle_groups(conn, handle_groups: list[list[str]]) -> list[dict]:
+    """Find chats containing at least one handle from each group.
+
+    This enables searches like ["Nick", "Andrew"] where each name might
+    map to multiple possible handles (phone numbers).
+
+    Args:
+        conn: Database connection
+        handle_groups: List of handle groups, where each group contains
+                      possible handles for one participant
+
+    Returns:
+        List of chat dicts that have at least one handle from each group
+    """
+    if not handle_groups:
+        return []
+
+    # If only one group, use simple query
+    if len(handle_groups) == 1:
+        handles = handle_groups[0]
+        placeholders = ','.join('?' * len(handles))
+        cursor = conn.execute(f"""
+            SELECT DISTINCT c.ROWID as id, c.guid, c.display_name, c.service_name
+            FROM chat c
+            JOIN chat_handle_join chj ON c.ROWID = chj.chat_id
+            JOIN handle h ON chj.handle_id = h.ROWID
+            WHERE h.id IN ({placeholders})
+        """, tuple(handles))
+        return [dict(row) for row in cursor.fetchall()]
+
+    # For multiple groups, build a query that requires one match from each group
+    # Strategy: Find chats, then filter to those having handles from all groups
+    all_handles = []
+    for group in handle_groups:
+        all_handles.extend(group)
+
+    placeholders = ','.join('?' * len(all_handles))
+
+    # Get candidate chats (have at least one of the handles)
+    cursor = conn.execute(f"""
+        SELECT DISTINCT c.ROWID as id, c.guid, c.display_name, c.service_name
+        FROM chat c
+        JOIN chat_handle_join chj ON c.ROWID = chj.chat_id
+        JOIN handle h ON chj.handle_id = h.ROWID
+        WHERE h.id IN ({placeholders})
+    """, tuple(all_handles))
+
+    candidate_chats = [dict(row) for row in cursor.fetchall()]
+
+    # Filter to chats that have at least one handle from each group
+    matching_chats = []
+    for chat in candidate_chats:
+        chat_id = chat['id']
+
+        # Get all handles for this chat
+        handle_cursor = conn.execute("""
+            SELECT h.id
+            FROM chat_handle_join chj
+            JOIN handle h ON chj.handle_id = h.ROWID
+            WHERE chj.chat_id = ?
+        """, (chat_id,))
+        chat_handles = {row['id'] for row in handle_cursor.fetchall()}
+
+        # Check if chat has at least one handle from each group
+        has_all_groups = True
+        for group in handle_groups:
+            if not any(h in chat_handles for h in group):
+                has_all_groups = False
+                break
+
+        if has_all_groups:
+            matching_chats.append(chat)
+
+    return matching_chats
 
 
 def find_chat_impl(
@@ -45,6 +120,8 @@ def find_chat_impl(
         }
 
     resolver = ContactResolver()
+    if resolver.is_available:
+        resolver.initialize()  # Explicitly initialize to trigger auth check
 
     try:
         with get_db_connection(db_path) as conn:
@@ -52,24 +129,30 @@ def find_chat_impl(
 
             # Strategy 1: Search by participant handles
             if participants:
-                handles = []
+                # Build handle groups - each participant name maps to possible handles
+                handle_groups = []
                 for p in participants:
+                    group_handles = []
                     if p.startswith('+'):
-                        handles.append(p)
+                        group_handles.append(p)
                     else:
                         normalized = normalize_to_e164(p)
                         if normalized:
-                            handles.append(normalized)
-                        else:
-                            # Try name lookup via contacts
-                            if resolver.is_available:
-                                resolver.initialize()
-                                for handle, contact_name in (resolver._lookup or {}).items():
-                                    if p.lower() in contact_name.lower():
-                                        handles.append(handle)
+                            group_handles.append(normalized)
 
-                if handles:
-                    chat_rows = find_chats_by_handles(conn, handles)
+                        # Also try name lookup via contacts
+                        if resolver.is_available:
+                            matches = resolver.search_by_name(p)
+                            for handle, contact_name in matches:
+                                if handle not in group_handles:
+                                    group_handles.append(handle)
+
+                    if group_handles:
+                        handle_groups.append(group_handles)
+
+                if handle_groups:
+                    # Find chats that have at least one handle from each group
+                    chat_rows = _find_chats_by_handle_groups(conn, handle_groups)
                     for chat_row in chat_rows:
                         chat_info = _build_chat_info(conn, chat_row, resolver)
                         chat_info["match"] = "participants"
@@ -80,9 +163,9 @@ def find_chat_impl(
                 cursor_obj = conn.execute("""
                     SELECT c.ROWID as id, c.guid, c.display_name, c.service_name
                     FROM chat c
-                    WHERE c.display_name LIKE ?
+                    WHERE c.display_name LIKE ? ESCAPE '\\'
                     LIMIT ?
-                """, (f"%{name}%", limit))
+                """, (f"%{escape_like(name)}%", limit))
 
                 for row in cursor_obj.fetchall():
                     chat_info = _build_chat_info(conn, dict(row), resolver)
@@ -96,10 +179,10 @@ def find_chat_impl(
                     FROM chat c
                     JOIN chat_message_join cmj ON c.ROWID = cmj.chat_id
                     JOIN message m ON cmj.message_id = m.ROWID
-                    WHERE m.text LIKE ?
+                    WHERE m.text LIKE ? ESCAPE '\\'
                     ORDER BY m.date DESC
                     LIMIT ?
-                """, (f"%{contains_recent}%", limit))
+                """, (f"%{escape_like(contains_recent)}%", limit))
 
                 for row in cursor_obj.fetchall():
                     chat_info = _build_chat_info(conn, dict(row), resolver)
@@ -120,11 +203,25 @@ def find_chat_impl(
                     if len(unique_results) >= limit:
                         break
 
-            return {
+            response = {
                 "chats": unique_results,
                 "more": len(results) > limit,
                 "cursor": None,
             }
+
+            # Add suggestions when no results found
+            if not unique_results:
+                suggestions = get_chat_suggestions(
+                    conn,
+                    resolver,
+                    name=name,
+                    participants=participants,
+                    contains_recent=contains_recent,
+                )
+                if suggestions:
+                    response["suggestions"] = suggestions
+
+            return response
 
     except FileNotFoundError:
         return {
@@ -168,7 +265,7 @@ def _build_chat_info(conn, chat_row: dict, resolver: ContactResolver) -> dict:
 
     # Get last message
     cursor = conn.execute("""
-        SELECT m.text, m.date, m.is_from_me, h.id as sender_handle
+        SELECT m.text, m.attributedBody, m.date, m.is_from_me, h.id as sender_handle
         FROM message m
         JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
         LEFT JOIN handle h ON m.handle_id = h.ROWID
@@ -187,9 +284,10 @@ def _build_chat_info(conn, chat_row: dict, resolver: ContactResolver) -> dict:
         if sender is None:
             sender = format_phone_display(last_msg['sender_handle']) if last_msg['sender_handle'] else "unknown"
         last_dt = apple_to_datetime(last_msg['date'])
+        msg_text = get_message_text(last_msg['text'], last_msg['attributedBody']) or ""
         last_info = {
             "from": sender,
-            "text": (last_msg['text'] or "")[:50],
+            "text": msg_text[:50],
             "ago": format_compact_relative(last_dt),
         }
 

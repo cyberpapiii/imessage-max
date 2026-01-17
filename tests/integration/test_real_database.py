@@ -39,7 +39,7 @@ class TestListChats:
     def test_list_chats_returns_results(self):
         """Verify list_chats returns data from real database."""
         skip_if_no_db()
-        from imessage_mcp.tools.list_chats import list_chats_impl
+        from imessage_max.tools.list_chats import list_chats_impl
 
         result = list_chats_impl(limit=5, db_path=REAL_DB_PATH)
 
@@ -67,7 +67,7 @@ class TestListChats:
     def test_list_chats_group_filter(self):
         """Verify list_chats can filter by group/DM."""
         skip_if_no_db()
-        from imessage_mcp.tools.list_chats import list_chats_impl
+        from imessage_max.tools.list_chats import list_chats_impl
 
         # Test groups only
         groups_result = list_chats_impl(limit=10, is_group=True, db_path=REAL_DB_PATH)
@@ -86,7 +86,7 @@ class TestListChats:
     def test_list_chats_sort_options(self):
         """Verify list_chats supports different sort options."""
         skip_if_no_db()
-        from imessage_mcp.tools.list_chats import list_chats_impl
+        from imessage_max.tools.list_chats import list_chats_impl
 
         for sort_option in ["recent", "alphabetical", "most_active"]:
             result = list_chats_impl(limit=5, sort=sort_option, db_path=REAL_DB_PATH)
@@ -100,7 +100,7 @@ class TestFindChat:
     def test_find_chat_by_group_filter(self):
         """Verify find_chat can filter by is_group."""
         skip_if_no_db()
-        from imessage_mcp.tools.find_chat import find_chat_impl
+        from imessage_max.tools.find_chat import find_chat_impl
 
         # Search with is_group filter (using a common name pattern)
         result = find_chat_impl(
@@ -126,7 +126,7 @@ class TestFindChat:
     def test_find_chat_requires_criteria(self):
         """Verify find_chat returns validation error without criteria."""
         skip_if_no_db()
-        from imessage_mcp.tools.find_chat import find_chat_impl
+        from imessage_max.tools.find_chat import find_chat_impl
 
         result = find_chat_impl(db_path=REAL_DB_PATH)
 
@@ -140,7 +140,7 @@ class TestGetMessages:
     def test_get_messages_requires_chat_id(self):
         """Verify get_messages returns error without chat_id."""
         skip_if_no_db()
-        from imessage_mcp.tools.get_messages import get_messages_impl
+        from imessage_max.tools.get_messages import get_messages_impl
 
         result = get_messages_impl(db_path=REAL_DB_PATH)
 
@@ -149,8 +149,8 @@ class TestGetMessages:
     def test_get_messages_with_valid_chat(self):
         """Verify get_messages returns messages for a valid chat."""
         skip_if_no_db()
-        from imessage_mcp.tools.list_chats import list_chats_impl
-        from imessage_mcp.tools.get_messages import get_messages_impl
+        from imessage_max.tools.list_chats import list_chats_impl
+        from imessage_max.tools.get_messages import get_messages_impl
 
         # First get a valid chat ID
         chats_result = list_chats_impl(limit=1, db_path=REAL_DB_PATH)
@@ -178,8 +178,8 @@ class TestGetMessages:
     def test_get_messages_with_sessions(self):
         """Verify get_messages includes session information."""
         skip_if_no_db()
-        from imessage_mcp.tools.list_chats import list_chats_impl
-        from imessage_mcp.tools.get_messages import get_messages_impl
+        from imessage_max.tools.list_chats import list_chats_impl
+        from imessage_max.tools.get_messages import get_messages_impl
 
         # Get a chat with activity
         chats_result = list_chats_impl(limit=1, db_path=REAL_DB_PATH)
@@ -201,7 +201,7 @@ class TestSearch:
     def test_search_returns_structured_response(self):
         """Verify search returns properly structured response."""
         skip_if_no_db()
-        from imessage_mcp.tools.search import search_impl
+        from imessage_max.tools.search import search_impl
 
         # Search for common word that should exist
         result = search_impl(query="the", limit=5, db_path=REAL_DB_PATH)
@@ -225,7 +225,7 @@ class TestSearch:
     def test_search_empty_query_returns_error(self):
         """Verify search returns error for empty query."""
         skip_if_no_db()
-        from imessage_mcp.tools.search import search_impl
+        from imessage_max.tools.search import search_impl
 
         result = search_impl(query="", db_path=REAL_DB_PATH)
 
@@ -234,7 +234,7 @@ class TestSearch:
     def test_search_grouped_format(self):
         """Verify search supports grouped_by_chat format."""
         skip_if_no_db()
-        from imessage_mcp.tools.search import search_impl
+        from imessage_max.tools.search import search_impl
 
         result = search_impl(
             query="the",
@@ -260,7 +260,7 @@ class TestGetContext:
     def test_get_context_requires_params(self):
         """Verify get_context returns error without required params."""
         skip_if_no_db()
-        from imessage_mcp.tools.get_context import get_context_impl
+        from imessage_max.tools.get_context import get_context_impl
 
         result = get_context_impl(db_path=REAL_DB_PATH)
 
@@ -269,9 +269,9 @@ class TestGetContext:
     def test_get_context_with_valid_message(self):
         """Verify get_context works with a valid message ID."""
         skip_if_no_db()
-        from imessage_mcp.tools.list_chats import list_chats_impl
-        from imessage_mcp.tools.get_messages import get_messages_impl
-        from imessage_mcp.tools.get_context import get_context_impl
+        from imessage_max.tools.list_chats import list_chats_impl
+        from imessage_max.tools.get_messages import get_messages_impl
+        from imessage_max.tools.get_context import get_context_impl
 
         # Get a valid message ID through chaining
         chats_result = list_chats_impl(limit=1, db_path=REAL_DB_PATH)
@@ -325,7 +325,7 @@ class TestGetActiveConversations:
     def test_get_active_returns_structured_response(self):
         """Verify get_active_conversations returns proper structure."""
         skip_if_no_db()
-        from imessage_mcp.tools.get_active import get_active_conversations_impl
+        from imessage_max.tools.get_active import get_active_conversations_impl
 
         result = get_active_conversations_impl(
             hours=168,  # 1 week to maximize chance of finding activity
@@ -358,7 +358,7 @@ class TestGetActiveConversations:
     def test_get_active_group_filter(self):
         """Verify get_active_conversations respects is_group filter."""
         skip_if_no_db()
-        from imessage_mcp.tools.get_active import get_active_conversations_impl
+        from imessage_max.tools.get_active import get_active_conversations_impl
 
         # Test both filter values without error
         groups_result = get_active_conversations_impl(
@@ -382,7 +382,7 @@ class TestListAttachments:
     def test_list_attachments_returns_structured_response(self):
         """Verify list_attachments returns proper structure."""
         skip_if_no_db()
-        from imessage_mcp.tools.list_attachments import list_attachments_impl
+        from imessage_max.tools.list_attachments import list_attachments_impl
 
         result = list_attachments_impl(limit=10, db_path=REAL_DB_PATH)
 
@@ -404,7 +404,7 @@ class TestListAttachments:
     def test_list_attachments_type_filter(self):
         """Verify list_attachments respects type filter."""
         skip_if_no_db()
-        from imessage_mcp.tools.list_attachments import list_attachments_impl
+        from imessage_max.tools.list_attachments import list_attachments_impl
 
         # Test image filter
         result = list_attachments_impl(type="image", limit=5, db_path=REAL_DB_PATH)
@@ -417,7 +417,7 @@ class TestListAttachments:
     def test_list_attachments_sort_options(self):
         """Verify list_attachments supports different sort options."""
         skip_if_no_db()
-        from imessage_mcp.tools.list_attachments import list_attachments_impl
+        from imessage_max.tools.list_attachments import list_attachments_impl
 
         for sort_option in ["recent_first", "oldest_first", "largest_first"]:
             result = list_attachments_impl(
@@ -434,7 +434,7 @@ class TestGetUnread:
     def test_get_unread_messages_format(self):
         """Verify get_unread returns proper structure in messages format."""
         skip_if_no_db()
-        from imessage_mcp.tools.get_unread import get_unread_impl
+        from imessage_max.tools.get_unread import get_unread_impl
 
         result = get_unread_impl(format="messages", limit=10, db_path=REAL_DB_PATH)
 
@@ -458,7 +458,7 @@ class TestGetUnread:
     def test_get_unread_summary_format(self):
         """Verify get_unread returns proper structure in summary format."""
         skip_if_no_db()
-        from imessage_mcp.tools.get_unread import get_unread_impl
+        from imessage_max.tools.get_unread import get_unread_impl
 
         result = get_unread_impl(format="summary", db_path=REAL_DB_PATH)
 
@@ -492,7 +492,7 @@ class TestDatabaseAccess:
     def test_database_connection_lifecycle(self):
         """Verify database connections open and close properly."""
         skip_if_no_db()
-        from imessage_mcp.db import get_db_connection
+        from imessage_max.db import get_db_connection
 
         # Connection should work and close cleanly
         with get_db_connection(REAL_DB_PATH) as conn:
@@ -503,7 +503,7 @@ class TestDatabaseAccess:
     def test_database_read_only(self):
         """Verify database is opened in read-only mode."""
         skip_if_no_db()
-        from imessage_mcp.db import get_db_connection
+        from imessage_max.db import get_db_connection
         import sqlite3
 
         with get_db_connection(REAL_DB_PATH) as conn:
@@ -518,7 +518,7 @@ class TestErrorHandling:
     def test_invalid_chat_id_handling(self):
         """Verify tools handle invalid chat IDs gracefully."""
         skip_if_no_db()
-        from imessage_mcp.tools.get_messages import get_messages_impl
+        from imessage_max.tools.get_messages import get_messages_impl
 
         result = get_messages_impl(chat_id="chat99999999", db_path=REAL_DB_PATH)
 
@@ -527,7 +527,7 @@ class TestErrorHandling:
     def test_invalid_message_id_handling(self):
         """Verify tools handle invalid message IDs gracefully."""
         skip_if_no_db()
-        from imessage_mcp.tools.get_context import get_context_impl
+        from imessage_max.tools.get_context import get_context_impl
 
         result = get_context_impl(message_id="msg99999999", db_path=REAL_DB_PATH)
 
@@ -538,7 +538,7 @@ class TestErrorHandling:
         # This test simulates what happens without Full Disk Access
         # We can't easily trigger this without changing permissions,
         # so we test that the error path exists in the code
-        from imessage_mcp.tools.list_chats import list_chats_impl
+        from imessage_max.tools.list_chats import list_chats_impl
 
         # Test with a definitely-nonexistent path
         result = list_chats_impl(db_path="/nonexistent/path/chat.db")

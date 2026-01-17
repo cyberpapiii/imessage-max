@@ -3,7 +3,7 @@
 import pytest
 import sqlite3
 from datetime import datetime, timezone
-from imessage_mcp.db import (
+from imessage_max.db import (
     get_db_connection,
     DB_PATH,
     apple_to_datetime,

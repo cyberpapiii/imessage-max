@@ -1,7 +1,7 @@
 """Tests for search tool."""
 
 import pytest
-from imessage_mcp.tools.search import search_impl
+from imessage_max.tools.search import search_impl
 
 
 def test_search_basic(populated_db):

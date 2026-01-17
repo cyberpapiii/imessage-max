@@ -2,7 +2,7 @@
 
 import pytest
 from datetime import datetime, timezone, timedelta
-from imessage_mcp.time_utils import (
+from imessage_max.time_utils import (
     parse_time_input,
     format_relative_time,
     format_compact_relative,

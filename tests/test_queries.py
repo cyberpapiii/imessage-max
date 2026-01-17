@@ -1,7 +1,7 @@
 """Tests for query building utilities."""
 
 import pytest
-from imessage_mcp.queries import (
+from imessage_max.queries import (
     QueryBuilder,
     get_chat_by_id,
     get_chat_participants,
@@ -123,7 +123,7 @@ class TestChatQueries:
 
     def test_get_chat_by_id(self, populated_db):
         """Test retrieving chat by ROWID."""
-        from imessage_mcp.db import get_db_connection
+        from imessage_max.db import get_db_connection
 
         with get_db_connection(populated_db) as conn:
             chat = get_chat_by_id(conn, 1)
@@ -134,7 +134,7 @@ class TestChatQueries:
 
     def test_get_chat_by_id_group(self, populated_db):
         """Test retrieving group chat."""
-        from imessage_mcp.db import get_db_connection
+        from imessage_max.db import get_db_connection
 
         with get_db_connection(populated_db) as conn:
             chat = get_chat_by_id(conn, 2)
@@ -145,7 +145,7 @@ class TestChatQueries:
 
     def test_get_chat_by_id_not_found(self, populated_db):
         """Test retrieving non-existent chat."""
-        from imessage_mcp.db import get_db_connection
+        from imessage_max.db import get_db_connection
 
         with get_db_connection(populated_db) as conn:
             chat = get_chat_by_id(conn, 999)
@@ -153,7 +153,7 @@ class TestChatQueries:
 
     def test_get_chat_participants(self, populated_db):
         """Test retrieving chat participants."""
-        from imessage_mcp.db import get_db_connection
+        from imessage_max.db import get_db_connection
 
         with get_db_connection(populated_db) as conn:
             participants = get_chat_participants(conn, 2)  # Group chat
@@ -165,7 +165,7 @@ class TestChatQueries:
 
     def test_get_chat_participants_single(self, populated_db):
         """Test retrieving participants from single-person chat."""
-        from imessage_mcp.db import get_db_connection
+        from imessage_max.db import get_db_connection
 
         with get_db_connection(populated_db) as conn:
             participants = get_chat_participants(conn, 1)
@@ -174,7 +174,7 @@ class TestChatQueries:
 
     def test_find_chats_by_handles(self, populated_db):
         """Test finding chats by participant handles."""
-        from imessage_mcp.db import get_db_connection
+        from imessage_max.db import get_db_connection
 
         with get_db_connection(populated_db) as conn:
             # Find chats with both handles (should be the group chat)
@@ -184,7 +184,7 @@ class TestChatQueries:
 
     def test_find_chats_by_handles_single(self, populated_db):
         """Test finding chats with a single handle."""
-        from imessage_mcp.db import get_db_connection
+        from imessage_max.db import get_db_connection
 
         with get_db_connection(populated_db) as conn:
             # Find chats with single handle (should be both chats)
@@ -193,7 +193,7 @@ class TestChatQueries:
 
     def test_find_chats_by_handles_empty(self, populated_db):
         """Test finding chats with empty handles list."""
-        from imessage_mcp.db import get_db_connection
+        from imessage_max.db import get_db_connection
 
         with get_db_connection(populated_db) as conn:
             chats = find_chats_by_handles(conn, [])
@@ -205,7 +205,7 @@ class TestMessageQueries:
 
     def test_get_messages_for_chat(self, populated_db):
         """Test retrieving messages for a chat."""
-        from imessage_mcp.db import get_db_connection
+        from imessage_max.db import get_db_connection
 
         with get_db_connection(populated_db) as conn:
             messages = get_messages_for_chat(conn, 1)
@@ -216,7 +216,7 @@ class TestMessageQueries:
 
     def test_get_messages_for_chat_with_limit(self, populated_db):
         """Test message retrieval with limit."""
-        from imessage_mcp.db import get_db_connection
+        from imessage_max.db import get_db_connection
 
         with get_db_connection(populated_db) as conn:
             messages = get_messages_for_chat(conn, 1, limit=1)
@@ -224,7 +224,7 @@ class TestMessageQueries:
 
     def test_get_messages_for_chat_contains_filter(self, populated_db):
         """Test message retrieval with text contains filter."""
-        from imessage_mcp.db import get_db_connection
+        from imessage_max.db import get_db_connection
 
         with get_db_connection(populated_db) as conn:
             messages = get_messages_for_chat(conn, 1, contains="Hello")
@@ -233,7 +233,7 @@ class TestMessageQueries:
 
     def test_get_messages_for_chat_ordering(self, populated_db):
         """Test that messages are ordered by date DESC."""
-        from imessage_mcp.db import get_db_connection
+        from imessage_max.db import get_db_connection
 
         with get_db_connection(populated_db) as conn:
             messages = get_messages_for_chat(conn, 1)
@@ -247,7 +247,7 @@ class TestReactionQueries:
 
     def test_get_reactions_for_messages_empty(self, populated_db):
         """Test getting reactions with empty message list."""
-        from imessage_mcp.db import get_db_connection
+        from imessage_max.db import get_db_connection
 
         with get_db_connection(populated_db) as conn:
             reactions = get_reactions_for_messages(conn, [])
@@ -255,7 +255,7 @@ class TestReactionQueries:
 
     def test_get_reactions_for_messages_no_reactions(self, populated_db):
         """Test getting reactions for messages without reactions."""
-        from imessage_mcp.db import get_db_connection
+        from imessage_max.db import get_db_connection
 
         with get_db_connection(populated_db) as conn:
             # msg1 and msg2 don't have reactions in our test data
@@ -269,7 +269,7 @@ class TestIntegration:
 
     def test_get_chat_with_participants_and_messages(self, populated_db):
         """Test retrieving a chat with its participants and messages."""
-        from imessage_mcp.db import get_db_connection
+        from imessage_max.db import get_db_connection
 
         with get_db_connection(populated_db) as conn:
             chat = get_chat_by_id(conn, 1)

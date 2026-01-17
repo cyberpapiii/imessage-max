@@ -1,10 +1,11 @@
 """search tool implementation."""
 
 from typing import Optional, Any
-from ..db import get_db_connection, apple_to_datetime, datetime_to_apple, DB_PATH
+from ..db import get_db_connection, apple_to_datetime, datetime_to_apple, escape_like, DB_PATH
 from ..contacts import ContactResolver
 from ..time_utils import parse_time_input, format_compact_relative
 from ..parsing import get_message_text
+from ..suggestions import get_message_suggestions
 
 # 24 hours in Apple timestamp format (nanoseconds)
 TWENTY_FOUR_HOURS_NS = 24 * 60 * 60 * 1_000_000_000
@@ -72,9 +73,8 @@ def _has_reply_within_24h(conn, chat_id: int, message_date: int) -> bool:
     return cursor.fetchone() is not None
 
 
-def _escape_like(s: str) -> str:
-    """Escape SQL LIKE special characters."""
-    return s.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+# Use escape_like from db module (aliased for local use)
+_escape_like = escape_like
 
 
 def search_impl(
@@ -124,6 +124,8 @@ def search_impl(
         format = "flat"
 
     resolver = ContactResolver()
+    if resolver.is_available:
+        resolver.initialize()  # Explicitly initialize to trigger auth check
 
     try:
         with get_db_connection(db_path) as conn:
@@ -243,9 +245,33 @@ def search_impl(
                 rows = filtered_rows
 
             if format == "grouped_by_chat":
-                return _build_grouped_response(rows, query, resolver)
+                response = _build_grouped_response(rows, query, resolver)
             else:
-                return _build_flat_response(rows, resolver, limit)
+                response = _build_flat_response(rows, resolver, limit)
+
+            # Add suggestions when no results found
+            if response.get("total", 0) == 0:
+                # Parse in_chat to get numeric chat ID if provided
+                numeric_chat_id = None
+                if in_chat:
+                    chat_id_str = in_chat.replace("chat", "") if in_chat.startswith("chat") else in_chat
+                    try:
+                        numeric_chat_id = int(chat_id_str)
+                    except ValueError:
+                        pass
+
+                suggestions = get_message_suggestions(
+                    conn,
+                    resolver,
+                    query=query,
+                    chat_id=numeric_chat_id,
+                    since=since,
+                    from_person=from_person,
+                )
+                if suggestions:
+                    response["suggestions"] = suggestions
+
+            return response
 
     except FileNotFoundError:
         return {"error": "database_not_found", "message": f"Database not found at {db_path}"}

@@ -1,7 +1,7 @@
 """Tests for get_context tool."""
 
 import pytest
-from imessage_mcp.tools.get_context import get_context_impl
+from imessage_max.tools.get_context import get_context_impl
 
 
 def test_get_context_by_message_id(populated_db):

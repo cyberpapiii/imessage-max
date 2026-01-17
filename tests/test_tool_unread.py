@@ -73,7 +73,7 @@ def unread_db(mock_db_path):
 
 def test_get_unread_messages_format(unread_db):
     """Test default messages format returns correct structure."""
-    from imessage_mcp.tools.get_unread import get_unread_impl
+    from imessage_max.tools.get_unread import get_unread_impl
 
     result = get_unread_impl(db_path=str(unread_db))
 
@@ -91,7 +91,7 @@ def test_get_unread_messages_format(unread_db):
 
 def test_get_unread_summary_format(unread_db):
     """Test summary format returns breakdown by chat."""
-    from imessage_mcp.tools.get_unread import get_unread_impl
+    from imessage_max.tools.get_unread import get_unread_impl
 
     result = get_unread_impl(format="summary", db_path=str(unread_db))
 
@@ -114,7 +114,7 @@ def test_get_unread_summary_format(unread_db):
 
 def test_get_unread_specific_chat(unread_db):
     """Test filter to specific chat_id works."""
-    from imessage_mcp.tools.get_unread import get_unread_impl
+    from imessage_max.tools.get_unread import get_unread_impl
 
     result = get_unread_impl(chat_id="chat1", db_path=str(unread_db))
 
@@ -132,7 +132,7 @@ def test_get_unread_specific_chat(unread_db):
 
 def test_get_unread_limit(unread_db):
     """Test limit parameter constrains results."""
-    from imessage_mcp.tools.get_unread import get_unread_impl
+    from imessage_max.tools.get_unread import get_unread_impl
 
     result = get_unread_impl(limit=1, db_path=str(unread_db))
 
@@ -146,7 +146,7 @@ def test_get_unread_limit(unread_db):
 
 def test_get_unread_empty(unread_db):
     """Test returns empty results when no unread messages."""
-    from imessage_mcp.tools.get_unread import get_unread_impl
+    from imessage_max.tools.get_unread import get_unread_impl
 
     # Chat 3 has no messages, so no unread
     result = get_unread_impl(chat_id="chat3", db_path=str(unread_db))
@@ -160,7 +160,7 @@ def test_get_unread_empty(unread_db):
 
 def test_get_unread_people_map(unread_db):
     """Test people map contains sender info."""
-    from imessage_mcp.tools.get_unread import get_unread_impl
+    from imessage_max.tools.get_unread import get_unread_impl
 
     result = get_unread_impl(db_path=str(unread_db))
 
@@ -179,7 +179,7 @@ def test_get_unread_people_map(unread_db):
 
 def test_get_unread_invalid_chat_id(unread_db):
     """Test invalid chat_id format returns error."""
-    from imessage_mcp.tools.get_unread import get_unread_impl
+    from imessage_max.tools.get_unread import get_unread_impl
 
     result = get_unread_impl(chat_id="invalid_chat_id_format", db_path=str(unread_db))
 
@@ -189,7 +189,7 @@ def test_get_unread_invalid_chat_id(unread_db):
 
 def test_get_unread_message_structure(unread_db):
     """Test individual unread message structure."""
-    from imessage_mcp.tools.get_unread import get_unread_impl
+    from imessage_max.tools.get_unread import get_unread_impl
 
     result = get_unread_impl(db_path=str(unread_db))
 
@@ -216,7 +216,7 @@ def test_get_unread_message_structure(unread_db):
 
 def test_get_unread_sorted_oldest_first(unread_db):
     """Test unread messages are sorted oldest first."""
-    from imessage_mcp.tools.get_unread import get_unread_impl
+    from imessage_max.tools.get_unread import get_unread_impl
 
     result = get_unread_impl(db_path=str(unread_db))
 
@@ -230,7 +230,7 @@ def test_get_unread_sorted_oldest_first(unread_db):
 
 def test_get_unread_max_limit(unread_db):
     """Test limit is clamped to max 100."""
-    from imessage_mcp.tools.get_unread import get_unread_impl
+    from imessage_max.tools.get_unread import get_unread_impl
 
     # Request more than max, should be clamped
     result = get_unread_impl(limit=500, db_path=str(unread_db))
@@ -241,7 +241,7 @@ def test_get_unread_max_limit(unread_db):
 
 def test_get_unread_database_not_found():
     """Test error handling for missing database."""
-    from imessage_mcp.tools.get_unread import get_unread_impl
+    from imessage_max.tools.get_unread import get_unread_impl
 
     result = get_unread_impl(db_path="/nonexistent/path/chat.db")
 
@@ -251,7 +251,7 @@ def test_get_unread_database_not_found():
 
 def test_get_unread_summary_sorted_by_count(unread_db):
     """Test summary breakdown is sorted by unread count descending."""
-    from imessage_mcp.tools.get_unread import get_unread_impl
+    from imessage_max.tools.get_unread import get_unread_impl
 
     result = get_unread_impl(format="summary", db_path=str(unread_db))
 
@@ -265,7 +265,7 @@ def test_get_unread_summary_sorted_by_count(unread_db):
 
 def test_get_unread_chat_id_special_chars(unread_db):
     """Test that special LIKE characters in chat_id are escaped."""
-    from imessage_mcp.tools.get_unread import get_unread_impl
+    from imessage_max.tools.get_unread import get_unread_impl
 
     result = get_unread_impl(chat_id="100%_test", db_path=str(unread_db))
     # Should not cause SQL errors

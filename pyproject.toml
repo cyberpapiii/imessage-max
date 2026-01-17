@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "imessage-mcp"
+name = "imessage-max"
 version = "0.1.0"
 description = "Intent-aligned MCP server for iMessage"
 readme = "README.md"
@@ -26,10 +26,10 @@ dev = [
 ]
 
 [project.scripts]
-imessage-mcp = "imessage_mcp.server:main"
+imessage-max = "imessage_max.server:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/imessage_mcp"]
+packages = ["src/imessage_max"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

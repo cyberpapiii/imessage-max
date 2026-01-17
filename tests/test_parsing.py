@@ -1,7 +1,7 @@
 """Tests for message parsing utilities."""
 
 import pytest
-from imessage_mcp.parsing import (
+from imessage_max.parsing import (
     extract_text_from_attributed_body,
     get_message_text,
     extract_links,

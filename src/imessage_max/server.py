@@ -1,4 +1,4 @@
-"""iMessage MCP Server."""
+"""iMessage Max - MCP Server for iMessage."""
 
 from typing import Optional
 from fastmcp import FastMCP
@@ -12,8 +12,9 @@ from .tools.get_active import get_active_conversations_impl
 from .tools.list_attachments import list_attachments_impl
 from .tools.get_unread import get_unread_impl
 from .tools.send import send_impl
+from .contacts import check_contacts_authorization, request_contacts_access, PYOBJC_AVAILABLE, ContactResolver
 
-mcp = FastMCP("iMessage MCP")
+mcp = FastMCP("iMessage Max")
 
 
 @mcp.tool()
@@ -333,8 +334,62 @@ def send(
     )
 
 
+@mcp.tool()
+def diagnose() -> dict:
+    """
+    Diagnose iMessage MCP configuration and permissions.
+
+    Use this tool to troubleshoot issues with contact resolution,
+    database access, or permission problems.
+
+    Returns:
+        Dict with PyObjC availability, authorization status, and contact count
+    """
+    import sys
+    import os
+
+    result = {
+        "pyobjc_available": PYOBJC_AVAILABLE,
+        "python_executable": sys.executable,
+        "process_id": os.getpid(),
+    }
+
+    if PYOBJC_AVAILABLE:
+        is_authorized, status = check_contacts_authorization()
+        result["contacts_authorized"] = is_authorized
+        result["authorization_status"] = status
+
+        if is_authorized:
+            resolver = ContactResolver()
+            resolver.initialize()
+            stats = resolver.get_stats()
+            result["contacts_loaded"] = stats.get("handle_count", 0)
+    else:
+        result["contacts_authorized"] = False
+        result["authorization_status"] = "pyobjc_not_available"
+
+    return result
+
+
+__version__ = "0.1.0"
+
+
 def main() -> None:
     """Run the MCP server."""
+    import argparse
+    import sys
+
+    parser = argparse.ArgumentParser(description="iMessage Max - MCP Server")
+    parser.add_argument("--version", "-v", action="version", version=f"imessage-max {__version__}")
+    parser.parse_args()
+
+    # Request Contacts access on startup - triggers macOS permission dialog if needed
+    if PYOBJC_AVAILABLE:
+        granted, status = request_contacts_access(timeout=30.0)
+        if not granted:
+            print(f"[iMessage MCP] Contacts access not granted ({status}). "
+                  f"Contact names will show as phone numbers.", file=sys.stderr, flush=True)
+
     mcp.run()
 
 

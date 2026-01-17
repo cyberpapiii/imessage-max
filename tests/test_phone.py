@@ -1,7 +1,7 @@
 """Tests for phone number utilities."""
 
 import pytest
-from imessage_mcp.phone import (
+from imessage_max.phone import (
     normalize_to_e164,
     format_phone_display,
     is_phone_number,

@@ -10,17 +10,19 @@ helping users find what they're looking for by suggesting:
 - Other chats where the query would find results
 """
 
+import logging
 import sqlite3
 from difflib import SequenceMatcher
 from typing import Optional, Any
 from .contacts import ContactResolver
 from .time_utils import parse_time_input
-from .db import datetime_to_apple
+from .db import datetime_to_apple, escape_like
+
+logger = logging.getLogger(__name__)
 
 
-def _escape_like(s: str) -> str:
-    """Escape SQL LIKE special characters."""
-    return s.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+# Use escape_like from db module (aliased for local use)
+_escape_like = escape_like
 
 
 def _similarity_ratio(a: str, b: str) -> float:
@@ -522,9 +524,9 @@ def get_chat_suggestions(
             if renamed:
                 suggestions["renamed_chat"] = renamed
 
-    except Exception:
+    except Exception as e:
         # Gracefully handle any errors in suggestion generation
-        pass
+        logger.debug(f"Error generating chat suggestions: {e}")
 
     return suggestions
 
@@ -576,8 +578,8 @@ def get_message_suggestions(
             if other_chats:
                 suggestions["other_chats"] = other_chats
 
-    except Exception:
+    except Exception as e:
         # Gracefully handle any errors in suggestion generation
-        pass
+        logger.debug(f"Error generating message suggestions: {e}")
 
     return suggestions
