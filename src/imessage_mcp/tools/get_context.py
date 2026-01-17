@@ -1,15 +1,14 @@
 """get_context tool implementation."""
 
 from typing import Optional, Any
-from ..db import get_db_connection, apple_to_datetime, DB_PATH
+from ..db import get_db_connection, apple_to_datetime, escape_like, DB_PATH
 from ..contacts import ContactResolver
 from ..time_utils import format_compact_relative
 from ..parsing import get_message_text
 
 
-def _escape_like(s: str) -> str:
-    """Escape SQL LIKE special characters."""
-    return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+# Use escape_like from db module (aliased for local use)
+_escape_like = escape_like
 
 
 def get_context_impl(
@@ -227,7 +226,7 @@ def get_context_impl(
 
             def format_message(row) -> dict[str, Any]:
                 """Format a message row into response format."""
-                text = get_message_text(row["text"], row.get("attributedBody"))
+                text = get_message_text(row["text"], row["attributedBody"])
                 msg_dt = apple_to_datetime(row["date"])
 
                 return {
