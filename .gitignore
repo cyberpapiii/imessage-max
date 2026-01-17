@@ -84,3 +84,7 @@ Thumbs.db
 
 # Project specific
 *.db
+
+# MCP Publisher
+.mcpregistry_*
+mcp-publisher
