@@ -1,153 +1,292 @@
-# MCP Registry
+# iMessage Max
 
-The MCP registry provides MCP clients with a list of MCP servers, like an app store for MCP servers.
+An MCP (Model Context Protocol) server for iMessage that lets AI assistants read and search your messages with proper contact resolution.
 
-[**📤 Publish my MCP server**](docs/modelcontextprotocol-io/quickstart.mdx) | [**⚡️ Live API docs**](https://registry.modelcontextprotocol.io/docs) | [**👀 Ecosystem vision**](docs/design/ecosystem-vision.md) | 📖 **[Full documentation](./docs)**
+<!-- mcp-name: io.github.cyberpapiii/imessage-max -->
 
-## Development Status
+## Features
 
-**2025-10-24 update**: The Registry API has entered an **API freeze (v0.1)** 🎉. For the next month or more, the API will remain stable with no breaking changes, allowing integrators to confidently implement support. This freeze applies to v0.1 while development continues on v0. We'll use this period to validate the API in real-world integrations and gather feedback to shape v1 for general availability. Thank you to everyone for your contributions and patience—your involvement has been key to getting us here!
+- **Contact Resolution** - See names instead of phone numbers (resolves via macOS Contacts)
+- **Participant Lookup** - Find chats by typing names like `find_chat(participants=["Nick", "Andrew"])`
+- **Session Grouping** - Messages grouped into conversation sessions with gap detection
+- **Token Efficient** - Designed for AI consumption with compact responses and pagination
+- **Read-Only Safe** - Only reads from chat.db, never modifies your messages
 
-**2025-09-08 update**: The registry has launched in preview 🎉 ([announcement blog post](https://blog.modelcontextprotocol.io/posts/2025-09-08-mcp-registry-preview/)). While the system is now more stable, this is still a preview release and breaking changes or data resets may occur. A general availability (GA) release will follow later. We'd love your feedback in [GitHub discussions](https://github.com/modelcontextprotocol/registry/discussions/new?category=ideas) or in the [#registry-dev Discord](https://discord.com/channels/1358869848138059966/1369487942862504016) ([joining details here](https://modelcontextprotocol.io/community/communication)).
+## Why This Exists
 
-Current key maintainers:
-- **Adam Jones** (Anthropic) [@domdomegg](https://github.com/domdomegg)  
-- **Tadas Antanavicius** (PulseMCP) [@tadasant](https://github.com/tadasant)
-- **Toby Padilla** (GitHub) [@toby](https://github.com/toby)
-- **Radoslav (Rado) Dimitrov** (Stacklok) [@rdimitrov](https://github.com/rdimitrov)
+Most iMessage tools expose raw database structures, requiring 3-5 tool calls per user intent. This MCP provides intent-aligned tools that work the way you'd naturally ask questions:
 
-## Contributing
+```
+"What did Nick and I talk about yesterday?"
+→ find_chat(participants=["Nick"]) + get_messages(since="yesterday")
 
-We use multiple channels for collaboration - see [modelcontextprotocol.io/community/communication](https://modelcontextprotocol.io/community/communication).
+"Show me recent group chats"
+→ list_chats(is_group=True)
 
-Often (but not always) ideas flow through this pipeline:
+"Find where we discussed the trip"
+→ search(query="trip")
+```
 
-- **[Discord](https://modelcontextprotocol.io/community/communication)** - Real-time community discussions
-- **[Discussions](https://github.com/modelcontextprotocol/registry/discussions)** - Propose and discuss product/technical requirements
-- **[Issues](https://github.com/modelcontextprotocol/registry/issues)** - Track well-scoped technical work  
-- **[Pull Requests](https://github.com/modelcontextprotocol/registry/pulls)** - Contribute work towards issues
+## Installation
 
-### Quick start:
-
-#### Pre-requisites
-
-- **Docker**
-- **Go 1.24.x**
-- **ko** - Container image builder for Go ([installation instructions](https://ko.build/install/))
-- **golangci-lint v2.4.0**
-
-#### Running the server
+### From PyPI (Recommended)
 
 ```bash
-# Start full development environment
-make dev-compose
+pip install imessage-max
 ```
 
-This starts the registry at [`localhost:8080`](http://localhost:8080) with PostgreSQL. The database uses ephemeral storage and is reset each time you restart the containers, ensuring a clean state for development and testing.
-
-**Note:** The registry uses [ko](https://ko.build) to build container images. The `make dev-compose` command automatically builds the registry image with ko and loads it into your local Docker daemon before starting the services.
-
-By default, the registry seeds from the production API with a filtered subset of servers (to keep startup fast). This ensures your local environment mirrors production behavior and all seed data passes validation. For offline development you can seed from a file without validation with `MCP_REGISTRY_SEED_FROM=data/seed.json MCP_REGISTRY_ENABLE_REGISTRY_VALIDATION=false make dev-compose`.
-
-The setup can be configured with environment variables in [docker-compose.yml](./docker-compose.yml) - see [.env.example](./.env.example) for a reference.
-
-<details>
-<summary>Alternative: Running a pre-built Docker image</summary>
-
-Pre-built Docker images are automatically published to GitHub Container Registry:
+### Using UV
 
 ```bash
-# Run latest stable release
-docker run -p 8080:8080 ghcr.io/modelcontextprotocol/registry:latest
+# Install UV if you haven't
+curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Run latest from main branch (continuous deployment)
-docker run -p 8080:8080 ghcr.io/modelcontextprotocol/registry:main
-
-# Run specific release version
-docker run -p 8080:8080 ghcr.io/modelcontextprotocol/registry:v1.0.0
-
-# Run development build from main branch
-docker run -p 8080:8080 ghcr.io/modelcontextprotocol/registry:main-20250906-abc123d
+# Install imessage-max
+uv pip install imessage-max
 ```
 
-**Available tags:** 
-- **Releases**: `latest`, `v1.0.0`, `v1.1.0`, etc.
-- **Continuous**: `main` (latest main branch build)
-- **Development**: `main-<date>-<sha>` (specific commit builds)
-
-</details>
-
-#### Publishing a server
-
-To publish a server, we've built a simple CLI. You can use it with:
+### From Source
 
 ```bash
-# Build the latest CLI
-make publisher
-
-# Use it!
-./bin/mcp-publisher --help
+pip install git+https://github.com/cyberpapiii/imessage-max.git
 ```
 
-See [the publisher guide](./docs/modelcontextprotocol-io/quickstart.mdx) for more details.
+## Setup
 
-#### Other commands
+### 1. Grant Permissions
+
+The MCP needs two macOS permissions to work properly:
+
+#### Full Disk Access (Required)
+Allows reading `~/Library/Messages/chat.db`
+
+1. Open **System Settings** → **Privacy & Security** → **Full Disk Access**
+2. Click **+** and add your terminal app (Terminal.app, iTerm, Warp, etc.)
+3. If using Claude Desktop, add the process that runs Python:
+   - For UV: Add `/Users/YOU/.local/share/uv/python/` (or find it with `which python`)
+
+#### Contacts Access (Required for name resolution)
+Allows resolving phone numbers to contact names
+
+1. Open **System Settings** → **Privacy & Security** → **Contacts**
+2. Add the same apps/processes as above
+3. **Important:** If using UV, you need to add UV itself (`~/.cargo/bin/uv` or similar)
+
+### 2. Configure Claude Desktop
+
+Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "imessage": {
+      "command": "uvx",
+      "args": ["imessage-max"]
+    }
+  }
+}
+```
+
+Or if installed via pip:
+
+```json
+{
+  "mcpServers": {
+    "imessage": {
+      "command": "imessage-max"
+    }
+  }
+}
+```
+
+### 3. Restart Claude Desktop
+
+The MCP will request Contacts access on first run if not already granted.
+
+## Tools
+
+### find_chat
+Find chats by participants, name, or recent content.
+
+```python
+# Find a DM by contact name
+find_chat(participants=["Nick"])
+
+# Find a group chat with multiple people
+find_chat(participants=["Nick", "Andrew"])
+
+# Find a named group chat
+find_chat(name="Family")
+
+# Find chat where you discussed something recently
+find_chat(contains_recent="dinner plans")
+```
+
+### get_messages
+Retrieve messages with flexible filtering.
+
+```python
+# Get recent messages from a chat
+get_messages(chat_id="chat123", limit=50)
+
+# Get messages from the last 24 hours
+get_messages(chat_id="chat123", since="24h")
+
+# Get only messages from a specific person
+get_messages(chat_id="chat123", from_person="Nick")
+
+# Get messages containing specific text
+get_messages(chat_id="chat123", contains="flight")
+```
+
+### list_chats
+Browse recent chats with previews.
+
+```python
+# List recent chats
+list_chats(limit=20)
+
+# List only group chats
+list_chats(is_group=True)
+
+# List chats active in the last week
+list_chats(since="7d")
+```
+
+### search
+Full-text search across all messages.
+
+```python
+# Search all messages
+search(query="dinner")
+
+# Search messages from a specific person
+search(query="dinner", from_person="Nick")
+
+# Search with time bounds
+search(query="meeting", since="2024-01-01", before="2024-02-01")
+
+# Search only in group chats
+search(query="party", is_group=True)
+```
+
+### get_context
+Get messages surrounding a specific message.
+
+```python
+# Get context around a message
+get_context(message_id="msg123", before=5, after=10)
+
+# Find message containing text and get context
+get_context(chat_id="chat123", contains="that link", before=3, after=5)
+```
+
+### get_active_conversations
+Find chats with recent back-and-forth activity.
+
+```python
+# Find active conversations in the last 24 hours
+get_active_conversations(hours=24)
+
+# Find active group conversations
+get_active_conversations(is_group=True, min_exchanges=3)
+```
+
+### list_attachments
+List attachments with metadata.
+
+```python
+# List recent attachments
+list_attachments(limit=20)
+
+# List images from a specific chat
+list_attachments(chat_id="chat123", type="image")
+
+# List attachments from a specific person
+list_attachments(from_person="Nick", type="any")
+```
+
+### get_unread
+Get unread messages or summary.
+
+```python
+# Get all unread messages
+get_unread()
+
+# Get unread summary by chat
+get_unread(format="summary")
+
+# Get unread from specific chat
+get_unread(chat_id="chat123")
+```
+
+### send
+Send a message (requires Automation permission for Messages.app).
+
+```python
+# Send to a contact
+send(to="Nick", text="Hey, are we still on for dinner?")
+
+# Send to a group chat
+send(chat_id="chat123", text="Running 5 minutes late")
+```
+
+### diagnose
+Troubleshoot configuration and permission issues.
+
+```python
+# Check setup
+diagnose()
+# Returns: pyobjc_available, contacts_authorized, contacts_loaded count
+```
+
+## Troubleshooting
+
+### Contacts showing as phone numbers
+
+Run the `diagnose` tool to check status:
+
+```json
+{
+  "pyobjc_available": true,
+  "contacts_authorized": false,
+  "authorization_status": "not_determined"
+}
+```
+
+**Fix:** Add your Python interpreter or UV to System Settings → Privacy & Security → Contacts.
+
+### "Database not found" error
+
+The MCP can't access `~/Library/Messages/chat.db`.
+
+**Fix:** Add your terminal/Python to System Settings → Privacy & Security → Full Disk Access.
+
+### Empty message previews
+
+Some messages store text in `attributedBody` instead of `text` column. This is handled automatically as of v0.1.0.
+
+### MCP not loading in Claude Desktop
+
+1. Check your config file syntax is valid JSON
+2. Ensure the command path is correct
+3. Restart Claude Desktop completely (Cmd+Q, not just close window)
+
+## Development
 
 ```bash
-# Run lint, unit tests and integration tests
-make check
+# Clone the repo
+git clone https://github.com/cyberpapiii/imessage-max.git
+cd imessage-max
+
+# Create virtual environment and install
+uv venv
+uv pip install -e ".[dev]"
+
+# Run tests
+pytest
 ```
 
-There are also a few more helpful commands for development. Run `make help` to learn more, or look in [Makefile](./Makefile).
+## License
 
-<!--
-For Claude and other AI tools: Always prefer make targets over custom commands where possible.
--->
-
-## Architecture
-
-### Project Structure
-
-```
-├── cmd/                     # Application entry points
-│   └── publisher/           # Server publishing tool
-├── data/                    # Seed data
-├── deploy/                  # Deployment configuration (Pulumi)
-├── docs/                    # Documentation
-├── internal/                # Private application code
-│   ├── api/                 # HTTP handlers and routing
-│   ├── auth/                # Authentication (GitHub OAuth, JWT, namespace blocking)
-│   ├── config/              # Configuration management
-│   ├── database/            # Data persistence (PostgreSQL)
-│   ├── service/             # Business logic
-│   ├── telemetry/           # Metrics and monitoring
-│   └── validators/          # Input validation
-├── pkg/                     # Public packages
-│   ├── api/                 # API types and structures
-│   │   └── v0/              # Version 0 API types
-│   └── model/               # Data models for server.json
-├── scripts/                 # Development and testing scripts
-├── tests/                   # Integration tests
-└── tools/                   # CLI tools and utilities
-    └── validate-*.sh        # Schema validation tools
-```
-
-### Authentication
-
-Publishing supports multiple authentication methods:
-- **GitHub OAuth** - For publishing by logging into GitHub
-- **GitHub OIDC** - For publishing from GitHub Actions
-- **DNS verification** - For proving ownership of a domain and its subdomains
-- **HTTP verification** - For proving ownership of a domain
-
-The registry validates namespace ownership when publishing. E.g. to publish...:
-- `io.github.domdomegg/my-cool-mcp` you must login to GitHub as `domdomegg`, or be in a GitHub Action on domdomegg's repos
-- `me.adamjones/my-cool-mcp` you must prove ownership of `adamjones.me` via DNS or HTTP challenge
-
-## Community Projects
-
-Check out [community projects](docs/community-projects.md) to explore notable registry-related work created by the community.
-
-## More documentation
-
-See the [documentation](./docs) for more details if your question has not been answered here!
+MIT
