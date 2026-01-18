@@ -10,11 +10,16 @@
     "url": "https://github.com/cyberpapiii"
   },
   "license": "MIT",
-  "repository": "https://github.com/cyberpapiii/imessage-max",
+  "repository": {
+    "url": "https://github.com/cyberpapiii/imessage-max"
+  },
   "icon": "icon.png",
   "server": {
-    "type": "uv",
-    "entry_point": "src/imessage_max/server.py"
+    "type": "python",
+    "mcp_config": {
+      "command": "uvx",
+      "args": ["imessage-max"]
+    }
   },
   "tools": [
     {"name": "find_chat", "description": "Find chats by participants, name, or recent content"},
