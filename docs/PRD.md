@@ -716,9 +716,9 @@ Essential for queries like "Find all group chats where we discussed the Anthropi
     {
       "chat_id": "chat_sukhmani",
       "display_name": null,
-      "display_name_generated": "Sukhmani Kular",
+      "display_name_generated": "Sarah Chen",
       "participants": [
-        {"name": "Sukhmani Kular", "handle": "+1xxxxxxxxxx", "in_contacts": true}
+        {"name": "Sarah Chen", "handle": "+1xxxxxxxxxx", "in_contacts": true}
       ],
       "is_group": false,
       "participant_count": 2,
@@ -727,7 +727,7 @@ Essential for queries like "Find all group chats where we discussed the Anthropi
         "timestamp": "2026-01-15T22:41:08Z",
         "timestamp_relative": "14 hours ago",
         "preview": "Why don't I make us soup dumplings",
-        "from": "Sukhmani Kular"
+        "from": "Sarah Chen"
       },
       "unread_count": 0,
       "message_count_24h": 8,
@@ -996,12 +996,12 @@ Links are treated as a type of attachment with additional metadata:
         "id": "msg_unread1",
         "timestamp": "2026-01-16T10:30:00Z",
         "timestamp_relative": "2 hours ago",
-        "from": {"name": "Sukhmani Kular", "is_me": false},
+        "from": {"name": "Sarah Chen", "is_me": false},
         "text": "Don't forget we have dinner reservations at 7!"
       },
       "chat": {
         "chat_id": "chat_sukhmani",
-        "display_name_generated": "Sukhmani Kular",
+        "display_name_generated": "Sarah Chen",
         "is_group": false
       }
     }
@@ -1022,7 +1022,7 @@ Links are treated as a type of attachment with additional metadata:
     "chats_with_unread": 4,
     "breakdown": [
       {"chat_display": "Loop", "unread_count": 8, "oldest_unread": "3 hours ago"},
-      {"chat_display": "Sukhmani Kular", "unread_count": 3, "oldest_unread": "2 hours ago"},
+      {"chat_display": "Sarah Chen", "unread_count": 3, "oldest_unread": "2 hours ago"},
       {"chat_display": "Nick & Andrew", "unread_count": 3, "oldest_unread": "1 hour ago"},
       {"chat_display": "Mom", "unread_count": 1, "oldest_unread": "30 minutes ago"}
     ]

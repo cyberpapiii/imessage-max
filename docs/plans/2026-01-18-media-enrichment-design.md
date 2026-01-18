@@ -16,7 +16,7 @@ Currently, when Claude queries messages:
 
 ## Ideal Experience
 
-A "catch me up on my texts" request gives Claude everything needed to say: "You sent Sukhmani a photo of naan bread shaped like bikinis, she said 'we don't need it?' but 'nice though'. Meanwhile in the group chat, Alex shared an Instagram reel about a doctor doing some sketchy procedure and Dylan was outraged about it."
+A "catch me up on my texts" request gives Claude everything needed to say: "You sent Sarah a photo of your homemade pasta, she said 'that looks amazing!' and asked for the recipe. Meanwhile in the group chat, Mike shared a YouTube video about a hiking trail and everyone's planning a trip now."
 
 ## Architecture
 
@@ -112,7 +112,7 @@ An item appears in `media` OR `attachments`, never both. If all attachments proc
 
 - **Output location:** `attachments[]` (not `media[]` - no visual content to display)
 - **Enrichment:** Extract duration via ffmpeg (same tooling as video)
-- **Value:** "Rob sent a 15-second voice note" is more useful than just "Rob sent a voice note"
+- **Value:** "Alex sent a 15-second voice note" is more useful than just "Alex sent a voice note"
 
 Example output:
 ```python
