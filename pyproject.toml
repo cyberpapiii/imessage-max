@@ -17,6 +17,11 @@ dependencies = [
     "pyobjc-framework-Contacts>=12.1",
     "phonenumbers>=8.13",
     "python-dateutil>=2.8",
+    "Pillow>=10.0",
+    "pillow-heif>=0.16",
+    "imageio-ffmpeg>=0.5",
+    "httpx>=0.27",
+    "beautifulsoup4>=4.12",
 ]
 
 [project.optional-dependencies]
