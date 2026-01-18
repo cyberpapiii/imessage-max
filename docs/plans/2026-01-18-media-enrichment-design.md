@@ -56,8 +56,8 @@ Enriched response with media[], links[], attachments[]
         {"url": "https://instagram.com/reel/abc", "title": "Funny dog", "description": "Watch this...", "domain": "instagram.com"}
       ],
       "attachments": [
-        {"filename": "contract.pdf", "size": 102400, "type": "pdf", "processed": false},
-        {"filename": "Audio Message.caf", "size": 32382, "type": "audio", "duration_seconds": 15, "processed": false}
+        {"filename": "contract.pdf", "size": 102400, "type": "pdf"},
+        {"filename": "Audio Message.caf", "size": 32382, "type": "audio", "duration_seconds": 15}
       ]
     }
   ],
@@ -85,7 +85,7 @@ An item appears in `media` OR `attachments`, never both. If all attachments proc
 | CAF/M4A (voice notes) | Extract duration only | `attachments[]` |
 | URLs in text | Fetch OG tags (title, desc, domain) | `links[]` |
 | PDF/docs | Metadata only | `attachments[]` |
-| Failed processing | Metadata + `processed: false` | `attachments[]` |
+| Failed processing | Metadata only | `attachments[]` |
 
 ### Image Processing Details
 
@@ -112,12 +112,11 @@ An item appears in `media` OR `attachments`, never both. If all attachments proc
 
 - **Output location:** `attachments[]` (not `media[]` - no visual content to display)
 - **Enrichment:** Extract duration via ffmpeg (same tooling as video)
-- **Marker:** `processed: false` since Claude can't "hear" the audio
 - **Value:** "Rob sent a 15-second voice note" is more useful than just "Rob sent a voice note"
 
 Example output:
 ```python
-{"type": "audio", "filename": "Audio Message.caf", "size": 32382, "duration_seconds": 15, "processed": false}
+{"type": "audio", "filename": "Audio Message.caf", "size": 32382, "duration_seconds": 15}
 ```
 
 ## Constraints
@@ -146,7 +145,7 @@ Prioritize by recency (most recent messages first). Response includes:
 
 ### Graceful Degradation
 
-- **Image/video fails:** Move to `attachments[]` with `processed: false`
+- **Image/video fails:** Move to `attachments[]` (metadata only)
 - **Link unreachable:** Include with just `url` and `domain`
 - **Overall timeout:** Return what's ready + `enrichment_partial: true`
 
