@@ -75,6 +75,9 @@ def get_messages(
     """
     Get messages from a chat with flexible filtering.
 
+    Images are returned as metadata (id, filename, size, dimensions). Use
+    get_attachment(id) to view actual image content.
+
     Args:
         chat_id: Chat identifier from find_chat
         participants: Alternative - find chat by participants
