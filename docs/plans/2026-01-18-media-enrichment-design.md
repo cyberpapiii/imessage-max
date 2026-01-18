@@ -31,6 +31,7 @@ get_messages()
 │  Enrichment Pipeline (new)                  │
 │  ├── images.py: HEIC→JPEG, resize to 1536px │
 │  ├── videos.py: extract frame @3s, duration │
+│  ├── audio.py: extract duration for voice   │
 │  └── links.py: fetch OG title/description   │
 └─────────────────────────────────────────────┘
     ↓
@@ -55,7 +56,8 @@ Enriched response with media[], links[], attachments[]
         {"url": "https://instagram.com/reel/abc", "title": "Funny dog", "description": "Watch this...", "domain": "instagram.com"}
       ],
       "attachments": [
-        {"filename": "contract.pdf", "size": 102400, "type": "pdf", "processed": false}
+        {"filename": "contract.pdf", "size": 102400, "type": "pdf", "processed": false},
+        {"filename": "Audio Message.caf", "size": 32382, "type": "audio", "duration_seconds": 15, "processed": false}
       ]
     }
   ],
@@ -80,8 +82,9 @@ An item appears in `media` OR `attachments`, never both. If all attachments proc
 | HEIC/JPEG/PNG | Resize to 1536px max, base64 | `media[]` |
 | GIF | First frame, resize, base64 | `media[]` |
 | MOV/MP4 | Frame @3s, resize, base64 + duration | `media[]` |
+| CAF/M4A (voice notes) | Extract duration only | `attachments[]` |
 | URLs in text | Fetch OG tags (title, desc, domain) | `links[]` |
-| PDF/audio/docs | Metadata only | `attachments[]` |
+| PDF/docs | Metadata only | `attachments[]` |
 | Failed processing | Metadata + `processed: false` | `attachments[]` |
 
 ### Image Processing Details
@@ -104,6 +107,18 @@ An item appears in `media` OR `attachments`, never both. If all attachments proc
 - **Data:** Title, description, domain from Open Graph tags
 - **No image fetch:** OG `image_url` not embedded (redundant - Claude can't see remote images anyway)
 - **Graceful degradation:** Sparse OG data (common on Instagram) still returned - domain alone is useful context
+
+### Voice Note Processing Details
+
+- **Output location:** `attachments[]` (not `media[]` - no visual content to display)
+- **Enrichment:** Extract duration via ffmpeg (same tooling as video)
+- **Marker:** `processed: false` since Claude can't "hear" the audio
+- **Value:** "Rob sent a 15-second voice note" is more useful than just "Rob sent a voice note"
+
+Example output:
+```python
+{"type": "audio", "filename": "Audio Message.caf", "size": 32382, "duration_seconds": 15, "processed": false}
+```
 
 ## Constraints
 
@@ -176,6 +191,7 @@ src/imessage_max/
 │   ├── __init__.py
 │   ├── images.py      # HEIC conversion, resize, base64 encoding
 │   ├── videos.py      # ffmpeg frame extraction, duration
+│   ├── audio.py       # ffmpeg duration extraction for voice notes
 │   └── links.py       # OG metadata fetching
 ├── tools/
 │   └── get_messages.py  # Updated to call enrichment pipeline
