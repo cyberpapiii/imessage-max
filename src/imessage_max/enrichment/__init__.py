@@ -84,13 +84,14 @@ Notes
   better performance when handling multiple links.
 """
 
-from .images import process_image
+from .images import process_image, get_image_metadata
 from .videos import process_video
 from .audio import process_audio
 from .links import enrich_link, enrich_links
 
 __all__ = [
     "process_image",
+    "get_image_metadata",
     "process_video",
     "process_audio",
     "enrich_link",

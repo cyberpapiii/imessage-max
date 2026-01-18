@@ -25,6 +25,14 @@ class ImageResult(TypedDict):
     filename: str
 
 
+class ImageMetadata(TypedDict):
+    """Metadata-only result for image files."""
+    type: str
+    filename: str
+    size_bytes: int
+    dimensions: dict[str, int]  # {"width": ..., "height": ...}
+
+
 def process_image(file_path: str, max_dimension: int = THUMBNAIL_DIMENSION) -> Optional[ImageResult]:
     """
     Process an image file for embedding in API response.
@@ -74,6 +82,44 @@ def process_image(file_path: str, max_dimension: int = THUMBNAIL_DIMENSION) -> O
                 base64=base64.b64encode(buffer.read()).decode('ascii'),
                 filename=path.name,
             )
+
+    except Exception:
+        return None
+
+
+def get_image_metadata(file_path: str) -> Optional[ImageMetadata]:
+    """
+    Get image metadata without processing to base64.
+
+    Extracts dimensions and file size for metadata-only responses.
+    Much faster than full processing since it doesn't resize or encode.
+
+    Args:
+        file_path: Path to the image file
+
+    Returns:
+        ImageMetadata dict with type, filename, size_bytes, dimensions,
+        or None if file doesn't exist or can't be read
+    """
+    path = Path(file_path)
+
+    if not path.exists():
+        return None
+
+    try:
+        # Get file size
+        size_bytes = path.stat().st_size
+
+        # Get dimensions without fully loading the image
+        with Image.open(path) as img:
+            width, height = img.size
+
+        return ImageMetadata(
+            type="image",
+            filename=path.name,
+            size_bytes=size_bytes,
+            dimensions={"width": width, "height": height},
+        )
 
     except Exception:
         return None

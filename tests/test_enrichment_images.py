@@ -3,7 +3,7 @@
 import pytest
 import base64
 from pathlib import Path
-from imessage_max.enrichment.images import process_image
+from imessage_max.enrichment.images import process_image, get_image_metadata
 
 
 class TestProcessImage:
@@ -125,3 +125,72 @@ class TestProcessImage:
 
         result = process_image(str(img_path))
         assert result is None
+
+
+class TestGetImageMetadata:
+    """Tests for get_image_metadata function."""
+
+    def test_returns_metadata_for_jpeg(self, tmp_path):
+        """JPEG images should return metadata without base64."""
+        from PIL import Image
+        img_path = tmp_path / "test.jpg"
+        img = Image.new("RGB", (640, 480), color="red")
+        img.save(img_path, "JPEG")
+
+        result = get_image_metadata(str(img_path))
+
+        assert result is not None
+        assert result["type"] == "image"
+        assert result["filename"] == "test.jpg"
+        assert result["size_bytes"] > 0
+        assert result["dimensions"]["width"] == 640
+        assert result["dimensions"]["height"] == 480
+        # Should NOT have base64
+        assert "base64" not in result
+
+    def test_returns_metadata_for_heic(self, tmp_path):
+        """HEIC images should return metadata without base64."""
+        import pillow_heif
+        from PIL import Image
+
+        img_path = tmp_path / "test.heic"
+        img = Image.new("RGB", (1920, 1080), color="blue")
+        heif_file = pillow_heif.from_pillow(img)
+        heif_file.save(str(img_path))
+
+        result = get_image_metadata(str(img_path))
+
+        assert result is not None
+        assert result["type"] == "image"
+        assert result["filename"] == "test.heic"
+        assert result["size_bytes"] > 0
+        assert result["dimensions"]["width"] == 1920
+        assert result["dimensions"]["height"] == 1080
+
+    def test_missing_file_returns_none(self):
+        """Missing files should return None."""
+        result = get_image_metadata("/nonexistent/path/image.jpg")
+        assert result is None
+
+    def test_corrupt_file_returns_none(self, tmp_path):
+        """Corrupt image files should return None."""
+        img_path = tmp_path / "corrupt.jpg"
+        img_path.write_bytes(b"not an image")
+
+        result = get_image_metadata(str(img_path))
+        assert result is None
+
+    def test_dimensions_structure(self, tmp_path):
+        """Dimensions should be a dict with width and height keys."""
+        from PIL import Image
+        img_path = tmp_path / "test.png"
+        img = Image.new("RGB", (800, 600), color="green")
+        img.save(img_path, "PNG")
+
+        result = get_image_metadata(str(img_path))
+
+        assert isinstance(result["dimensions"], dict)
+        assert "width" in result["dimensions"]
+        assert "height" in result["dimensions"]
+        assert isinstance(result["dimensions"]["width"], int)
+        assert isinstance(result["dimensions"]["height"], int)

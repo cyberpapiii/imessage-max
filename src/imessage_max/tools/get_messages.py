@@ -11,7 +11,7 @@ from ..parsing import get_message_text, get_reaction_type, reaction_to_emoji, ex
 from ..time_utils import parse_time_input
 from ..models import Participant, generate_display_name
 from ..suggestions import get_message_suggestions
-from ..enrichment import process_image, process_video, process_audio, enrich_links
+from ..enrichment import get_image_metadata, process_video, process_audio, enrich_links
 
 # 24 hours in Apple timestamp format (nanoseconds)
 TWENTY_FOUR_HOURS_NS = 24 * 60 * 60 * 1_000_000_000
@@ -20,7 +20,7 @@ TWENTY_FOUR_HOURS_NS = 24 * 60 * 60 * 1_000_000_000
 SESSION_GAP_HOURS = 4
 SESSION_GAP_NS = SESSION_GAP_HOURS * 60 * 60 * 1_000_000_000
 
-# Maximum number of media items to process per request
+# Maximum number of media items to return metadata for per request
 MAX_MEDIA = 10
 # Maximum number of links to enrich per request
 MAX_LINKS = 10
@@ -482,9 +482,9 @@ def get_messages_impl(
                 processed_count = 0
 
                 with ThreadPoolExecutor(max_workers=4) as executor:
-                    # Process images
+                    # Get image metadata (no base64, just dimensions and size)
                     image_futures = {
-                        executor.submit(process_image, path): (idx, att)
+                        executor.submit(get_image_metadata, path): (idx, att)
                         for idx, att, path in image_tasks[:MAX_MEDIA]
                     }
 
@@ -495,9 +495,14 @@ def get_messages_impl(
                             if result:
                                 if 'media' not in messages[idx]:
                                     messages[idx]['media'] = []
-                                # Add attachment ID for full resolution retrieval
-                                result['id'] = f"att{att['id']}"
-                                messages[idx]['media'].append(result)
+                                # Build metadata-only response with attachment ID for retrieval
+                                messages[idx]['media'].append({
+                                    'type': 'image',
+                                    'id': f"att{att['id']}",
+                                    'filename': result['filename'],
+                                    'size_bytes': result['size_bytes'],
+                                    'dimensions': result['dimensions'],
+                                })
                                 processed_count += 1
                             else:
                                 # Failed - add to attachments

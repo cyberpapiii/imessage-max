@@ -603,7 +603,7 @@ class TestGetMessagesEnrichment:
         return mock_db_path
 
     def test_get_messages_includes_media(self, db_with_media, monkeypatch):
-        """Messages should include processed media."""
+        """Messages should include media metadata (no base64)."""
         # Mock the link enrichment to avoid actual HTTP requests
         def mock_enrich_links(urls):
             return [{"url": url, "domain": "example.com", "title": "Article Title"} for url in urls]
@@ -618,11 +618,19 @@ class TestGetMessagesEnrichment:
         assert "messages" in result
         msg = result["messages"][0]
 
-        # Check media array exists with processed image
+        # Check media array exists with metadata (not base64)
         assert "media" in msg
         assert len(msg["media"]) == 1
-        assert msg["media"][0]["type"] == "image"
-        assert "base64" in msg["media"][0]
+        media = msg["media"][0]
+        assert media["type"] == "image"
+        assert "id" in media  # Attachment ID for retrieval
+        assert "filename" in media
+        assert "size_bytes" in media
+        assert "dimensions" in media
+        assert "width" in media["dimensions"]
+        assert "height" in media["dimensions"]
+        # Should NOT have base64 - that's the point of this change
+        assert "base64" not in media
 
         # Check links array exists with enriched data
         assert "links" in msg
