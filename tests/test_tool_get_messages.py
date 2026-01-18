@@ -561,3 +561,95 @@ def test_get_messages_sessions_empty_chat(mock_db_path):
     assert "sessions" in result
     assert result["sessions"] == []
     assert result["messages"] == []
+
+
+class TestGetMessagesEnrichment:
+    """Tests for media enrichment in get_messages."""
+
+    @pytest.fixture
+    def db_with_media(self, mock_db_path):
+        """Create database with messages containing attachments and links."""
+        import sqlite3
+        conn = sqlite3.connect(mock_db_path)
+        conn.executescript("""
+            INSERT INTO handle (ROWID, id, service) VALUES
+                (1, '+19175551234', 'iMessage');
+
+            INSERT INTO chat (ROWID, guid, display_name, service_name) VALUES
+                (1, 'iMessage;+;chat123', NULL, 'iMessage');
+
+            INSERT INTO chat_handle_join (chat_id, handle_id) VALUES
+                (1, 1);
+
+            INSERT INTO message (ROWID, guid, text, handle_id, date, is_from_me, cache_has_attachments) VALUES
+                (1, 'msg1', 'Check this out https://example.com/article', 1, 789100000000000000, 0, 1);
+
+            INSERT INTO chat_message_join (chat_id, message_id) VALUES
+                (1, 1);
+
+            INSERT INTO attachment (ROWID, guid, filename, mime_type, uti, total_bytes) VALUES
+                (1, 'att1', '/tmp/test_image.jpg', 'image/jpeg', 'public.jpeg', 102400);
+
+            INSERT INTO message_attachment_join (message_id, attachment_id) VALUES
+                (1, 1);
+        """)
+        conn.close()
+
+        # Create an actual image file for the test
+        from PIL import Image
+        img = Image.new("RGB", (100, 100), color="red")
+        img.save("/tmp/test_image.jpg", "JPEG")
+
+        return mock_db_path
+
+    def test_get_messages_includes_media(self, db_with_media, monkeypatch):
+        """Messages should include processed media."""
+        # Mock the link enrichment to avoid actual HTTP requests
+        def mock_enrich_links(urls):
+            return [{"url": url, "domain": "example.com", "title": "Article Title"} for url in urls]
+
+        monkeypatch.setattr(
+            "imessage_max.tools.get_messages.enrich_links",
+            mock_enrich_links
+        )
+
+        result = get_messages_impl(chat_id="chat1", db_path=str(db_with_media))
+
+        assert "messages" in result
+        msg = result["messages"][0]
+
+        # Check media array exists with processed image
+        assert "media" in msg
+        assert len(msg["media"]) == 1
+        assert msg["media"][0]["type"] == "image"
+        assert "base64" in msg["media"][0]
+
+        # Check links array exists with enriched data
+        assert "links" in msg
+        assert len(msg["links"]) == 1
+        assert msg["links"][0]["title"] == "Article Title"
+
+    def test_get_messages_handles_missing_attachment_file(self, mock_db_path):
+        """Missing attachment files should go to attachments array."""
+        import sqlite3
+        conn = sqlite3.connect(mock_db_path)
+        conn.executescript("""
+            INSERT INTO handle (ROWID, id, service) VALUES (1, '+19175551234', 'iMessage');
+            INSERT INTO chat (ROWID, guid, display_name, service_name) VALUES (1, 'chat1', NULL, 'iMessage');
+            INSERT INTO chat_handle_join (chat_id, handle_id) VALUES (1, 1);
+            INSERT INTO message (ROWID, guid, text, handle_id, date, is_from_me, cache_has_attachments)
+                VALUES (1, 'msg1', 'Photo', 1, 789100000000000000, 0, 1);
+            INSERT INTO chat_message_join (chat_id, message_id) VALUES (1, 1);
+            INSERT INTO attachment (ROWID, guid, filename, mime_type, uti, total_bytes)
+                VALUES (1, 'att1', '/nonexistent/image.jpg', 'image/jpeg', 'public.jpeg', 102400);
+            INSERT INTO message_attachment_join (message_id, attachment_id) VALUES (1, 1);
+        """)
+        conn.close()
+
+        result = get_messages_impl(chat_id="chat1", db_path=str(mock_db_path))
+
+        msg = result["messages"][0]
+        # Should be in attachments (fallback), not media
+        assert "attachments" in msg
+        assert len(msg["attachments"]) == 1
+        assert msg["attachments"][0]["filename"] == "image.jpg"

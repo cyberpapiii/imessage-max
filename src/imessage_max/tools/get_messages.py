@@ -1,14 +1,17 @@
 """get_messages tool implementation."""
 
+import os
+from concurrent.futures import ThreadPoolExecutor
 from typing import Optional, Any
 from ..db import get_db_connection, apple_to_datetime, datetime_to_apple, DB_PATH
 from ..contacts import ContactResolver
 from ..phone import normalize_to_e164, format_phone_display
-from ..queries import get_chat_participants, get_messages_for_chat, get_reactions_for_messages
+from ..queries import get_chat_participants, get_messages_for_chat, get_reactions_for_messages, get_attachments_for_messages
 from ..parsing import get_message_text, get_reaction_type, reaction_to_emoji, extract_links
 from ..time_utils import parse_time_input
 from ..models import Participant, generate_display_name
 from ..suggestions import get_message_suggestions
+from ..enrichment import process_image, process_video, process_audio, enrich_links
 
 # 24 hours in Apple timestamp format (nanoseconds)
 TWENTY_FOUR_HOURS_NS = 24 * 60 * 60 * 1_000_000_000
@@ -16,6 +19,37 @@ TWENTY_FOUR_HOURS_NS = 24 * 60 * 60 * 1_000_000_000
 # Session detection: 4 hours gap starts a new session
 SESSION_GAP_HOURS = 4
 SESSION_GAP_NS = SESSION_GAP_HOURS * 60 * 60 * 1_000_000_000
+
+# Maximum number of media items to process per request
+MAX_MEDIA = 10
+
+
+def _get_attachment_type(mime_type: Optional[str], uti: Optional[str]) -> str:
+    """Determine attachment type from MIME type or UTI.
+
+    Args:
+        mime_type: MIME type string (e.g., "image/jpeg")
+        uti: Uniform Type Identifier (e.g., "public.jpeg")
+
+    Returns:
+        One of: "image", "video", "audio", "pdf", "other"
+    """
+    if not mime_type and not uti:
+        return "other"
+
+    mime = (mime_type or "").lower()
+    uti_str = (uti or "").lower()
+
+    if "image" in mime or "image" in uti_str or "jpeg" in uti_str or "png" in uti_str or "heic" in uti_str:
+        return "image"
+    elif "video" in mime or "movie" in uti_str or "video" in uti_str:
+        return "video"
+    elif "audio" in mime or "audio" in uti_str:
+        return "audio"
+    elif "pdf" in mime or "pdf" in uti_str:
+        return "pdf"
+    else:
+        return "other"
 
 
 def _looks_like_question(text: str) -> bool:
@@ -388,6 +422,154 @@ def get_messages_impl(
                 # Also filter sessions summary to only include the requested session
                 sessions_summary = [s for s in sessions_summary if s["session_id"] == session]
 
+            # Enrich messages with media and link data
+            media_truncated = False
+            total_media = 0
+            if messages:
+                # Fetch attachments for messages
+                message_row_ids = [row['id'] for row in message_rows]
+                attachments_map = get_attachments_for_messages(conn, message_row_ids)
+
+                # Collect all items to process
+                image_tasks = []  # (msg_idx, attachment, filepath)
+                video_tasks = []
+                audio_tasks = []
+                url_to_msg_indices: dict[str, list[int]] = {}  # URL -> list of msg indices
+                all_urls: list[str] = []
+
+                for idx, (msg, row) in enumerate(zip(messages, message_rows)):
+                    msg_id = row['id']
+
+                    # Collect attachment processing tasks
+                    if msg_id in attachments_map:
+                        for att in attachments_map[msg_id]:
+                            att_type = _get_attachment_type(att['mime_type'], att['uti'])
+                            filename = att['filename']
+                            if filename:
+                                # Expand ~ in path
+                                if filename.startswith('~'):
+                                    filename = os.path.expanduser(filename)
+
+                                if att_type == 'image':
+                                    image_tasks.append((idx, att, filename))
+                                elif att_type == 'video':
+                                    video_tasks.append((idx, att, filename))
+                                elif att_type == 'audio':
+                                    audio_tasks.append((idx, att, filename))
+                                else:
+                                    # Other types go directly to attachments
+                                    if 'attachments' not in msg:
+                                        msg['attachments'] = []
+                                    msg['attachments'].append({
+                                        'type': att_type,
+                                        'filename': att['filename'].split('/')[-1] if att['filename'] else None,
+                                        'size': att['total_bytes'],
+                                    })
+
+                    # Collect links for enrichment (links already extracted during message building)
+                    if 'links' in msg and msg['links']:
+                        for url in msg['links']:
+                            if url not in url_to_msg_indices:
+                                url_to_msg_indices[url] = []
+                                all_urls.append(url)
+                            url_to_msg_indices[url].append(idx)
+                        # Clear raw links, will be replaced with enriched
+                        del msg['links']
+
+                # Process media in parallel
+                processed_count = 0
+
+                with ThreadPoolExecutor(max_workers=4) as executor:
+                    # Process images
+                    image_futures = {
+                        executor.submit(process_image, path): (idx, att)
+                        for idx, att, path in image_tasks[:MAX_MEDIA]
+                    }
+
+                    for future in image_futures:
+                        idx, att = image_futures[future]
+                        try:
+                            result = future.result()
+                            if result:
+                                if 'media' not in messages[idx]:
+                                    messages[idx]['media'] = []
+                                messages[idx]['media'].append(result)
+                                processed_count += 1
+                            else:
+                                # Failed - add to attachments
+                                if 'attachments' not in messages[idx]:
+                                    messages[idx]['attachments'] = []
+                                messages[idx]['attachments'].append({
+                                    'type': 'image',
+                                    'filename': att['filename'].split('/')[-1] if att['filename'] else None,
+                                    'size': att['total_bytes'],
+                                })
+                        except Exception:
+                            pass
+
+                    # Process videos
+                    remaining_slots = MAX_MEDIA - processed_count
+                    video_futures = {
+                        executor.submit(process_video, path): (idx, att)
+                        for idx, att, path in video_tasks[:remaining_slots]
+                    }
+
+                    for future in video_futures:
+                        idx, att = video_futures[future]
+                        try:
+                            result = future.result()
+                            if result:
+                                if 'media' not in messages[idx]:
+                                    messages[idx]['media'] = []
+                                messages[idx]['media'].append(result)
+                                processed_count += 1
+                            else:
+                                if 'attachments' not in messages[idx]:
+                                    messages[idx]['attachments'] = []
+                                messages[idx]['attachments'].append({
+                                    'type': 'video',
+                                    'filename': att['filename'].split('/')[-1] if att['filename'] else None,
+                                    'size': att['total_bytes'],
+                                })
+                        except Exception:
+                            pass
+
+                    # Process audio (just duration, always goes to attachments)
+                    audio_futures = {
+                        executor.submit(process_audio, path): (idx, att)
+                        for idx, att, path in audio_tasks
+                    }
+
+                    for future in audio_futures:
+                        idx, att = audio_futures[future]
+                        try:
+                            result = future.result()
+                            if 'attachments' not in messages[idx]:
+                                messages[idx]['attachments'] = []
+                            if result:
+                                messages[idx]['attachments'].append(result)
+                            else:
+                                messages[idx]['attachments'].append({
+                                    'type': 'audio',
+                                    'filename': att['filename'].split('/')[-1] if att['filename'] else None,
+                                    'size': att['total_bytes'],
+                                })
+                        except Exception:
+                            pass
+
+                # Enrich links
+                if all_urls:
+                    enriched = enrich_links(all_urls)
+                    for url, link_data in zip(all_urls, enriched):
+                        for msg_idx in url_to_msg_indices[url]:
+                            if 'links' not in messages[msg_idx]:
+                                messages[msg_idx]['links'] = []
+                            messages[msg_idx]['links'].append(link_data)
+
+                # Calculate truncation info
+                total_media = len(image_tasks) + len(video_tasks)
+                media_truncated = total_media > MAX_MEDIA
+
             # Build chat info
             participant_objs = [
                 Participant(handle=p['handle'], name=p['name'])
@@ -406,6 +588,12 @@ def get_messages_impl(
                 "more": len(messages) == limit,
                 "cursor": None,
             }
+
+            # Add media truncation info if applicable
+            if media_truncated:
+                response["media_truncated"] = True
+                response["media_total"] = total_media
+                response["media_included"] = MAX_MEDIA
 
             # Add suggestions when no messages found
             if not messages:
