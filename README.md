@@ -10,6 +10,7 @@ An MCP (Model Context Protocol) server for iMessage that lets AI assistants read
 
 ## Features
 
+- **Media Enrichment** - Images converted to viewable format, video thumbnails extracted, links unfurled with titles
 - **Contact Resolution** - See names instead of phone numbers (resolves via macOS Contacts)
 - **Participant Lookup** - Find chats by typing names like `find_chat(participants=["Nick", "Andrew"])`
 - **Session Grouping** - Messages grouped into conversation sessions with gap detection
@@ -147,7 +148,7 @@ find_chat(contains_recent="dinner plans")
 ```
 
 ### get_messages
-Retrieve messages with flexible filtering.
+Retrieve messages with flexible filtering. **Automatically enriches media and links.**
 
 ```python
 # Get recent messages from a chat
@@ -162,6 +163,36 @@ get_messages(chat_id="chat123", from_person="Nick")
 # Get messages containing specific text
 get_messages(chat_id="chat123", contains="flight")
 ```
+
+Messages with attachments or links are automatically enriched:
+
+```json
+{
+  "messages": [{
+    "id": "msg_123",
+    "text": "Check out this photo!",
+    "from": "nick",
+    "media": [{
+      "type": "image",
+      "base64": "/9j/4AAQ...",
+      "filename": "IMG_1234.heic"
+    }],
+    "links": [{
+      "url": "https://instagram.com/p/abc",
+      "domain": "instagram.com",
+      "title": "Post by @user",
+      "description": "Check out this amazing..."
+    }]
+  }]
+}
+```
+
+| Media Type | Enrichment |
+|------------|------------|
+| Images (HEIC/JPEG/PNG) | Converted to JPEG, resized to 1536px max, base64 encoded |
+| Videos (MOV/MP4) | Thumbnail extracted at ~3s, duration included |
+| Audio (voice notes) | Duration extracted |
+| Links | Open Graph metadata (title, description, domain) |
 
 ### list_chats
 Browse recent chats with previews.
