@@ -324,3 +324,49 @@ def get_reactions_for_messages(
         })
 
     return reactions
+
+
+def get_attachments_for_messages(
+    conn: sqlite3.Connection,
+    message_ids: list[int]
+) -> dict[int, list[dict]]:
+    """Get attachments grouped by message ID.
+
+    Args:
+        conn: Database connection
+        message_ids: List of message ROWIDs to fetch attachments for
+
+    Returns:
+        Dict mapping message_id to list of attachment dicts
+    """
+    if not message_ids:
+        return {}
+
+    placeholders = ','.join('?' * len(message_ids))
+    cursor = conn.execute(f"""
+        SELECT
+            maj.message_id,
+            a.ROWID as id,
+            a.filename,
+            a.mime_type,
+            a.uti,
+            a.total_bytes
+        FROM attachment a
+        JOIN message_attachment_join maj ON a.ROWID = maj.attachment_id
+        WHERE maj.message_id IN ({placeholders})
+    """, tuple(message_ids))
+
+    attachments: dict[int, list[dict]] = {}
+    for row in cursor.fetchall():
+        msg_id = row['message_id']
+        if msg_id not in attachments:
+            attachments[msg_id] = []
+        attachments[msg_id].append({
+            'id': row['id'],
+            'filename': row['filename'],
+            'mime_type': row['mime_type'],
+            'uti': row['uti'],
+            'total_bytes': row['total_bytes'],
+        })
+
+    return attachments
