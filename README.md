@@ -37,14 +37,21 @@ Most iMessage tools expose raw database structures, requiring 3-5 tool calls per
 
 One-click install with icon support in Claude Desktop:
 
-**Prerequisites:** [UV](https://docs.astral.sh/uv/) must be installed first:
-```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
-```
+**Prerequisites:**
+1. [UV](https://docs.astral.sh/uv/) must be installed:
+   ```bash
+   curl -LsSf https://astral.sh/uv/install.sh | sh
+   ```
+2. Grant **Full Disk Access** to `uvx` (required to read iMessage database):
+   - Open **System Settings** → **Privacy & Security** → **Full Disk Access**
+   - Click **+** and add `~/.local/bin/uvx` (press Cmd+Shift+G to enter path)
 
+**Install:**
 1. Download [`imessage-max.mcpb`](https://github.com/cyberpapiii/imessage-max/releases/latest/download/imessage-max.mcpb)
 2. Double-click to install, or drag into Claude Desktop
-3. Grant permissions when prompted (see [Setup](#setup))
+3. Grant Contacts access when prompted (for name resolution)
+
+**Troubleshooting:** Run the `diagnose` tool to check permissions status.
 
 ### From PyPI
 
