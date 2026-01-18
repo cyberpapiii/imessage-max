@@ -371,21 +371,26 @@ def send(
 @mcp.tool()
 def get_attachment(
     attachment_id: str,
-) -> dict:
+    variant: str = "vision",
+):
     """
-    Get full-resolution attachment content.
+    Get attachment content at specified resolution.
 
-    Use this tool when you need to read text from a screenshot, examine image
-    details, or view a photo at full resolution. The get_messages tool returns
-    thumbnails (512px) - this tool returns full resolution (1536px).
+    Use this tool when you need to view an image from a conversation.
+    The get_messages tool returns metadata only - use this to see actual images.
 
     Args:
         attachment_id: Attachment identifier from media objects (e.g., "att123")
+        variant: Resolution variant:
+            - "vision" (default): 1568px, optimized for AI analysis
+            - "thumb": 400px, quick preview
+            - "full": Original resolution (may be large)
 
     Returns:
-        Full-resolution image or video thumbnail with base64 data
+        List with [metadata_string, Image] for successful image retrieval,
+        or dict with error details if retrieval fails
     """
-    return get_attachment_impl(attachment_id=attachment_id)
+    return get_attachment_impl(attachment_id=attachment_id, variant=variant)
 
 
 @mcp.tool()
