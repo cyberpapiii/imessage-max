@@ -3,6 +3,7 @@
 import json
 import os
 import time
+from importlib.metadata import version, PackageNotFoundError
 from pathlib import Path
 from typing import Optional
 import httpx
@@ -12,8 +13,18 @@ CACHE_DIR = Path.home() / ".cache" / "imessage-max"
 CACHE_FILE = CACHE_DIR / "version_check.json"
 CACHE_TTL = 86400  # 24 hours in seconds
 
-# Current version (should match pyproject.toml)
-CURRENT_VERSION = "0.2.1"
+
+def _get_installed_version() -> str:
+    """Get the installed package version from metadata."""
+    try:
+        return version("imessage-max")
+    except PackageNotFoundError:
+        # Fallback for development installs
+        return "0.0.0"
+
+
+# Current version from package metadata
+CURRENT_VERSION = _get_installed_version()
 
 # Session state - track if we've notified this session
 _session_notified = False

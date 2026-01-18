@@ -526,7 +526,7 @@ def update() -> dict:
         }
 
 
-__version__ = "0.2.1"
+__version__ = CURRENT_VERSION
 
 
 def main() -> None:
@@ -535,7 +535,7 @@ def main() -> None:
     import sys
 
     parser = argparse.ArgumentParser(description="iMessage Max - MCP Server")
-    parser.add_argument("--version", "-v", action="version", version=f"imessage-max {__version__}")
+    parser.add_argument("--version", "-v", action="version", version=f"imessage-max {CURRENT_VERSION}")
     parser.parse_args()
 
     # Check database access on startup (Full Disk Access)
