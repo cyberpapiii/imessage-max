@@ -1,5 +1,6 @@
 """iMessage Max - MCP Server for iMessage."""
 
+import subprocess
 from typing import Optional
 from fastmcp import FastMCP
 
@@ -14,6 +15,12 @@ from .tools.get_unread import get_unread_impl
 from .tools.send import send_impl
 from .contacts import check_contacts_authorization, request_contacts_access, PYOBJC_AVAILABLE, ContactResolver
 from .db import check_database_access, DB_PATH
+from .version_check import (
+    check_for_update,
+    get_update_notice_once,
+    get_current_version,
+    CURRENT_VERSION,
+)
 
 mcp = FastMCP("iMessage Max")
 
@@ -39,13 +46,14 @@ def find_chat(
     Returns:
         List of matching chats with participant info
     """
-    return find_chat_impl(
+    result = find_chat_impl(
         participants=participants,
         name=name,
         contains_recent=contains_recent,
         is_group=is_group,
         limit=limit,
     )
+    return _add_update_notice(result)
 
 
 @mcp.tool()
@@ -83,7 +91,7 @@ def get_messages(
     Returns:
         Messages with chat info, people map, and sessions summary
     """
-    return get_messages_impl(
+    result = get_messages_impl(
         chat_id=chat_id,
         participants=participants,
         since=since,
@@ -97,6 +105,19 @@ def get_messages(
         unanswered=unanswered,
         session=session,
     )
+    return _add_update_notice(result)
+
+
+def _add_update_notice(response: dict) -> dict:
+    """Add update notice to response if available (once per session)."""
+    update_notice = get_update_notice_once()
+    if update_notice:
+        response["_update"] = {
+            "available": update_notice["latest_version"],
+            "current": update_notice["current_version"],
+            "message": f"iMessage Max {update_notice['latest_version']} is available (you have {update_notice['current_version']}). Use the 'update' tool to install it.",
+        }
+    return response
 
 
 @mcp.tool()
@@ -122,7 +143,7 @@ def list_chats(
     Returns:
         List of chats with last message previews
     """
-    return list_chats_impl(
+    result = list_chats_impl(
         limit=limit,
         since=since,
         is_group=is_group,
@@ -130,6 +151,7 @@ def list_chats(
         max_participants=max_participants,
         sort=sort,
     )
+    return _add_update_notice(result)
 
 
 @mcp.tool()
@@ -167,7 +189,7 @@ def search(
     Returns:
         Search results with people map
     """
-    return search_impl(
+    result = search_impl(
         query=query,
         from_person=from_person,
         in_chat=in_chat,
@@ -181,6 +203,7 @@ def search(
         include_context=include_context,
         unanswered=unanswered,
     )
+    return _add_update_notice(result)
 
 
 @mcp.tool()
@@ -344,7 +367,7 @@ def diagnose() -> dict:
     database access, or permission problems.
 
     Returns:
-        Dict with database access status, contacts status, and system info
+        Dict with database access status, contacts status, version info, and system info
     """
     import sys
     import os
@@ -353,6 +376,13 @@ def diagnose() -> dict:
         "python_executable": sys.executable,
         "process_id": os.getpid(),
     }
+
+    # Version info
+    result["version"] = CURRENT_VERSION
+    update_info = check_for_update()
+    if update_info:
+        result["update_available"] = update_info["latest_version"]
+        result["update_command"] = update_info["update_command"]
 
     # Check database access (Full Disk Access)
     db_accessible, db_status = check_database_access()
@@ -401,7 +431,72 @@ def diagnose() -> dict:
     return result
 
 
-__version__ = "0.2.0"
+@mcp.tool()
+def update() -> dict:
+    """
+    Check for and install iMessage Max updates.
+
+    This tool checks PyPI for a newer version and installs it if available.
+    After updating, Claude Desktop needs to be restarted to use the new version.
+
+    Returns:
+        Dict with update status and instructions
+    """
+    # Check if update is available
+    update_info = check_for_update()
+
+    if not update_info:
+        return {
+            "status": "up_to_date",
+            "current_version": CURRENT_VERSION,
+            "message": "You're running the latest version of iMessage Max."
+        }
+
+    # Perform the update
+    try:
+        result = subprocess.run(
+            ["uvx", "--refresh", "imessage-max", "--version"],
+            capture_output=True,
+            text=True,
+            timeout=60
+        )
+
+        if result.returncode == 0:
+            return {
+                "status": "updated",
+                "previous_version": CURRENT_VERSION,
+                "new_version": update_info["latest_version"],
+                "message": (
+                    f"Successfully updated from {CURRENT_VERSION} to {update_info['latest_version']}. "
+                    f"Please restart Claude Desktop (Cmd+Q, then reopen) to use the new version."
+                ),
+                "action_required": "Restart Claude Desktop"
+            }
+        else:
+            return {
+                "status": "update_failed",
+                "error": result.stderr or "Unknown error",
+                "manual_command": "uvx --refresh imessage-max",
+                "message": "Automatic update failed. Please run the manual command in your terminal."
+            }
+
+    except FileNotFoundError:
+        return {
+            "status": "update_failed",
+            "error": "uvx not found",
+            "manual_command": "pip install --upgrade imessage-max",
+            "message": "uvx is not installed. Please update manually with pip."
+        }
+    except subprocess.TimeoutExpired:
+        return {
+            "status": "update_failed",
+            "error": "Update timed out",
+            "manual_command": "uvx --refresh imessage-max",
+            "message": "Update timed out. Please try the manual command."
+        }
+
+
+__version__ = "0.2.1"
 
 
 def main() -> None:
