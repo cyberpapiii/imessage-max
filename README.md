@@ -177,7 +177,7 @@ Messages with attachments return metadata (not image content) for performance:
       "id": "att123",
       "filename": "IMG_1234.heic",
       "size_bytes": 2457600,
-      "dimensions": {"w": 4032, "h": 3024}
+      "dimensions": {"width": 4032, "height": 3024}
     }],
     "links": [{
       "url": "https://instagram.com/p/abc",

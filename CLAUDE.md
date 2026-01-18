@@ -108,8 +108,8 @@ To prevent Claude Desktop freezing on image-heavy conversations:
 
 **Implementation:** Uses FastMCP's `Image` class to return properly formatted image responses:
 ```python
-from mcp.types import ImageContent
-# Returns ImageContent with base64-encoded JPEG
+from fastmcp.utilities.types import Image
+# Returns [metadata_string, Image(data=bytes, format="jpeg")]
 ```
 
 This reduces per-image response size from ~70KB (embedded thumbnail) to ~100 bytes (metadata).
