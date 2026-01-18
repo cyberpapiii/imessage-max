@@ -76,6 +76,26 @@ class TestProcessImage:
         decoded = base64.b64decode(result["base64"])
         assert decoded[:2] == b'\xff\xd8'  # JPEG magic bytes
 
+    def test_process_heic_converts_to_jpeg(self, tmp_path):
+        """HEIC images should be converted to JPEG."""
+        import pillow_heif
+        from PIL import Image
+
+        img_path = tmp_path / "test.heic"
+        # Create a HEIC file using pillow_heif
+        img = Image.new("RGB", (100, 100), color="purple")
+        heif_file = pillow_heif.from_pillow(img)
+        heif_file.save(str(img_path))
+
+        result = process_image(str(img_path))
+
+        assert result is not None
+        assert result["type"] == "image"
+        assert result["filename"] == "test.heic"
+        # Verify output is JPEG
+        decoded = base64.b64decode(result["base64"])
+        assert decoded[:2] == b'\xff\xd8'
+
     def test_process_missing_file_returns_none(self):
         """Missing files should return None."""
         result = process_image("/nonexistent/path/image.jpg")
