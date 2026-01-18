@@ -1,10 +1,9 @@
 """get_attachment tool implementation."""
 
-import base64
 import os
 from io import BytesIO
 from pathlib import Path
-from typing import Any, Literal, Optional
+from typing import Any, Optional
 
 from fastmcp.utilities.types import Image as MCPImage
 
@@ -61,11 +60,25 @@ def process_image_for_variant(
         with Image.open(path) as img:
             original_width, original_height = img.size
 
-            # For "full" variant, return original file if it's already JPEG
+            # For "full" variant, return original bytes for compatible formats
+            # HEIC/HEIF must be converted to JPEG for compatibility
             if variant == "full":
-                # Read original file
-                original_bytes = path.read_bytes()
-                return (original_bytes, original_width, original_height, len(original_bytes))
+                ext = path.suffix.lower()
+                if ext in ('.heic', '.heif'):
+                    # Convert HEIC/HEIF to JPEG for compatibility
+                    if img.mode in ('RGBA', 'P', 'LA'):
+                        img = img.convert('RGB')
+                    elif img.mode != 'RGB':
+                        img = img.convert('RGB')
+                    buffer = BytesIO()
+                    img.save(buffer, format='JPEG', quality=95)
+                    buffer.seek(0)
+                    image_bytes = buffer.read()
+                    return (image_bytes, original_width, original_height, len(image_bytes))
+                else:
+                    # Return original file bytes for compatible formats
+                    original_bytes = path.read_bytes()
+                    return (original_bytes, original_width, original_height, len(original_bytes))
 
             # Convert to RGB if necessary (handles RGBA, P mode, etc)
             if img.mode in ('RGBA', 'P', 'LA'):

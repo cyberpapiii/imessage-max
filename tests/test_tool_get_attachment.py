@@ -295,12 +295,14 @@ class TestFullVariant:
 
     def test_warns_for_large_files(self, attachments_db, tmp_path):
         """Test that full variant includes warning for files > 200KB."""
-        import numpy as np
+        import random
         img_path = tmp_path / "large_image.jpg"
         # Create a larger image with random noise that will exceed 200KB
         # Solid colors compress very well, so we need random data
-        random_data = np.random.randint(0, 256, (2000, 2000, 3), dtype=np.uint8)
-        img = PILImage.fromarray(random_data)
+        # Generate random pixel data using pure Python
+        width, height = 2000, 2000
+        random_data = bytes(random.randint(0, 255) for _ in range(width * height * 3))
+        img = PILImage.frombytes("RGB", (width, height), random_data)
         img.save(img_path, "JPEG", quality=95)
 
         conn = sqlite3.connect(attachments_db)
@@ -320,6 +322,102 @@ class TestFullVariant:
         assert isinstance(result, list)
         metadata = result[0]
         assert "WARNING" in metadata
+
+
+class TestHEICFormat:
+    """Tests for HEIC image format handling."""
+
+    def test_heic_converted_to_jpeg_for_vision(self, attachments_db, tmp_path):
+        """Test that HEIC images are converted to JPEG for vision variant."""
+        # Create a test HEIC file using pillow-heif
+        try:
+            import pillow_heif
+            pillow_heif.register_heif_opener()
+        except ImportError:
+            pytest.skip("pillow-heif not available for HEIC test")
+
+        heic_path = tmp_path / "test_image.heic"
+        img = PILImage.new("RGB", (1000, 800), color="red")
+        # Save as HEIF format
+        img.save(heic_path, format="HEIF")
+
+        conn = sqlite3.connect(attachments_db)
+        conn.execute(
+            "UPDATE attachment SET filename = ?, mime_type = ?, uti = ? WHERE ROWID = 1",
+            (str(heic_path), "image/heic", "public.heic")
+        )
+        conn.commit()
+        conn.close()
+
+        result = get_attachment_impl(
+            attachment_id="att1",
+            variant="vision",
+            db_path=str(attachments_db),
+        )
+
+        assert isinstance(result, list)
+        assert len(result) == 2
+        assert isinstance(result[1], MCPImage)
+        # Vision variant converts to JPEG - verify by checking image bytes
+        # MCPImage stores data in _data attribute
+        image_data = result[1].data
+        assert image_data[:2] == b'\xff\xd8'  # JPEG magic bytes
+
+    def test_heic_converted_to_jpeg_for_full(self, attachments_db, tmp_path):
+        """Test that HEIC images are converted to JPEG for full variant (for compatibility)."""
+        try:
+            import pillow_heif
+            pillow_heif.register_heif_opener()
+        except ImportError:
+            pytest.skip("pillow-heif not available for HEIC test")
+
+        heic_path = tmp_path / "test_image.heic"
+        img = PILImage.new("RGB", (1000, 800), color="blue")
+        # Save as HEIF format
+        img.save(heic_path, format="HEIF")
+
+        conn = sqlite3.connect(attachments_db)
+        conn.execute(
+            "UPDATE attachment SET filename = ?, mime_type = ?, uti = ? WHERE ROWID = 1",
+            (str(heic_path), "image/heic", "public.heic")
+        )
+        conn.commit()
+        conn.close()
+
+        result = get_attachment_impl(
+            attachment_id="att1",
+            variant="full",
+            db_path=str(attachments_db),
+        )
+
+        assert isinstance(result, list)
+        assert len(result) == 2
+        assert isinstance(result[1], MCPImage)
+        # Full variant should also convert HEIC to JPEG for compatibility
+        # Verify by checking image bytes
+        image_data = result[1].data
+        assert image_data[:2] == b'\xff\xd8'  # JPEG magic bytes
+
+    def test_heic_process_image_for_variant_full(self, tmp_path):
+        """Test process_image_for_variant converts HEIC to JPEG for full variant."""
+        try:
+            import pillow_heif
+            pillow_heif.register_heif_opener()
+        except ImportError:
+            pytest.skip("pillow-heif not available for HEIC test")
+
+        heic_path = tmp_path / "test.heic"
+        img = PILImage.new("RGB", (500, 400), color="green")
+        img.save(heic_path, format="HEIF")
+
+        result = process_image_for_variant(str(heic_path), "full")
+
+        assert result is not None
+        image_bytes, width, height, size_bytes = result
+        # Verify the bytes are valid JPEG by checking magic bytes
+        assert image_bytes[:2] == b'\xff\xd8'  # JPEG magic bytes
+        assert width == 500
+        assert height == 400
 
 
 class TestUnsupportedTypes:
