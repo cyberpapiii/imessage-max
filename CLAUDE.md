@@ -50,7 +50,7 @@ dt = APPLE_EPOCH + timedelta(seconds=seconds)
 | Tool | Purpose |
 |------|---------|
 | `find_chat` | Locate chat by participants, name, or content |
-| `get_messages` | Retrieve messages with flexible filtering (512px thumbnails) |
+| `get_messages` | Retrieve messages with flexible filtering (media metadata only) |
 | `get_context` | Get messages surrounding a specific message |
 | `search` | Full-text search with compound filters |
 | `list_chats` | Browse recent/active chats with previews |
@@ -58,7 +58,7 @@ dt = APPLE_EPOCH + timedelta(seconds=seconds)
 | `get_active_conversations` | Find chats with recent back-and-forth |
 | `list_attachments` | Retrieve attachments by type, person, chat |
 | `get_unread` | Get unread messages or summary |
-| `get_attachment` | Get full-resolution (1536px) attachment by ID |
+| `get_attachment` | Get image content by ID with variant options (vision/thumb/full) |
 | `diagnose` | Troubleshoot configuration and permission issues |
 
 ## Critical Implementation Details
@@ -93,12 +93,26 @@ def get_db_connection():
 - Reactions as compact strings: `["❤️ andrew", "😂 nick"]`
 - Omit obvious fields (no `is_group: false` on 2-person chats)
 
-### Tiered Media Resolution
-To stay under Claude Desktop's 1MB response limit:
-- `get_messages` returns 512px thumbnails for browsing
-- `get_attachment` returns 1536px full resolution on demand
+### Metadata-First Media Handling
+To prevent Claude Desktop freezing on image-heavy conversations:
+- `get_messages` returns **metadata only** for images (id, filename, size_bytes, dimensions)
+- `get_attachment(attachment_id, variant)` retrieves actual image content on demand
 - Link enrichment capped at 10 URLs per request
-- Each media item includes `id` field (e.g., `att123`) for full-res retrieval
+
+**Variant options for `get_attachment`:**
+| Variant | Resolution | Token Cost | Use Case |
+|---------|------------|------------|----------|
+| `vision` (default) | 1568px | ~1,600 | AI analysis, OCR |
+| `thumb` | 400px | ~200 | Quick preview |
+| `full` | Original | Varies | Maximum detail |
+
+**Implementation:** Uses FastMCP's `Image` class to return properly formatted image responses:
+```python
+from mcp.types import ImageContent
+# Returns ImageContent with base64-encoded JPEG
+```
+
+This reduces per-image response size from ~70KB (embedded thumbnail) to ~100 bytes (metadata).
 
 ### Display Name Generation
 When `display_name` is null, generate like Messages.app:

@@ -148,7 +148,7 @@ find_chat(contains_recent="dinner plans")
 ```
 
 ### get_messages
-Retrieve messages with flexible filtering. **Automatically enriches media and links.**
+Retrieve messages with flexible filtering. **Returns metadata for media, links are enriched.**
 
 ```python
 # Get recent messages from a chat
@@ -164,7 +164,7 @@ get_messages(chat_id="chat123", from_person="Nick")
 get_messages(chat_id="chat123", contains="flight")
 ```
 
-Messages with attachments or links are automatically enriched:
+Messages with attachments return metadata (not image content) for performance:
 
 ```json
 {
@@ -174,8 +174,10 @@ Messages with attachments or links are automatically enriched:
     "from": "nick",
     "media": [{
       "type": "image",
-      "base64": "/9j/4AAQ...",
-      "filename": "IMG_1234.heic"
+      "id": "att123",
+      "filename": "IMG_1234.heic",
+      "size_bytes": 2457600,
+      "dimensions": {"w": 4032, "h": 3024}
     }],
     "links": [{
       "url": "https://instagram.com/p/abc",
@@ -187,14 +189,42 @@ Messages with attachments or links are automatically enriched:
 }
 ```
 
-| Media Type | Enrichment |
-|------------|------------|
-| Images (HEIC/JPEG/PNG) | Converted to JPEG, resized to 512px thumbnails, base64 encoded |
-| Videos (MOV/MP4) | Thumbnail extracted at ~3s (512px), duration included |
-| Audio (voice notes) | Duration extracted |
+| Media Type | Response |
+|------------|----------|
+| Images (HEIC/JPEG/PNG) | Metadata only: id, filename, size, dimensions |
+| Videos (MOV/MP4) | Metadata: id, filename, duration |
+| Audio (voice notes) | Metadata: id, filename, duration |
 | Links | Open Graph metadata (title, description, domain), capped at 10 per request |
 
-**Need full resolution?** Each media item includes an `id` field (e.g., `att123`). Use `get_attachment(attachment_id="att123")` to retrieve the full 1536px version.
+**To view an image:** Use `get_attachment(attachment_id="att123")` - see below.
+
+### get_attachment
+Retrieve full image content by attachment ID. Use after `get_messages` to view specific images.
+
+```python
+# Get image optimized for AI analysis (default)
+get_attachment(attachment_id="att123")
+
+# Get quick thumbnail preview
+get_attachment(attachment_id="att123", variant="thumb")
+
+# Get original full resolution
+get_attachment(attachment_id="att123", variant="full")
+```
+
+| Variant | Resolution | Use Case | Token Cost |
+|---------|------------|----------|------------|
+| `vision` (default) | 1568px | AI analysis, reading text in images | ~1,600 tokens |
+| `thumb` | 400px | Quick preview, browsing multiple images | ~200 tokens |
+| `full` | Original | When you need maximum detail | Varies |
+
+**Example workflow:**
+```
+1. get_messages(chat_id="chat123") → See media metadata: {"id": "att123", "filename": "photo.heic"}
+2. get_attachment(attachment_id="att123") → View the actual image content
+```
+
+This metadata-first approach prevents slowdowns when fetching messages with many images.
 
 ### list_chats
 Browse recent chats with previews.
