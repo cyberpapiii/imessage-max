@@ -33,7 +33,15 @@ Most iMessage tools expose raw database structures, requiring 3-5 tool calls per
 
 ## Installation
 
-### From PyPI (Recommended)
+### Desktop Extension (Recommended)
+
+One-click install with icon support in Claude Desktop:
+
+1. Download [`imessage-max.mcpb`](https://github.com/cyberpapiii/imessage-max/releases/latest/download/imessage-max.mcpb)
+2. Double-click to install, or drag into Claude Desktop
+3. Grant permissions when prompted (see [Setup](#setup))
+
+### From PyPI
 
 ```bash
 pip install imessage-max

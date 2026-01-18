@@ -1,0 +1,34 @@
+{
+  "manifest_version": "0.3",
+  "name": "imessage-max",
+  "version": "0.1.2",
+  "display_name": "iMessage Max",
+  "description": "AI-optimized MCP server for iMessage on macOS. Read, search, and send messages with contact resolution.",
+  "long_description": "iMessage Max provides intent-aligned tools for AI assistants to interact with your iMessage conversations. Features include contact name resolution, session grouping, full-text search, and token-efficient responses designed for AI consumption.",
+  "author": {
+    "name": "Rob Dezendorf",
+    "url": "https://github.com/cyberpapiii"
+  },
+  "license": "MIT",
+  "repository": "https://github.com/cyberpapiii/imessage-max",
+  "icon": "icon.png",
+  "server": {
+    "type": "uv",
+    "entry_point": "src/imessage_max/server.py"
+  },
+  "tools": [
+    {"name": "find_chat", "description": "Find chats by participants, name, or recent content"},
+    {"name": "get_messages", "description": "Retrieve messages with flexible filtering"},
+    {"name": "get_context", "description": "Get messages surrounding a specific message"},
+    {"name": "search", "description": "Full-text search across all messages"},
+    {"name": "list_chats", "description": "Browse recent/active chats with previews"},
+    {"name": "send", "description": "Send a message to person or group"},
+    {"name": "get_active_conversations", "description": "Find chats with recent back-and-forth"},
+    {"name": "list_attachments", "description": "Retrieve attachments by type, person, chat"},
+    {"name": "get_unread", "description": "Get unread messages or summary"},
+    {"name": "diagnose", "description": "Troubleshoot configuration and permission issues"}
+  ],
+  "compatibility": {
+    "platforms": ["darwin"]
+  }
+}
