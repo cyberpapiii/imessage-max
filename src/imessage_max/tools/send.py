@@ -57,10 +57,34 @@ def _send_via_applescript(recipient: str, message: str) -> dict:
             timeout=30
         )
         if result.returncode != 0:
+            stderr = result.stderr.lower()
+            # Detect Automation permission errors
+            if "not allowed" in stderr or "not permitted" in stderr or "assistive access" in stderr:
+                return {
+                    "error": "automation_permission_required",
+                    "message": (
+                        "Messages.app Automation permission required. "
+                        "When prompted, click 'OK' to allow iMessage Max to send messages. "
+                        "If you missed the prompt: System Settings → Privacy & Security → "
+                        "Automation → Enable Messages.app for your terminal/Python."
+                    )
+                }
+            # Detect if Messages app isn't running/responding
+            if "connection is invalid" in stderr or "application isn't running" in stderr:
+                return {
+                    "error": "messages_app_unavailable",
+                    "message": "Messages.app is not responding. Please open Messages.app and try again."
+                }
+            # Detect if recipient doesn't exist
+            if "can't get participant" in stderr or "doesn't understand" in stderr:
+                return {
+                    "error": "recipient_not_found",
+                    "message": f"Could not find recipient '{recipient}' in Messages.app."
+                }
             return {"error": "send_failed", "message": result.stderr}
         return {"success": True}
     except subprocess.TimeoutExpired:
-        return {"error": "timeout", "message": "Send operation timed out"}
+        return {"error": "timeout", "message": "Send operation timed out. Messages.app may be unresponsive."}
     except Exception as e:
         return {"error": "internal_error", "message": str(e)}
 

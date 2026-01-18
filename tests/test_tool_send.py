@@ -74,6 +74,47 @@ class TestSendViaApplescript:
         result = _send_via_applescript('+19175551234', 'Hello!')
 
         assert 'error' in result
+        # "can't get participant" is now detected as recipient_not_found for clearer messaging
+        assert result['error'] == 'recipient_not_found'
+
+    @patch('subprocess.run')
+    def test_send_automation_permission_error(self, mock_run):
+        """Test automation permission error is detected."""
+        mock_run.return_value = MagicMock(
+            returncode=1,
+            stderr='execution error: Not allowed to send Apple events'
+        )
+
+        result = _send_via_applescript('+19175551234', 'Hello!')
+
+        assert 'error' in result
+        assert result['error'] == 'automation_permission_required'
+        assert 'Automation' in result['message']
+
+    @patch('subprocess.run')
+    def test_send_messages_unavailable(self, mock_run):
+        """Test Messages.app unavailable is detected."""
+        mock_run.return_value = MagicMock(
+            returncode=1,
+            stderr="execution error: connection is invalid"
+        )
+
+        result = _send_via_applescript('+19175551234', 'Hello!')
+
+        assert 'error' in result
+        assert result['error'] == 'messages_app_unavailable'
+
+    @patch('subprocess.run')
+    def test_send_generic_failure(self, mock_run):
+        """Test generic failure returns send_failed."""
+        mock_run.return_value = MagicMock(
+            returncode=1,
+            stderr='Some unknown error occurred'
+        )
+
+        result = _send_via_applescript('+19175551234', 'Hello!')
+
+        assert 'error' in result
         assert result['error'] == 'send_failed'
 
     @patch('subprocess.run')

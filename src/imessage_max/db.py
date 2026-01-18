@@ -9,6 +9,73 @@ from typing import Generator
 # Default database path
 DB_PATH = os.path.expanduser("~/Library/Messages/chat.db")
 
+
+class DatabaseAccessError(Exception):
+    """Raised when iMessage database cannot be accessed due to permissions."""
+
+    def __init__(self, db_path: str, original_error: Exception | None = None):
+        self.db_path = db_path
+        self.original_error = original_error
+
+        # Determine the process that needs Full Disk Access
+        import sys
+        executable = sys.executable or "your Python interpreter"
+
+        self.message = f"""
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                         FULL DISK ACCESS REQUIRED                            ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+iMessage Max cannot access the iMessage database at:
+  {db_path}
+
+This is because macOS requires Full Disk Access to read iMessage data.
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  HOW TO FIX:                                                                │
+│                                                                             │
+│  1. Open System Settings → Privacy & Security → Full Disk Access           │
+│  2. Click the + button                                                      │
+│  3. Navigate to and add:                                                    │
+│     {executable:<63} │
+│  4. Restart the application                                                 │
+│                                                                             │
+│  TIP: Press Cmd+Shift+G in the file dialog to enter the path directly.     │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+If you're using Claude Desktop with UV, also add:
+  ~/.local/bin/uvx
+
+Run the 'diagnose' tool after granting permission to verify setup.
+"""
+        super().__init__(self.message)
+
+
+def check_database_access(db_path: str = DB_PATH) -> tuple[bool, str]:
+    """
+    Check if the iMessage database is accessible.
+
+    Returns:
+        Tuple of (accessible, status_message)
+    """
+    if not os.path.exists(db_path):
+        return False, "database_not_found"
+
+    try:
+        # Try to actually open and read from the database
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=2.0)
+        cursor = conn.execute("SELECT COUNT(*) FROM chat LIMIT 1")
+        cursor.fetchone()
+        conn.close()
+        return True, "accessible"
+    except sqlite3.OperationalError as e:
+        error_str = str(e).lower()
+        if "unable to open" in error_str or "permission denied" in error_str:
+            return False, "permission_denied"
+        return False, f"database_error: {e}"
+    except Exception as e:
+        return False, f"unknown_error: {e}"
+
 # Apple epoch (2001-01-01 00:00:00 UTC)
 APPLE_EPOCH = datetime(2001, 1, 1, tzinfo=timezone.utc)
 
@@ -36,19 +103,35 @@ def get_db_connection(db_path: str = DB_PATH) -> Generator[sqlite3.Connection, N
 
     Connection is closed immediately after use to prevent
     macOS Tahoe from terminating Messages.app.
+
+    Raises:
+        DatabaseAccessError: If database cannot be accessed (usually missing Full Disk Access)
+        FileNotFoundError: If database file doesn't exist (iMessage not set up)
     """
     if not os.path.exists(db_path):
-        raise FileNotFoundError(f"Database not found: {db_path}")
+        raise FileNotFoundError(
+            f"iMessage database not found at {db_path}. "
+            f"Make sure iMessage is set up and has sent/received at least one message."
+        )
 
-    conn = sqlite3.connect(
-        f"file:{db_path}?mode=ro",
-        uri=True,
-        timeout=5.0
-    )
+    try:
+        conn = sqlite3.connect(
+            f"file:{db_path}?mode=ro",
+            uri=True,
+            timeout=5.0
+        )
+    except sqlite3.OperationalError as e:
+        # Permission denied or unable to open = Full Disk Access issue
+        raise DatabaseAccessError(db_path, e) from e
+
     conn.row_factory = sqlite3.Row
 
-    conn.execute("PRAGMA query_only = ON")
-    conn.execute("PRAGMA busy_timeout = 1000")
+    try:
+        conn.execute("PRAGMA query_only = ON")
+        conn.execute("PRAGMA busy_timeout = 1000")
+    except sqlite3.OperationalError as e:
+        conn.close()
+        raise DatabaseAccessError(db_path, e) from e
 
     try:
         yield conn

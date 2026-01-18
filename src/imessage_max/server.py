@@ -13,6 +13,7 @@ from .tools.list_attachments import list_attachments_impl
 from .tools.get_unread import get_unread_impl
 from .tools.send import send_impl
 from .contacts import check_contacts_authorization, request_contacts_access, PYOBJC_AVAILABLE, ContactResolver
+from .db import check_database_access, DB_PATH
 
 mcp = FastMCP("iMessage Max")
 
@@ -343,35 +344,64 @@ def diagnose() -> dict:
     database access, or permission problems.
 
     Returns:
-        Dict with PyObjC availability, authorization status, and contact count
+        Dict with database access status, contacts status, and system info
     """
     import sys
     import os
 
     result = {
-        "pyobjc_available": PYOBJC_AVAILABLE,
         "python_executable": sys.executable,
         "process_id": os.getpid(),
     }
 
+    # Check database access (Full Disk Access)
+    db_accessible, db_status = check_database_access()
+    result["database_accessible"] = db_accessible
+    result["database_status"] = db_status
+    result["database_path"] = DB_PATH
+
+    if not db_accessible:
+        if db_status == "permission_denied":
+            result["database_fix"] = (
+                "Grant Full Disk Access: System Settings → Privacy & Security → "
+                "Full Disk Access → Add your Python interpreter or uvx"
+            )
+        elif db_status == "database_not_found":
+            result["database_fix"] = (
+                "iMessage database not found. Ensure iMessage is set up and "
+                "has sent/received at least one message."
+            )
+
+    # Check Contacts access
+    result["pyobjc_available"] = PYOBJC_AVAILABLE
+
     if PYOBJC_AVAILABLE:
         is_authorized, status = check_contacts_authorization()
         result["contacts_authorized"] = is_authorized
-        result["authorization_status"] = status
+        result["contacts_status"] = status
 
         if is_authorized:
             resolver = ContactResolver()
             resolver.initialize()
             stats = resolver.get_stats()
             result["contacts_loaded"] = stats.get("handle_count", 0)
+        else:
+            result["contacts_fix"] = (
+                "Grant Contacts access: System Settings → Privacy & Security → "
+                "Contacts → Add your Python interpreter or uvx"
+            )
     else:
         result["contacts_authorized"] = False
-        result["authorization_status"] = "pyobjc_not_available"
+        result["contacts_status"] = "pyobjc_not_available"
+
+    # Overall status
+    all_good = db_accessible and result.get("contacts_authorized", False)
+    result["status"] = "ready" if all_good else "needs_setup"
 
     return result
 
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 
 def main() -> None:
@@ -383,11 +413,40 @@ def main() -> None:
     parser.add_argument("--version", "-v", action="version", version=f"imessage-max {__version__}")
     parser.parse_args()
 
+    # Check database access on startup (Full Disk Access)
+    db_accessible, db_status = check_database_access()
+    if not db_accessible:
+        if db_status == "permission_denied":
+            print("""
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                         FULL DISK ACCESS REQUIRED                            ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+iMessage Max cannot access your iMessage database.
+
+To fix this:
+  1. Open System Settings → Privacy & Security → Full Disk Access
+  2. Click + and add: """ + sys.executable + """
+  3. Restart Claude Desktop
+
+If using UV/uvx, also add: ~/.local/bin/uvx
+
+TIP: Press Cmd+Shift+G to type the path directly.
+
+Run the 'diagnose' tool after granting permission to verify setup.
+""", file=sys.stderr, flush=True)
+        elif db_status == "database_not_found":
+            print(f"[iMessage Max] Database not found at {DB_PATH}. "
+                  f"Make sure iMessage is set up.", file=sys.stderr, flush=True)
+        else:
+            print(f"[iMessage Max] Database access issue: {db_status}", file=sys.stderr, flush=True)
+        # Continue anyway - the error will surface when tools are used
+
     # Request Contacts access on startup - triggers macOS permission dialog if needed
     if PYOBJC_AVAILABLE:
         granted, status = request_contacts_access(timeout=30.0)
         if not granted:
-            print(f"[iMessage MCP] Contacts access not granted ({status}). "
+            print(f"[iMessage Max] Contacts access not granted ({status}). "
                   f"Contact names will show as phone numbers.", file=sys.stderr, flush=True)
 
     mcp.run()
