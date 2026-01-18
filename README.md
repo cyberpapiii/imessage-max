@@ -37,6 +37,11 @@ Most iMessage tools expose raw database structures, requiring 3-5 tool calls per
 
 One-click install with icon support in Claude Desktop:
 
+**Prerequisites:** [UV](https://docs.astral.sh/uv/) must be installed first:
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
 1. Download [`imessage-max.mcpb`](https://github.com/cyberpapiii/imessage-max/releases/latest/download/imessage-max.mcpb)
 2. Double-click to install, or drag into Claude Desktop
 3. Grant permissions when prompted (see [Setup](#setup))

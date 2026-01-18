@@ -1,7 +1,7 @@
 {
   "manifest_version": "0.2",
   "name": "imessage-max",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "display_name": "iMessage Max",
   "description": "AI-optimized MCP server for iMessage on macOS. Read, search, and send messages with contact resolution.",
   "long_description": "iMessage Max provides intent-aligned tools for AI assistants to interact with your iMessage conversations. Features include contact name resolution, session grouping, full-text search, and token-efficient responses designed for AI consumption.",
@@ -19,7 +19,7 @@
     "type": "python",
     "entry_point": "src/imessage_max/server.py",
     "mcp_config": {
-      "command": "uvx",
+      "command": "${HOME}/.local/bin/uvx",
       "args": ["imessage-max"]
     }
   },
