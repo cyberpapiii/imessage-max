@@ -11,7 +11,10 @@ pillow_heif.register_heif_opener()
 
 from PIL import Image
 
-MAX_DIMENSION = 1536
+# Thumbnail size for browsing (fits under 1MB MCP response limit)
+THUMBNAIL_DIMENSION = 512
+# Full resolution for detailed viewing (screenshots, etc.)
+FULL_RESOLUTION = 1536
 JPEG_QUALITY = 85
 
 
@@ -22,16 +25,17 @@ class ImageResult(TypedDict):
     filename: str
 
 
-def process_image(file_path: str) -> Optional[ImageResult]:
+def process_image(file_path: str, max_dimension: int = THUMBNAIL_DIMENSION) -> Optional[ImageResult]:
     """
     Process an image file for embedding in API response.
 
     - Converts HEIC/PNG/etc to JPEG
-    - Resizes to max 1536px on long edge
+    - Resizes to max dimension on long edge (default 512px for thumbnails)
     - Returns base64 encoded data
 
     Args:
         file_path: Path to the image file
+        max_dimension: Maximum dimension for the long edge (default THUMBNAIL_DIMENSION=512)
 
     Returns:
         ImageResult dict with type, base64, filename, or None if processing fails
@@ -51,13 +55,13 @@ def process_image(file_path: str) -> Optional[ImageResult]:
 
             # Resize if needed
             width, height = img.size
-            if max(width, height) > MAX_DIMENSION:
+            if max(width, height) > max_dimension:
                 if width > height:
-                    new_width = MAX_DIMENSION
-                    new_height = int(height * (MAX_DIMENSION / width))
+                    new_width = max_dimension
+                    new_height = int(height * (max_dimension / width))
                 else:
-                    new_height = MAX_DIMENSION
-                    new_width = int(width * (MAX_DIMENSION / height))
+                    new_height = max_dimension
+                    new_width = int(width * (max_dimension / height))
                 img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
 
             # Save to JPEG in memory

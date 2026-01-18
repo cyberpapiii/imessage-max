@@ -53,7 +53,7 @@ class TestProcessVideo:
         assert 4 <= result["duration_seconds"] <= 6
 
     def test_process_video_resizes_thumbnail(self, tmp_path):
-        """Large video thumbnails should be resized."""
+        """Large video thumbnails should be resized to 512px by default."""
         import subprocess
         import imageio_ffmpeg
 
@@ -74,7 +74,37 @@ class TestProcessVideo:
         result = process_video(str(video_path))
 
         assert result is not None
-        # Check thumbnail dimensions
+        # Check thumbnail dimensions (512px default)
+        decoded = base64.b64decode(result["thumbnail_base64"])
+        from PIL import Image
+        from io import BytesIO
+        img = Image.open(BytesIO(decoded))
+        assert max(img.size) <= 512
+
+    def test_process_video_full_resolution_thumbnail(self, tmp_path):
+        """Full resolution mode should cap at 1536px."""
+        import subprocess
+        import imageio_ffmpeg
+        from imessage_max.enrichment.videos import FULL_RESOLUTION
+
+        video_path = tmp_path / "large.mp4"
+        ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
+
+        # Create a 4K test video (3840x2160)
+        subprocess.run([
+            ffmpeg_path,
+            "-f", "lavfi",
+            "-i", "color=c=blue:size=3840x2160:duration=2",
+            "-c:v", "libx264",
+            "-t", "2",
+            "-y",
+            str(video_path)
+        ], capture_output=True, check=True)
+
+        result = process_video(str(video_path), max_dimension=FULL_RESOLUTION)
+
+        assert result is not None
+        # Check thumbnail dimensions (1536px full resolution)
         decoded = base64.b64decode(result["thumbnail_base64"])
         from PIL import Image
         from io import BytesIO

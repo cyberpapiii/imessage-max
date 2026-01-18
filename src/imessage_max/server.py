@@ -13,6 +13,7 @@ from .tools.get_active import get_active_conversations_impl
 from .tools.list_attachments import list_attachments_impl
 from .tools.get_unread import get_unread_impl
 from .tools.send import send_impl
+from .tools.get_attachment import get_attachment_impl
 from .contacts import check_contacts_authorization, request_contacts_access, PYOBJC_AVAILABLE, ContactResolver
 from .db import check_database_access, DB_PATH
 from .version_check import (
@@ -305,15 +306,23 @@ def list_attachments(
 @mcp.tool()
 def get_unread(
     chat_id: Optional[str] = None,
+    since: str = "7d",
     format: str = "messages",
     limit: int = 50,
     cursor: Optional[str] = None,
 ) -> dict:
     """
-    Get all unread messages across chats, or unread count summary.
+    Get unread messages across chats, or unread count summary.
+
+    By default returns unread messages from the last 7 days, which matches
+    what Messages.app displays. Use since="all" to include historical unread
+    messages that were never properly marked as read.
 
     Args:
         chat_id: Filter to specific chat (e.g., "chat123")
+        since: Time window for unread messages (default "7d").
+               Accepts relative ("24h", "7d", "14d", "30d"), natural ("yesterday",
+               "last week"), or "all" for no time limit.
         format: "messages" (default) returns full unread messages,
                 "summary" returns unread counts by chat
         limit: Max messages to return in "messages" format (default 50, max 100)
@@ -324,6 +333,7 @@ def get_unread(
     """
     return get_unread_impl(
         chat_id=chat_id,
+        since=since,
         format=format,
         limit=min(limit, 100),
         cursor=cursor,
@@ -356,6 +366,26 @@ def send(
         text=text,
         reply_to=reply_to,
     )
+
+
+@mcp.tool()
+def get_attachment(
+    attachment_id: str,
+) -> dict:
+    """
+    Get full-resolution attachment content.
+
+    Use this tool when you need to read text from a screenshot, examine image
+    details, or view a photo at full resolution. The get_messages tool returns
+    thumbnails (512px) - this tool returns full resolution (1536px).
+
+    Args:
+        attachment_id: Attachment identifier from media objects (e.g., "att123")
+
+    Returns:
+        Full-resolution image or video thumbnail with base64 data
+    """
+    return get_attachment_impl(attachment_id=attachment_id)
 
 
 @mcp.tool()

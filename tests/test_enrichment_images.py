@@ -27,8 +27,8 @@ class TestProcessImage:
         decoded = base64.b64decode(result["base64"])
         assert len(decoded) > 0
 
-    def test_process_image_resizes_large_images(self, tmp_path):
-        """Images larger than 1536px should be resized."""
+    def test_process_image_resizes_large_images_to_thumbnail(self, tmp_path):
+        """Images larger than 512px should be resized to thumbnail size by default."""
         from PIL import Image
         img_path = tmp_path / "large.jpg"
         img = Image.new("RGB", (3000, 2000), color="blue")
@@ -41,7 +41,24 @@ class TestProcessImage:
         decoded = base64.b64decode(result["base64"])
         from io import BytesIO
         resized = Image.open(BytesIO(decoded))
-        # Long edge should be capped at 1536
+        # Long edge should be capped at 512 (thumbnail)
+        assert max(resized.size) <= 512
+
+    def test_process_image_full_resolution(self, tmp_path):
+        """Full resolution mode should cap at 1536px."""
+        from PIL import Image
+        from imessage_max.enrichment.images import FULL_RESOLUTION
+        img_path = tmp_path / "large.jpg"
+        img = Image.new("RGB", (3000, 2000), color="blue")
+        img.save(img_path, "JPEG")
+
+        result = process_image(str(img_path), max_dimension=FULL_RESOLUTION)
+
+        assert result is not None
+        decoded = base64.b64decode(result["base64"])
+        from io import BytesIO
+        resized = Image.open(BytesIO(decoded))
+        # Long edge should be capped at 1536 (full resolution)
         assert max(resized.size) <= 1536
 
     def test_process_image_preserves_aspect_ratio(self, tmp_path):
@@ -57,9 +74,9 @@ class TestProcessImage:
         decoded = base64.b64decode(result["base64"])
         from io import BytesIO
         resized = Image.open(BytesIO(decoded))
-        # Should be 1536x768 (maintaining 2:1)
-        assert resized.size[0] == 1536
-        assert resized.size[1] == 768
+        # Should be 512x256 (maintaining 2:1 at thumbnail size)
+        assert resized.size[0] == 512
+        assert resized.size[1] == 256
 
     def test_process_png_converts_to_jpeg(self, tmp_path):
         """PNG images should be converted to JPEG."""

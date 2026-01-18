@@ -75,7 +75,8 @@ def test_get_unread_messages_format(unread_db):
     """Test default messages format returns correct structure."""
     from imessage_max.tools.get_unread import get_unread_impl
 
-    result = get_unread_impl(db_path=str(unread_db))
+    # Use since="all" to test with fixture data (timestamps are fixed in the past)
+    result = get_unread_impl(since="all", db_path=str(unread_db))
 
     assert "error" not in result
     assert "unread_messages" in result
@@ -93,7 +94,8 @@ def test_get_unread_summary_format(unread_db):
     """Test summary format returns breakdown by chat."""
     from imessage_max.tools.get_unread import get_unread_impl
 
-    result = get_unread_impl(format="summary", db_path=str(unread_db))
+    # Use since="all" to test with fixture data
+    result = get_unread_impl(since="all", format="summary", db_path=str(unread_db))
 
     assert "error" not in result
     assert "summary" in result
@@ -116,7 +118,8 @@ def test_get_unread_specific_chat(unread_db):
     """Test filter to specific chat_id works."""
     from imessage_max.tools.get_unread import get_unread_impl
 
-    result = get_unread_impl(chat_id="chat1", db_path=str(unread_db))
+    # Use since="all" to test with fixture data
+    result = get_unread_impl(chat_id="chat1", since="all", db_path=str(unread_db))
 
     assert "error" not in result
     assert "unread_messages" in result
@@ -134,7 +137,8 @@ def test_get_unread_limit(unread_db):
     """Test limit parameter constrains results."""
     from imessage_max.tools.get_unread import get_unread_impl
 
-    result = get_unread_impl(limit=1, db_path=str(unread_db))
+    # Use since="all" to test with fixture data
+    result = get_unread_impl(limit=1, since="all", db_path=str(unread_db))
 
     assert "error" not in result
     assert len(result["unread_messages"]) == 1
@@ -149,7 +153,8 @@ def test_get_unread_empty(unread_db):
     from imessage_max.tools.get_unread import get_unread_impl
 
     # Chat 3 has no messages, so no unread
-    result = get_unread_impl(chat_id="chat3", db_path=str(unread_db))
+    # Use since="all" to test with fixture data
+    result = get_unread_impl(chat_id="chat3", since="all", db_path=str(unread_db))
 
     assert "error" not in result
     assert result["unread_messages"] == []
@@ -162,7 +167,8 @@ def test_get_unread_people_map(unread_db):
     """Test people map contains sender info."""
     from imessage_max.tools.get_unread import get_unread_impl
 
-    result = get_unread_impl(db_path=str(unread_db))
+    # Use since="all" to test with fixture data
+    result = get_unread_impl(since="all", db_path=str(unread_db))
 
     assert "error" not in result
     assert "people" in result
@@ -191,7 +197,8 @@ def test_get_unread_message_structure(unread_db):
     """Test individual unread message structure."""
     from imessage_max.tools.get_unread import get_unread_impl
 
-    result = get_unread_impl(db_path=str(unread_db))
+    # Use since="all" to test with fixture data
+    result = get_unread_impl(since="all", db_path=str(unread_db))
 
     assert "unread_messages" in result
     assert len(result["unread_messages"]) > 0
@@ -218,7 +225,8 @@ def test_get_unread_sorted_oldest_first(unread_db):
     """Test unread messages are sorted oldest first."""
     from imessage_max.tools.get_unread import get_unread_impl
 
-    result = get_unread_impl(db_path=str(unread_db))
+    # Use since="all" to test with fixture data
+    result = get_unread_impl(since="all", db_path=str(unread_db))
 
     assert "unread_messages" in result
     assert len(result["unread_messages"]) >= 2
@@ -233,7 +241,8 @@ def test_get_unread_max_limit(unread_db):
     from imessage_max.tools.get_unread import get_unread_impl
 
     # Request more than max, should be clamped
-    result = get_unread_impl(limit=500, db_path=str(unread_db))
+    # Use since="all" to test with fixture data
+    result = get_unread_impl(limit=500, since="all", db_path=str(unread_db))
 
     assert "error" not in result
     # Should still work, just clamped to 100
@@ -253,7 +262,8 @@ def test_get_unread_summary_sorted_by_count(unread_db):
     """Test summary breakdown is sorted by unread count descending."""
     from imessage_max.tools.get_unread import get_unread_impl
 
-    result = get_unread_impl(format="summary", db_path=str(unread_db))
+    # Use since="all" to test with fixture data
+    result = get_unread_impl(since="all", format="summary", db_path=str(unread_db))
 
     assert "summary" in result
     breakdown = result["summary"]["breakdown"]
@@ -267,6 +277,40 @@ def test_get_unread_chat_id_special_chars(unread_db):
     """Test that special LIKE characters in chat_id are escaped."""
     from imessage_max.tools.get_unread import get_unread_impl
 
-    result = get_unread_impl(chat_id="100%_test", db_path=str(unread_db))
+    result = get_unread_impl(chat_id="100%_test", since="all", db_path=str(unread_db))
     # Should not cause SQL errors
     assert "error" not in result or result.get("error") == "chat_not_found"
+
+
+def test_get_unread_since_parameter(unread_db):
+    """Test since parameter filters messages by time window."""
+    from imessage_max.tools.get_unread import get_unread_impl
+
+    # With since="all", should get all 3 unread messages
+    result_all = get_unread_impl(since="all", db_path=str(unread_db))
+    assert result_all["total_unread"] == 3
+
+    # With default 7d, fixture data is in the past so may get fewer
+    # (depending on when tests run relative to fixture timestamps)
+    result_default = get_unread_impl(db_path=str(unread_db))
+    assert "error" not in result_default
+    assert "total_unread" in result_default
+
+    # With very short window, fixture data should be excluded
+    result_1h = get_unread_impl(since="1h", db_path=str(unread_db))
+    assert "error" not in result_1h
+    # Fixture timestamps are far in the past, so 1h window should return 0
+    assert result_1h["total_unread"] == 0
+
+
+def test_get_unread_since_formats(unread_db):
+    """Test various since parameter format options."""
+    from imessage_max.tools.get_unread import get_unread_impl
+
+    # All these should work without errors
+    formats = ["7d", "14d", "24h", "1w", "1m", "yesterday", "last week", "all"]
+
+    for since_format in formats:
+        result = get_unread_impl(since=since_format, db_path=str(unread_db))
+        assert "error" not in result, f"Failed for since={since_format}"
+        assert "total_unread" in result

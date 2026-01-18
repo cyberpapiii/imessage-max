@@ -189,10 +189,12 @@ Messages with attachments or links are automatically enriched:
 
 | Media Type | Enrichment |
 |------------|------------|
-| Images (HEIC/JPEG/PNG) | Converted to JPEG, resized to 1536px max, base64 encoded |
-| Videos (MOV/MP4) | Thumbnail extracted at ~3s, duration included |
+| Images (HEIC/JPEG/PNG) | Converted to JPEG, resized to 512px thumbnails, base64 encoded |
+| Videos (MOV/MP4) | Thumbnail extracted at ~3s (512px), duration included |
 | Audio (voice notes) | Duration extracted |
-| Links | Open Graph metadata (title, description, domain) |
+| Links | Open Graph metadata (title, description, domain), capped at 10 per request |
+
+**Need full resolution?** Each media item includes an `id` field (e.g., `att123`). Use `get_attachment(attachment_id="att123")` to retrieve the full 1536px version.
 
 ### list_chats
 Browse recent chats with previews.
@@ -262,11 +264,20 @@ list_attachments(from_person="Nick", type="any")
 ```
 
 ### get_unread
-Get unread messages or summary.
+Get unread messages or summary. By default, returns unread messages from the last 7 days to match Messages.app behavior.
 
 ```python
-# Get all unread messages
+# Get unread messages (default: last 7 days)
 get_unread()
+
+# Get unread from last 24 hours
+get_unread(since="24h")
+
+# Get unread from last 14 days
+get_unread(since="14d")
+
+# Get ALL historical unread messages (may include stale data)
+get_unread(since="all")
 
 # Get unread summary by chat
 get_unread(format="summary")

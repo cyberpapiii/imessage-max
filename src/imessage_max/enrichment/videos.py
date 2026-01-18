@@ -8,7 +8,10 @@ from typing import Optional, TypedDict
 import imageio_ffmpeg
 from PIL import Image
 
-MAX_DIMENSION = 1536
+# Thumbnail size for browsing (matches images.py)
+THUMBNAIL_DIMENSION = 512
+# Full resolution for detailed viewing
+FULL_RESOLUTION = 1536
 JPEG_QUALITY = 85
 FRAME_POSITION = 3  # Extract frame at 3 seconds (or earlier for short videos)
 
@@ -21,16 +24,17 @@ class VideoResult(TypedDict):
     filename: str
 
 
-def process_video(file_path: str) -> Optional[VideoResult]:
+def process_video(file_path: str, max_dimension: int = THUMBNAIL_DIMENSION) -> Optional[VideoResult]:
     """
     Process a video file for embedding in API response.
 
     - Extracts a frame at ~3 seconds (or earlier if video is short)
-    - Resizes to max 1536px on long edge
+    - Resizes to max dimension on long edge (default 512px for thumbnails)
     - Returns base64 encoded JPEG thumbnail + duration
 
     Args:
         file_path: Path to the video file
+        max_dimension: Maximum dimension for thumbnail (default THUMBNAIL_DIMENSION=512)
 
     Returns:
         VideoResult dict with type, thumbnail_base64, duration_seconds, filename,
@@ -85,13 +89,13 @@ def process_video(file_path: str) -> Optional[VideoResult]:
         img = Image.frombytes('RGB', (width, height), frame_data)
 
         # Resize if needed
-        if max(width, height) > MAX_DIMENSION:
+        if max(width, height) > max_dimension:
             if width > height:
-                new_width = MAX_DIMENSION
-                new_height = int(height * (MAX_DIMENSION / width))
+                new_width = max_dimension
+                new_height = int(height * (max_dimension / width))
             else:
-                new_height = MAX_DIMENSION
-                new_width = int(width * (MAX_DIMENSION / height))
+                new_height = max_dimension
+                new_width = int(width * (max_dimension / height))
             img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
 
         # Save to JPEG

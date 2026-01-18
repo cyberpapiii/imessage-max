@@ -1,10 +1,10 @@
 """get_unread tool implementation."""
 
 from typing import Optional, Any
-from ..db import get_db_connection, apple_to_datetime, escape_like, DB_PATH
+from ..db import get_db_connection, apple_to_datetime, datetime_to_apple, escape_like, DB_PATH
 from ..contacts import ContactResolver
 from ..queries import get_chat_participants
-from ..time_utils import format_compact_relative
+from ..time_utils import format_compact_relative, parse_time_input
 from ..models import Participant, generate_display_name
 from ..phone import format_phone_display
 from ..parsing import get_message_text
@@ -13,19 +13,29 @@ from ..parsing import get_message_text
 # Use escape_like from db module (aliased for local use)
 _escape_like = escape_like
 
+# Default time window for unread messages (matches Messages.app behavior)
+DEFAULT_SINCE = "7d"
+
 
 def get_unread_impl(
     chat_id: Optional[str] = None,
+    since: str = DEFAULT_SINCE,
     format: str = "messages",
     limit: int = 50,
     cursor: Optional[str] = None,
     db_path: str = DB_PATH,
 ) -> dict[str, Any]:
     """
-    Get all unread messages across chats, or unread count summary.
+    Get unread messages across chats, or unread count summary.
+
+    By default, returns unread messages from the last 7 days to match
+    Messages.app behavior. Use since="all" for historical unread messages.
 
     Args:
         chat_id: Filter to specific chat (e.g., "chat123")
+        since: Time window for unread messages (default "7d").
+               Accepts relative ("24h", "7d", "14d", "30d"), natural ("yesterday",
+               "last week"), or "all" for no time limit.
         format: "messages" (default) or "summary"
         limit: Max messages to return in "messages" format (max 100)
         cursor: Pagination cursor from previous response
@@ -38,6 +48,13 @@ def get_unread_impl(
     if format not in ("messages", "summary"):
         format = "messages"
     limit = max(1, min(limit, 100))  # Clamp to 1-100
+
+    # Parse since parameter - "all" means no time filter
+    since_apple: Optional[int] = None
+    if since and since.lower() != "all":
+        since_dt = parse_time_input(since)
+        if since_dt:
+            since_apple = datetime_to_apple(since_dt)
 
     resolver = ContactResolver()
     if resolver.is_available:
@@ -71,9 +88,9 @@ def get_unread_impl(
                     }
 
             if format == "summary":
-                return _get_unread_summary(conn, numeric_chat_id, resolver)
+                return _get_unread_summary(conn, numeric_chat_id, since_apple, resolver)
             else:
-                return _get_unread_messages(conn, numeric_chat_id, limit, resolver)
+                return _get_unread_messages(conn, numeric_chat_id, since_apple, limit, resolver)
 
     except FileNotFoundError:
         return {
@@ -90,6 +107,7 @@ def get_unread_impl(
 def _get_unread_messages(
     conn,
     chat_id: Optional[int],
+    since_apple: Optional[int],
     limit: int,
     resolver: ContactResolver,
 ) -> dict[str, Any]:
@@ -119,6 +137,11 @@ def _get_unread_messages(
     """
     params: list = []
 
+    # Apply time window filter (default 7 days to match Messages.app)
+    if since_apple is not None:
+        query += " AND m.date >= ?"
+        params.append(since_apple)
+
     if chat_id is not None:
         query += " AND cmj.chat_id = ?"
         params.append(chat_id)
@@ -141,6 +164,11 @@ def _get_unread_messages(
         AND m.associated_message_type = 0
     """
     count_params: list = []
+
+    # Apply same time window filter to count query
+    if since_apple is not None:
+        count_query += " AND m.date >= ?"
+        count_params.append(since_apple)
 
     if chat_id is not None:
         count_query += " AND cmj.chat_id = ?"
@@ -243,6 +271,7 @@ def _get_unread_messages(
 def _get_unread_summary(
     conn,
     chat_id: Optional[int],
+    since_apple: Optional[int],
     resolver: ContactResolver,
 ) -> dict[str, Any]:
     """Get unread messages in summary format."""
@@ -261,6 +290,11 @@ def _get_unread_summary(
         AND m.associated_message_type = 0
     """
     params: list = []
+
+    # Apply time window filter (default 7 days to match Messages.app)
+    if since_apple is not None:
+        query += " AND m.date >= ?"
+        params.append(since_apple)
 
     if chat_id is not None:
         query += " AND cmj.chat_id = ?"

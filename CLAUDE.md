@@ -45,12 +45,12 @@ seconds = apple_timestamp / 1_000_000_000
 dt = APPLE_EPOCH + timedelta(seconds=seconds)
 ```
 
-## Nine Core Tools
+## Eleven Core Tools
 
 | Tool | Purpose |
 |------|---------|
 | `find_chat` | Locate chat by participants, name, or content |
-| `get_messages` | Retrieve messages with flexible filtering |
+| `get_messages` | Retrieve messages with flexible filtering (512px thumbnails) |
 | `get_context` | Get messages surrounding a specific message |
 | `search` | Full-text search with compound filters |
 | `list_chats` | Browse recent/active chats with previews |
@@ -58,6 +58,8 @@ dt = APPLE_EPOCH + timedelta(seconds=seconds)
 | `get_active_conversations` | Find chats with recent back-and-forth |
 | `list_attachments` | Retrieve attachments by type, person, chat |
 | `get_unread` | Get unread messages or summary |
+| `get_attachment` | Get full-resolution (1536px) attachment by ID |
+| `diagnose` | Troubleshoot configuration and permission issues |
 
 ## Critical Implementation Details
 
@@ -90,6 +92,13 @@ def get_db_connection():
 - Short keys: `ts` not `timestamp`, `msgs` not `message_count`
 - Reactions as compact strings: `["❤️ andrew", "😂 nick"]`
 - Omit obvious fields (no `is_group: false` on 2-person chats)
+
+### Tiered Media Resolution
+To stay under Claude Desktop's 1MB response limit:
+- `get_messages` returns 512px thumbnails for browsing
+- `get_attachment` returns 1536px full resolution on demand
+- Link enrichment capped at 10 URLs per request
+- Each media item includes `id` field (e.g., `att123`) for full-res retrieval
 
 ### Display Name Generation
 When `display_name` is null, generate like Messages.app:

@@ -22,6 +22,8 @@ SESSION_GAP_NS = SESSION_GAP_HOURS * 60 * 60 * 1_000_000_000
 
 # Maximum number of media items to process per request
 MAX_MEDIA = 10
+# Maximum number of links to enrich per request
+MAX_LINKS = 10
 
 
 def _get_attachment_type(mime_type: Optional[str], uti: Optional[str]) -> str:
@@ -493,6 +495,8 @@ def get_messages_impl(
                             if result:
                                 if 'media' not in messages[idx]:
                                     messages[idx]['media'] = []
+                                # Add attachment ID for full resolution retrieval
+                                result['id'] = f"att{att['id']}"
                                 messages[idx]['media'].append(result)
                                 processed_count += 1
                             else:
@@ -521,6 +525,8 @@ def get_messages_impl(
                             if result:
                                 if 'media' not in messages[idx]:
                                     messages[idx]['media'] = []
+                                # Add attachment ID for full resolution retrieval
+                                result['id'] = f"att{att['id']}"
                                 messages[idx]['media'].append(result)
                                 processed_count += 1
                             else:
@@ -557,10 +563,11 @@ def get_messages_impl(
                         except Exception:
                             pass
 
-                # Enrich links
+                # Enrich links (capped at MAX_LINKS)
                 if all_urls:
-                    enriched = enrich_links(all_urls)
-                    for url, link_data in zip(all_urls, enriched):
+                    urls_to_enrich = all_urls[:MAX_LINKS]
+                    enriched = enrich_links(urls_to_enrich)
+                    for url, link_data in zip(urls_to_enrich, enriched):
                         for msg_idx in url_to_msg_indices[url]:
                             if 'links' not in messages[msg_idx]:
                                 messages[msg_idx]['links'] = []

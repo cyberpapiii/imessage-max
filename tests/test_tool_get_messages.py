@@ -653,3 +653,57 @@ class TestGetMessagesEnrichment:
         assert "attachments" in msg
         assert len(msg["attachments"]) == 1
         assert msg["attachments"][0]["filename"] == "image.jpg"
+
+    def test_get_messages_caps_link_enrichment(self, mock_db_path, monkeypatch):
+        """Link enrichment should be capped at MAX_LINKS (10)."""
+        import sqlite3
+        conn = sqlite3.connect(mock_db_path)
+
+        # Create 15 URLs in a single message
+        urls = " ".join(f"https://example{i}.com/page" for i in range(15))
+        conn.executescript(f"""
+            INSERT INTO handle (ROWID, id, service) VALUES (1, '+19175551234', 'iMessage');
+            INSERT INTO chat (ROWID, guid, display_name, service_name) VALUES (1, 'chat1', NULL, 'iMessage');
+            INSERT INTO chat_handle_join (chat_id, handle_id) VALUES (1, 1);
+            INSERT INTO message (ROWID, guid, text, handle_id, date, is_from_me, cache_has_attachments)
+                VALUES (1, 'msg1', '{urls}', 1, 789100000000000000, 0, 0);
+            INSERT INTO chat_message_join (chat_id, message_id) VALUES (1, 1);
+        """)
+        conn.close()
+
+        # Track which URLs were enriched
+        enriched_urls = []
+
+        def mock_enrich_links(url_list):
+            enriched_urls.extend(url_list)
+            return [{"url": url, "domain": "example.com", "title": "Title"} for url in url_list]
+
+        monkeypatch.setattr(
+            "imessage_max.tools.get_messages.enrich_links",
+            mock_enrich_links
+        )
+
+        result = get_messages_impl(chat_id="chat1", db_path=str(mock_db_path))
+
+        # Should only enrich 10 links (MAX_LINKS)
+        assert len(enriched_urls) == 10
+
+    def test_get_messages_media_includes_attachment_id(self, db_with_media, monkeypatch):
+        """Media items should include attachment ID for full-res retrieval."""
+        def mock_enrich_links(urls):
+            return []
+
+        monkeypatch.setattr(
+            "imessage_max.tools.get_messages.enrich_links",
+            mock_enrich_links
+        )
+
+        result = get_messages_impl(chat_id="chat1", db_path=str(db_with_media))
+
+        assert "messages" in result
+        msg = result["messages"][0]
+        assert "media" in msg
+        assert len(msg["media"]) == 1
+        # Should have an ID for full-resolution retrieval
+        assert "id" in msg["media"][0]
+        assert msg["media"][0]["id"].startswith("att")

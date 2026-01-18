@@ -973,15 +973,16 @@ Links are treated as a type of attachment with additional metadata:
 
 ### Tool 9: `get_unread`
 
-**Purpose:** Get all unread messages across chats, or unread count summary.
+**Purpose:** Get unread messages across chats, or unread count summary. By default returns unread messages from the last 7 days, which matches what Messages.app displays.
 
-**Why this tool exists:** Users ask "do I have any unread messages?" or "what did I miss?" This is faster than scanning list_chats for unread_count > 0.
+**Why this tool exists:** Users ask "do I have any unread messages?" or "what did I miss?" This is faster than scanning list_chats for unread_count > 0. The 7-day default prevents returning stale unread messages from years ago that were never properly marked as read.
 
 **Parameters:**
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `chat_id` | string | No | Filter to specific chat (omit for all chats) |
+| `since` | string | No | Time window for unread messages (default "7d"). Accepts relative ("24h", "7d", "14d", "30d"), natural ("yesterday", "last week"), or "all" for no time limit. |
 | `format` | string | No | "messages" (default) or "summary" |
 | `limit` | integer | No | Max messages to return in "messages" format (default: 50) |
 | `cursor` | string | No | Pagination cursor from previous response |
