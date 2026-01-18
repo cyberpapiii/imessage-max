@@ -512,6 +512,51 @@ class TestDatabaseAccess:
                 conn.execute("CREATE TABLE test_table (id INTEGER)")
 
 
+@pytest.mark.integration
+class TestGetMessagesEnrichmentIntegration:
+    """Integration tests for media enrichment with real database."""
+
+    def test_get_messages_enriches_recent_messages(self):
+        """Should enrich images and links in recent messages."""
+        skip_if_no_db()
+        from imessage_max.tools.get_messages import get_messages_impl
+
+        # Get messages from last 24 hours from any chat
+        from imessage_max.tools.list_chats import list_chats_impl
+
+        chats = list_chats_impl(limit=1, db_path=REAL_DB_PATH)
+
+        if not chats.get("chats"):
+            pytest.skip("No chats available")
+
+        chat_id = chats["chats"][0]["id"]
+        result = get_messages_impl(
+            chat_id=chat_id, since="24h", limit=10, db_path=REAL_DB_PATH
+        )
+
+        assert "messages" in result
+        # Just verify the structure is correct - media/links/attachments may or may not exist
+        for msg in result["messages"]:
+            if "media" in msg:
+                for m in msg["media"]:
+                    assert "type" in m
+                    if m["type"] == "image":
+                        assert "base64" in m
+                    elif m["type"] == "video":
+                        assert "thumbnail_base64" in m
+                        assert "duration_seconds" in m
+
+            if "links" in msg:
+                for link in msg["links"]:
+                    assert "url" in link
+                    assert "domain" in link
+
+            if "attachments" in msg:
+                for att in msg["attachments"]:
+                    assert "type" in att
+                    assert "filename" in att
+
+
 class TestErrorHandling:
     """Integration tests for error handling with real database."""
 
