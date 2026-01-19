@@ -53,8 +53,14 @@ def _read_cache() -> Optional[dict]:
         with open(CACHE_FILE) as f:
             data = json.load(f)
 
-        # Check if cache is still valid
+        # Check if cache is still valid (TTL)
         if time.time() - data.get("timestamp", 0) > CACHE_TTL:
+            return None
+
+        # Invalidate cache if current version is newer than cached latest
+        # This handles the case where user updated but cache has old PyPI data
+        cached_latest = data.get("latest_version")
+        if cached_latest and _is_newer(CURRENT_VERSION, cached_latest):
             return None
 
         return data
