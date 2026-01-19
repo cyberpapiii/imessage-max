@@ -160,7 +160,7 @@ def list_chats(
 
 @mcp.tool()
 def search(
-    query: str,
+    query: Optional[str] = None,
     from_person: Optional[str] = None,
     in_chat: Optional[str] = None,
     is_group: Optional[bool] = None,
@@ -177,7 +177,7 @@ def search(
     Full-text search across messages with advanced filtering.
 
     Args:
-        query: Text to search for
+        query: Text to search for (optional if using filters)
         from_person: Filter to messages from this person (or "me")
         in_chat: Chat ID to search within
         is_group: True for groups only, False for DMs only

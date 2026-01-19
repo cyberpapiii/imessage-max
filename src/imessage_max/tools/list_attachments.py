@@ -170,7 +170,7 @@ def list_attachments_impl(
             attachments: list[dict[str, Any]] = []
             people: dict[str, dict[str, Any]] = {}
             handle_to_key: dict[str, str] = {}
-            person_counter = 1
+            unknown_counter = 0
 
             for row in rows:
                 if len(attachments) >= limit:
@@ -193,12 +193,29 @@ def list_attachments_impl(
                 else:
                     handle = row['sender_handle'] or "unknown"
                     if handle not in handle_to_key:
-                        key = f"p{person_counter}"
-                        person_counter += 1
-                        handle_to_key[handle] = key
                         name = None
                         if resolver.is_available:
                             name = resolver.resolve(handle)
+
+                        # Generate key from first name or unknown
+                        if name:
+                            first_name = name.split()[0].lower()
+                            key = first_name
+                            # Handle collisions
+                            if key in people:
+                                parts = name.split()
+                                if len(parts) > 1:
+                                    key = f"{first_name}_{parts[-1][0].lower()}"
+                                if key in people:
+                                    suffix = 2
+                                    while f"{first_name}{suffix}" in people:
+                                        suffix += 1
+                                    key = f"{first_name}{suffix}"
+                        else:
+                            unknown_counter += 1
+                            key = f"unknown{unknown_counter}"
+
+                        handle_to_key[handle] = key
                         people[key] = {
                             "name": name or handle,
                             "handle": handle,
