@@ -176,6 +176,9 @@ def list_chats_impl(
                         "ago": format_compact_relative(last_dt),
                     }
 
+                    # awaiting_reply is True if the last message is not from me
+                    chat_info["awaiting_reply"] = not last_msg['is_from_me']
+
                 chats.append(chat_info)
 
             # Get totals

@@ -6,9 +6,11 @@ from ..contacts import ContactResolver
 from ..time_utils import parse_time_input, format_compact_relative
 from ..parsing import get_message_text
 from ..suggestions import get_message_suggestions
+from ..queries import get_chat_participants
+from ..models import Participant, generate_display_name
 
-# 24 hours in Apple timestamp format (nanoseconds)
-TWENTY_FOUR_HOURS_NS = 24 * 60 * 60 * 1_000_000_000
+# Default unanswered window in hours
+DEFAULT_UNANSWERED_HOURS = 24
 
 
 def _looks_like_question(text: str) -> bool:
@@ -48,17 +50,19 @@ def _looks_like_question(text: str) -> bool:
     return False
 
 
-def _has_reply_within_24h(conn, chat_id: int, message_date: int) -> bool:
-    """Check if there's a reply from someone else within 24 hours.
+def _has_reply_within_window(conn, chat_id: int, message_date: int, hours: int = DEFAULT_UNANSWERED_HOURS) -> bool:
+    """Check if there's a reply from someone else within the specified window.
 
     Args:
         conn: Database connection
         chat_id: Chat ROWID
         message_date: Apple timestamp of the original message
+        hours: Number of hours to check for a reply (default 24)
 
     Returns:
-        True if there is a reply within 24 hours
+        True if there is a reply within the window
     """
+    window_ns = hours * 60 * 60 * 1_000_000_000
     cursor = conn.execute("""
         SELECT 1 FROM message m
         JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
@@ -68,7 +72,7 @@ def _has_reply_within_24h(conn, chat_id: int, message_date: int) -> bool:
         AND m.is_from_me = 0
         AND m.associated_message_type = 0
         LIMIT 1
-    """, (chat_id, message_date, message_date + TWENTY_FOUR_HOURS_NS))
+    """, (chat_id, message_date, message_date + window_ns))
 
     return cursor.fetchone() is not None
 
@@ -78,7 +82,7 @@ _escape_like = escape_like
 
 
 def search_impl(
-    query: str,
+    query: Optional[str] = None,
     from_person: Optional[str] = None,
     in_chat: Optional[str] = None,
     is_group: Optional[bool] = None,
@@ -90,13 +94,14 @@ def search_impl(
     format: str = "flat",
     include_context: bool = False,
     unanswered: bool = False,
+    unanswered_hours: int = DEFAULT_UNANSWERED_HOURS,
     db_path: str = DB_PATH,
 ) -> dict[str, Any]:
     """
     Full-text search across messages with advanced filtering.
 
     Args:
-        query: Text to search for
+        query: Text to search for (optional if filters provided)
         from_person: Filter to messages from this person (or "me")
         in_chat: Chat ID to search within
         is_group: True for groups only, False for DMs only
@@ -107,15 +112,18 @@ def search_impl(
         sort: "recent_first" (default) or "oldest_first"
         format: "flat" (default) or "grouped_by_chat"
         include_context: Include messages before/after each result
-        unanswered: Only return messages from me that didn't receive a reply within 24h
+        unanswered: Only return messages from me that didn't receive a reply
+        unanswered_hours: Window in hours to check for replies (default 24)
         db_path: Path to chat.db (for testing)
 
     Returns:
         Search results with people map
     """
-    # Validate inputs
-    if not query or not query.strip():
-        return {"error": "invalid_query", "message": "Query cannot be empty"}
+    # Validate inputs - require query or at least one filter
+    has_filter = any([from_person, in_chat, is_group is not None, has, since, before, unanswered])
+    has_query = query and query.strip()
+    if not has_query and not has_filter:
+        return {"error": "invalid_query", "message": "Query or at least one filter required"}
 
     limit = max(1, min(limit, 100))
     if sort not in ("recent_first", "oldest_first"):
@@ -151,10 +159,11 @@ def search_impl(
 
             params: list[Any] = []
 
-            # Text search - use LIKE for partial matching
-            search_term = query.strip()
-            base_query += " AND (m.text LIKE ? ESCAPE '\\' COLLATE NOCASE)"
-            params.append(f"%{_escape_like(search_term)}%")
+            # Text search - use LIKE for partial matching (only if query provided)
+            if query and query.strip():
+                search_term = query.strip()
+                base_query += " AND (m.text LIKE ? ESCAPE '\\' COLLATE NOCASE)"
+                params.append(f"%{_escape_like(search_term)}%")
 
             # Time filters
             if since:
@@ -234,9 +243,9 @@ def search_impl(
                 filtered_rows = []
                 for row in rows:
                     text = get_message_text(row["text"], row["attributedBody"])
-                    # Check if message looks like a question and has no reply within 24h
-                    if _looks_like_question(text) and not _has_reply_within_24h(
-                        conn, row["chat_id"], row["date"]
+                    # Check if message looks like a question and has no reply within window
+                    if _looks_like_question(text) and not _has_reply_within_window(
+                        conn, row["chat_id"], row["date"], unanswered_hours
                     ):
                         filtered_rows.append(row)
                         # Stop once we have enough
@@ -245,9 +254,9 @@ def search_impl(
                 rows = filtered_rows
 
             if format == "grouped_by_chat":
-                response = _build_grouped_response(rows, query, resolver)
+                response = _build_grouped_response(conn, rows, query, resolver)
             else:
-                response = _build_flat_response(rows, resolver, limit)
+                response = _build_flat_response(conn, rows, resolver, limit, include_context)
 
             # Add suggestions when no results found
             if response.get("total", 0) == 0:
@@ -279,12 +288,54 @@ def search_impl(
         return {"error": "internal_error", "message": str(e)}
 
 
-def _build_flat_response(rows: list, resolver: ContactResolver, limit: int) -> dict[str, Any]:
+def _format_context_msg(conn_row, resolver: ContactResolver, handle_to_key: dict[str, str], people: dict[str, Any], person_counter_holder: list) -> dict:
+    """Format a context message row."""
+    text = get_message_text(conn_row["text"], conn_row["attributedBody"])
+    msg_dt = apple_to_datetime(conn_row["date"]) if conn_row["date"] else None
+
+    # Get sender key
+    if conn_row["is_from_me"]:
+        sender_key = "me"
+        if "me" not in people:
+            people["me"] = {"name": "Me", "is_me": True}
+    else:
+        handle = conn_row["sender_handle"] or "unknown"
+        if handle not in handle_to_key:
+            name = resolver.resolve(handle) if resolver.is_available else None
+            if name:
+                first_name = name.split()[0].lower()
+                key = first_name
+                if key in people:
+                    suffix = 2
+                    while f"{first_name}{suffix}" in people:
+                        suffix += 1
+                    key = f"{first_name}{suffix}"
+            else:
+                key = f"p{person_counter_holder[0]}"
+                person_counter_holder[0] += 1
+            handle_to_key[handle] = key
+            people[key] = {
+                "name": name or handle,
+                "handle": handle,
+            }
+        sender_key = handle_to_key[handle]
+
+    return {
+        "id": f"msg{conn_row['msg_id']}",
+        "ts": msg_dt.isoformat() if msg_dt else None,
+        "from": sender_key,
+        "text": text,
+    }
+
+
+def _build_flat_response(conn, rows: list, resolver: ContactResolver, limit: int, include_context: bool = False) -> dict[str, Any]:
     """Build flat format response."""
     results = []
     people: dict[str, Any] = {}
     person_counter = 1
+    person_counter_holder = [person_counter]  # Mutable holder for context function
     handle_to_key: dict[str, str] = {}
+    chat_names_cache: dict[int, str] = {}  # Cache for generated display names
 
     for row in rows:
         # Get or create person reference
@@ -295,10 +346,21 @@ def _build_flat_response(rows: list, resolver: ContactResolver, limit: int) -> d
         else:
             handle = row["sender_handle"] or "unknown"
             if handle not in handle_to_key:
-                key = f"p{person_counter}"
-                person_counter += 1
-                handle_to_key[handle] = key
+                # Use first name as key for consistency
                 name = resolver.resolve(handle) if resolver.is_available else None
+                if name:
+                    first_name = name.split()[0].lower()
+                    key = first_name
+                    # Handle collisions
+                    if key in people:
+                        suffix = 2
+                        while f"{first_name}{suffix}" in people:
+                            suffix += 1
+                        key = f"{first_name}{suffix}"
+                else:
+                    key = f"p{person_counter_holder[0]}"
+                    person_counter_holder[0] += 1
+                handle_to_key[handle] = key
                 people[key] = {
                     "name": name or handle,
                     "handle": handle,
@@ -308,15 +370,70 @@ def _build_flat_response(rows: list, resolver: ContactResolver, limit: int) -> d
         text = get_message_text(row["text"], row["attributedBody"])
         msg_dt = apple_to_datetime(row["date"])
 
-        results.append({
+        # Get chat name with fallback to generated display name
+        chat_name = row["chat_display_name"]
+        if not chat_name:
+            chat_id = row["chat_id"]
+            if chat_id not in chat_names_cache:
+                participant_rows = get_chat_participants(conn, chat_id, resolver)
+                participant_objs = [
+                    Participant(handle=p['handle'], name=p['name'])
+                    for p in participant_rows
+                ]
+                chat_names_cache[chat_id] = generate_display_name(participant_objs)
+            chat_name = chat_names_cache[chat_id]
+
+        result = {
             "id": f"msg{row['msg_id']}",
             "ts": msg_dt.isoformat() if msg_dt else None,
             "ago": format_compact_relative(msg_dt),
             "from": sender_key,
             "text": text,
             "chat": f"chat{row['chat_id']}",
-            "chat_name": row["chat_display_name"],
-        })
+            "chat_name": chat_name,
+        }
+
+        # Add context messages if requested
+        if include_context:
+            chat_id = row["chat_id"]
+            msg_date = row["date"]
+
+            # Get 2 messages before
+            before_cursor = conn.execute("""
+                SELECT m.ROWID as msg_id, m.text, m.attributedBody, m.date, m.is_from_me, h.id as sender_handle
+                FROM message m
+                JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
+                LEFT JOIN handle h ON m.handle_id = h.ROWID
+                WHERE cmj.chat_id = ? AND m.date < ? AND m.associated_message_type = 0
+                ORDER BY m.date DESC LIMIT 2
+            """, (chat_id, msg_date))
+            context_before = [
+                _format_context_msg(dict(r), resolver, handle_to_key, people, person_counter_holder)
+                for r in before_cursor.fetchall()
+            ]
+            # Reverse to get chronological order
+            context_before.reverse()
+
+            # Get 2 messages after
+            after_cursor = conn.execute("""
+                SELECT m.ROWID as msg_id, m.text, m.attributedBody, m.date, m.is_from_me, h.id as sender_handle
+                FROM message m
+                JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
+                LEFT JOIN handle h ON m.handle_id = h.ROWID
+                WHERE cmj.chat_id = ? AND m.date > ? AND m.associated_message_type = 0
+                ORDER BY m.date ASC LIMIT 2
+            """, (chat_id, msg_date))
+            context_after = [
+                _format_context_msg(dict(r), resolver, handle_to_key, people, person_counter_holder)
+                for r in after_cursor.fetchall()
+            ]
+
+            if context_before:
+                result["context_before"] = context_before
+            if context_after:
+                result["context_after"] = context_after
+
+        results.append(result)
 
     return {
         "results": results,
@@ -327,12 +444,13 @@ def _build_flat_response(rows: list, resolver: ContactResolver, limit: int) -> d
     }
 
 
-def _build_grouped_response(rows: list, query: str, resolver: ContactResolver) -> dict[str, Any]:
+def _build_grouped_response(conn, rows: list, query: str, resolver: ContactResolver) -> dict[str, Any]:
     """Build grouped_by_chat format response."""
     chats_data: dict[int, dict[str, Any]] = {}
     people: dict[str, Any] = {}
     person_counter = 1
     handle_to_key: dict[str, str] = {}
+    chat_names_cache: dict[int, str] = {}  # Cache for generated display names
 
     for row in rows:
         chat_id = row["chat_id"]
@@ -345,10 +463,21 @@ def _build_grouped_response(rows: list, query: str, resolver: ContactResolver) -
         else:
             handle = row["sender_handle"] or "unknown"
             if handle not in handle_to_key:
-                key = f"p{person_counter}"
-                person_counter += 1
-                handle_to_key[handle] = key
+                # Use first name as key for consistency
                 name = resolver.resolve(handle) if resolver.is_available else None
+                if name:
+                    first_name = name.split()[0].lower()
+                    key = first_name
+                    # Handle collisions
+                    if key in people:
+                        suffix = 2
+                        while f"{first_name}{suffix}" in people:
+                            suffix += 1
+                        key = f"{first_name}{suffix}"
+                else:
+                    key = f"p{person_counter}"
+                    person_counter += 1
+                handle_to_key[handle] = key
                 people[key] = {
                     "name": name or handle,
                     "handle": handle,
@@ -358,10 +487,22 @@ def _build_grouped_response(rows: list, query: str, resolver: ContactResolver) -
         text = get_message_text(row["text"], row["attributedBody"])
         msg_dt = apple_to_datetime(row["date"])
 
+        # Get chat name with fallback to generated display name
+        chat_name = row["chat_display_name"]
+        if not chat_name:
+            if chat_id not in chat_names_cache:
+                participant_rows = get_chat_participants(conn, chat_id, resolver)
+                participant_objs = [
+                    Participant(handle=p['handle'], name=p['name'])
+                    for p in participant_rows
+                ]
+                chat_names_cache[chat_id] = generate_display_name(participant_objs)
+            chat_name = chat_names_cache[chat_id]
+
         if chat_id not in chats_data:
             chats_data[chat_id] = {
                 "id": f"chat{chat_id}",
-                "name": row["chat_display_name"],
+                "name": chat_name,
                 "match_count": 0,
                 "first_match_dt": msg_dt,
                 "last_match_dt": msg_dt,

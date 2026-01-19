@@ -39,7 +39,34 @@ def _find_chats_by_handle_groups(conn, handle_groups: list[list[str]]) -> list[d
             JOIN handle h ON chj.handle_id = h.ROWID
             WHERE h.id IN ({placeholders})
         """, tuple(handles))
-        return [dict(row) for row in cursor.fetchall()]
+        matching_chats = [dict(row) for row in cursor.fetchall()]
+
+        # Enrich with participant count and last message date for ranking
+        for chat in matching_chats:
+            chat_id = chat['id']
+
+            count_cursor = conn.execute("""
+                SELECT COUNT(*) as cnt FROM chat_handle_join WHERE chat_id = ?
+            """, (chat_id,))
+            chat['participant_count'] = count_cursor.fetchone()['cnt'] + 1
+
+            msg_cursor = conn.execute("""
+                SELECT MAX(m.date) as last_date
+                FROM message m
+                JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
+                WHERE cmj.chat_id = ?
+            """, (chat_id,))
+            row = msg_cursor.fetchone()
+            chat['last_message_date'] = row['last_date'] if row else 0
+
+        # Sort: exact participant match first (2 = me + 1 participant), then by recency
+        target_count = 2  # 1 participant + me
+        matching_chats.sort(key=lambda c: (
+            0 if c['participant_count'] == target_count else 1,
+            -(c.get('last_message_date') or 0)
+        ))
+
+        return matching_chats
 
     # For multiple groups, build a query that requires one match from each group
     # Strategy: Find chats, then filter to those having handles from all groups
@@ -83,6 +110,33 @@ def _find_chats_by_handle_groups(conn, handle_groups: list[list[str]]) -> list[d
 
         if has_all_groups:
             matching_chats.append(chat)
+
+    # Enrich each matching chat with participant count and last message date for ranking
+    for chat in matching_chats:
+        chat_id = chat['id']
+
+        # Get participant count (+1 for "me")
+        count_cursor = conn.execute("""
+            SELECT COUNT(*) as cnt FROM chat_handle_join WHERE chat_id = ?
+        """, (chat_id,))
+        chat['participant_count'] = count_cursor.fetchone()['cnt'] + 1
+
+        # Get last message date
+        msg_cursor = conn.execute("""
+            SELECT MAX(m.date) as last_date
+            FROM message m
+            JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
+            WHERE cmj.chat_id = ?
+        """, (chat_id,))
+        row = msg_cursor.fetchone()
+        chat['last_message_date'] = row['last_date'] if row else 0
+
+    # Sort: exact participant match first (matching target count), then by recency
+    target_count = len(handle_groups) + 1  # participants + me
+    matching_chats.sort(key=lambda c: (
+        0 if c['participant_count'] == target_count else 1,  # Exact matches first
+        -(c.get('last_message_date') or 0)  # Then by recency (desc)
+    ))
 
     return matching_chats
 

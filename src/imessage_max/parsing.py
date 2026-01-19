@@ -55,13 +55,18 @@ def extract_text_from_attributed_body(blob: bytes) -> Optional[str]:
 
 def get_message_text(text: Optional[str], attributed_body: Optional[bytes] = None) -> Optional[str]:
     """Get message text, preferring text column but falling back to attributedBody."""
+    result = None
     if text:
-        return text
+        result = text
+    elif attributed_body:
+        result = extract_text_from_attributed_body(attributed_body)
 
-    if attributed_body:
-        return extract_text_from_attributed_body(attributed_body)
+    # Replace object replacement character with readable placeholder
+    # Each ￼ (U+FFFC) represents one attachment, so [Photo] for each is semantically correct
+    if result and '\ufffc' in result:
+        result = result.replace('\ufffc', '[Photo]')
 
-    return None
+    return result
 
 
 def extract_links(text: Optional[str]) -> list[str]:

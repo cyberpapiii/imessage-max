@@ -13,8 +13,23 @@ from ..models import Participant, generate_display_name
 from ..suggestions import get_message_suggestions
 from ..enrichment import get_image_metadata, process_video, process_audio, enrich_links
 
-# 24 hours in Apple timestamp format (nanoseconds)
-TWENTY_FOUR_HOURS_NS = 24 * 60 * 60 * 1_000_000_000
+# Default unanswered window in hours
+DEFAULT_UNANSWERED_HOURS = 24
+
+
+def _format_file_size(bytes_size: Optional[int]) -> str:
+    """Format file size in human-readable format."""
+    if bytes_size is None or bytes_size <= 0:
+        return "0 B"
+
+    size = float(bytes_size)
+    for unit in ['B', 'KB', 'MB', 'GB']:
+        if size < 1024:
+            if unit == 'B':
+                return f"{int(size)} {unit}"
+            return f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{size:.1f} TB"
 
 # Session detection: 4 hours gap starts a new session
 SESSION_GAP_HOURS = 4
@@ -91,17 +106,19 @@ def _looks_like_question(text: str) -> bool:
     return False
 
 
-def _has_reply_within_24h(conn, chat_id: int, message_date: int) -> bool:
-    """Check if there's a reply from someone else within 24 hours.
+def _has_reply_within_window(conn, chat_id: int, message_date: int, hours: int = DEFAULT_UNANSWERED_HOURS) -> bool:
+    """Check if there's a reply from someone else within the specified window.
 
     Args:
         conn: Database connection
         chat_id: Chat ROWID
         message_date: Apple timestamp of the original message
+        hours: Number of hours to check for a reply (default 24)
 
     Returns:
-        True if there is a reply within 24 hours
+        True if there is a reply within the window
     """
+    window_ns = hours * 60 * 60 * 1_000_000_000
     cursor = conn.execute("""
         SELECT 1 FROM message m
         JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
@@ -111,7 +128,7 @@ def _has_reply_within_24h(conn, chat_id: int, message_date: int) -> bool:
         AND m.is_from_me = 0
         AND m.associated_message_type = 0
         LIMIT 1
-    """, (chat_id, message_date, message_date + TWENTY_FOUR_HOURS_NS))
+    """, (chat_id, message_date, message_date + window_ns))
 
     return cursor.fetchone() is not None
 
@@ -203,6 +220,7 @@ def get_messages_impl(
     include_reactions: bool = True,
     cursor: Optional[str] = None,
     unanswered: bool = False,
+    unanswered_hours: int = DEFAULT_UNANSWERED_HOURS,
     session: Optional[str] = None,
     db_path: str = DB_PATH,
 ) -> dict[str, Any]:
@@ -222,7 +240,8 @@ def get_messages_impl(
         has: Filter by content type ("links", "attachments", etc.)
         include_reactions: Include reaction data (default True)
         cursor: Pagination cursor for continuing retrieval
-        unanswered: Only return messages from me that didn't receive a reply within 24h
+        unanswered: Only return messages from me that didn't receive a reply
+        unanswered_hours: Window in hours to check for replies (default 24)
         session: Filter to specific session ID (e.g., "session_1", "session_2")
         db_path: Path to chat.db (for testing)
 
@@ -241,6 +260,71 @@ def get_messages_impl(
 
     try:
         with get_db_connection(db_path) as conn:
+            # Resolve participants to chat_id if provided
+            if participants and not chat_id:
+                from .find_chat import _find_chats_by_handle_groups
+
+                # Build handle groups for each participant
+                handle_groups = []
+                for p in participants:
+                    group_handles = []
+                    if p.startswith('+'):
+                        group_handles.append(p)
+                    else:
+                        normalized = normalize_to_e164(p)
+                        if normalized:
+                            group_handles.append(normalized)
+                        if resolver.is_available:
+                            matches = resolver.search_by_name(p)
+                            for handle, _ in matches:
+                                if handle not in group_handles:
+                                    group_handles.append(handle)
+                    if group_handles:
+                        handle_groups.append(group_handles)
+
+                if handle_groups:
+                    matching_chats = _find_chats_by_handle_groups(conn, handle_groups)
+                    target_count = len(participants) + 1  # +1 for me
+
+                    # Filter to exact participant count matches
+                    exact_matches = [c for c in matching_chats
+                                     if c.get('participant_count') == target_count]
+
+                    if len(exact_matches) == 1:
+                        # Single exact match - use it
+                        chat_id = f"chat{exact_matches[0]['id']}"
+                    elif len(exact_matches) > 1:
+                        # Multiple exact matches - use most recent (already sorted by recency)
+                        chat_id = f"chat{exact_matches[0]['id']}"
+                    elif len(matching_chats) == 1:
+                        # Single partial match - use it
+                        chat_id = f"chat{matching_chats[0]['id']}"
+                    elif matching_chats:
+                        # Ambiguous - return disambiguation options
+                        return {
+                            "error": "ambiguous_participants",
+                            "message": f"Multiple chats found with participants: {participants}",
+                            "candidates": [
+                                {
+                                    "chat_id": f"chat{c['id']}",
+                                    "name": c.get('display_name') or "(Unnamed)",
+                                    "participant_count": c.get('participant_count', 0),
+                                }
+                                for c in matching_chats[:5]
+                            ],
+                            "suggestion": f"Did you mean the {matching_chats[0].get('participant_count', 0)}-person chat or a different one?"
+                        }
+                    else:
+                        return {
+                            "error": "chat_not_found",
+                            "message": f"No chat found with participants: {participants}"
+                        }
+                else:
+                    return {
+                        "error": "invalid_participants",
+                        "message": f"Could not resolve any handles for participants: {participants}"
+                    }
+
             # Resolve chat_id to numeric ID
             numeric_chat_id = None
 
@@ -359,9 +443,9 @@ def get_messages_impl(
                 filtered_rows = []
                 for row in message_rows:
                     text = get_message_text(row['text'], row.get('attributedBody'))
-                    # Check if message looks like a question and has no reply within 24h
-                    if _looks_like_question(text) and not _has_reply_within_24h(
-                        conn, numeric_chat_id, row['date']
+                    # Check if message looks like a question and has no reply within window
+                    if _looks_like_question(text) and not _has_reply_within_window(
+                        conn, numeric_chat_id, row['date'], unanswered_hours
                     ):
                         filtered_rows.append(row)
                         # Stop once we have enough
@@ -501,6 +585,7 @@ def get_messages_impl(
                                     'id': f"att{att['id']}",
                                     'filename': result['filename'],
                                     'size_bytes': result['size_bytes'],
+                                    'size_human': _format_file_size(result['size_bytes']),
                                     'dimensions': result['dimensions'],
                                 })
                                 processed_count += 1
