@@ -70,6 +70,7 @@ def get_messages(
     include_reactions: bool = True,
     cursor: Optional[str] = None,
     unanswered: bool = False,
+    unanswered_hours: int = 24,
     session: Optional[str] = None,
 ) -> dict:
     """
@@ -89,7 +90,8 @@ def get_messages(
         has: Filter by content type (links, attachments, images)
         include_reactions: Include reaction data (default True)
         cursor: Pagination cursor from previous response
-        unanswered: Only return messages from me that didn't receive a reply within 24h
+        unanswered: Only return messages from me that didn't receive a reply within unanswered_hours
+        unanswered_hours: Hours to wait for reply before considering unanswered (default 24)
         session: Filter to specific session ID (e.g., "session_1")
 
     Returns:
@@ -107,6 +109,7 @@ def get_messages(
         include_reactions=include_reactions,
         cursor=cursor,
         unanswered=unanswered,
+        unanswered_hours=unanswered_hours,
         session=session,
     )
     return _add_update_notice(result)
@@ -172,6 +175,7 @@ def search(
     format: str = "flat",
     include_context: bool = False,
     unanswered: bool = False,
+    unanswered_hours: int = 24,
 ) -> dict:
     """
     Full-text search across messages with advanced filtering.
@@ -188,7 +192,8 @@ def search(
         sort: "recent_first" (default) or "oldest_first"
         format: "flat" (default) or "grouped_by_chat"
         include_context: Include messages before/after each result
-        unanswered: Only return messages from me that didn't receive a reply within 24h
+        unanswered: Only return messages from me that didn't receive a reply within unanswered_hours
+        unanswered_hours: Hours to wait for reply before considering unanswered (default 24)
 
     Returns:
         Search results with people map
@@ -206,6 +211,7 @@ def search(
         format=format,
         include_context=include_context,
         unanswered=unanswered,
+        unanswered_hours=unanswered_hours,
     )
     return _add_update_notice(result)
 
