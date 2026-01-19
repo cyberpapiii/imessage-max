@@ -1,6 +1,8 @@
 """iMessage MCP - Intent-aligned MCP server for iMessage."""
 
-__version__ = "0.1.0"
+from .version_check import CURRENT_VERSION
+
+__version__ = CURRENT_VERSION
 
 from .db import (
     get_db_connection,
