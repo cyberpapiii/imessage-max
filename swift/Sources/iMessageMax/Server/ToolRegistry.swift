@@ -9,5 +9,6 @@ enum ToolRegistry {
 
         // Register individual tools
         FindChatTool.register(on: server, database: db, resolver: resolver)
+        SearchTool.register(on: server, db: db, resolver: resolver)
     }
 }
