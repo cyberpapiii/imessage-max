@@ -54,6 +54,7 @@ struct AttachmentListItem: Codable {
     let chat: String
     let msgId: String
     let msgPreview: String?
+    let available: Bool  // true if file is on disk, false if offloaded to iCloud
 
     enum CodingKeys: String, CodingKey {
         case id, type, mime, name, size
@@ -61,6 +62,7 @@ struct AttachmentListItem: Codable {
         case ts, ago, from, chat
         case msgId = "msg_id"
         case msgPreview = "msg_preview"
+        case available
     }
 }
 
@@ -146,7 +148,7 @@ final class ListAttachments {
 
         server.registerTool(
             name: "list_attachments",
-            description: "List attachments with filters by chat, sender, type, or time range. Returns metadata for images, videos, audio, PDFs, and documents.",
+            description: "List attachments with filters by chat, sender, type, or time range. Returns metadata for images, videos, audio, PDFs, and documents. Each attachment includes 'available: true/false' indicating if the file is on disk (false means offloaded to iCloud).",
             inputSchema: inputSchema,
             annotations: Tool.Annotations(
                 readOnlyHint: true,
@@ -364,17 +366,20 @@ final class ListAttachments {
 
                 let msgDate = AppleTime.toDate(row.date)
 
-                // Extract filename from path
-                var filename = row.filename
-                if let path = filename {
-                    filename = (path as NSString).lastPathComponent
+                // Extract filename from path and check availability
+                var displayName: String? = nil
+                var isAvailable = false
+                if let path = row.filename {
+                    let expandedPath = (path as NSString).expandingTildeInPath
+                    displayName = (path as NSString).lastPathComponent
+                    isAvailable = FileManager.default.fileExists(atPath: expandedPath)
                 }
 
                 let attachment = AttachmentListItem(
                     id: "att\(row.attId)",
                     type: attType.rawValue,
                     mime: row.mimeType,
-                    name: filename,
+                    name: displayName,
                     size: row.totalBytes,
                     sizeHuman: formatFileSize(row.totalBytes),
                     ts: TimeUtils.formatISO(msgDate),
@@ -382,7 +387,8 @@ final class ListAttachments {
                     from: senderKey,
                     chat: "chat\(row.chatId)",
                     msgId: "msg\(row.msgId)",
-                    msgPreview: row.text.map { String($0.prefix(50)) }
+                    msgPreview: row.text.map { String($0.prefix(50)) },
+                    available: isAvailable
                 )
 
                 attachments.append(attachment)

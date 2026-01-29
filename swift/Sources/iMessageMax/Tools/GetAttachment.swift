@@ -168,13 +168,26 @@ struct GetAttachment {
 
             // Expand ~ in path
             let expandedPath = (filename as NSString).expandingTildeInPath
+            let fileURL = URL(fileURLWithPath: expandedPath)
 
-            guard FileManager.default.fileExists(atPath: expandedPath) else {
-                return .error(
-                    type: "attachment_unavailable",
-                    message: "Attachment file not found on disk",
-                    details: nil
-                )
+            // Check if file exists locally
+            if !FileManager.default.fileExists(atPath: expandedPath) {
+                // Check if it's an iCloud file that can be downloaded
+                if let downloaded = tryDownloadFromiCloud(url: fileURL) {
+                    if !downloaded {
+                        return .error(
+                            type: "attachment_offloaded",
+                            message: "Attachment is stored in iCloud and download was triggered. Try again in a few seconds.",
+                            details: ["path": expandedPath]
+                        )
+                    }
+                } else {
+                    return .error(
+                        type: "attachment_offloaded",
+                        message: "Attachment has been offloaded from this Mac. Open the conversation in Messages.app to download it from iCloud, then try again.",
+                        details: nil
+                    )
+                }
             }
 
             // Determine attachment type
@@ -287,6 +300,52 @@ struct GetAttachment {
             return String(format: "%.1fKB", Double(sizeBytes) / 1024.0)
         } else {
             return String(format: "%.1fMB", Double(sizeBytes) / (1024.0 * 1024.0))
+        }
+    }
+
+    /// Try to download an iCloud file if it's offloaded
+    /// Returns: nil if not an iCloud file, false if download started but not complete, true if available
+    private func tryDownloadFromiCloud(url: URL) -> Bool? {
+        // Check if this is a ubiquitous (iCloud) item
+        do {
+            let resourceValues = try url.resourceValues(forKeys: [
+                .isUbiquitousItemKey,
+                .ubiquitousItemDownloadingStatusKey
+            ])
+
+            guard resourceValues.isUbiquitousItem == true else {
+                // Not an iCloud file
+                return nil
+            }
+
+            // Check download status
+            if let status = resourceValues.ubiquitousItemDownloadingStatus {
+                if status == .current {
+                    // Already downloaded
+                    return true
+                } else if status == .downloaded {
+                    // Downloaded but may need refresh
+                    return true
+                }
+            }
+
+            // Try to start downloading
+            try FileManager.default.startDownloadingUbiquitousItem(at: url)
+
+            // Wait briefly for small files
+            for _ in 0..<10 {
+                Thread.sleep(forTimeInterval: 0.5)
+                if FileManager.default.fileExists(atPath: url.path) {
+                    return true
+                }
+            }
+
+            // Download started but not complete yet
+            return false
+
+        } catch {
+            // Not an iCloud file or can't access
+            return nil
         }
     }
 }
