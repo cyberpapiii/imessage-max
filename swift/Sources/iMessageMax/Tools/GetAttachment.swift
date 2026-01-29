@@ -1,5 +1,6 @@
 // Sources/iMessageMax/Tools/GetAttachment.swift
 import Foundation
+import MCP
 
 /// Result types for get_attachment tool
 enum GetAttachmentResult {
@@ -35,6 +36,54 @@ struct GetAttachment {
     init(db: Database = Database(), imageProcessor: ImageProcessor = ImageProcessor()) {
         self.db = db
         self.imageProcessor = imageProcessor
+    }
+
+    // MARK: - Tool Registration
+
+    static func register(on server: Server, db: Database) {
+        let inputSchema: Value = .object([
+            "type": "object",
+            "properties": .object([
+                "attachment_id": .object([
+                    "type": "string",
+                    "description": "Attachment identifier (e.g., \"att123\" or \"123\")",
+                ]),
+                "variant": .object([
+                    "type": "string",
+                    "description": "Resolution variant",
+                    "enum": ["vision", "thumb", "full"],
+                    "default": "vision",
+                ]),
+            ]),
+            "required": ["attachment_id"],
+            "additionalProperties": false,
+        ])
+
+        server.registerTool(
+            name: "get_attachment",
+            description: "Get image content by attachment ID. Returns the image at the specified resolution variant: vision (1568px, best for AI analysis), thumb (400px, quick preview), or full (original).",
+            inputSchema: inputSchema,
+            annotations: Tool.Annotations(
+                readOnlyHint: true,
+                destructiveHint: false,
+                idempotentHint: true,
+                openWorldHint: false
+            )
+        ) { arguments in
+            guard let attachmentId = arguments?["attachment_id"]?.stringValue else {
+                let errorResponse = ["error": "validation_error", "message": "attachment_id is required"]
+                let jsonData = try JSONSerialization.data(withJSONObject: errorResponse, options: [.sortedKeys])
+                return [.text(String(data: jsonData, encoding: .utf8) ?? "{}")]
+            }
+
+            let variant = arguments?["variant"]?.stringValue ?? "vision"
+            let tool = GetAttachment(db: db)
+            let result = tool.execute(attachmentId: attachmentId, variant: variant)
+
+            let dict = result.toDict()
+            let jsonData = try JSONSerialization.data(withJSONObject: dict, options: [.sortedKeys])
+            return [.text(String(data: jsonData, encoding: .utf8) ?? "{}")]
+        }
     }
 
     /// Execute the get_attachment tool

@@ -1,5 +1,6 @@
 // Sources/iMessageMax/Tools/ListAttachments.swift
 import Foundation
+import MCP
 
 /// Attachment type derived from MIME type or UTI
 enum AttachmentType: String, Codable {
@@ -101,6 +102,89 @@ final class ListAttachments {
     init(db: Database = Database(), resolver: ContactResolver = ContactResolver()) {
         self.db = db
         self.resolver = resolver
+    }
+
+    // MARK: - Tool Registration
+
+    static func register(on server: Server, db: Database, resolver: ContactResolver) {
+        let inputSchema: Value = .object([
+            "type": "object",
+            "properties": .object([
+                "chat_id": .object([
+                    "type": "string",
+                    "description": "Filter to specific chat (e.g., \"chat123\")",
+                ]),
+                "from_person": .object([
+                    "type": "string",
+                    "description": "Filter by sender (or \"me\")",
+                ]),
+                "type": .object([
+                    "type": "string",
+                    "description": "Filter by type",
+                    "enum": ["image", "video", "audio", "pdf", "document", "any"],
+                ]),
+                "since": .object([
+                    "type": "string",
+                    "description": "Lower time bound (ISO, relative, or natural)",
+                ]),
+                "before": .object([
+                    "type": "string",
+                    "description": "Upper time bound",
+                ]),
+                "limit": .object([
+                    "type": "integer",
+                    "description": "Max results (default 50, max 100)",
+                ]),
+                "sort": .object([
+                    "type": "string",
+                    "description": "Sort order",
+                    "enum": ["recent_first", "oldest_first", "largest_first"],
+                ]),
+            ]),
+            "additionalProperties": false,
+        ])
+
+        server.registerTool(
+            name: "list_attachments",
+            description: "List attachments with filters by chat, sender, type, or time range. Returns metadata for images, videos, audio, PDFs, and documents.",
+            inputSchema: inputSchema,
+            annotations: Tool.Annotations(
+                readOnlyHint: true,
+                destructiveHint: false,
+                idempotentHint: true,
+                openWorldHint: false
+            )
+        ) { arguments in
+            let chatId = arguments?["chat_id"]?.stringValue
+            let fromPerson = arguments?["from_person"]?.stringValue
+            let type = arguments?["type"]?.stringValue
+            let since = arguments?["since"]?.stringValue
+            let before = arguments?["before"]?.stringValue
+            let limit = arguments?["limit"]?.intValue ?? 50
+            let sort = arguments?["sort"]?.stringValue ?? "recent_first"
+
+            let tool = ListAttachments(db: db, resolver: resolver)
+            let result = await tool.execute(
+                chatId: chatId,
+                fromPerson: fromPerson,
+                type: type,
+                since: since,
+                before: before,
+                limit: limit,
+                sort: sort
+            )
+
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys]
+            switch result {
+            case .success(let response):
+                let json = try encoder.encode(response)
+                return [.text(String(data: json, encoding: .utf8) ?? "{}")]
+            case .failure(let error):
+                let json = try encoder.encode(error)
+                return [.text(String(data: json, encoding: .utf8) ?? "{}")]
+            }
+        }
     }
 
     /// List attachments with filters

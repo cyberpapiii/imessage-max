@@ -1,5 +1,6 @@
 // Sources/iMessageMax/Tools/ListChats.swift
 import Foundation
+import MCP
 
 /// Sort order for list_chats
 enum ListChatsSort: String {
@@ -71,6 +72,84 @@ struct ListChatsError: Error, Codable {
 
 /// Implementation of the list_chats tool
 enum ListChatsTool {
+    // MARK: - Tool Registration
+
+    static func register(on server: Server, db: Database, resolver: ContactResolver) {
+        let inputSchema: Value = .object([
+            "type": "object",
+            "properties": .object([
+                "limit": .object([
+                    "type": "integer",
+                    "description": "Max chats to return (default 20, max 100)",
+                ]),
+                "since": .object([
+                    "type": "string",
+                    "description": "Only chats with activity since this time (ISO, relative, or natural)",
+                ]),
+                "is_group": .object([
+                    "type": "boolean",
+                    "description": "True for groups only, False for DMs only",
+                ]),
+                "min_participants": .object([
+                    "type": "integer",
+                    "description": "Filter to chats with at least N participants",
+                ]),
+                "max_participants": .object([
+                    "type": "integer",
+                    "description": "Filter to chats with at most N participants",
+                ]),
+                "sort": .object([
+                    "type": "string",
+                    "description": "Sort order",
+                    "enum": ["recent", "alphabetical", "most_active"],
+                ]),
+            ]),
+            "additionalProperties": false,
+        ])
+
+        server.registerTool(
+            name: "list_chats",
+            description: "List recent chats with previews. Returns chat names, participants, last message, and metadata.",
+            inputSchema: inputSchema,
+            annotations: Tool.Annotations(
+                readOnlyHint: true,
+                destructiveHint: false,
+                idempotentHint: true,
+                openWorldHint: false
+            )
+        ) { arguments in
+            let limit = arguments?["limit"]?.intValue ?? 20
+            let since = arguments?["since"]?.stringValue
+            let isGroup = arguments?["is_group"]?.boolValue
+            let minParticipants = arguments?["min_participants"]?.intValue
+            let maxParticipants = arguments?["max_participants"]?.intValue
+            let sort = arguments?["sort"]?.stringValue ?? "recent"
+
+            let result = await execute(
+                limit: limit,
+                since: since,
+                isGroup: isGroup,
+                minParticipants: minParticipants,
+                maxParticipants: maxParticipants,
+                sort: sort,
+                cursor: nil,
+                db: db,
+                resolver: resolver
+            )
+
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys]
+            switch result {
+            case .success(let response):
+                let json = try encoder.encode(response)
+                return [.text(String(data: json, encoding: .utf8) ?? "{}")]
+            case .failure(let error):
+                let json = try encoder.encode(error)
+                return [.text(String(data: json, encoding: .utf8) ?? "{}")]
+            }
+        }
+    }
+
     /// List recent chats with previews
     /// - Parameters:
     ///   - limit: Max chats to return (default 20, clamped to 1-100)

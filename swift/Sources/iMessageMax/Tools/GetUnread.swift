@@ -1,5 +1,6 @@
 // Sources/iMessageMax/Tools/GetUnread.swift
 import Foundation
+import MCP
 
 /// Response format for get_unread tool
 enum UnreadFormat: String, CaseIterable {
@@ -15,6 +16,71 @@ final class GetUnread {
     init(database: Database = Database(), contactResolver: ContactResolver = ContactResolver()) {
         self.database = database
         self.contactResolver = contactResolver
+    }
+
+    // MARK: - Tool Registration
+
+    static func register(on server: Server, db: Database, resolver: ContactResolver) {
+        let inputSchema: Value = .object([
+            "type": "object",
+            "properties": .object([
+                "chat_id": .object([
+                    "type": "string",
+                    "description": "Filter to specific chat (e.g., \"chat123\")",
+                ]),
+                "since": .object([
+                    "type": "string",
+                    "description": "Time window (default \"7d\", use \"all\" for all time)",
+                ]),
+                "format": .object([
+                    "type": "string",
+                    "description": "Response format",
+                    "enum": ["messages", "summary"],
+                ]),
+                "limit": .object([
+                    "type": "integer",
+                    "description": "Max messages (default 50, max 100)",
+                ]),
+            ]),
+            "additionalProperties": false,
+        ])
+
+        server.registerTool(
+            name: "get_unread",
+            description: "Get unread messages or summary of unread activity. Returns messages not sent by you that haven't been read.",
+            inputSchema: inputSchema,
+            annotations: Tool.Annotations(
+                readOnlyHint: true,
+                destructiveHint: false,
+                idempotentHint: true,
+                openWorldHint: false
+            )
+        ) { arguments in
+            let chatId = arguments?["chat_id"]?.stringValue
+            let since = arguments?["since"]?.stringValue ?? "7d"
+            let formatStr = arguments?["format"]?.stringValue ?? "messages"
+            let limit = arguments?["limit"]?.intValue ?? 50
+
+            let format = UnreadFormat(rawValue: formatStr) ?? .messages
+            let params = Parameters(
+                chatId: chatId,
+                since: since,
+                format: format,
+                limit: limit,
+                cursor: nil
+            )
+
+            let tool = GetUnread(database: db, contactResolver: resolver)
+            do {
+                let result = try await tool.execute(params: params)
+                let jsonData = try JSONSerialization.data(withJSONObject: result, options: [.sortedKeys])
+                return [.text(String(data: jsonData, encoding: .utf8) ?? "{}")]
+            } catch {
+                let errorResponse = ["error": "execution_error", "message": error.localizedDescription]
+                let jsonData = try JSONSerialization.data(withJSONObject: errorResponse, options: [.sortedKeys])
+                return [.text(String(data: jsonData, encoding: .utf8) ?? "{}")]
+            }
+        }
     }
 
     /// Parameters for get_unread tool

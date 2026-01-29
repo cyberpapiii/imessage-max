@@ -1,5 +1,6 @@
 // Sources/iMessageMax/Tools/GetContext.swift
 import Foundation
+import MCP
 
 /// Response for the get_context tool
 struct GetContextResponse: Codable {
@@ -46,6 +47,76 @@ struct GetContextError: LocalizedError, Codable {
 
 /// GetContext tool implementation
 enum GetContext {
+    // MARK: - Tool Registration
+
+    static func register(on server: Server, db: Database, resolver: ContactResolver) {
+        let inputSchema: Value = .object([
+            "type": "object",
+            "properties": .object([
+                "message_id": .object([
+                    "type": "string",
+                    "description": "Specific message ID to get context around (e.g., \"msg1\")",
+                ]),
+                "chat_id": .object([
+                    "type": "string",
+                    "description": "Chat ID (required if using contains)",
+                ]),
+                "contains": .object([
+                    "type": "string",
+                    "description": "Find message containing this text, then get context",
+                ]),
+                "before": .object([
+                    "type": "integer",
+                    "description": "Number of messages before the target (default 5, max 50)",
+                ]),
+                "after": .object([
+                    "type": "integer",
+                    "description": "Number of messages after the target (default 10, max 50)",
+                ]),
+            ]),
+            "additionalProperties": false,
+        ])
+
+        server.registerTool(
+            name: "get_context",
+            description: "Get messages surrounding a specific message. Use to see the conversation context around a particular message.",
+            inputSchema: inputSchema,
+            annotations: Tool.Annotations(
+                readOnlyHint: true,
+                destructiveHint: false,
+                idempotentHint: true,
+                openWorldHint: false
+            )
+        ) { arguments in
+            let messageId = arguments?["message_id"]?.stringValue
+            let chatId = arguments?["chat_id"]?.stringValue
+            let contains = arguments?["contains"]?.stringValue
+            let before = arguments?["before"]?.intValue ?? 5
+            let after = arguments?["after"]?.intValue ?? 10
+
+            let result = await execute(
+                messageId: messageId,
+                chatId: chatId,
+                contains: contains,
+                before: before,
+                after: after,
+                database: db,
+                resolver: resolver
+            )
+
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys]
+            switch result {
+            case .success(let response):
+                let json = try encoder.encode(response)
+                return [.text(String(data: json, encoding: .utf8) ?? "{}")]
+            case .failure(let error):
+                let json = try encoder.encode(error)
+                return [.text(String(data: json, encoding: .utf8) ?? "{}")]
+            }
+        }
+    }
+
     /// Get messages surrounding a specific message
     /// - Parameters:
     ///   - messageId: Specific message ID to get context around (e.g., "msg1" or "1")

@@ -1,5 +1,6 @@
 // Sources/iMessageMax/Tools/GetActiveConversations.swift
 import Foundation
+import MCP
 
 /// Result type for get_active_conversations tool
 struct ActiveConversationsResult: Codable {
@@ -71,6 +72,74 @@ struct ActiveConversationsError: Codable {
 }
 
 enum GetActiveConversations {
+    // MARK: - Tool Registration
+
+    static func register(on server: Server, db: Database, resolver: ContactResolver) {
+        let inputSchema: Value = .object([
+            "type": "object",
+            "properties": .object([
+                "hours": .object([
+                    "type": "integer",
+                    "description": "Time window to consider (default 24, max 168 = 1 week)",
+                ]),
+                "min_exchanges": .object([
+                    "type": "integer",
+                    "description": "Minimum back-and-forth exchanges to qualify (default 2)",
+                ]),
+                "is_group": .object([
+                    "type": "boolean",
+                    "description": "True for groups only, False for DMs only",
+                ]),
+                "limit": .object([
+                    "type": "integer",
+                    "description": "Max results (default 10, max 50)",
+                ]),
+            ]),
+            "additionalProperties": false,
+        ])
+
+        server.registerTool(
+            name: "get_active_conversations",
+            description: "Find conversations with recent bidirectional activity. Returns chats where both parties have exchanged messages within the time window.",
+            inputSchema: inputSchema,
+            annotations: Tool.Annotations(
+                readOnlyHint: true,
+                destructiveHint: false,
+                idempotentHint: true,
+                openWorldHint: false
+            )
+        ) { arguments in
+            let hours = arguments?["hours"]?.intValue ?? 24
+            let minExchanges = arguments?["min_exchanges"]?.intValue ?? 2
+            let isGroup = arguments?["is_group"]?.boolValue
+            let limit = arguments?["limit"]?.intValue ?? 10
+
+            do {
+                let result = try await execute(
+                    hours: hours,
+                    minExchanges: minExchanges,
+                    isGroup: isGroup,
+                    limit: limit,
+                    database: db,
+                    resolver: resolver
+                )
+
+                let encoder = JSONEncoder()
+                encoder.outputFormatting = [.sortedKeys]
+                let json = try encoder.encode(result)
+                return [.text(String(data: json, encoding: .utf8) ?? "{}")]
+            } catch {
+                let errorResponse = ActiveConversationsError(
+                    error: "execution_error",
+                    message: error.localizedDescription
+                )
+                let encoder = JSONEncoder()
+                let json = try encoder.encode(errorResponse)
+                return [.text(String(data: json, encoding: .utf8) ?? "{}")]
+            }
+        }
+    }
+
     /// Find conversations with recent bidirectional activity
     ///
     /// - Parameters:

@@ -1,5 +1,6 @@
 // Sources/iMessageMax/Tools/Diagnose.swift
 import Foundation
+import MCP
 
 /// Result type for diagnose tool
 struct DiagnoseResult: Codable {
@@ -31,6 +32,34 @@ struct DiagnoseResult: Codable {
 }
 
 enum DiagnoseTool {
+    // MARK: - Tool Registration
+
+    static func register(on server: Server, resolver: ContactResolver) {
+        let inputSchema: Value = .object([
+            "type": "object",
+            "properties": .object([:]),
+            "additionalProperties": false,
+        ])
+
+        server.registerTool(
+            name: "diagnose",
+            description: "Diagnose iMessage MCP configuration and permissions. Use this to troubleshoot database access, contacts, or permission issues.",
+            inputSchema: inputSchema,
+            annotations: Tool.Annotations(
+                readOnlyHint: true,
+                destructiveHint: false,
+                idempotentHint: true,
+                openWorldHint: false
+            )
+        ) { _ in
+            let result = try await execute(resolver: resolver)
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys]
+            let json = try encoder.encode(result)
+            return [.text(String(data: json, encoding: .utf8) ?? "{}")]
+        }
+    }
+
     /// Diagnose iMessage MCP configuration and permissions.
     ///
     /// Use this tool to troubleshoot issues with contact resolution,
