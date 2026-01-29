@@ -18,7 +18,10 @@ let package = Package(
                 .product(name: "MCP", package: "swift-sdk"),
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
             ],
-            path: "Sources/iMessageMax"
+            path: "Sources/iMessageMax",
+            swiftSettings: [
+                .unsafeFlags(["-parse-as-library"])
+            ]
         ),
         .testTarget(
             name: "iMessageMaxTests",
