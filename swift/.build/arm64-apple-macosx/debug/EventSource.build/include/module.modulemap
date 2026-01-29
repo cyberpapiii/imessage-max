@@ -1,3 +1,0 @@
-module EventSource {
-    header "/Users/robdezendorf/Documents/GitHub/imessage-max/swift/.build/arm64-apple-macosx/debug/EventSource.build/include/EventSource-Swift.h"
-}

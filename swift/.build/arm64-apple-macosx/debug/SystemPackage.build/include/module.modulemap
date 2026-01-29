@@ -1,3 +1,0 @@
-module SystemPackage {
-    header "/Users/robdezendorf/Documents/GitHub/imessage-max/swift/.build/arm64-apple-macosx/debug/SystemPackage.build/include/SystemPackage-Swift.h"
-}

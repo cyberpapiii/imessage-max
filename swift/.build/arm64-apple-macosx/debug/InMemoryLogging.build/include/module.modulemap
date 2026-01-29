@@ -1,3 +1,0 @@
-module InMemoryLogging {
-    header "/Users/robdezendorf/Documents/GitHub/imessage-max/swift/.build/arm64-apple-macosx/debug/InMemoryLogging.build/include/InMemoryLogging-Swift.h"
-}
