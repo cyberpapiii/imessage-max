@@ -1,0 +1,34 @@
+name: Release Swift
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-and-release:
+    runs-on: macos-14
+    permissions:
+      contents: write
+    defaults:
+      run:
+        working-directory: swift
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build universal binary
+        run: swift build -c release --arch arm64 --arch x86_64
+
+      - name: Create tarball
+        run: |
+          cd .build/apple/Products/Release
+          tar -czvf imessage-max-macos.tar.gz imessage-max
+          mv imessage-max-macos.tar.gz $GITHUB_WORKSPACE/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: imessage-max-macos.tar.gz
+          generate_release_notes: true
