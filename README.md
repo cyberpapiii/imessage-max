@@ -35,7 +35,14 @@ Most iMessage tools expose raw database structures, requiring 3-5 tool calls per
 
 ## Installation
 
-### From Source (Recommended)
+### Homebrew (Recommended)
+
+```bash
+brew tap cyberpapiii/tap
+brew install imessage-max
+```
+
+### From Source
 
 ```bash
 git clone https://github.com/cyberpapiii/imessage-max.git
@@ -45,12 +52,6 @@ swift build -c release
 # Binary is at .build/release/imessage-max
 ```
 
-### Homebrew (Coming Soon)
-
-```bash
-brew install cyberpapiii/tap/imessage-max
-```
-
 ## Setup
 
 ### 1. Grant Full Disk Access
@@ -58,25 +59,45 @@ brew install cyberpapiii/tap/imessage-max
 Required to read `~/Library/Messages/chat.db`:
 
 1. Open **System Settings** → **Privacy & Security** → **Full Disk Access**
-2. Click **+** and navigate to the `imessage-max` binary
-3. Press **⌘+Shift+G** and enter the path to the binary
+2. Click **+** to add the binary
+
+**For Homebrew installs:** The binary is at `/opt/homebrew/Cellar/imessage-max/VERSION/bin/imessage-max` (not the symlink at `/opt/homebrew/bin/`). Find it with:
+```bash
+# Open the folder containing the actual binary
+open $(dirname $(readlink -f $(which imessage-max)))
+```
+
+**For source builds:** Add `.build/release/imessage-max` from your clone directory.
+
+> **Tip:** In the file picker, press **⌘+Shift+G** and paste the path to navigate directly.
 
 ### 2. Grant Contacts Access
 
-Required for resolving phone numbers to names:
+Required for resolving phone numbers to names. The app will request access on first run, or add manually:
 
-1. Run `imessage-max` once - it will request access automatically
-2. Or manually add to **System Settings** → **Privacy & Security** → **Contacts**
+**System Settings** → **Privacy & Security** → **Contacts** → add `imessage-max`
 
 ### 3. Configure Claude Desktop
 
 Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
+**For Homebrew:**
 ```json
 {
   "mcpServers": {
     "imessage": {
-      "command": "/path/to/imessage-max"
+      "command": "/opt/homebrew/Cellar/imessage-max/1.0.0/bin/imessage-max"
+    }
+  }
+}
+```
+
+**For source builds:**
+```json
+{
+  "mcpServers": {
+    "imessage": {
+      "command": "/path/to/imessage-max/swift/.build/release/imessage-max"
     }
   }
 }
@@ -84,7 +105,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
 ### 4. Restart Claude Desktop
 
-The MCP should now appear in Claude's tools.
+The MCP should now appear in Claude's tools. You can verify with the `diagnose` tool.
 
 ## Tools
 
