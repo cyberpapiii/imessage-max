@@ -5,7 +5,9 @@ import Foundation
 actor ContactResolver {
     private var cache: [String: String] = [:]  // handle -> name
     private var isInitialized = false
-    private let store = CNContactStore()
+    // CNContactStore is not Sendable, so we mark it nonisolated(unsafe)
+    // This is safe because we only use it from within actor-isolated methods
+    nonisolated(unsafe) private let store = CNContactStore()
 
     // MARK: - Authorization
 
