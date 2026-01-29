@@ -699,59 +699,50 @@ actor GetMessagesTool {
             return text
         }
 
-        // Try to extract from attributedBody (binary plist format)
-        guard let data = attributedBody else { return nil }
+        // Try to extract from attributedBody (Apple typedstream format)
+        guard let blob = attributedBody else { return nil }
+        return extractTextFromTypedstream(blob)
+    }
 
-        // attributedBody is a serialized NSAttributedString in binary plist format
-        // The text content is stored under the "NSString" key
-        do {
-            if let plist = try PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any] {
-                // Direct NSString key
-                if let nsString = plist["NSString"] as? String, !nsString.isEmpty {
-                    return nsString
-                }
-                // Sometimes nested under NSAttributedString
-                if let attrDict = plist["NSAttributedString"] as? [String: Any],
-                   let nsString = attrDict["NSString"] as? String, !nsString.isEmpty {
-                    return nsString
-                }
-            }
-        } catch {
-            // Fall through to regex extraction
+    /// Extract plain text from attributedBody blob (Apple typedstream format)
+    private func extractTextFromTypedstream(_ blob: Data) -> String? {
+        // Look for NSString or NSMutableString marker in the typedstream
+        guard let nsStringRange = blob.range(of: Data("NSString".utf8)) ??
+              blob.range(of: Data("NSMutableString".utf8)) else {
+            return nil
         }
 
-        // Fallback: Try to extract text using pattern matching on raw bytes
-        // The text in attributedBody often appears after "NSString" marker
-        if let str = String(data: data, encoding: .ascii) {
-            // Look for readable text sequences (at least 3 consecutive printable chars)
-            let pattern = "[\\x20-\\x7E]{3,}"
-            if let regex = try? NSRegularExpression(pattern: pattern, options: []) {
-                let range = NSRange(str.startIndex..., in: str)
-                let matches = regex.matches(in: str, options: [], range: range)
+        // Skip past the class name marker to the length field
+        // The format is: marker + some bytes + length + data
+        var idx = nsStringRange.upperBound + 5
 
-                // Find the longest match that isn't just metadata keywords
-                var bestMatch: String?
-                var bestLength = 0
-                let keywords = Set(["NSString", "NSAttributedString", "NSMutableAttributedString",
-                                   "NSAttributes", "NSColor", "NSFont", "bplist"])
+        guard idx < blob.count else { return nil }
 
-                for match in matches {
-                    if let swiftRange = Range(match.range, in: str) {
-                        let candidate = String(str[swiftRange])
-                        if candidate.count > bestLength && !keywords.contains(candidate) {
-                            bestMatch = candidate
-                            bestLength = candidate.count
-                        }
-                    }
-                }
+        let lengthByte = blob[idx]
+        let length: Int
+        let dataStart: Int
 
-                if let text = bestMatch, text.count >= 3 {
-                    return text
-                }
-            }
+        // Parse length based on prefix byte
+        if lengthByte == 0x81 {
+            // 2-byte length (little endian)
+            guard idx + 3 <= blob.count else { return nil }
+            length = Int(blob[idx + 1]) | (Int(blob[idx + 2]) << 8)
+            dataStart = idx + 3
+        } else if lengthByte == 0x82 {
+            // 3-byte length (little endian)
+            guard idx + 4 <= blob.count else { return nil }
+            length = Int(blob[idx + 1]) | (Int(blob[idx + 2]) << 8) | (Int(blob[idx + 3]) << 16)
+            dataStart = idx + 4
+        } else {
+            // Single byte length
+            length = Int(lengthByte)
+            dataStart = idx + 1
         }
 
-        return nil
+        guard length > 0 && dataStart + length <= blob.count else { return nil }
+
+        let textData = blob[dataStart..<(dataStart + length)]
+        return String(data: textData, encoding: .utf8)
     }
 
     private func filterUnanswered(

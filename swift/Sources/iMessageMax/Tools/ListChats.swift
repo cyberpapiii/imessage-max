@@ -488,35 +488,44 @@ enum ListChatsTool {
         return text
     }
 
-    /// Extract plain text from attributedBody blob
+    /// Extract plain text from attributedBody blob (Apple typedstream format)
     private static func extractFromAttributedBody(_ data: Data) -> String? {
-        // attributedBody is a binary plist containing NSAttributedString
-        // We look for the __kIMMessagePartAttributeName marker and extract text after it
-        guard let str = String(data: data, encoding: .utf8) else {
-            // Try to find plain text within the binary data
-            // Look for readable ASCII sequences
-            var result = ""
-            var currentWord = ""
-
-            for byte in data {
-                if byte >= 32 && byte < 127 {
-                    currentWord.append(Character(UnicodeScalar(byte)))
-                } else {
-                    if currentWord.count > 2 {
-                        result += currentWord + " "
-                    }
-                    currentWord = ""
-                }
-            }
-
-            if currentWord.count > 2 {
-                result += currentWord
-            }
-
-            let trimmed = result.trimmingCharacters(in: .whitespaces)
-            return trimmed.isEmpty ? nil : trimmed
+        // Look for NSString or NSMutableString marker in the typedstream
+        guard let nsStringRange = data.range(of: Data("NSString".utf8)) ??
+              data.range(of: Data("NSMutableString".utf8)) else {
+            return nil
         }
-        return str
+
+        // Skip past the class name marker to the length field
+        var idx = nsStringRange.upperBound + 5
+
+        guard idx < data.count else { return nil }
+
+        let lengthByte = data[idx]
+        let length: Int
+        let dataStart: Int
+
+        // Parse length based on prefix byte
+        if lengthByte == 0x81 {
+            // 2-byte length (little endian)
+            guard idx + 3 <= data.count else { return nil }
+            length = Int(data[idx + 1]) | (Int(data[idx + 2]) << 8)
+            dataStart = idx + 3
+        } else if lengthByte == 0x82 {
+            // 3-byte length (little endian)
+            guard idx + 4 <= data.count else { return nil }
+            length = Int(data[idx + 1]) | (Int(data[idx + 2]) << 8) | (Int(data[idx + 3]) << 16)
+            dataStart = idx + 4
+        } else {
+            // Single byte length
+            length = Int(lengthByte)
+            dataStart = idx + 1
+        }
+
+        guard length > 0 && dataStart + length <= data.count else { return nil }
+
+        let textData = data[dataStart..<(dataStart + length)]
+        return String(data: textData, encoding: .utf8)
     }
 
     /// Generate display name from participants (like Messages.app)

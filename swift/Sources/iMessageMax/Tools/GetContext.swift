@@ -501,61 +501,43 @@ enum GetContext {
         return result
     }
 
-    /// Extract plain text from iMessage attributedBody blob
+    /// Extract plain text from iMessage attributedBody blob (Apple typedstream format)
     private static func extractTextFromAttributedBody(_ data: Data) -> String? {
-        // attributedBody is a serialized NSAttributedString in binary plist format
-        // The text content is stored under the "NSString" key
-        do {
-            if let plist = try PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any] {
-                // Direct NSString key
-                if let nsString = plist["NSString"] as? String, !nsString.isEmpty {
-                    return nsString
-                }
-                // Sometimes nested under NSAttributedString
-                if let attrDict = plist["NSAttributedString"] as? [String: Any],
-                   let nsString = attrDict["NSString"] as? String, !nsString.isEmpty {
-                    return nsString
-                }
-            }
-        } catch {
-            // Fall through to regex extraction
+        // Look for NSString or NSMutableString marker in the typedstream
+        guard let nsStringRange = data.range(of: Data("NSString".utf8)) ??
+              data.range(of: Data("NSMutableString".utf8)) else {
+            return nil
         }
 
-        // Fallback: Try to extract text using pattern matching on raw bytes
-        return extractReadableText(from: data)
-    }
+        // Skip past the class name marker to the length field
+        var idx = nsStringRange.upperBound + 5
 
-    /// Extract readable text from binary data using pattern matching
-    private static func extractReadableText(from data: Data) -> String? {
-        guard let str = String(data: data, encoding: .ascii) else { return nil }
+        guard idx < data.count else { return nil }
 
-        // Look for readable text sequences (at least 3 consecutive printable chars)
-        let pattern = "[\\x20-\\x7E]{3,}"
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { return nil }
+        let lengthByte = data[idx]
+        let length: Int
+        let dataStart: Int
 
-        let range = NSRange(str.startIndex..., in: str)
-        let matches = regex.matches(in: str, options: [], range: range)
-
-        // Find the longest match that isn't just metadata keywords
-        var bestMatch: String?
-        var bestLength = 0
-        let keywords = Set(["NSString", "NSAttributedString", "NSMutableAttributedString",
-                           "NSAttributes", "NSColor", "NSFont", "bplist"])
-
-        for match in matches {
-            if let swiftRange = Range(match.range, in: str) {
-                let candidate = String(str[swiftRange])
-                if candidate.count > bestLength && !keywords.contains(candidate) {
-                    bestMatch = candidate
-                    bestLength = candidate.count
-                }
-            }
+        // Parse length based on prefix byte
+        if lengthByte == 0x81 {
+            // 2-byte length (little endian)
+            guard idx + 3 <= data.count else { return nil }
+            length = Int(data[idx + 1]) | (Int(data[idx + 2]) << 8)
+            dataStart = idx + 3
+        } else if lengthByte == 0x82 {
+            // 3-byte length (little endian)
+            guard idx + 4 <= data.count else { return nil }
+            length = Int(data[idx + 1]) | (Int(data[idx + 2]) << 8) | (Int(data[idx + 3]) << 16)
+            dataStart = idx + 4
+        } else {
+            // Single byte length
+            length = Int(lengthByte)
+            dataStart = idx + 1
         }
 
-        if let text = bestMatch, text.count >= 3 {
-            return text
-        }
+        guard length > 0 && dataStart + length <= data.count else { return nil }
 
-        return nil
+        let textData = data[dataStart..<(dataStart + length)]
+        return String(data: textData, encoding: .utf8)
     }
 }

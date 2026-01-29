@@ -952,17 +952,49 @@ enum SearchTool {
             return text
         }
 
-        // Try to extract from attributedBody
+        // Try to extract from attributedBody (Apple typedstream format)
         guard let data = attributedBody else { return nil }
+        return extractTextFromTypedstream(data)
+    }
 
-        // The attributedBody is a binary plist with NSAttributedString
-        // For simplicity, try to extract readable text from it
-        if let str = String(data: data, encoding: .utf8) {
-            let cleaned = str.components(separatedBy: .controlCharacters).joined()
-            if !cleaned.isEmpty { return cleaned }
+    /// Extract plain text from attributedBody blob (Apple typedstream format)
+    private static func extractTextFromTypedstream(_ blob: Data) -> String? {
+        // Look for NSString or NSMutableString marker in the typedstream
+        guard let nsStringRange = blob.range(of: Data("NSString".utf8)) ??
+              blob.range(of: Data("NSMutableString".utf8)) else {
+            return nil
         }
 
-        return nil
+        // Skip past the class name marker to the length field
+        let idx = nsStringRange.upperBound + 5
+
+        guard idx < blob.count else { return nil }
+
+        let lengthByte = blob[idx]
+        let length: Int
+        let dataStart: Int
+
+        // Parse length based on prefix byte
+        if lengthByte == 0x81 {
+            // 2-byte length (little endian)
+            guard idx + 3 <= blob.count else { return nil }
+            length = Int(blob[idx + 1]) | (Int(blob[idx + 2]) << 8)
+            dataStart = idx + 3
+        } else if lengthByte == 0x82 {
+            // 3-byte length (little endian)
+            guard idx + 4 <= blob.count else { return nil }
+            length = Int(blob[idx + 1]) | (Int(blob[idx + 2]) << 8) | (Int(blob[idx + 3]) << 16)
+            dataStart = idx + 4
+        } else {
+            // Single byte length
+            length = Int(lengthByte)
+            dataStart = idx + 1
+        }
+
+        guard length > 0 && dataStart + length <= blob.count else { return nil }
+
+        let textData = blob[dataStart..<(dataStart + length)]
+        return String(data: textData, encoding: .utf8)
     }
 
     private static func generateChatDisplayName(
