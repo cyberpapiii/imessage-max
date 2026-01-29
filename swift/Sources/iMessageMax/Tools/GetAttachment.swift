@@ -4,28 +4,8 @@ import MCP
 
 /// Result types for get_attachment tool
 enum GetAttachmentResult {
-    case success(metadata: String, imageData: String)  // base64 encoded
+    case success(metadata: String, imageData: String, mimeType: String)  // base64 encoded image
     case error(type: String, message: String, details: [String: Any]?)
-
-    func toDict() -> [String: Any] {
-        switch self {
-        case .success(let metadata, let imageData):
-            return [
-                "result": [metadata, imageData]
-            ]
-        case .error(let type, let message, let details):
-            var dict: [String: Any] = [
-                "error": type,
-                "message": message
-            ]
-            if let details = details {
-                for (key, value) in details {
-                    dict[key] = value
-                }
-            }
-            return dict
-        }
-    }
 }
 
 /// Get attachment content at specified resolution variant
@@ -80,9 +60,27 @@ struct GetAttachment {
             let tool = GetAttachment(db: db)
             let result = tool.execute(attachmentId: attachmentId, variant: variant)
 
-            let dict = result.toDict()
-            let jsonData = try JSONSerialization.data(withJSONObject: dict, options: [.sortedKeys])
-            return [.text(String(data: jsonData, encoding: .utf8) ?? "{}")]
+            switch result {
+            case .success(let metadata, let imageData, let mimeType):
+                // Return metadata as text + image as proper MCP image content
+                // This allows Claude to see the image visually without token overhead
+                return [
+                    .text(metadata),
+                    .image(data: imageData, mimeType: mimeType, metadata: nil)
+                ]
+            case .error(let type, let message, let details):
+                var dict: [String: Any] = [
+                    "error": type,
+                    "message": message
+                ]
+                if let details = details {
+                    for (key, value) in details {
+                        dict[key] = value
+                    }
+                }
+                let jsonData = try JSONSerialization.data(withJSONObject: dict, options: [.sortedKeys])
+                return [.text(String(data: jsonData, encoding: .utf8) ?? "{}")]
+            }
         }
     }
 
@@ -206,7 +204,8 @@ struct GetAttachment {
                 // Encode image data as base64
                 let base64Data = result.data.base64EncodedString()
 
-                return .success(metadata: metadata, imageData: base64Data)
+                // ImageProcessor outputs JPEG format
+                return .success(metadata: metadata, imageData: base64Data, mimeType: "image/jpeg")
 
             case "video":
                 return .error(
