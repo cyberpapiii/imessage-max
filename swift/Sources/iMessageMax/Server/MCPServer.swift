@@ -3,6 +3,7 @@ import MCP
 
 actor MCPServerWrapper {
     private let server: Server
+    private let database: Database
     private let resolver: ContactResolver
 
     init() {
@@ -10,12 +11,13 @@ actor MCPServerWrapper {
             name: Version.name,
             version: Version.current
         )
+        self.database = Database()
         self.resolver = ContactResolver()
     }
 
     func start(transport: any Transport) async throws {
         await performStartupChecks()
-        ToolRegistry.registerAll(on: server)
+        ToolRegistry.registerAll(on: server, db: database, resolver: resolver)
         try await server.start(transport: transport)
         await server.waitUntilCompleted()
     }
