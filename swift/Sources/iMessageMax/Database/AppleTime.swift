@@ -76,16 +76,65 @@ enum AppleTime {
         let now = Date()
 
         switch lower {
+        // Simple keywords
         case "yesterday":
             return calendar.date(byAdding: .day, value: -1, to: now)
+        case "today":
+            return calendar.startOfDay(for: now)
+
+        // This period
+        case "this week":
+            return calendar.date(from: calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: now))
+        case "this month":
+            return calendar.date(from: calendar.dateComponents([.year, .month], from: now))
+        case "this year":
+            return calendar.date(from: calendar.dateComponents([.year], from: now))
+
+        // Last period
         case "last week":
             return calendar.date(byAdding: .weekOfYear, value: -1, to: now)
         case "last month":
             return calendar.date(byAdding: .month, value: -1, to: now)
-        case "today":
-            return calendar.startOfDay(for: now)
+        case "last year":
+            return calendar.date(byAdding: .year, value: -1, to: now)
+
         default:
-            return nil
+            break
         }
+
+        // "N days/weeks/months ago" pattern
+        let agoPattern = #"^(\d+)\s+(day|days|week|weeks|month|months)\s+ago$"#
+        if let regex = try? NSRegularExpression(pattern: agoPattern, options: .caseInsensitive),
+           let match = regex.firstMatch(in: lower, range: NSRange(lower.startIndex..., in: lower)),
+           let numRange = Range(match.range(at: 1), in: lower),
+           let unitRange = Range(match.range(at: 2), in: lower),
+           let num = Int(lower[numRange]) {
+            let unit = String(lower[unitRange]).lowercased()
+            switch unit {
+            case "day", "days":
+                return calendar.date(byAdding: .day, value: -num, to: now)
+            case "week", "weeks":
+                return calendar.date(byAdding: .weekOfYear, value: -num, to: now)
+            case "month", "months":
+                return calendar.date(byAdding: .month, value: -num, to: now)
+            default:
+                break
+            }
+        }
+
+        // "last tuesday", "last friday" etc.
+        let weekdays = ["sunday": 1, "monday": 2, "tuesday": 3, "wednesday": 4,
+                        "thursday": 5, "friday": 6, "saturday": 7]
+        if lower.hasPrefix("last ") {
+            let dayName = String(lower.dropFirst(5))
+            if let targetWeekday = weekdays[dayName] {
+                let currentWeekday = calendar.component(.weekday, from: now)
+                var daysBack = currentWeekday - targetWeekday
+                if daysBack <= 0 { daysBack += 7 }
+                return calendar.date(byAdding: .day, value: -daysBack, to: now)
+            }
+        }
+
+        return nil
     }
 }

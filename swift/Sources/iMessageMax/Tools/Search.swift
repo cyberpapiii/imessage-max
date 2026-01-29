@@ -145,7 +145,17 @@ enum SearchTool {
                 ]),
                 "since": .object([
                     "type": "string",
-                    "description": "Time bound (ISO, relative like \"24h\", or natural like \"yesterday\")"
+                    "description": "Time bound (ISO, relative like \"24h\"/\"7d\", or natural like \"yesterday\"/\"last tuesday\"/\"2 weeks ago\")"
+                ]),
+                "match_all": .object([
+                    "type": "boolean",
+                    "description": "If true, require ALL words to match. If false (default), match ANY word.",
+                    "default": .bool(false)
+                ]),
+                "fuzzy": .object([
+                    "type": "boolean",
+                    "description": "Enable typo-tolerant matching (allows 1-2 character differences). Useful for finding messages with typos.",
+                    "default": .bool(false)
                 ]),
                 "before": .object([
                     "type": "string",
@@ -192,9 +202,21 @@ enum SearchTool {
             description: """
                 Full-text search across messages with advanced filtering.
 
+                Search features:
+                - Multi-word: "costa rica trip" matches ANY word by default
+                - match_all: true requires ALL words to be present
+                - fuzzy: true handles typos (costarcia → costa rica)
+
+                Time filters (since/before):
+                - Relative: "24h", "7d", "2w", "3m"
+                - Natural: "yesterday", "last tuesday", "2 weeks ago", "this month"
+                - ISO: "2024-01-15T10:30:00Z"
+
                 Examples:
-                - search(query: "dinner plans") - find messages containing "dinner plans"
-                - search(from_person: "me", since: "7d") - my messages from last week
+                - search(query: "costa rica trip") - find any of these words
+                - search(query: "costa rica", match_all: true) - must have both words
+                - search(query: "volcno", fuzzy: true) - finds "volcano" despite typo
+                - search(from_person: "me", since: "last monday") - my messages since Monday
                 - search(has: "link", in_chat: "chat123") - links in a specific chat
                 - search(unanswered: true) - questions I sent without replies
                 """,
@@ -220,6 +242,8 @@ enum SearchTool {
             let includeContext = arguments?["include_context"]?.boolValue ?? false
             let unanswered = arguments?["unanswered"]?.boolValue ?? false
             let unansweredHours = arguments?["unanswered_hours"]?.intValue ?? 24
+            let matchAll = arguments?["match_all"]?.boolValue ?? false
+            let fuzzy = arguments?["fuzzy"]?.boolValue ?? false
 
             let result = await execute(
                 query: query,
@@ -235,6 +259,8 @@ enum SearchTool {
                 includeContext: includeContext,
                 unanswered: unanswered,
                 unansweredHours: unansweredHours,
+                matchAll: matchAll,
+                fuzzy: fuzzy,
                 db: db,
                 resolver: resolver
             )
@@ -266,6 +292,8 @@ enum SearchTool {
         includeContext: Bool = false,
         unanswered: Bool = false,
         unansweredHours: Int = 24,
+        matchAll: Bool = false,
+        fuzzy: Bool = false,
         db: Database = Database(),
         resolver: ContactResolver
     ) async -> Result<String, SearchError> {
@@ -326,11 +354,35 @@ enum SearchTool {
             }
 
             // Filter by search query in Swift (since we can't search attributedBody in SQL)
-            if hasQuery, let searchTerm = query?.trimmingCharacters(in: .whitespaces).lowercased() {
-                rows = rows.filter { row in
-                    let extractedText = getMessageText(text: row.text, attributedBody: row.attributedBody)
-                    guard let text = extractedText?.lowercased() else { return false }
-                    return text.contains(searchTerm)
+            // Supports multi-word search: OR (any word) by default, AND (all words) with matchAll=true
+            // With fuzzy=true, also matches words within 1-2 edits (handles typos)
+            if hasQuery, let searchQuery = query?.trimmingCharacters(in: .whitespaces).lowercased(), !searchQuery.isEmpty {
+                // Split query into words (minimum 2 chars each to avoid noise)
+                let searchWords = searchQuery.split(separator: " ")
+                    .map { String($0).lowercased() }
+                    .filter { $0.count >= 2 }
+
+                if !searchWords.isEmpty {
+                    rows = rows.filter { row in
+                        let extractedText = getMessageText(text: row.text, attributedBody: row.attributedBody)
+                        guard let text = extractedText?.lowercased() else { return false }
+
+                        // Split message text into words for fuzzy matching
+                        let textWords = text.split(whereSeparator: { !$0.isLetter && !$0.isNumber })
+                            .map { String($0).lowercased() }
+
+                        if matchAll {
+                            // AND logic: all search words must be present
+                            return searchWords.allSatisfy { searchWord in
+                                wordMatches(searchWord: searchWord, in: text, textWords: textWords, fuzzy: fuzzy)
+                            }
+                        } else {
+                            // OR logic: any word matches
+                            return searchWords.contains { searchWord in
+                                wordMatches(searchWord: searchWord, in: text, textWords: textWords, fuzzy: fuzzy)
+                            }
+                        }
+                    }
                 }
             }
 
@@ -967,6 +1019,75 @@ enum SearchTool {
             suffix += 1
         }
         return "\(baseName)\(suffix)"
+    }
+
+    /// Check if a search word matches anywhere in the text
+    /// - Parameters:
+    ///   - searchWord: The word to search for
+    ///   - text: The full message text (for exact contains match)
+    ///   - textWords: Individual words from the message (for fuzzy matching)
+    ///   - fuzzy: Whether to use fuzzy/typo-tolerant matching
+    /// - Returns: True if the word matches
+    private static func wordMatches(searchWord: String, in text: String, textWords: [String], fuzzy: Bool) -> Bool {
+        // Always try exact substring match first (fast)
+        if text.contains(searchWord) {
+            return true
+        }
+
+        // If fuzzy matching enabled, check for close matches
+        if fuzzy {
+            // Calculate max allowed distance based on word length
+            // Short words (3-4 chars): 1 edit, longer words: 2 edits
+            let maxDistance = searchWord.count <= 4 ? 1 : 2
+
+            for textWord in textWords {
+                // Skip words that are way too different in length
+                if abs(textWord.count - searchWord.count) > maxDistance {
+                    continue
+                }
+                // Check Levenshtein distance
+                if levenshteinDistance(searchWord, textWord) <= maxDistance {
+                    return true
+                }
+            }
+        }
+
+        return false
+    }
+
+    /// Calculate Levenshtein edit distance between two strings
+    /// Returns the minimum number of single-character edits (insertions, deletions, substitutions)
+    /// needed to transform one string into another
+    private static func levenshteinDistance(_ s1: String, _ s2: String) -> Int {
+        let m = s1.count
+        let n = s2.count
+
+        // Quick checks for empty strings
+        if m == 0 { return n }
+        if n == 0 { return m }
+
+        // Convert to arrays for indexing
+        let chars1 = Array(s1)
+        let chars2 = Array(s2)
+
+        // Use two rows instead of full matrix for memory efficiency
+        var prevRow = Array(0...n)
+        var currRow = Array(repeating: 0, count: n + 1)
+
+        for i in 1...m {
+            currRow[0] = i
+            for j in 1...n {
+                let cost = chars1[i - 1] == chars2[j - 1] ? 0 : 1
+                currRow[j] = min(
+                    prevRow[j] + 1,      // deletion
+                    currRow[j - 1] + 1,  // insertion
+                    prevRow[j - 1] + cost // substitution
+                )
+            }
+            swap(&prevRow, &currRow)
+        }
+
+        return prevRow[n]
     }
 
     private static func getMessageText(text: String?, attributedBody: Data?) -> String? {
