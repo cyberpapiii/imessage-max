@@ -224,7 +224,8 @@ enum GetContext {
                     ))
                 }
 
-                let escapedSearch = QueryBuilder.escapeLike(searchText)
+                // Fetch recent messages and search in Swift (to handle attributedBody)
+                // Note: We can't search attributedBody in SQL since it's a binary blob
                 let sql = """
                     SELECT
                         m.ROWID as msg_id,
@@ -240,13 +241,13 @@ enum GetContext {
                     JOIN chat c ON cmj.chat_id = c.ROWID
                     LEFT JOIN handle h ON m.handle_id = h.ROWID
                     WHERE c.ROWID = ?
-                    AND m.text LIKE ? ESCAPE '\\'
+                    AND (m.text IS NOT NULL OR m.attributedBody IS NOT NULL)
                     AND m.associated_message_type = 0
                     ORDER BY m.date DESC
-                    LIMIT 1
+                    LIMIT 500
                     """
 
-                let rows = try database.query(sql, params: [numericChatId, "%\(escapedSearch)%"]) { row in
+                let rows = try database.query(sql, params: [numericChatId]) { row in
                     (
                         msgId: row.int(0),
                         text: row.string(1),
@@ -259,10 +260,15 @@ enum GetContext {
                     )
                 }
 
-                guard let found = rows.first else {
+                // Search in Swift after extracting text from both columns
+                let searchLower = searchText.lowercased()
+                guard let found = rows.first(where: { row in
+                    let extractedText = getMessageText(text: row.text, attributedBody: row.attributedBody)
+                    return extractedText?.lowercased().contains(searchLower) ?? false
+                }) else {
                     return .failure(GetContextError(
                         error: "not_found",
-                        message: "Target message not found"
+                        message: "No message found containing '\(searchText)'"
                     ))
                 }
                 targetResult = found

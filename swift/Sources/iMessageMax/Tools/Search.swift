@@ -292,6 +292,11 @@ enum SearchTool {
 
         do {
             // Build and execute query
+            // Fetch more rows if we need to filter by text in Swift
+            // (since attributedBody can't be searched in SQL)
+            // Use a higher multiplier to improve search coverage without time filters
+            let fetchLimit = (hasQuery || unanswered) ? max(500, clampedLimit * 10) : clampedLimit
+
             let (sql, params) = buildQuery(
                 query: query,
                 fromPerson: fromPerson,
@@ -300,7 +305,7 @@ enum SearchTool {
                 has: has,
                 since: since,
                 before: before,
-                limit: unanswered ? clampedLimit * 3 : clampedLimit,
+                limit: fetchLimit,
                 sort: sortOrder,
                 unanswered: unanswered
             )
@@ -320,6 +325,15 @@ enum SearchTool {
                 )
             }
 
+            // Filter by search query in Swift (since we can't search attributedBody in SQL)
+            if hasQuery, let searchTerm = query?.trimmingCharacters(in: .whitespaces).lowercased() {
+                rows = rows.filter { row in
+                    let extractedText = getMessageText(text: row.text, attributedBody: row.attributedBody)
+                    guard let text = extractedText?.lowercased() else { return false }
+                    return text.contains(searchTerm)
+                }
+            }
+
             // Filter for unanswered if requested
             if unanswered {
                 rows = try filterUnanswered(
@@ -328,6 +342,11 @@ enum SearchTool {
                     limit: clampedLimit,
                     hours: unansweredHours
                 )
+            }
+
+            // Trim to requested limit after filtering
+            if rows.count > clampedLimit {
+                rows = Array(rows.prefix(clampedLimit))
             }
 
             // Build response
@@ -402,10 +421,14 @@ enum SearchTool {
 
         var params: [Any] = [0]
 
-        // Text search
-        if let searchQuery = query?.trimmingCharacters(in: .whitespaces), !searchQuery.isEmpty {
-            builder.where("m.text LIKE ? ESCAPE '\\' COLLATE NOCASE")
-            params.append("%\(QueryBuilder.escapeLike(searchQuery))%")
+        // NOTE: Text search is done in Swift after fetching, not in SQL
+        // This is because many messages have text in attributedBody (binary blob)
+        // instead of the text column, and SQLite can't search binary blobs effectively.
+        // We fetch more rows and filter in Swift after extracting text from both columns.
+
+        // Ensure we have text content (either in text or attributedBody)
+        if query != nil && !query!.isEmpty {
+            builder.where("(m.text IS NOT NULL OR m.attributedBody IS NOT NULL)")
         }
 
         // Time filters
