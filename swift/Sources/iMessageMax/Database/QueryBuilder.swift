@@ -7,6 +7,7 @@ final class QueryBuilder {
     private var joins: [String] = []
     private var conditions: [(String, [Any])] = []
     private var groupByCols: [String] = []
+    private var havingConditions: [(String, [Any])] = []
     private var orderByCols: [String] = []
     private var limitValue: Int?
     private var offsetValue: Int?
@@ -44,6 +45,12 @@ final class QueryBuilder {
     @discardableResult
     func groupBy(_ columns: String...) -> QueryBuilder {
         groupByCols.append(contentsOf: columns)
+        return self
+    }
+
+    @discardableResult
+    func having(_ condition: String, _ params: Any...) -> QueryBuilder {
+        havingConditions.append((condition, params))
         return self
     }
 
@@ -90,6 +97,15 @@ final class QueryBuilder {
         // GROUP BY
         if !groupByCols.isEmpty {
             parts.append("GROUP BY \(groupByCols.joined(separator: ", "))")
+        }
+
+        // HAVING
+        if !havingConditions.isEmpty {
+            let havingClauses = havingConditions.map { $0.0 }
+            parts.append("HAVING \(havingClauses.joined(separator: " AND "))")
+            for (_, params) in havingConditions {
+                allParams.append(contentsOf: params)
+            }
         }
 
         // ORDER BY

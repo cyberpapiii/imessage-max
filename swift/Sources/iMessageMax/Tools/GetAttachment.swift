@@ -1,0 +1,244 @@
+// Sources/iMessageMax/Tools/GetAttachment.swift
+import Foundation
+
+/// Result types for get_attachment tool
+enum GetAttachmentResult {
+    case success(metadata: String, imageData: String)  // base64 encoded
+    case error(type: String, message: String, details: [String: Any]?)
+
+    func toDict() -> [String: Any] {
+        switch self {
+        case .success(let metadata, let imageData):
+            return [
+                "result": [metadata, imageData]
+            ]
+        case .error(let type, let message, let details):
+            var dict: [String: Any] = [
+                "error": type,
+                "message": message
+            ]
+            if let details = details {
+                for (key, value) in details {
+                    dict[key] = value
+                }
+            }
+            return dict
+        }
+    }
+}
+
+/// Get attachment content at specified resolution variant
+struct GetAttachment {
+    private let db: Database
+    private let imageProcessor: ImageProcessor
+
+    init(db: Database = Database(), imageProcessor: ImageProcessor = ImageProcessor()) {
+        self.db = db
+        self.imageProcessor = imageProcessor
+    }
+
+    /// Execute the get_attachment tool
+    /// - Parameters:
+    ///   - attachmentId: Attachment identifier (e.g., "att123" or just "123")
+    ///   - variant: Resolution variant - "vision" (1568px, default), "thumb" (400px), or "full" (original)
+    /// - Returns: GetAttachmentResult with image data or error
+    func execute(attachmentId: String, variant: String = "vision") -> GetAttachmentResult {
+        // Validate variant
+        guard let imageVariant = ImageVariant(rawValue: variant) else {
+            let validVariants = ImageVariant.allCases.map { $0.rawValue }.sorted()
+            return .error(
+                type: "validation_error",
+                message: "Invalid variant '\(variant)'. Must be one of: \(validVariants.joined(separator: ", "))",
+                details: nil
+            )
+        }
+
+        // Validate attachment_id
+        guard !attachmentId.isEmpty else {
+            return .error(
+                type: "validation_error",
+                message: "attachment_id is required",
+                details: nil
+            )
+        }
+
+        // Extract numeric ID from "attXXX" format
+        let numericId: Int?
+        if attachmentId.hasPrefix("att") {
+            numericId = Int(attachmentId.dropFirst(3))
+        } else {
+            numericId = Int(attachmentId)
+        }
+
+        guard let rowId = numericId else {
+            return .error(
+                type: "validation_error",
+                message: "Invalid attachment_id format: \(attachmentId)",
+                details: nil
+            )
+        }
+
+        // Query database for attachment
+        do {
+            let attachments: [(filename: String?, mimeType: String?, uti: String?, totalBytes: Int64?, transferName: String?)] = try db.query(
+                """
+                SELECT
+                    filename,
+                    mime_type,
+                    uti,
+                    total_bytes,
+                    transfer_name
+                FROM attachment
+                WHERE ROWID = ?
+                """,
+                params: [rowId]
+            ) { row in
+                // Column indices: 0=filename, 1=mime_type, 2=uti, 3=total_bytes, 4=transfer_name
+                (
+                    filename: row.string(0),
+                    mimeType: row.string(1),
+                    uti: row.string(2),
+                    totalBytes: row.optionalInt(3),
+                    transferName: row.string(4)
+                )
+            }
+
+            guard let attachment = attachments.first else {
+                return .error(
+                    type: "attachment_not_found",
+                    message: "Attachment not found: \(attachmentId)",
+                    details: nil
+                )
+            }
+
+            guard let filename = attachment.filename else {
+                return .error(
+                    type: "attachment_unavailable",
+                    message: "Attachment file path not available",
+                    details: nil
+                )
+            }
+
+            // Expand ~ in path
+            let expandedPath = (filename as NSString).expandingTildeInPath
+
+            guard FileManager.default.fileExists(atPath: expandedPath) else {
+                return .error(
+                    type: "attachment_unavailable",
+                    message: "Attachment file not found on disk",
+                    details: nil
+                )
+            }
+
+            // Determine attachment type
+            let attType = getAttachmentType(mimeType: attachment.mimeType, uti: attachment.uti)
+            let displayName = attachment.transferName ?? (expandedPath as NSString).lastPathComponent
+
+            // Process based on type
+            switch attType {
+            case "image":
+                guard let result = imageProcessor.process(at: expandedPath, variant: imageVariant) else {
+                    return .error(
+                        type: "processing_failed",
+                        message: "Failed to process image",
+                        details: nil
+                    )
+                }
+
+                // Build metadata string
+                let sizeHuman = formatSize(result.data.count)
+                var metadata = "\(displayName) (\(result.width)x\(result.height), \(sizeHuman))"
+
+                // Add warning for full variant if large
+                if imageVariant == .full && result.data.count > 200 * 1024 {
+                    metadata += " [WARNING: Large file may impact performance]"
+                }
+
+                // Encode image data as base64
+                let base64Data = result.data.base64EncodedString()
+
+                return .success(metadata: metadata, imageData: base64Data)
+
+            case "video":
+                return .error(
+                    type: "unsupported_type",
+                    message: "Video attachments are not yet supported with the new variant system. Use list_attachments to see video metadata.",
+                    details: [
+                        "type": attType,
+                        "filename": displayName,
+                        "size": attachment.totalBytes as Any
+                    ]
+                )
+
+            default:
+                return .error(
+                    type: "unsupported_type",
+                    message: "Attachment type '\(attType)' not supported. Only images are supported.",
+                    details: [
+                        "type": attType,
+                        "filename": displayName,
+                        "size": attachment.totalBytes as Any
+                    ]
+                )
+            }
+
+        } catch let error as DatabaseError {
+            switch error {
+            case .notFound(let path):
+                return .error(
+                    type: "database_not_found",
+                    message: "Database not found at \(path)",
+                    details: nil
+                )
+            default:
+                return .error(
+                    type: "internal_error",
+                    message: error.localizedDescription,
+                    details: nil
+                )
+            }
+        } catch {
+            return .error(
+                type: "internal_error",
+                message: error.localizedDescription,
+                details: nil
+            )
+        }
+    }
+
+    // MARK: - Private Helpers
+
+    /// Determine attachment type from MIME type or UTI
+    private func getAttachmentType(mimeType: String?, uti: String?) -> String {
+        guard mimeType != nil || uti != nil else {
+            return "other"
+        }
+
+        let mime = (mimeType ?? "").lowercased()
+        let utiStr = (uti ?? "").lowercased()
+
+        if mime.contains("image") || utiStr.contains("image") ||
+           utiStr.contains("jpeg") || utiStr.contains("png") || utiStr.contains("heic") {
+            return "image"
+        } else if mime.contains("video") || utiStr.contains("movie") || utiStr.contains("video") {
+            return "video"
+        } else if mime.contains("audio") || utiStr.contains("audio") {
+            return "audio"
+        } else if mime.contains("pdf") || utiStr.contains("pdf") {
+            return "pdf"
+        } else {
+            return "other"
+        }
+    }
+
+    /// Format bytes as human-readable string
+    private func formatSize(_ sizeBytes: Int) -> String {
+        if sizeBytes < 1024 {
+            return "\(sizeBytes)B"
+        } else if sizeBytes < 1024 * 1024 {
+            return String(format: "%.1fKB", Double(sizeBytes) / 1024.0)
+        } else {
+            return String(format: "%.1fMB", Double(sizeBytes) / (1024.0 * 1024.0))
+        }
+    }
+}
