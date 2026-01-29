@@ -1,12 +1,29 @@
-// iMessage Max - Swift MCP Server for iMessage
-// https://github.com/robdezendorf/imessage-max
-
 import Foundation
+import ArgumentParser
+import MCP
 
 @main
-struct iMessageMax {
-    static func main() async throws {
-        print("[iMessage Max] Starting Swift MCP server...")
-        // Placeholder - will be replaced with full MCP integration
+struct iMessageMax: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "imessage-max",
+        abstract: "MCP server for iMessage",
+        version: Version.current
+    )
+
+    @Flag(name: .long, help: "Run with HTTP transport instead of stdio")
+    var http = false
+
+    @Option(name: .long, help: "Port for HTTP transport (default: 8080)")
+    var port: Int = 8080
+
+    mutating func run() async throws {
+        let server = MCPServerWrapper()
+
+        if http {
+            fatalError("HTTP transport not yet implemented")
+        }
+
+        let transport = StdioTransport()
+        try await server.start(transport: transport)
     }
 }
