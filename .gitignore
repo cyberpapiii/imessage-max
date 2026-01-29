@@ -88,3 +88,12 @@ Thumbs.db
 # MCP Publisher
 .mcpregistry_*
 mcp-publisher
+
+# Swift
+swift/.build/
+swift/.swiftpm/
+swift/Package.resolved
+*.xcodeproj
+*.xcworkspace
+xcuserdata/
+DerivedData/

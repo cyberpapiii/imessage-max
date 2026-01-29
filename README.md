@@ -4,29 +4,30 @@
 
 # iMessage Max
 
-An MCP (Model Context Protocol) server for iMessage that lets AI assistants read and search your messages with proper contact resolution.
+A high-performance MCP (Model Context Protocol) server for iMessage that lets AI assistants read, search, and send your messages with proper contact resolution.
 
-<!-- mcp-name: io.github.cyberpapiii/imessage-max -->
+Built in Swift for native macOS integration - single binary, no runtime dependencies.
 
 ## Features
 
-- **Media Enrichment** - Images converted to viewable format, video thumbnails extracted, links unfurled with titles
-- **Contact Resolution** - See names instead of phone numbers (resolves via macOS Contacts)
-- **Participant Lookup** - Find chats by typing names like `find_chat(participants=["Nick", "Andrew"])`
+- **12 Intent-Aligned Tools** - Work the way you naturally ask questions, not raw database queries
+- **Contact Resolution** - See names instead of phone numbers via macOS Contacts
+- **Smart Image Handling** - Efficient image variants (vision/thumb/full) to avoid token bloat
 - **Session Grouping** - Messages grouped into conversation sessions with gap detection
-- **Token Efficient** - Designed for AI consumption with compact responses and pagination
-- **Read-Only Safe** - Only reads from chat.db, never modifies your messages
+- **Attachment Tracking** - Know which images are available locally vs offloaded to iCloud
+- **Native Performance** - Swift with raw SQLite3, Core Image GPU acceleration
+- **Read-Only Safe** - Only reads from chat.db, send requires explicit permission
 
 ## Why This Exists
 
-Most iMessage tools expose raw database structures, requiring 3-5 tool calls per user intent. This MCP provides intent-aligned tools that work the way you'd naturally ask questions:
+Most iMessage tools expose raw database structures, requiring 3-5 tool calls per user intent. This MCP provides intent-aligned tools:
 
 ```
 "What did Nick and I talk about yesterday?"
 → find_chat(participants=["Nick"]) + get_messages(since="yesterday")
 
-"Show me recent group chats"
-→ list_chats(is_group=True)
+"Show me photos from the group chat"
+→ list_attachments(chat_id="chat123", type="image")
 
 "Find where we discussed the trip"
 → search(query="trip")
@@ -34,70 +35,40 @@ Most iMessage tools expose raw database structures, requiring 3-5 tool calls per
 
 ## Installation
 
-### Desktop Extension (Recommended)
-
-One-click install with icon support in Claude Desktop:
-
-**Prerequisites:**
-1. [UV](https://docs.astral.sh/uv/) must be installed:
-   ```bash
-   curl -LsSf https://astral.sh/uv/install.sh | sh
-   ```
-2. Grant **Full Disk Access** to `uvx` (required to read iMessage database):
-   - Open **System Settings** → **Privacy & Security** → **Full Disk Access**
-   - Click **+** and add `~/.local/bin/uvx` (press Cmd+Shift+G to enter path)
-
-**Install:**
-1. Download [`imessage-max.mcpb`](https://github.com/cyberpapiii/imessage-max/releases/latest/download/imessage-max.mcpb)
-2. Double-click to install, or drag into Claude Desktop
-3. Grant Contacts access when prompted (for name resolution)
-
-**Troubleshooting:** Run the `diagnose` tool to check permissions status.
-
-### From PyPI
+### From Source (Recommended)
 
 ```bash
-pip install imessage-max
+git clone https://github.com/cyberpapiii/imessage-max.git
+cd imessage-max/swift
+swift build -c release
+
+# Binary is at .build/release/imessage-max
 ```
 
-### Using UV
+### Homebrew (Coming Soon)
 
 ```bash
-# Install UV if you haven't
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# Install imessage-max
-uv pip install imessage-max
-```
-
-### From Source
-
-```bash
-pip install git+https://github.com/cyberpapiii/imessage-max.git
+brew install cyberpapiii/tap/imessage-max
 ```
 
 ## Setup
 
-### 1. Grant Permissions
+### 1. Grant Full Disk Access
 
-The MCP needs two macOS permissions to work properly:
-
-#### Full Disk Access (Required)
-Allows reading `~/Library/Messages/chat.db`
+Required to read `~/Library/Messages/chat.db`:
 
 1. Open **System Settings** → **Privacy & Security** → **Full Disk Access**
-2. Click **+** and add your terminal app (Terminal.app, iTerm, Warp, etc.)
-3. If using Claude Desktop, add the process that runs Python:
-   - For UV: Add `/Users/YOU/.local/share/uv/python/` (or find it with `which python`)
+2. Click **+** and navigate to the `imessage-max` binary
+3. Press **⌘+Shift+G** and enter the path to the binary
 
-#### Contacts Access (Required for name resolution)
-Allows resolving phone numbers to contact names
+### 2. Grant Contacts Access
 
-1. Open **System Settings** → **Privacy & Security** → **Contacts**
-2. Add the same apps/processes as above
-3. **Important:** If using UV, you need to add UV itself (`~/.cargo/bin/uv` or similar)
+Required for resolving phone numbers to names:
 
-### 2. Configure Claude Desktop
+1. Run `imessage-max` once - it will request access automatically
+2. Or manually add to **System Settings** → **Privacy & Security** → **Contacts**
+
+### 3. Configure Claude Desktop
 
 Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
@@ -105,28 +76,15 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 {
   "mcpServers": {
     "imessage": {
-      "command": "uvx",
-      "args": ["imessage-max"]
+      "command": "/path/to/imessage-max"
     }
   }
 }
 ```
 
-Or if installed via pip:
+### 4. Restart Claude Desktop
 
-```json
-{
-  "mcpServers": {
-    "imessage": {
-      "command": "imessage-max"
-    }
-  }
-}
-```
-
-### 3. Restart Claude Desktop
-
-The MCP will request Contacts access on first run if not already granted.
+The MCP should now appear in Claude's tools.
 
 ## Tools
 
@@ -134,253 +92,159 @@ The MCP will request Contacts access on first run if not already granted.
 Find chats by participants, name, or recent content.
 
 ```python
-# Find a DM by contact name
-find_chat(participants=["Nick"])
-
-# Find a group chat with multiple people
-find_chat(participants=["Nick", "Andrew"])
-
-# Find a named group chat
-find_chat(name="Family")
-
-# Find chat where you discussed something recently
-find_chat(contains_recent="dinner plans")
+find_chat(participants=["Nick"])           # Find DM with Nick
+find_chat(participants=["Nick", "Andrew"]) # Find group with both
+find_chat(name="Family")                   # Find by chat name
+find_chat(contains_recent="dinner plans")  # Find by recent content
 ```
 
 ### get_messages
-Retrieve messages with flexible filtering. **Returns metadata for media, links are enriched.**
+Retrieve messages with flexible filtering. Returns metadata for media.
 
 ```python
-# Get recent messages from a chat
-get_messages(chat_id="chat123", limit=50)
-
-# Get messages from the last 24 hours
-get_messages(chat_id="chat123", since="24h")
-
-# Get only messages from a specific person
-get_messages(chat_id="chat123", from_person="Nick")
-
-# Get messages containing specific text
-get_messages(chat_id="chat123", contains="flight")
+get_messages(chat_id="chat123", limit=50)      # Recent messages
+get_messages(chat_id="chat123", since="24h")   # Last 24 hours
+get_messages(chat_id="chat123", from_person="Nick")  # From specific person
 ```
-
-Messages with attachments return metadata (not image content) for performance:
-
-```json
-{
-  "messages": [{
-    "id": "msg_123",
-    "text": "Check out this photo!",
-    "from": "nick",
-    "media": [{
-      "type": "image",
-      "id": "att123",
-      "filename": "IMG_1234.heic",
-      "size_bytes": 2457600,
-      "dimensions": {"width": 4032, "height": 3024}
-    }],
-    "links": [{
-      "url": "https://instagram.com/p/abc",
-      "domain": "instagram.com",
-      "title": "Post by @user",
-      "description": "Check out this amazing..."
-    }]
-  }]
-}
-```
-
-| Media Type | Response |
-|------------|----------|
-| Images (HEIC/JPEG/PNG) | Metadata only: id, filename, size, dimensions |
-| Videos (MOV/MP4) | Metadata: id, filename, duration |
-| Audio (voice notes) | Metadata: id, filename, duration |
-| Links | Open Graph metadata (title, description, domain), capped at 10 per request |
-
-**To view an image:** Use `get_attachment(attachment_id="att123")` - see below.
 
 ### get_attachment
-Retrieve full image content by attachment ID. Use after `get_messages` to view specific images.
+Retrieve image content by attachment ID with resolution variants.
 
 ```python
-# Get image optimized for AI analysis (default)
-get_attachment(attachment_id="att123")
-
-# Get quick thumbnail preview
-get_attachment(attachment_id="att123", variant="thumb")
-
-# Get original full resolution
-get_attachment(attachment_id="att123", variant="full")
+get_attachment(attachment_id="att123")                 # Default: vision (1568px)
+get_attachment(attachment_id="att123", variant="thumb") # Quick preview (400px)
+get_attachment(attachment_id="att123", variant="full")  # Original resolution
 ```
 
 | Variant | Resolution | Use Case | Token Cost |
 |---------|------------|----------|------------|
-| `vision` (default) | 1568px | AI analysis, reading text in images | ~1,600 tokens |
-| `thumb` | 400px | Quick preview, browsing multiple images | ~200 tokens |
-| `full` | Original | When you need maximum detail | Varies |
-
-**Example workflow:**
-```
-1. get_messages(chat_id="chat123") → See media metadata: {"id": "att123", "filename": "photo.heic"}
-2. get_attachment(attachment_id="att123") → View the actual image content
-```
-
-This metadata-first approach prevents slowdowns when fetching messages with many images.
+| `vision` (default) | 1568px | AI analysis, OCR | ~1,600 tokens |
+| `thumb` | 400px | Quick preview | ~200 tokens |
+| `full` | Original | Maximum detail | Varies |
 
 ### list_chats
 Browse recent chats with previews.
 
 ```python
-# List recent chats
-list_chats(limit=20)
-
-# List only group chats
-list_chats(is_group=True)
-
-# List chats active in the last week
-list_chats(since="7d")
+list_chats(limit=20)          # Recent chats
+list_chats(is_group=True)     # Only group chats
+list_chats(since="7d")        # Active in last week
 ```
 
 ### search
-Full-text search across all messages.
+Full-text search across messages.
 
 ```python
-# Search all messages
-search(query="dinner")
-
-# Search messages from a specific person
-search(query="dinner", from_person="Nick")
-
-# Search with time bounds
-search(query="meeting", since="2024-01-01", before="2024-02-01")
-
-# Search only in group chats
-search(query="party", is_group=True)
+search(query="dinner")                    # Search all messages
+search(query="meeting", from_person="Nick")  # From specific person
+search(query="party", is_group=True)      # Only in group chats
 ```
 
 ### get_context
 Get messages surrounding a specific message.
 
 ```python
-# Get context around a message
-get_context(message_id="msg123", before=5, after=10)
-
-# Find message containing text and get context
-get_context(chat_id="chat123", contains="that link", before=3, after=5)
+get_context(message_id="msg_123", before=5, after=10)
 ```
 
 ### get_active_conversations
 Find chats with recent back-and-forth activity.
 
 ```python
-# Find active conversations in the last 24 hours
 get_active_conversations(hours=24)
-
-# Find active group conversations
 get_active_conversations(is_group=True, min_exchanges=3)
 ```
 
 ### list_attachments
-List attachments with metadata.
+List attachments with metadata. Includes `available` field showing if file is on disk.
 
 ```python
-# List recent attachments
-list_attachments(limit=20)
-
-# List images from a specific chat
-list_attachments(chat_id="chat123", type="image")
-
-# List attachments from a specific person
-list_attachments(from_person="Nick", type="any")
+list_attachments(type="image", since="7d")
+list_attachments(chat_id="chat123", type="any")
 ```
 
 ### get_unread
-Get unread messages or summary. By default, returns unread messages from the last 7 days to match Messages.app behavior.
+Get unread messages or summary.
 
 ```python
-# Get unread messages (default: last 7 days)
-get_unread()
-
-# Get unread from last 24 hours
-get_unread(since="24h")
-
-# Get unread from last 14 days
-get_unread(since="14d")
-
-# Get ALL historical unread messages (may include stale data)
-get_unread(since="all")
-
-# Get unread summary by chat
-get_unread(format="summary")
-
-# Get unread from specific chat
-get_unread(chat_id="chat123")
+get_unread()                  # Unread from last 7 days
+get_unread(since="24h")       # Last 24 hours
+get_unread(mode="summary")    # Summary by chat
 ```
 
 ### send
 Send a message (requires Automation permission for Messages.app).
 
 ```python
-# Send to a contact
-send(to="Nick", text="Hey, are we still on for dinner?")
-
-# Send to a group chat
-send(chat_id="chat123", text="Running 5 minutes late")
+send(to="Nick", text="Hey!")
+send(chat_id="chat123", text="Running late")
 ```
 
 ### diagnose
 Troubleshoot configuration and permission issues.
 
 ```python
-# Check setup
-diagnose()
-# Returns: pyobjc_available, contacts_authorized, contacts_loaded count
+diagnose()  # Returns: database status, contacts count, permissions
+```
+
+## HTTP Mode
+
+For integration with other tools:
+
+```bash
+imessage-max --http --port 8080
 ```
 
 ## Troubleshooting
 
 ### Contacts showing as phone numbers
 
-Run the `diagnose` tool to check status:
-
-```json
-{
-  "pyobjc_available": true,
-  "contacts_authorized": false,
-  "authorization_status": "not_determined"
-}
-```
-
-**Fix:** Add your Python interpreter or UV to System Settings → Privacy & Security → Contacts.
+Run `diagnose` to check status. If `contacts_authorized` is false:
+- Add the `imessage-max` binary to System Settings → Privacy & Security → Contacts
 
 ### "Database not found" error
 
-The MCP can't access `~/Library/Messages/chat.db`.
+Add the `imessage-max` binary to System Settings → Privacy & Security → Full Disk Access
 
-**Fix:** Add your terminal/Python to System Settings → Privacy & Security → Full Disk Access.
+### Images show "attachment_offloaded" error
 
-### Empty message previews
-
-Some messages store text in `attributedBody` instead of `text` column. This is handled automatically as of v0.1.0.
+Some attachments are stored in iCloud, not on disk. The `list_attachments` tool shows `available: true/false` for each attachment. To download offloaded attachments, open the conversation in Messages.app.
 
 ### MCP not loading in Claude Desktop
 
-1. Check your config file syntax is valid JSON
-2. Ensure the command path is correct
-3. Restart Claude Desktop completely (Cmd+Q, not just close window)
+1. Check config file syntax is valid JSON
+2. Verify the binary path is correct
+3. Restart Claude Desktop completely (Cmd+Q)
+
+## Architecture
+
+```
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│  Claude/AI      │◄───►│  iMessage Max   │◄───►│  chat.db        │
+│  Assistant      │     │  (Swift MCP)    │     │  (SQLite)       │
+└─────────────────┘     └────────┬────────┘     └─────────────────┘
+                                │
+                                ▼
+                        ┌─────────────────┐
+                        │  Contacts.app   │
+                        │  (CNContactStore)│
+                        └─────────────────┘
+```
+
+## Requirements
+
+- macOS 13+ (Ventura or later)
+- Full Disk Access permission
+- Contacts permission (for name resolution)
+- Automation permission for Messages.app (send only)
 
 ## Development
 
 ```bash
-# Clone the repo
-git clone https://github.com/cyberpapiii/imessage-max.git
-cd imessage-max
-
-# Create virtual environment and install
-uv venv
-uv pip install -e ".[dev]"
-
-# Run tests
-pytest
+cd swift
+swift build           # Debug build
+swift build -c release  # Release build
+swift test            # Run tests
 ```
 
 ## License
