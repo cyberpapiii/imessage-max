@@ -1,8 +1,8 @@
 class ImessageMax < Formula
   desc "MCP server for iMessage - AI assistant integration"
   homepage "https://github.com/cyberpapiii/imessage-max"
-  url "https://github.com/cyberpapiii/imessage-max/releases/download/v1.0.1/imessage-max-macos.tar.gz"
-  sha256 "b9f328d0f7325ad5b6c07bf020411eed4a72ae1127784f2f0ecb4108b522f2b5"
+  url "https://github.com/cyberpapiii/imessage-max/releases/download/v1.0.2/imessage-max-macos.tar.gz"
+  sha256 "9359d6e8142b3473dd55877cd6a1f38f7629751f59f24e72600b17d0adce2e68"
   license "MIT"
 
   depends_on :macos
