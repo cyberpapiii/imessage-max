@@ -18,8 +18,21 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Build universal binary
-        run: swift build -c release --arch arm64 --arch x86_64
+      - name: Build universal binary with embedded Info.plist
+        run: |
+          swift build -c release --arch arm64 --arch x86_64 \
+            -Xlinker -sectcreate \
+            -Xlinker __TEXT \
+            -Xlinker __info_plist \
+            -Xlinker "$PWD/Sources/Resources/Info.plist"
+
+      - name: Re-sign binary with bundle identifier
+        run: |
+          BINARY=".build/apple/Products/Release/imessage-max"
+          BUNDLE_ID="com.cyberpapiii.imessage-max"
+          codesign --force --sign - --identifier "$BUNDLE_ID" "$BINARY"
+          echo "Verifying code signature..."
+          codesign -dvvv "$BINARY" 2>&1 | grep -E "(Identifier|Info.plist)"
 
       - name: Create tarball
         run: |
