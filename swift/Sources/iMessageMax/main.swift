@@ -19,11 +19,13 @@ struct iMessageMax: AsyncParsableCommand {
     mutating func run() async throws {
         let server = MCPServerWrapper()
 
+        let transport: any Transport
         if http {
-            fatalError("HTTP transport not yet implemented")
+            transport = HTTPTransport(port: port)
+        } else {
+            transport = StdioTransport()
         }
 
-        let transport = StdioTransport()
         try await server.start(transport: transport)
     }
 }
