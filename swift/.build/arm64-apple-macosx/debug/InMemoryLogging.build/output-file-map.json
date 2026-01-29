@@ -1,0 +1,12 @@
+{
+  "": {
+    "swift-dependencies": "/Users/robdezendorf/Documents/GitHub/imessage-max/swift/.build/arm64-apple-macosx/debug/InMemoryLogging.build/master.swiftdeps"
+  },
+  "/Users/robdezendorf/Documents/GitHub/imessage-max/swift/.build/checkouts/swift-log/Sources/InMemoryLogging/InMemoryLogHandler.swift": {
+    "dependencies": "/Users/robdezendorf/Documents/GitHub/imessage-max/swift/.build/arm64-apple-macosx/debug/InMemoryLogging.build/InMemoryLogHandler.d",
+    "object": "/Users/robdezendorf/Documents/GitHub/imessage-max/swift/.build/arm64-apple-macosx/debug/InMemoryLogging.build/InMemoryLogHandler.swift.o",
+    "swiftmodule": "/Users/robdezendorf/Documents/GitHub/imessage-max/swift/.build/arm64-apple-macosx/debug/InMemoryLogging.build/InMemoryLogHandler~partial.swiftmodule",
+    "swift-dependencies": "/Users/robdezendorf/Documents/GitHub/imessage-max/swift/.build/arm64-apple-macosx/debug/InMemoryLogging.build/InMemoryLogHandler.swiftdeps",
+    "diagnostics": "/Users/robdezendorf/Documents/GitHub/imessage-max/swift/.build/arm64-apple-macosx/debug/InMemoryLogging.build/InMemoryLogHandler.dia"
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "": {
+    "swift-dependencies": "/Users/robdezendorf/Documents/GitHub/imessage-max/swift/.build/arm64-apple-macosx/debug/EventSource.build/master.swiftdeps"
+  },
+  "/Users/robdezendorf/Documents/GitHub/imessage-max/swift/.build/checkouts/eventsource/Sources/EventSource/AsyncEventsSequence.swift": {
+    "dependencies": "/Users/robdezendorf/Documents/GitHub/imessage-max/swift/.build/arm64-apple-macosx/debug/EventSource.build/AsyncEventsSequence.d",
+    "object": "/Users/robdezendorf/Documents/GitHub/imessage-max/swift/.build/arm64-apple-macosx/debug/EventSource.build/AsyncEventsSequence.swift.o",
+    "swiftmodule": "/Users/robdezendorf/Documents/GitHub/imessage-max/swift/.build/arm64-apple-macosx/debug/EventSource.build/AsyncEventsSequence~partial.swiftmodule",
+    "swift-dependencies": "/Users/robdezendorf/Documents/GitHub/imessage-max/swift/.build/arm64-apple-macosx/debug/EventSource.build/AsyncEventsSequence.swiftdeps",
+    "diagnostics": "/Users/robdezendorf/Documents/GitHub/imessage-max/swift/.build/arm64-apple-macosx/debug/EventSource.build/AsyncEventsSequence.dia"
+  },
+  "/Users/robdezendorf/Documents/GitHub/imessage-max/swift/.build/checkouts/eventsource/Sources/EventSource/AsyncSequence+Events.swift": {
+    "dependencies": "/Users/robdezendorf/Documents/GitHub/imessage-max/swift/.build/arm64-apple-macosx/debug/EventSource.build/AsyncSequence+Events.d",
+    "object": "/Users/robdezendorf/Documents/GitHub/imessage-max/swift/.build/arm64-apple-macosx/debug/EventSource.build/AsyncSequence+Events.swift.o",
+    "swiftmodule": "/Users/robdezendorf/Documents/GitHub/imessage-max/swift/.build/arm64-apple-macosx/debug/EventSource.build/AsyncSequence+Events~partial.swiftmodule",
+    "swift-dependencies": "/Users/robdezendorf/Documents/GitHub/imessage-max/swift/.build/arm64-apple-macosx/debug/EventSource.build/AsyncSequence+Events.swiftdeps",
+    "diagnostics": "/Users/robdezendorf/Documents/GitHub/imessage-max/swift/.build/arm64-apple-macosx/debug/EventSource.build/AsyncSequence+Events.dia"
+  },
+  "/Users/robdezendorf/Documents/GitHub/imessage-max/swift/.build/checkouts/eventsource/Sources/EventSource/EventSource.swift": {
+    "dependencies": "/Users/robdezendorf/Documents/GitHub/imessage-max/swift/.build/arm64-apple-macosx/debug/EventSource.build/EventSource.d",
+    "object": "/Users/robdezendorf/Documents/GitHub/imessage-max/swift/.build/arm64-apple-macosx/debug/EventSource.build/EventSource.swift.o",
+    "swiftmodule": "/Users/robdezendorf/Documents/GitHub/imessage-max/swift/.build/arm64-apple-macosx/debug/EventSource.build/EventSource~partial.swiftmodule",
+    "swift-dependencies": "/Users/robdezendorf/Documents/GitHub/imessage-max/swift/.build/arm64-apple-macosx/debug/EventSource.build/EventSource.swiftdeps",
+    "diagnostics": "/Users/robdezendorf/Documents/GitHub/imessage-max/swift/.build/arm64-apple-macosx/debug/EventSource.build/EventSource.dia"
+  }
+}
