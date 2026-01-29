@@ -16,9 +16,19 @@ actor MCPServerWrapper {
     }
 
     func start(transport: any Transport) async throws {
-        await performStartupChecks()
+        // Register tools and start server FIRST so MCP handshake can complete
         ToolRegistry.registerAll(on: server, db: database, resolver: resolver)
-        try await server.start(transport: transport)
+
+        // Start server in background, then do startup checks
+        // This allows MCP initialization to complete while contacts load
+        async let serverTask: () = server.start(transport: transport)
+
+        // Perform startup checks after server starts (non-blocking for MCP)
+        Task {
+            await performStartupChecks()
+        }
+
+        try await serverTask
         await server.waitUntilCompleted()
     }
 
@@ -31,7 +41,7 @@ actor MCPServerWrapper {
             )
         }
 
-        // Initialize contacts
+        // Initialize contacts (this may show permission dialog)
         let (contactsOk, contactsStatus) = ContactResolver.authorizationStatus()
         if !contactsOk && contactsStatus == "not_determined" {
             _ = try? await resolver.requestAccess()
