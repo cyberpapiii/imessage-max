@@ -699,15 +699,55 @@ actor GetMessagesTool {
             return text
         }
 
-        // Try to extract from attributedBody
+        // Try to extract from attributedBody (binary plist format)
         guard let data = attributedBody else { return nil }
 
-        // Simple extraction - look for NSString content
-        if let str = String(data: data, encoding: .utf8) {
-            // Extract text between common delimiters
-            let cleaned = str.replacingOccurrences(of: "\u{0000}", with: "")
-            if !cleaned.isEmpty {
-                return cleaned
+        // attributedBody is a serialized NSAttributedString in binary plist format
+        // The text content is stored under the "NSString" key
+        do {
+            if let plist = try PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any] {
+                // Direct NSString key
+                if let nsString = plist["NSString"] as? String, !nsString.isEmpty {
+                    return nsString
+                }
+                // Sometimes nested under NSAttributedString
+                if let attrDict = plist["NSAttributedString"] as? [String: Any],
+                   let nsString = attrDict["NSString"] as? String, !nsString.isEmpty {
+                    return nsString
+                }
+            }
+        } catch {
+            // Fall through to regex extraction
+        }
+
+        // Fallback: Try to extract text using pattern matching on raw bytes
+        // The text in attributedBody often appears after "NSString" marker
+        if let str = String(data: data, encoding: .ascii) {
+            // Look for readable text sequences (at least 3 consecutive printable chars)
+            let pattern = "[\\x20-\\x7E]{3,}"
+            if let regex = try? NSRegularExpression(pattern: pattern, options: []) {
+                let range = NSRange(str.startIndex..., in: str)
+                let matches = regex.matches(in: str, options: [], range: range)
+
+                // Find the longest match that isn't just metadata keywords
+                var bestMatch: String?
+                var bestLength = 0
+                let keywords = Set(["NSString", "NSAttributedString", "NSMutableAttributedString",
+                                   "NSAttributes", "NSColor", "NSFont", "bplist"])
+
+                for match in matches {
+                    if let swiftRange = Range(match.range, in: str) {
+                        let candidate = String(str[swiftRange])
+                        if candidate.count > bestLength && !keywords.contains(candidate) {
+                            bestMatch = candidate
+                            bestLength = candidate.count
+                        }
+                    }
+                }
+
+                if let text = bestMatch, text.count >= 3 {
+                    return text
+                }
             }
         }
 

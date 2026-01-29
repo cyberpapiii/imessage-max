@@ -463,11 +463,13 @@ enum GetContext {
 
     // MARK: - Private Helpers
 
-    /// Parse message ID from "msgXXX" or "XXX" format
+    /// Parse message ID from "msg_XXX", "msgXXX", or "XXX" format
     private static func parseMessageId(_ idStr: String) -> Int64? {
         var numStr = idStr
-        if numStr.hasPrefix("msg") {
-            numStr = String(numStr.dropFirst(3))
+        if numStr.hasPrefix("msg_") {
+            numStr = String(numStr.dropFirst(4))  // Handle "msg_" with underscore
+        } else if numStr.hasPrefix("msg") {
+            numStr = String(numStr.dropFirst(3))  // Handle "msg" without underscore
         }
         return Int64(numStr)
     }
@@ -501,38 +503,59 @@ enum GetContext {
 
     /// Extract plain text from iMessage attributedBody blob
     private static func extractTextFromAttributedBody(_ data: Data) -> String? {
-        // The attributedBody is a binary plist with NSAttributedString
-        // Try to find the plain text content
-        guard let str = String(data: data, encoding: .utf8) else {
-            // Try to find text using a simple heuristic
-            // Look for readable ASCII sequences
-            if let text = extractReadableText(from: data) {
-                return text
+        // attributedBody is a serialized NSAttributedString in binary plist format
+        // The text content is stored under the "NSString" key
+        do {
+            if let plist = try PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any] {
+                // Direct NSString key
+                if let nsString = plist["NSString"] as? String, !nsString.isEmpty {
+                    return nsString
+                }
+                // Sometimes nested under NSAttributedString
+                if let attrDict = plist["NSAttributedString"] as? [String: Any],
+                   let nsString = attrDict["NSString"] as? String, !nsString.isEmpty {
+                    return nsString
+                }
             }
-            return nil
+        } catch {
+            // Fall through to regex extraction
         }
-        return str
+
+        // Fallback: Try to extract text using pattern matching on raw bytes
+        return extractReadableText(from: data)
     }
 
-    /// Extract readable text from binary data
+    /// Extract readable text from binary data using pattern matching
     private static func extractReadableText(from data: Data) -> String? {
-        // Simple approach: look for NSString content in the plist
-        // The text is usually stored after "NSString" marker
-        guard let dataStr = String(data: data, encoding: .ascii) else { return nil }
+        guard let str = String(data: data, encoding: .ascii) else { return nil }
 
-        // Look for common patterns in attributed body
-        // This is a simplified extraction - the real implementation would parse the plist
-        let lines = dataStr.components(separatedBy: CharacterSet.controlCharacters)
-        for line in lines {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if !trimmed.isEmpty && trimmed.count > 1 && !trimmed.hasPrefix("NS") {
-                // Filter out binary noise
-                let printable = trimmed.filter { $0.isLetter || $0.isNumber || $0.isWhitespace || $0.isPunctuation }
-                if printable.count > trimmed.count / 2 {
-                    return printable
+        // Look for readable text sequences (at least 3 consecutive printable chars)
+        let pattern = "[\\x20-\\x7E]{3,}"
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { return nil }
+
+        let range = NSRange(str.startIndex..., in: str)
+        let matches = regex.matches(in: str, options: [], range: range)
+
+        // Find the longest match that isn't just metadata keywords
+        var bestMatch: String?
+        var bestLength = 0
+        let keywords = Set(["NSString", "NSAttributedString", "NSMutableAttributedString",
+                           "NSAttributes", "NSColor", "NSFont", "bplist"])
+
+        for match in matches {
+            if let swiftRange = Range(match.range, in: str) {
+                let candidate = String(str[swiftRange])
+                if candidate.count > bestLength && !keywords.contains(candidate) {
+                    bestMatch = candidate
+                    bestLength = candidate.count
                 }
             }
         }
+
+        if let text = bestMatch, text.count >= 3 {
+            return text
+        }
+
         return nil
     }
 }
