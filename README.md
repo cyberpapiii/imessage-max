@@ -210,11 +210,62 @@ diagnose()  # Returns: database status, contacts count, permissions
 
 ## HTTP Mode
 
-For integration with other tools:
+For MCP Router, MCP Inspector, or other HTTP-based integrations:
 
 ```bash
 imessage-max --http --port 8080
 ```
+
+### Running as a Service (Recommended)
+
+Create a launchd plist at `~/Library/LaunchAgents/local.imessage-max.plist`:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>local.imessage-max</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/path/to/imessage-max</string>
+        <string>--http</string>
+        <string>--port</string>
+        <string>8080</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/Users/YOU/Library/Logs/imessage-max.stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/YOU/Library/Logs/imessage-max.stderr.log</string>
+</dict>
+</plist>
+```
+
+Then load it:
+```bash
+launchctl load ~/Library/LaunchAgents/local.imessage-max.plist
+```
+
+### MCP Router Integration
+
+Add to MCP Router as a remote-streamable server:
+```sql
+INSERT INTO servers (id, name, server_type, remote_url, auto_start, disabled, created_at, updated_at)
+VALUES ('imessage', 'imessage', 'remote-streamable', 'http://127.0.0.1:8080', 1, 0, strftime('%s','now'), strftime('%s','now'));
+```
+
+### Session Management
+
+The HTTP transport supports clean reconnection:
+- Each client connection gets its own isolated session
+- Sessions auto-expire after 1 hour of inactivity
+- If MCP Router disconnects, it can reconnect seamlessly with a fresh session
+- No "Server already initialized" errors on reconnection
 
 ## Troubleshooting
 

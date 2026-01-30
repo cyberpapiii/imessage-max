@@ -17,13 +17,25 @@ The project has been rewritten in **Swift** (located in `/swift/`) for native ma
 ```bash
 cd swift
 swift build -c release
+
+# stdio mode (for Claude Desktop)
 ./.build/release/imessage-max
+
+# HTTP mode (for MCP Router, Inspector, etc.)
+./.build/release/imessage-max --http --port 8080
 ```
 
 ### Test via MCP Protocol
 
 ```bash
+# stdio mode
 echo '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' | ./.build/release/imessage-max
+
+# HTTP mode
+curl -X POST http://localhost:8080 \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}'
 ```
 
 ## Architecture
@@ -31,6 +43,7 @@ echo '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' | ./.build/rel
 ### Swift Stack
 - **Language:** Swift 6.0
 - **MCP SDK:** modelcontextprotocol/swift-sdk v0.10.0
+- **HTTP Server:** Hummingbird 2.x (for `--http` mode)
 - **Database:** Raw SQLite3 C API for `~/Library/Messages/chat.db`
 - **Contacts:** CNContactStore (native macOS)
 - **Images:** Core Image for GPU-accelerated resizing
@@ -42,7 +55,13 @@ echo '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' | ./.build/rel
 swift/
 ├── Sources/iMessageMax/
 │   ├── main.swift              # Entry point
-│   ├── Server/                 # MCP server lifecycle
+│   ├── Server/
+│   │   ├── MCPServer.swift     # Server lifecycle (stdio)
+│   │   ├── HTTPTransport.swift # HTTP Streamable transport
+│   │   ├── SessionManager.swift # Per-session Server instances
+│   │   ├── SSEConnection.swift # Server-Sent Events
+│   │   ├── OriginValidationMiddleware.swift
+│   │   └── ToolRegistry.swift  # Tool registration
 │   ├── Database/               # SQLite wrapper, query builder
 │   ├── Tools/                  # 12 MCP tools
 │   ├── Contacts/               # CNContactStore resolver
@@ -50,6 +69,28 @@ swift/
 │   └── Utilities/              # Time, phone formatting
 ├── Tests/
 └── Package.swift
+```
+
+### HTTP Transport Architecture
+
+The HTTP mode implements MCP Streamable HTTP transport (spec 2025-03-26):
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  HTTPTransport (Hummingbird HTTP Server)                │
+│  POST / → JSON-RPC requests → SessionManager            │
+│  GET /  → SSE streaming ← Server notifications          │
+│  DELETE / → Session termination                         │
+├─────────────────────────────────────────────────────────┤
+│  SessionManager (per-session isolation)                 │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐     │
+│  │ Session A   │  │ Session B   │  │ Session C   │     │
+│  │ Server inst │  │ Server inst │  │ Server inst │     │
+│  │ Message strm│  │ Message strm│  │ Message strm│     │
+│  └─────────────┘  └─────────────┘  └─────────────┘     │
+│  - 1 hour timeout with automatic cleanup                │
+│  - Clean reconnection (no "already initialized" error)  │
+└─────────────────────────────────────────────────────────┘
 ```
 
 ## Database Schema (iMessage chat.db)

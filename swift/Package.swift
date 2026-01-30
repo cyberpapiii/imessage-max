@@ -3,13 +3,14 @@ import PackageDescription
 
 let package = Package(
     name: "imessage-max",
-    platforms: [.macOS(.v13)],
+    platforms: [.macOS(.v14)],
     products: [
         .executable(name: "imessage-max", targets: ["iMessageMax"])
     ],
     dependencies: [
         .package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", from: "0.10.0"),
         .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.3.0"),
+        .package(url: "https://github.com/hummingbird-project/hummingbird.git", from: "2.0.0"),
     ],
     targets: [
         .executableTarget(
@@ -17,6 +18,7 @@ let package = Package(
             dependencies: [
                 .product(name: "MCP", package: "swift-sdk"),
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
+                .product(name: "Hummingbird", package: "hummingbird"),
             ],
             path: "Sources/iMessageMax",
             swiftSettings: [
