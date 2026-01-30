@@ -51,6 +51,9 @@ actor SessionManager {
     /// Callback when sessions are terminated (for SSE cleanup)
     private var sessionTerminationHandler: ((String) async -> Void)?
 
+    /// Callback to check if a session has active SSE connections
+    private var hasActiveConnectionsChecker: ((String) async -> Bool)?
+
     init(database: Database, resolver: ContactResolver) {
         self.database = database
         self.resolver = resolver
@@ -68,6 +71,13 @@ actor SessionManager {
     /// Sets the session termination handler (for SSE cleanup on timeout)
     func setSessionTerminationHandler(_ handler: @escaping (String) async -> Void) {
         self.sessionTerminationHandler = handler
+    }
+
+    /// Sets a checker to determine if a session has active SSE connections
+    ///
+    /// Sessions with active connections are never timed out.
+    func setActiveConnectionsChecker(_ checker: @escaping (String) async -> Bool) {
+        self.hasActiveConnectionsChecker = checker
     }
 
     /// Creates a new session with its own Server instance
@@ -199,15 +209,24 @@ actor SessionManager {
         }
     }
 
-    /// Removes expired sessions
-    private func cleanupExpiredSessions() {
+    /// Removes expired sessions that have no active SSE connections
+    ///
+    /// Sessions with active SSE connections are never timed out - only sessions
+    /// where the client disconnected without cleanup are cleaned up.
+    private func cleanupExpiredSessions() async {
         let now = Date()
-        let expiredIds = sessions.filter { _, session in
+
+        // Find sessions that are past the timeout threshold
+        let candidateIds = sessions.filter { _, session in
             now.timeIntervalSince(session.lastActivity) > sessionTimeout
         }.map(\.key)
 
-        for id in expiredIds {
-            terminateSession(id)
+        // Only terminate sessions that have NO active SSE connections
+        for id in candidateIds {
+            let hasActiveConnections = await hasActiveConnectionsChecker?(id) ?? false
+            if !hasActiveConnections {
+                terminateSession(id)
+            }
         }
     }
 }

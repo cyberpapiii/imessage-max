@@ -212,4 +212,10 @@ actor SSEConnectionManager {
     var connectionCount: Int {
         connectionInfo.count
     }
+
+    /// Checks if a session has any active SSE connections
+    func hasActiveConnections(forSession sessionId: String) -> Bool {
+        guard let connections = sessionConnections[sessionId] else { return false }
+        return !connections.isEmpty
+    }
 }

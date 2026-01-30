@@ -91,6 +91,13 @@ public actor HTTPTransport: Transport {
             await self?.cleanupPendingRequestsAsync(for: sessionId)
         }
 
+        // Tell SessionManager how to check for active SSE connections
+        // Sessions with active connections are never timed out
+        await sessionManager.setActiveConnectionsChecker { [weak self] sessionId in
+            guard let self = self else { return false }
+            return await self.sseManager.hasActiveConnections(forSession: sessionId)
+        }
+
         // Create router with all routes
         let router = Router()
 
