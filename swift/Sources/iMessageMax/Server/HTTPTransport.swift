@@ -37,8 +37,8 @@ public actor HTTPTransport: Transport {
     // Request correlation: maps JSON-RPC id to continuation for response
     private var pendingRequests: [String: PendingRequest] = [:]
 
-    // Closure to run the Hummingbird application with graceful shutdown
-    private var runServiceClosure: (@Sendable () async throws -> Void)?
+    /// Background task running the Hummingbird server
+    private var serverTask: Task<Void, Error>?
 
     /// Tracks a pending request with its session
     private struct PendingRequest {
@@ -122,19 +122,10 @@ public actor HTTPTransport: Transport {
 
         isConnected = true
 
-        // Store runService closure for lifecycle management
-        self.runServiceClosure = { try await app.runService() }
-    }
-
-    /// Runs the HTTP server with graceful shutdown support
-    ///
-    /// This method blocks until the server is shut down via SIGTERM or SIGINT.
-    /// Uses Hummingbird's built-in ServiceGroup for lifecycle management.
-    public func runService() async throws {
-        guard let runService = self.runServiceClosure else {
-            throw MCPError.serverError(code: -32000, message: "Call connect() before runService()")
+        // Start the server in a background task
+        self.serverTask = Task {
+            try await app.runService()
         }
-        try await runService()
     }
 
     /// Handles POST requests with JSON-RPC messages
@@ -446,8 +437,9 @@ public actor HTTPTransport: Transport {
         guard isConnected else { return }
         isConnected = false
 
-        // Clear run closure reference
-        runServiceClosure = nil
+        // Cancel server task
+        serverTask?.cancel()
+        serverTask = nil
 
         // Terminate all sessions
         for sessionId in await sessionManager.activeSessionIds() {
