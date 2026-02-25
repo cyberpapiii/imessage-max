@@ -55,7 +55,7 @@ enum GetContext {
             "properties": .object([
                 "message_id": .object([
                     "type": "string",
-                    "description": "Specific message ID to get context around (e.g., \"msg1\")",
+                    "description": "Specific message ID to get context around (e.g., \"msg_1\")",
                 ]),
                 "chat_id": .object([
                     "type": "string",
@@ -82,6 +82,7 @@ enum GetContext {
             description: "Get messages surrounding a specific message. Use to see the conversation context around a particular message.",
             inputSchema: inputSchema,
             annotations: Tool.Annotations(
+                title: "Get Context",
                 readOnlyHint: true,
                 destructiveHint: false,
                 idempotentHint: true,
@@ -119,7 +120,7 @@ enum GetContext {
 
     /// Get messages surrounding a specific message
     /// - Parameters:
-    ///   - messageId: Specific message ID to get context around (e.g., "msg1" or "1")
+    ///   - messageId: Specific message ID to get context around (e.g., "msg_1" or "1")
     ///   - chatId: Chat ID (required if using contains)
     ///   - contains: Find message containing this text, then get context
     ///   - before: Number of messages before the target (default 5, max 50)
@@ -263,7 +264,7 @@ enum GetContext {
                 // Search in Swift after extracting text from both columns
                 let searchLower = searchText.lowercased()
                 guard let found = rows.first(where: { row in
-                    let extractedText = getMessageText(text: row.text, attributedBody: row.attributedBody)
+                    let extractedText = MessageTextExtractor.extract(text: row.text, attributedBody: row.attributedBody)
                     return extractedText?.lowercased().contains(searchLower) ?? false
                 }) else {
                     return .failure(GetContextError(
@@ -342,6 +343,15 @@ enum GetContext {
             var handleToKey: [String: String] = [:]
             var personCounter = 1
 
+            func generateUniqueKey(baseName: String, existing: [String: GetContextResponse.PersonInfo]) -> String {
+                if existing[baseName] == nil { return baseName }
+                var suffix = 2
+                while existing["\(baseName)\(suffix)"] != nil {
+                    suffix += 1
+                }
+                return "\(baseName)\(suffix)"
+            }
+
             func getPersonKey(isFromMe: Bool, handle: String?) async -> String {
                 if isFromMe {
                     if people["me"] == nil {
@@ -354,12 +364,18 @@ enum GetContext {
                         return existingKey
                     }
 
-                    let key = "p\(personCounter)"
-                    personCounter += 1
-                    handleToKey[h] = key
-
                     // Try to resolve contact name
                     let name = await resolver.resolve(h)
+
+                    let key: String
+                    if let resolvedName = name {
+                        let firstName = resolvedName.split(separator: " ").first.map(String.init) ?? resolvedName
+                        key = generateUniqueKey(baseName: firstName.lowercased(), existing: people)
+                    } else {
+                        key = "p\(personCounter)"
+                        personCounter += 1
+                    }
+                    handleToKey[h] = key
 
                     people[key] = GetContextResponse.PersonInfo(
                         name: name ?? h,
@@ -378,11 +394,11 @@ enum GetContext {
                 isFromMe: Bool,
                 senderHandle: String?
             ) async -> GetContextResponse.ContextMessage {
-                let messageText = getMessageText(text: text, attributedBody: attributedBody)
+                let messageText = MessageTextExtractor.extract(text: text, attributedBody: attributedBody)
                 let msgDate = AppleTime.toDate(date)
 
                 return GetContextResponse.ContextMessage(
-                    id: "msg\(msgId)",
+                    id: "msg_\(msgId)",
                     ts: TimeUtils.formatISO(msgDate),
                     ago: TimeUtils.formatCompactRelative(msgDate),
                     from: await getPersonKey(isFromMe: isFromMe, handle: senderHandle),
@@ -489,61 +505,4 @@ enum GetContext {
         return Int64(numStr)
     }
 
-    /// Get message text, preferring text column but falling back to attributedBody
-    private static func getMessageText(text: String?, attributedBody: Data?) -> String? {
-        var result: String?
-
-        if let text = text, !text.isEmpty {
-            result = text
-        } else if let body = attributedBody {
-            result = extractTextFromAttributedBody(body)
-        }
-
-        // Replace object replacement character with readable placeholder
-        if let r = result, r.contains("\u{FFFC}") {
-            result = r.replacingOccurrences(of: "\u{FFFC}", with: "[Photo]")
-        }
-
-        return result
-    }
-
-    /// Extract plain text from iMessage attributedBody blob (Apple typedstream format)
-    private static func extractTextFromAttributedBody(_ data: Data) -> String? {
-        // Look for NSString or NSMutableString marker in the typedstream
-        guard let nsStringRange = data.range(of: Data("NSString".utf8)) ??
-              data.range(of: Data("NSMutableString".utf8)) else {
-            return nil
-        }
-
-        // Skip past the class name marker to the length field
-        var idx = nsStringRange.upperBound + 5
-
-        guard idx < data.count else { return nil }
-
-        let lengthByte = data[idx]
-        let length: Int
-        let dataStart: Int
-
-        // Parse length based on prefix byte
-        if lengthByte == 0x81 {
-            // 2-byte length (little endian)
-            guard idx + 3 <= data.count else { return nil }
-            length = Int(data[idx + 1]) | (Int(data[idx + 2]) << 8)
-            dataStart = idx + 3
-        } else if lengthByte == 0x82 {
-            // 3-byte length (little endian)
-            guard idx + 4 <= data.count else { return nil }
-            length = Int(data[idx + 1]) | (Int(data[idx + 2]) << 8) | (Int(data[idx + 3]) << 16)
-            dataStart = idx + 4
-        } else {
-            // Single byte length
-            length = Int(lengthByte)
-            dataStart = idx + 1
-        }
-
-        guard length > 0 && dataStart + length <= data.count else { return nil }
-
-        let textData = data[dataStart..<(dataStart + length)]
-        return String(data: textData, encoding: .utf8)
-    }
 }

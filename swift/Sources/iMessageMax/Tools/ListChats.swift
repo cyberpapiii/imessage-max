@@ -112,6 +112,7 @@ enum ListChatsTool {
             description: "List recent chats with previews. Returns chat names, participants, last message, and metadata.",
             inputSchema: inputSchema,
             annotations: Tool.Annotations(
+                title: "List Chats",
                 readOnlyHint: true,
                 destructiveHint: false,
                 idempotentHint: true,
@@ -276,7 +277,8 @@ enum ListChatsTool {
                 }
 
                 // Generate display name
-                let displayName = chatRow.displayName ?? generateDisplayName(participants)
+                let rawDisplayName = chatRow.displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
+                let displayName = (rawDisplayName?.isEmpty == false) ? rawDisplayName! : DisplayNameGenerator.fromNames(participants.map { $0.name })
                 let isGroupChat = chatRow.participantCount > 1
 
                 // Get last message
@@ -435,8 +437,8 @@ enum ListChatsTool {
             sender = "unknown"
         }
 
-        // Get message text (try attributedBody first, fall back to text)
-        let msgText = extractMessageText(text: last.text, attributedBody: last.attributedBody) ?? ""
+        // Get message text
+        let msgText = MessageTextExtractor.extract(text: last.text, attributedBody: last.attributedBody) ?? ""
 
         // Format time
         let date = AppleTime.toDate(last.date)
@@ -476,74 +478,6 @@ enum ListChatsTool {
         }
 
         return rows.first ?? (0, 0, 0)
-    }
-
-    /// Extract text from message, trying attributedBody first
-    private static func extractMessageText(text: String?, attributedBody: Data?) -> String? {
-        // Try attributedBody first (contains styled text)
-        if let data = attributedBody,
-           let extracted = extractFromAttributedBody(data) {
-            return extracted
-        }
-        return text
-    }
-
-    /// Extract plain text from attributedBody blob (Apple typedstream format)
-    private static func extractFromAttributedBody(_ data: Data) -> String? {
-        // Look for NSString or NSMutableString marker in the typedstream
-        guard let nsStringRange = data.range(of: Data("NSString".utf8)) ??
-              data.range(of: Data("NSMutableString".utf8)) else {
-            return nil
-        }
-
-        // Skip past the class name marker to the length field
-        var idx = nsStringRange.upperBound + 5
-
-        guard idx < data.count else { return nil }
-
-        let lengthByte = data[idx]
-        let length: Int
-        let dataStart: Int
-
-        // Parse length based on prefix byte
-        if lengthByte == 0x81 {
-            // 2-byte length (little endian)
-            guard idx + 3 <= data.count else { return nil }
-            length = Int(data[idx + 1]) | (Int(data[idx + 2]) << 8)
-            dataStart = idx + 3
-        } else if lengthByte == 0x82 {
-            // 3-byte length (little endian)
-            guard idx + 4 <= data.count else { return nil }
-            length = Int(data[idx + 1]) | (Int(data[idx + 2]) << 8) | (Int(data[idx + 3]) << 16)
-            dataStart = idx + 4
-        } else {
-            // Single byte length
-            length = Int(lengthByte)
-            dataStart = idx + 1
-        }
-
-        guard length > 0 && dataStart + length <= data.count else { return nil }
-
-        let textData = data[dataStart..<(dataStart + length)]
-        return String(data: textData, encoding: .utf8)
-    }
-
-    /// Generate display name from participants (like Messages.app)
-    private static func generateDisplayName(_ participants: [ListChatsParticipantInfo]) -> String {
-        if participants.isEmpty {
-            return "Unknown"
-        }
-
-        let names = participants.map { $0.name }
-
-        if names.count <= 4 {
-            return names.joined(separator: ", ")
-        }
-
-        // More than 4: first 3 + "and N others"
-        let first3 = names.prefix(3).joined(separator: ", ")
-        let remaining = names.count - 3
-        return "\(first3) and \(remaining) others"
     }
 
     /// Create a short key for the people map

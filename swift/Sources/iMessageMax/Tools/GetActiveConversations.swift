@@ -103,6 +103,7 @@ enum GetActiveConversations {
             description: "Find conversations with recent bidirectional activity. Returns chats where both parties have exchanged messages within the time window.",
             inputSchema: inputSchema,
             annotations: Tool.Annotations(
+                title: "Get Active Conversations",
                 readOnlyHint: true,
                 destructiveHint: false,
                 idempotentHint: true,
@@ -250,13 +251,27 @@ enum GetActiveConversations {
                 let displayName = p.name ?? PhoneUtils.formatDisplay(p.handle)
                 participantRefs.append(ParticipantRef(name: displayName, handle: p.handle))
 
-                // Add to people map
-                let key = "p\(peopleMap.count)"
+                // Add to people map with name-based keys
+                let key: String
+                if let name = p.name {
+                    let firstName = name.split(separator: " ").first.map(String.init) ?? name
+                    key = generateUniqueKey(baseName: firstName.lowercased(), existing: peopleMap)
+                } else {
+                    // Use p1, p2, etc. for unresolved handles
+                    var counter = 1
+                    while peopleMap["p\(counter)"] != nil {
+                        counter += 1
+                    }
+                    key = "p\(counter)"
+                }
                 peopleMap[key] = p
             }
 
             // Generate display name if not set
-            let chatDisplayName = row.displayName ?? generateDisplayName(from: participantRows)
+            let raw = row.displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let chatDisplayName = (raw?.isEmpty == false) ? raw! : DisplayNameGenerator.fromNames(
+                participantRows.map { p in p.name ?? PhoneUtils.formatDisplay(p.handle) }
+            )
             let isGroupChat = row.participantCount > 1
 
             // Determine awaiting reply
@@ -344,21 +359,14 @@ enum GetActiveConversations {
         return participants
     }
 
-    private static func generateDisplayName(from participants: [Participant]) -> String {
-        let names = participants.map { p in
-            p.name ?? PhoneUtils.formatDisplay(p.handle)
-        }
 
-        switch names.count {
-        case 0:
-            return "Unknown"
-        case 1...4:
-            return names.joined(separator: ", ")
-        default:
-            let first3 = names.prefix(3).joined(separator: ", ")
-            let remaining = names.count - 3
-            return "\(first3) and \(remaining) others"
+    private static func generateUniqueKey(baseName: String, existing: PeopleMap) -> String {
+        if existing[baseName] == nil { return baseName }
+        var suffix = 2
+        while existing["\(baseName)\(suffix)"] != nil {
+            suffix += 1
         }
+        return "\(baseName)\(suffix)"
     }
 
     private static func formatTimestamp(_ appleTimestamp: Int64?) -> String? {

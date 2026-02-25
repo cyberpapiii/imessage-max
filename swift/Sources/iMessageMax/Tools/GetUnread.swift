@@ -50,6 +50,7 @@ final class GetUnread {
             description: "Get unread messages or summary of unread activity. Returns messages not sent by you that haven't been read.",
             inputSchema: inputSchema,
             annotations: Tool.Annotations(
+                title: "Get Unread Messages",
                 readOnlyHint: true,
                 destructiveHint: false,
                 idempotentHint: true,
@@ -275,19 +276,25 @@ final class GetUnread {
             }
 
             // Get chat display name
-            var chatDisplayName = row.chatDisplayName
-            if chatDisplayName == nil || chatDisplayName?.isEmpty == true {
-                // Generate from participants
-                if let participants = chatParticipantsCache[msgChatId] {
-                    chatDisplayName = generateDisplayName(participants: participants)
+            let rawDisplayName = row.chatDisplayName?.trimmingCharacters(in: .whitespacesAndNewlines)
+            var chatDisplayName: String?
+            if let raw = rawDisplayName, !raw.isEmpty {
+                chatDisplayName = raw
+            } else if let participants = chatParticipantsCache[msgChatId] {
+                let names = participants.map { p in
+                    if let name = p.name {
+                        return name.split(separator: " ").first.map(String.init) ?? name
+                    }
+                    return PhoneUtils.formatDisplay(p.handle)
                 }
+                chatDisplayName = DisplayNameGenerator.fromNames(names)
             }
 
             // Determine if group chat
             let isGroup = (chatParticipantsCache[msgChatId]?.count ?? 0) > 1
 
             // Get message text
-            let text = getMessageText(text: row.text, attributedBody: row.attributedBody)
+            let text = MessageTextExtractor.extract(text: row.text, attributedBody: row.attributedBody)
             let msgDate = AppleTime.toDate(row.date)
 
             var msgItem: [String: Any] = [
@@ -383,11 +390,19 @@ final class GetUnread {
             totalUnread += unreadCount
 
             // Get chat display name
-            var chatDisplayName = row.chatDisplayName
-            if chatDisplayName == nil || chatDisplayName?.isEmpty == true {
-                // Generate from participants
+            let rawDisplayName = row.chatDisplayName?.trimmingCharacters(in: .whitespacesAndNewlines)
+            var chatDisplayName: String?
+            if let raw = rawDisplayName, !raw.isEmpty {
+                chatDisplayName = raw
+            } else {
                 let participants = try await getChatParticipants(chatId: msgChatId)
-                chatDisplayName = generateDisplayName(participants: participants)
+                let names = participants.map { p in
+                    if let name = p.name {
+                        return name.split(separator: " ").first.map(String.init) ?? name
+                    }
+                    return PhoneUtils.formatDisplay(p.handle)
+                }
+                chatDisplayName = DisplayNameGenerator.fromNames(names)
             }
 
             let oldestDt = AppleTime.toDate(row.oldestUnreadDate)
@@ -468,87 +483,6 @@ final class GetUnread {
         return participants
     }
 
-    private func generateDisplayName(participants: [ParticipantInfo], maxNames: Int = 3) -> String {
-        if participants.isEmpty {
-            return "(empty chat)"
-        }
-
-        var names: [String] = []
-        for participant in participants.prefix(maxNames) {
-            if let name = participant.name {
-                // Use first name
-                let firstName = name.split(separator: " ").first.map(String.init) ?? name
-                names.append(firstName)
-            } else {
-                names.append(PhoneUtils.formatDisplay(participant.handle))
-            }
-        }
-
-        if participants.count > maxNames {
-            let remaining = participants.count - maxNames
-            return "\(names.joined(separator: ", ")) and \(remaining) others"
-        }
-
-        if names.count == 2 {
-            return "\(names[0]) & \(names[1])"
-        }
-
-        return names.joined(separator: ", ")
-    }
-
-    /// Extract text from message, handling attributedBody fallback
-    private func getMessageText(text: String?, attributedBody: Data?) -> String? {
-        var result: String?
-
-        if let text = text, !text.isEmpty {
-            result = text
-        } else if let blob = attributedBody {
-            result = extractTextFromAttributedBody(blob)
-        }
-
-        // Replace object replacement character with readable placeholder
-        if var text = result, text.contains("\u{FFFC}") {
-            text = text.replacingOccurrences(of: "\u{FFFC}", with: "[Photo]")
-            result = text
-        }
-
-        return result
-    }
-
-    /// Extract plain text from attributedBody blob (typedstream format)
-    private func extractTextFromAttributedBody(_ blob: Data) -> String? {
-        // Look for NSString or NSMutableString marker
-        guard let nsStringRange = blob.range(of: Data("NSString".utf8)) ??
-              blob.range(of: Data("NSMutableString".utf8)) else {
-            return nil
-        }
-
-        var idx = nsStringRange.upperBound + 5
-
-        guard idx < blob.count else { return nil }
-
-        let lengthByte = blob[idx]
-        let length: Int
-        let dataStart: Int
-
-        if lengthByte == 0x81 {
-            guard idx + 3 <= blob.count else { return nil }
-            length = Int(blob[idx + 1]) | (Int(blob[idx + 2]) << 8)
-            dataStart = idx + 3
-        } else if lengthByte == 0x82 {
-            guard idx + 4 <= blob.count else { return nil }
-            length = Int(blob[idx + 1]) | (Int(blob[idx + 2]) << 8) | (Int(blob[idx + 3]) << 16)
-            dataStart = idx + 4
-        } else {
-            length = Int(lengthByte)
-            dataStart = idx + 1
-        }
-
-        guard length > 0 && dataStart + length <= blob.count else { return nil }
-
-        let textData = blob[dataStart..<(dataStart + length)]
-        return String(data: textData, encoding: .utf8)
-    }
 }
 
 // MARK: - Helper Types

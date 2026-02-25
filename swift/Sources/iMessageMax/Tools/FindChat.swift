@@ -91,6 +91,7 @@ enum FindChatTool {
             description: description,
             inputSchema: inputSchema,
             annotations: Tool.Annotations(
+                title: "Find Chat",
                 readOnlyHint: true,
                 destructiveHint: false,
                 idempotentHint: true,
@@ -116,7 +117,7 @@ enum FindChatTool {
                 error: "validation_error",
                 message: "At least one of participants, name, or contains_recent required"
             )
-            return [.text(try encodeJSON(error))]
+            return [.text(try FormatUtils.encodeJSON(error))]
         }
 
         // Initialize contacts if available
@@ -202,7 +203,7 @@ enum FindChatTool {
                 more: results.count > params.limit
             )
 
-            return [.text(try encodeJSON(response))]
+            return [.text(try FormatUtils.encodeJSON(response))]
 
         } catch let dbError as DatabaseError {
             let error: ErrorResponse
@@ -216,21 +217,15 @@ enum FindChatTool {
             case .invalidData(let msg):
                 error = ErrorResponse(error: "invalid_data", message: msg)
             }
-            return [.text(try encodeJSON(error))]
+            return [.text(try FormatUtils.encodeJSON(error))]
         } catch {
             let errorResp = ErrorResponse(error: "internal_error", message: error.localizedDescription)
-            return [.text(try encodeJSON(errorResp))]
+            return [.text(try FormatUtils.encodeJSON(errorResp))]
         }
     }
 
     // MARK: - Private Helpers
 
-    private static func encodeJSON<T: Encodable>(_ value: T) throws -> String {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
-        let data = try encoder.encode(value)
-        return String(data: data, encoding: .utf8) ?? "{}"
-    }
 
     private static func buildHandleGroups(
         participants: [String],
@@ -467,7 +462,7 @@ enum FindChatTool {
         // Generate display name if not set
         var displayName = chat.displayName ?? ""
         if displayName.isEmpty {
-            displayName = generateDisplayName(participants: participants)
+            displayName = DisplayNameGenerator.fromNames(participants.compactMap { $0["name"] })
         }
 
         // Get last message
@@ -526,21 +521,7 @@ enum FindChatTool {
         )
     }
 
-    private static func generateDisplayName(participants: [[String: String]]) -> String {
-        let names = participants.compactMap { $0["name"] }
 
-        if names.isEmpty {
-            return "Unknown"
-        }
-
-        if names.count <= 4 {
-            return names.joined(separator: ", ")
-        }
-
-        let first3 = names.prefix(3).joined(separator: ", ")
-        let remaining = names.count - 3
-        return "\(first3) and \(remaining) others"
-    }
 }
 
 // MARK: - Supporting Types

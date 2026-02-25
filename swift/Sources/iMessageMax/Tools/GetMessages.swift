@@ -186,9 +186,9 @@ actor GetMessagesTool {
     func execute(args: [String: Value]?) async throws -> [Tool.Content] {
         do {
             let response = try await executeImpl(args: args)
-            return [.text(try encodeJSON(response))]
+            return [.text(try FormatUtils.encodeJSON(response))]
         } catch let error as GetMessagesToolError {
-            return [.text(try encodeJSON(error.errorResponse))]
+            return [.text(try FormatUtils.encodeJSON(error.errorResponse))]
         } catch {
             let errorResponse = GetMessagesErrorResponse(
                 error: "internal_error",
@@ -196,7 +196,7 @@ actor GetMessagesTool {
                 candidates: nil,
                 suggestion: nil
             )
-            return [.text(try encodeJSON(errorResponse))]
+            return [.text(try FormatUtils.encodeJSON(errorResponse))]
         }
     }
 
@@ -351,7 +351,7 @@ actor GetMessagesTool {
                                     id: "att\(att.id)",
                                     filename: metadata.filename,
                                     sizeBytes: metadata.sizeBytes,
-                                    sizeHuman: formatFileSize(metadata.sizeBytes),
+                                    sizeHuman: FormatUtils.fileSize(metadata.sizeBytes),
                                     dimensions: .init(width: metadata.width, height: metadata.height)
                                 ))
                                 mediaCount += 1
@@ -409,7 +409,10 @@ actor GetMessagesTool {
         }
 
         // Build display name
-        let displayName = chatInfo.displayName ?? generateDisplayName(people: people)
+        let rawDisplayName = chatInfo.displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let displayName = (rawDisplayName?.isEmpty == false) ? rawDisplayName! : DisplayNameGenerator.fromNames(
+            people.filter { $0.key != "me" }.map { $0.value }
+        )
 
         // Build response
         let mediaTruncated = mediaCount > maxMedia
@@ -685,64 +688,12 @@ actor GetMessagesTool {
             MessageRow(
                 id: Int(row.int(0)),
                 guid: row.string(1) ?? "",
-                text: getMessageText(text: row.string(2), attributedBody: row.blob(3)),
+                text: MessageTextExtractor.extract(text: row.string(2), attributedBody: row.blob(3)),
                 date: row.optionalInt(4),
                 isFromMe: row.int(5) == 1,
                 senderHandle: row.string(6)
             )
         }
-    }
-
-    private func getMessageText(text: String?, attributedBody: Data?) -> String? {
-        // Try plain text first
-        if let text = text, !text.isEmpty {
-            return text
-        }
-
-        // Try to extract from attributedBody (Apple typedstream format)
-        guard let blob = attributedBody else { return nil }
-        return extractTextFromTypedstream(blob)
-    }
-
-    /// Extract plain text from attributedBody blob (Apple typedstream format)
-    private func extractTextFromTypedstream(_ blob: Data) -> String? {
-        // Look for NSString or NSMutableString marker in the typedstream
-        guard let nsStringRange = blob.range(of: Data("NSString".utf8)) ??
-              blob.range(of: Data("NSMutableString".utf8)) else {
-            return nil
-        }
-
-        // Skip past the class name marker to the length field
-        // The format is: marker + some bytes + length + data
-        var idx = nsStringRange.upperBound + 5
-
-        guard idx < blob.count else { return nil }
-
-        let lengthByte = blob[idx]
-        let length: Int
-        let dataStart: Int
-
-        // Parse length based on prefix byte
-        if lengthByte == 0x81 {
-            // 2-byte length (little endian)
-            guard idx + 3 <= blob.count else { return nil }
-            length = Int(blob[idx + 1]) | (Int(blob[idx + 2]) << 8)
-            dataStart = idx + 3
-        } else if lengthByte == 0x82 {
-            // 3-byte length (little endian)
-            guard idx + 4 <= blob.count else { return nil }
-            length = Int(blob[idx + 1]) | (Int(blob[idx + 2]) << 8) | (Int(blob[idx + 3]) << 16)
-            dataStart = idx + 4
-        } else {
-            // Single byte length
-            length = Int(lengthByte)
-            dataStart = idx + 1
-        }
-
-        guard length > 0 && dataStart + length <= blob.count else { return nil }
-
-        let textData = blob[dataStart..<(dataStart + length)]
-        return String(data: textData, encoding: .utf8)
     }
 
     private func filterUnanswered(
@@ -913,20 +864,6 @@ actor GetMessagesTool {
         }
     }
 
-    private func formatFileSize(_ bytes: Int) -> String {
-        var size = Double(bytes)
-        for unit in ["B", "KB", "MB", "GB"] {
-            if size < 1024 {
-                if unit == "B" {
-                    return "\(Int(size)) \(unit)"
-                }
-                return String(format: "%.1f %@", size, unit)
-            }
-            size /= 1024
-        }
-        return String(format: "%.1f TB", size)
-    }
-
     private func assignSessions(
         messages: [GetMessagesResponse.MessageInfo],
         messageRows: [MessageRow]
@@ -1008,23 +945,6 @@ actor GetMessagesTool {
         return (updatedMessages, sessions)
     }
 
-    private func generateDisplayName(people: [String: String]) -> String {
-        let names = people.filter { $0.key != "me" }.map { $0.value }
-
-        if names.count <= 4 {
-            return names.joined(separator: ", ")
-        } else {
-            let first3 = names.prefix(3).joined(separator: ", ")
-            return "\(first3) and \(names.count - 3) others"
-        }
-    }
-
-    private func encodeJSON<T: Encodable>(_ value: T) throws -> String {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
-        let data = try encoder.encode(value)
-        return String(data: data, encoding: .utf8) ?? "{}"
-    }
 }
 
 // MARK: - Helper Types

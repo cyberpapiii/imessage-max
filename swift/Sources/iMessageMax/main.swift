@@ -41,6 +41,13 @@ struct iMessageMax: AsyncParsableCommand {
             }
             try? await resolver.initialize()
 
+            // Warn if binding to a non-localhost address
+            if host != "127.0.0.1" && host != "::1" && host != "localhost" {
+                FileHandle.standardError.write(
+                    "[WARNING] Binding to '\(host)' exposes iMessage data to the network. Use 127.0.0.1 for local-only access.\n"
+                        .data(using: .utf8)!)
+            }
+
             let transport = HTTPTransport(
                 host: host,
                 port: port,
@@ -49,11 +56,7 @@ struct iMessageMax: AsyncParsableCommand {
             )
 
             try await transport.connect()
-
-            // Keep running until interrupted
-            await withCheckedContinuation { (_: CheckedContinuation<Void, Never>) in
-                // Server runs indefinitely
-            }
+            try await transport.runService()
         } else {
             // Stdio mode: Single Server instance managed by MCPServerWrapper
             let server = MCPServerWrapper()

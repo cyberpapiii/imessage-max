@@ -115,7 +115,13 @@ actor SendTool {
                 ],
                 required: ["text"]
             ),
-            annotations: Tool.Annotations(readOnlyHint: false)  // send modifies state
+            annotations: Tool.Annotations(
+                title: "Send Message",
+                readOnlyHint: false,
+                destructiveHint: false,
+                idempotentHint: false,
+                openWorldHint: true
+            )
         ) { args in
             try await tool.execute(args: args)
         }
@@ -130,14 +136,7 @@ actor SendTool {
         let replyTo = args?["reply_to"]?.stringValue
 
         let response = await send(to: to, chatId: chatId, text: text, replyTo: replyTo)
-        return [.text(try encodeJSON(response))]
-    }
-
-    private func encodeJSON<T: Encodable>(_ value: T) throws -> String {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
-        let data = try encoder.encode(value)
-        return String(data: data, encoding: .utf8) ?? "{}"
+        return [.text(try FormatUtils.encodeJSON(response))]
     }
 
     // MARK: - Send Implementation

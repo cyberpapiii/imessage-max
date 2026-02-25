@@ -2,37 +2,6 @@
 import Foundation
 import MCP
 
-/// Attachment type derived from MIME type or UTI
-enum AttachmentType: String, Codable {
-    case image
-    case video
-    case audio
-    case pdf
-    case document
-    case other
-
-    static func from(mimeType: String?, uti: String?) -> AttachmentType {
-        let mime = (mimeType ?? "").lowercased()
-        let utiStr = (uti ?? "").lowercased()
-
-        if mime.contains("image") || utiStr.contains("image") ||
-            utiStr.contains("jpeg") || utiStr.contains("png") {
-            return .image
-        } else if mime.contains("video") || utiStr.contains("movie") || utiStr.contains("video") {
-            return .video
-        } else if mime.contains("audio") || utiStr.contains("audio") {
-            return .audio
-        } else if mime.contains("pdf") || utiStr.contains("pdf") {
-            return .pdf
-        } else if mime.contains("document") || mime.contains("msword") ||
-            mime.contains("spreadsheet") || mime.contains("presentation") {
-            return .document
-        } else {
-            return .other
-        }
-    }
-}
-
 /// Sort options for attachments
 enum AttachmentSort: String {
     case recentFirst = "recent_first"
@@ -151,6 +120,7 @@ final class ListAttachments {
             description: "List attachments with filters by chat, sender, type, or time range. Returns metadata for images, videos, audio, PDFs, and documents. Each attachment includes 'available: true/false' indicating if the file is on disk (false means offloaded to iCloud).",
             inputSchema: inputSchema,
             annotations: Tool.Annotations(
+                title: "List Attachments",
                 readOnlyHint: true,
                 destructiveHint: false,
                 idempotentHint: true,
@@ -381,12 +351,12 @@ final class ListAttachments {
                     mime: row.mimeType,
                     name: displayName,
                     size: row.totalBytes,
-                    sizeHuman: formatFileSize(row.totalBytes),
+                    sizeHuman: row.totalBytes.map { FormatUtils.fileSize($0) },
                     ts: TimeUtils.formatISO(msgDate),
                     ago: TimeUtils.formatCompactRelative(msgDate),
                     from: senderKey,
                     chat: "chat\(row.chatId)",
-                    msgId: "msg\(row.msgId)",
+                    msgId: "msg_\(row.msgId)",
                     msgPreview: row.text.map { String($0.prefix(50)) },
                     available: isAvailable
                 )
@@ -482,19 +452,4 @@ final class ListAttachments {
         }
     }
 
-    private func formatFileSize(_ bytes: Int?) -> String? {
-        guard let bytes = bytes, bytes > 0 else { return nil }
-
-        var size = Double(bytes)
-        for unit in ["B", "KB", "MB", "GB"] {
-            if size < 1024 {
-                if unit == "B" {
-                    return "\(Int(size)) \(unit)"
-                }
-                return String(format: "%.1f %@", size, unit)
-            }
-            size /= 1024
-        }
-        return String(format: "%.1f TB", size)
-    }
 }

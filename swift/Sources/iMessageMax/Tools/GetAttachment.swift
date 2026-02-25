@@ -44,6 +44,7 @@ struct GetAttachment {
             description: "Get image content by attachment ID. Returns the image at the specified resolution variant: vision (1568px, best for AI analysis), thumb (400px, quick preview), or full (original).",
             inputSchema: inputSchema,
             annotations: Tool.Annotations(
+                title: "Get Attachment",
                 readOnlyHint: true,
                 destructiveHint: false,
                 idempotentHint: true,
@@ -58,7 +59,7 @@ struct GetAttachment {
 
             let variant = arguments?["variant"]?.stringValue ?? "vision"
             let tool = GetAttachment(db: db)
-            let result = tool.execute(attachmentId: attachmentId, variant: variant)
+            let result = await tool.execute(attachmentId: attachmentId, variant: variant)
 
             switch result {
             case .success(let metadata, let imageData, let mimeType):
@@ -89,7 +90,7 @@ struct GetAttachment {
     ///   - attachmentId: Attachment identifier (e.g., "att123" or just "123")
     ///   - variant: Resolution variant - "vision" (1568px, default), "thumb" (400px), or "full" (original)
     /// - Returns: GetAttachmentResult with image data or error
-    func execute(attachmentId: String, variant: String = "vision") -> GetAttachmentResult {
+    func execute(attachmentId: String, variant: String = "vision") async -> GetAttachmentResult {
         // Validate variant
         guard let imageVariant = ImageVariant(rawValue: variant) else {
             let validVariants = ImageVariant.allCases.map { $0.rawValue }.sorted()
@@ -173,7 +174,7 @@ struct GetAttachment {
             // Check if file exists locally
             if !FileManager.default.fileExists(atPath: expandedPath) {
                 // Check if it's an iCloud file that can be downloaded
-                if let downloaded = tryDownloadFromiCloud(url: fileURL) {
+                if let downloaded = await tryDownloadFromiCloud(url: fileURL) {
                     if !downloaded {
                         return .error(
                             type: "attachment_offloaded",
@@ -206,7 +207,7 @@ struct GetAttachment {
                 }
 
                 // Build metadata string
-                let sizeHuman = formatSize(result.data.count)
+                let sizeHuman = FormatUtils.fileSize(result.data.count)
                 var metadata = "\(displayName) (\(result.width)x\(result.height), \(sizeHuman))"
 
                 // Add warning for full variant if large
@@ -292,20 +293,9 @@ struct GetAttachment {
         }
     }
 
-    /// Format bytes as human-readable string
-    private func formatSize(_ sizeBytes: Int) -> String {
-        if sizeBytes < 1024 {
-            return "\(sizeBytes)B"
-        } else if sizeBytes < 1024 * 1024 {
-            return String(format: "%.1fKB", Double(sizeBytes) / 1024.0)
-        } else {
-            return String(format: "%.1fMB", Double(sizeBytes) / (1024.0 * 1024.0))
-        }
-    }
-
     /// Try to download an iCloud file if it's offloaded
     /// Returns: nil if not an iCloud file, false if download started but not complete, true if available
-    private func tryDownloadFromiCloud(url: URL) -> Bool? {
+    private func tryDownloadFromiCloud(url: URL) async -> Bool? {
         // Check if this is a ubiquitous (iCloud) item
         do {
             let resourceValues = try url.resourceValues(forKeys: [
@@ -334,7 +324,7 @@ struct GetAttachment {
 
             // Wait briefly for small files
             for _ in 0..<10 {
-                Thread.sleep(forTimeInterval: 0.5)
+                try? await Task.sleep(nanoseconds: 500_000_000)
                 if FileManager.default.fileExists(atPath: url.path) {
                     return true
                 }

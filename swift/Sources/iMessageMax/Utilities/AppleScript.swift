@@ -7,6 +7,7 @@ enum SendError: LocalizedError {
     case recipientNotFound(String)
     case timeout
     case failed(String)
+    case invalidParams(String)
 
     var errorDescription: String? {
         switch self {
@@ -25,41 +26,49 @@ enum SendError: LocalizedError {
             return "Send operation timed out. Messages.app may be unresponsive."
         case .failed(let message):
             return "Send failed: \(message)"
+        case .invalidParams(let message):
+            return message
         }
     }
 }
 
 enum AppleScriptRunner {
-    /// Escape a string for safe use in AppleScript.
-    /// Handles backslashes, double quotes, and newlines.
-    private static func escape(_ string: String) -> String {
-        string
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-            .replacingOccurrences(of: "\n", with: " ")
-            .replacingOccurrences(of: "\r", with: " ")
-    }
-
     /// Send a message to a recipient via AppleScript and Messages.app
     /// - Parameters:
     ///   - recipient: Phone number, email, or chat GUID
     ///   - message: Message text to send
     /// - Returns: Result indicating success or specific error
     static func send(to recipient: String, message: String) -> Result<Void, SendError> {
-        let escapedRecipient = escape(recipient)
-        let escapedMessage = escape(message)
+        // Input length validation
+        guard recipient.count <= 100 else {
+            return .failure(.invalidParams("Recipient too long"))
+        }
+        guard message.count <= 20_000 else {
+            return .failure(.invalidParams("Message too long (max 20,000 chars)"))
+        }
 
+        // Static AppleScript template — no string interpolation.
+        // Values are passed via environment variables to prevent injection.
         let script = """
+            set recipientId to system attribute "IMSG_RECIPIENT"
+            set messageText to system attribute "IMSG_MESSAGE"
             tell application "Messages"
                 set targetService to 1st account whose service type = iMessage
-                set targetBuddy to participant "\(escapedRecipient)" of targetService
-                send "\(escapedMessage)" to targetBuddy
+                set targetBuddy to participant recipientId of targetService
+                send messageText to targetBuddy
             end tell
             """
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
         process.arguments = ["-e", script]
+
+        // Clean environment: only the two variables the script needs.
+        // Do NOT inherit the parent process environment.
+        process.environment = [
+            "IMSG_RECIPIENT": recipient,
+            "IMSG_MESSAGE": message
+        ]
 
         let pipe = Pipe()
         process.standardOutput = pipe

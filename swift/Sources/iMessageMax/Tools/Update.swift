@@ -50,7 +50,7 @@ enum UpdateTool {
             annotations: .init(
                 title: "Update iMessage Max",
                 readOnlyHint: false,
-                destructiveHint: false,
+                destructiveHint: true,
                 idempotentHint: true,
                 openWorldHint: true
             )
@@ -72,7 +72,7 @@ enum UpdateTool {
                 currentVersion: Version.current,
                 message: "You're running the latest version of iMessage Max."
             )
-            return [.text(try encodeJSON(result))]
+            return [.text(try FormatUtils.encodeJSON(result))]
 
         case .updateAvailable(let newVersion):
             // Perform the update
@@ -88,7 +88,7 @@ enum UpdateTool {
                     message: "Successfully updated from \(Version.current) to \(newVersion). Please restart Claude Desktop (Cmd+Q, then reopen) to use the new version.",
                     actionRequired: "Restart Claude Desktop"
                 )
-                return [.text(try encodeJSON(result))]
+                return [.text(try FormatUtils.encodeJSON(result))]
 
             case .failure(let error):
                 let result = UpdateResult(
@@ -98,7 +98,7 @@ enum UpdateTool {
                     error: error,
                     manualCommand: "brew upgrade imessage-max"
                 )
-                return [.text(try encodeJSON(result))]
+                return [.text(try FormatUtils.encodeJSON(result))]
             }
 
         case .checkFailed(let error):
@@ -109,7 +109,7 @@ enum UpdateTool {
                 error: error,
                 manualCommand: "brew outdated imessage-max"
             )
-            return [.text(try encodeJSON(result))]
+            return [.text(try FormatUtils.encodeJSON(result))]
         }
     }
 
@@ -290,12 +290,4 @@ enum UpdateTool {
         }
     }
 
-    // MARK: - Helpers
-
-    private static func encodeJSON<T: Encodable>(_ value: T) throws -> String {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
-        let data = try encoder.encode(value)
-        return String(data: data, encoding: .utf8) ?? "{}"
-    }
 }

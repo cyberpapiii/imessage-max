@@ -41,9 +41,9 @@ struct OriginValidationMiddleware<Context: RequestContext>: RouterMiddleware {
                 )
             }
         } else if requireOrigin {
-            // Origin header is required but missing
+            // Origin header is required but missing — 403 per MCP spec
             return Response(
-                status: .badRequest,
+                status: .forbidden,
                 headers: [.contentType: "application/json"],
                 body: .init(
                     byteBuffer: .init(string: """
@@ -54,21 +54,57 @@ struct OriginValidationMiddleware<Context: RequestContext>: RouterMiddleware {
         }
 
         // Also validate Host header to prevent DNS rebinding
-        // Use the authority from the request head for HTTPTypes 1.x+
-        if let authority = request.uri.host {
-            // Extract host without port
-            let hostWithoutPort = authority.split(separator: ":").first.map(String.init) ?? authority
-            guard allowedHosts.contains(hostWithoutPort) else {
-                return Response(
-                    status: .forbidden,
-                    headers: [.contentType: "application/json"],
-                    body: .init(
-                        byteBuffer: .init(string: """
-                            {"jsonrpc":"2.0","error":{"code":-32600,"message":"Host not allowed"},"id":null}
-                            """)
-                    )
+        // Host validation is mandatory — reject if we cannot determine the host
+        guard let authority = request.uri.host else {
+            return Response(
+                status: .forbidden,
+                headers: [.contentType: "application/json"],
+                body: .init(
+                    byteBuffer: .init(string: """
+                        {"jsonrpc":"2.0","error":{"code":-32600,"message":"Host not allowed"},"id":null}
+                        """)
                 )
+            )
+        }
+
+        // Extract host without port, handling IPv6 bracket notation
+        let hostWithoutPort: String
+        if authority.hasPrefix("[") {
+            // IPv6 bracketed: [::1]:8080 -> [::1]
+            if let closeBracket = authority.firstIndex(of: "]") {
+                hostWithoutPort = String(authority[authority.startIndex...closeBracket])
+            } else {
+                hostWithoutPort = authority
             }
+        } else if authority.filter({ $0 == ":" }).count > 1 {
+            // Bare IPv6 without brackets (e.g., ::1) — contains multiple colons,
+            // so don't attempt port stripping which would mangle the address
+            hostWithoutPort = authority
+        } else {
+            // IPv4 or hostname: strip port if present
+            // Only strip suffix that looks like :<digits>
+            if let lastColon = authority.lastIndex(of: ":") {
+                let portCandidate = authority[authority.index(after: lastColon)...]
+                if !portCandidate.isEmpty && portCandidate.allSatisfy({ $0.isNumber }) {
+                    hostWithoutPort = String(authority[..<lastColon])
+                } else {
+                    hostWithoutPort = authority
+                }
+            } else {
+                hostWithoutPort = authority
+            }
+        }
+
+        guard allowedHosts.contains(hostWithoutPort) else {
+            return Response(
+                status: .forbidden,
+                headers: [.contentType: "application/json"],
+                body: .init(
+                    byteBuffer: .init(string: """
+                        {"jsonrpc":"2.0","error":{"code":-32600,"message":"Host not allowed"},"id":null}
+                        """)
+                )
+            )
         }
 
         return try await next(request, context)

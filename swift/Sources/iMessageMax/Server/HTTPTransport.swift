@@ -37,8 +37,8 @@ public actor HTTPTransport: Transport {
     // Request correlation: maps JSON-RPC id to continuation for response
     private var pendingRequests: [String: PendingRequest] = [:]
 
-    // Server task
-    private var serverTask: Task<Void, Error>?
+    // Closure to run the Hummingbird application with graceful shutdown
+    private var runServiceClosure: (@Sendable () async throws -> Void)?
 
     /// Tracks a pending request with its session
     private struct PendingRequest {
@@ -91,13 +91,6 @@ public actor HTTPTransport: Transport {
             await self?.cleanupPendingRequestsAsync(for: sessionId)
         }
 
-        // Tell SessionManager how to check for active SSE connections
-        // Sessions with active connections are never timed out
-        await sessionManager.setActiveConnectionsChecker { [weak self] sessionId in
-            guard let self = self else { return false }
-            return await self.sseManager.hasActiveConnections(forSession: sessionId)
-        }
-
         // Create router with all routes
         let router = Router()
 
@@ -129,16 +122,25 @@ public actor HTTPTransport: Transport {
 
         isConnected = true
 
-        // Start server in background
-        serverTask = Task {
-            try await app.run()
+        // Store runService closure for lifecycle management
+        self.runServiceClosure = { try await app.runService() }
+    }
+
+    /// Runs the HTTP server with graceful shutdown support
+    ///
+    /// This method blocks until the server is shut down via SIGTERM or SIGINT.
+    /// Uses Hummingbird's built-in ServiceGroup for lifecycle management.
+    public func runService() async throws {
+        guard let runService = self.runServiceClosure else {
+            throw MCPError.serverError(code: -32000, message: "Call connect() before runService()")
         }
+        try await runService()
     }
 
     /// Handles POST requests with JSON-RPC messages
     private func handlePost(
         request: Request,
-        context: some RequestContext
+        context: some Hummingbird.RequestContext
     ) async throws -> Response {
         // Validate Content-Type
         guard let contentType = request.headers[.contentType],
@@ -162,22 +164,36 @@ public actor HTTPTransport: Transport {
         }
 
         // Collect request body
-        let body = try await request.body.collect(upTo: 10 * 1024 * 1024)  // 10MB max
+        let body = try await request.body.collect(upTo: 512 * 1024)  // 512KB
         let requestData = Data(buffer: body)
+
+        // Validate client's protocol version header
+        if let versionHeader = request.headers[HTTPField.Name("Mcp-Protocol-Version")!] ??
+                               request.headers[HTTPField.Name("mcp-protocol-version")!] {
+            let supportedVersions: Set<String> = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"]
+            guard supportedVersions.contains(versionHeader) else {
+                return errorResponse(
+                    status: .badRequest,
+                    message: "Unsupported protocol version: \(versionHeader)",
+                    code: -32600
+                )
+            }
+        }
+        // If header is absent, assume 2025-03-26 for backwards compatibility
+
+        // Reject batch requests (JSON arrays)
+        let jsonString = String(data: requestData, encoding: .utf8) ?? ""
+        if jsonString.trimmingCharacters(in: .whitespaces).hasPrefix("[") {
+            return errorResponse(
+                status: .badRequest,
+                message: "Batch requests are not supported",
+                code: -32600
+            )
+        }
 
         // Parse JSON to determine message type
         guard let json = try? JSONSerialization.jsonObject(with: requestData) as? [String: Any]
         else {
-            // Check if it's a batch (array)
-            if let jsonArray = try? JSONSerialization.jsonObject(with: requestData)
-                as? [[String: Any]]
-            {
-                return try await handleBatchRequest(
-                    jsonArray: jsonArray,
-                    requestData: requestData,
-                    request: request
-                )
-            }
             return errorResponse(
                 status: .badRequest,
                 message: "Invalid JSON"
@@ -193,7 +209,12 @@ public actor HTTPTransport: Transport {
 
         if isInitialize {
             // Create new session with its own Server instance
-            let session = await sessionManager.createSession()
+            guard let session = await sessionManager.createSession() else {
+                return errorResponse(
+                    status: .serviceUnavailable,
+                    message: "Too many active sessions. Try again later."
+                )
+            }
             sessionId = session.id
             responseHeaders[.mcpSessionId] = sessionId
             logger.info("Created new session with dedicated Server: \(sessionId)")
@@ -278,83 +299,13 @@ public actor HTTPTransport: Transport {
                 headers: responseHeaders
             )
 
-        case .batch:
-            // Shouldn't reach here since we check for batch above
-            return Response(
-                status: .accepted,
-                headers: responseHeaders
-            )
-        }
-    }
-
-    /// Handles batch requests
-    private func handleBatchRequest(
-        jsonArray: [[String: Any]],
-        requestData: Data,
-        request: Request
-    ) async throws -> Response {
-        var responseHeaders = HTTPFields()
-        responseHeaders[.contentType] = "application/json"
-
-        // Get session ID
-        guard let sessionId = request.headers[.mcpSessionId] else {
-            return errorResponse(
-                status: .badRequest,
-                message: "Missing Mcp-Session-Id header for batch request"
-            )
-        }
-
-        guard await sessionManager.validate(sessionId: sessionId) != nil else {
-            return errorResponse(
-                status: .notFound,
-                message: "Invalid or expired session. Please re-initialize."
-            )
-        }
-
-        responseHeaders[.mcpSessionId] = sessionId
-
-        // For batches, generate a unique ID and wait for response
-        let batchId = "batch-\(UUID().uuidString)"
-
-        do {
-            let responseData = try await withCheckedThrowingContinuation {
-                (continuation: CheckedContinuation<Data, Error>) in
-                self.storePendingRequest(
-                    id: batchId,
-                    sessionId: sessionId,
-                    continuation: continuation
-                )
-
-                Task {
-                    let routed = await self.sessionManager.routeMessage(
-                        sessionId: sessionId,
-                        data: requestData
-                    )
-                    if !routed {
-                        if let pending = await self.removePendingRequest(id: batchId) {
-                            pending.continuation.resume(throwing: MCPError.connectionClosed)
-                        }
-                    }
-                }
-            }
-
-            return Response(
-                status: .ok,
-                headers: responseHeaders,
-                body: .init(byteBuffer: ByteBuffer(data: responseData))
-            )
-        } catch {
-            return errorResponse(
-                status: .internalServerError,
-                message: "Failed to process batch: \(error.localizedDescription)"
-            )
         }
     }
 
     /// Handles GET requests for SSE streaming
     private func handleGet(
         request: Request,
-        context: some RequestContext
+        context: some Hummingbird.RequestContext
     ) async throws -> Response {
         // Validate Accept header
         guard let accept = request.headers[.accept],
@@ -428,7 +379,7 @@ public actor HTTPTransport: Transport {
     /// Handles DELETE requests for session termination
     private func handleDelete(
         request: Request,
-        context: some RequestContext
+        context: some Hummingbird.RequestContext
     ) async throws -> Response {
         // Validate session
         guard let sessionId = request.headers[.mcpSessionId] else {
@@ -495,9 +446,8 @@ public actor HTTPTransport: Transport {
         guard isConnected else { return }
         isConnected = false
 
-        // Cancel server task
-        serverTask?.cancel()
-        serverTask = nil
+        // Clear run closure reference
+        runServiceClosure = nil
 
         // Terminate all sessions
         for sessionId in await sessionManager.activeSessionIds() {
@@ -598,12 +548,12 @@ public actor HTTPTransport: Transport {
     }
 
     /// Creates a JSON-RPC error response
-    private nonisolated func errorResponse(status: HTTPResponse.Status, message: String) -> Response
+    private nonisolated func errorResponse(status: HTTPResponse.Status, message: String, code: Int = -32600) -> Response
     {
         let escapedMessage = message.replacingOccurrences(of: "\"", with: "\\\"")
         let errorJson =
             """
-            {"jsonrpc":"2.0","error":{"code":-32600,"message":"\(escapedMessage)"},"id":null}
+            {"jsonrpc":"2.0","error":{"code":\(code),"message":"\(escapedMessage)"},"id":null}
             """
         return Response(
             status: status,
@@ -620,7 +570,6 @@ private enum JSONRPCMessageType {
     case request
     case notification
     case response
-    case batch
 }
 
 // MARK: - HTTPField.Name Extensions

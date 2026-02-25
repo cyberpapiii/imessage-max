@@ -222,6 +222,7 @@ enum SearchTool {
                 """,
             inputSchema: inputSchema,
             annotations: Tool.Annotations(
+                title: "Search Messages",
                 readOnlyHint: true,
                 destructiveHint: false,
                 idempotentHint: true,
@@ -364,7 +365,7 @@ enum SearchTool {
 
                 if !searchWords.isEmpty {
                     rows = rows.filter { row in
-                        let extractedText = getMessageText(text: row.text, attributedBody: row.attributedBody)
+                        let extractedText = MessageTextExtractor.extract(text: row.text, attributedBody: row.attributedBody)
                         guard let text = extractedText?.lowercased() else { return false }
 
                         // Split message text into words for fuzzy matching
@@ -471,8 +472,6 @@ enum SearchTool {
             .leftJoin("handle h ON m.handle_id = h.ROWID")
             .where("m.associated_message_type = ?", 0)
 
-        var params: [Any] = [0]
-
         // NOTE: Text search is done in Swift after fetching, not in SQL
         // This is because many messages have text in attributedBody (binary blob)
         // instead of the text column, and SQLite can't search binary blobs effectively.
@@ -485,38 +484,31 @@ enum SearchTool {
 
         // Time filters
         if let sinceStr = since, let sinceTs = AppleTime.parse(sinceStr) {
-            builder.where("m.date >= ?")
-            params.append(sinceTs)
+            builder.where("m.date >= ?", sinceTs)
         }
 
         if let beforeStr = before, let beforeTs = AppleTime.parse(beforeStr) {
-            builder.where("m.date <= ?")
-            params.append(beforeTs)
+            builder.where("m.date <= ?", beforeTs)
         }
 
         // Chat filter
         if let chatStr = inChat {
             let chatIdStr = chatStr.hasPrefix("chat") ? String(chatStr.dropFirst(4)) : chatStr
             if let chatId = Int64(chatIdStr) {
-                builder.where("c.ROWID = ?")
-                params.append(chatId)
+                builder.where("c.ROWID = ?", chatId)
             } else {
-                builder.where("c.guid LIKE ? ESCAPE '\\'")
-                params.append("%\(QueryBuilder.escapeLike(chatStr))%")
+                builder.where("c.guid LIKE ? ESCAPE '\\'", "%\(QueryBuilder.escapeLike(chatStr))%")
             }
         }
 
         // From filter (unanswered implies from_me)
         if unanswered {
-            builder.where("m.is_from_me = ?")
-            params.append(1)
+            builder.where("m.is_from_me = ?", 1)
         } else if let person = fromPerson {
             if person.lowercased() == "me" {
-                builder.where("m.is_from_me = ?")
-                params.append(1)
+                builder.where("m.is_from_me = ?", 1)
             } else {
-                builder.where("h.id LIKE ? ESCAPE '\\'")
-                params.append("%\(QueryBuilder.escapeLike(person))%")
+                builder.where("h.id LIKE ? ESCAPE '\\'", "%\(QueryBuilder.escapeLike(person))%")
             }
         }
 
@@ -524,12 +516,12 @@ enum SearchTool {
         if let isGroupChat = isGroup {
             if isGroupChat {
                 builder.where(
-                    "(SELECT COUNT(*) FROM chat_handle_join chj WHERE chj.chat_id = c.ROWID) > ?")
-                params.append(1)
+                    "(SELECT COUNT(*) FROM chat_handle_join chj WHERE chj.chat_id = c.ROWID) > ?",
+                    1)
             } else {
                 builder.where(
-                    "(SELECT COUNT(*) FROM chat_handle_join chj WHERE chj.chat_id = c.ROWID) = ?")
-                params.append(1)
+                    "(SELECT COUNT(*) FROM chat_handle_join chj WHERE chj.chat_id = c.ROWID) = ?",
+                    1)
             }
         }
 
@@ -537,8 +529,7 @@ enum SearchTool {
         if let hasType = has {
             switch hasType {
             case "link":
-                builder.where("m.text LIKE ?")
-                params.append("%http%")
+                builder.where("m.text LIKE ?", "%http%")
             case "image", "video", "attachment":
                 builder.where("""
                     EXISTS (
@@ -561,8 +552,7 @@ enum SearchTool {
 
         builder.limit(limit)
 
-        let (sql, _) = builder.build()
-        return (sql, params)
+        return builder.build()
     }
 
     // MARK: - Unanswered Filtering
@@ -628,7 +618,7 @@ enum SearchTool {
         var filtered: [SearchRow] = []
 
         for row in rows {
-            let text = getMessageText(text: row.text, attributedBody: row.attributedBody)
+            let text = MessageTextExtractor.extract(text: row.text, attributedBody: row.attributedBody)
             guard let date = row.date else { continue }
 
             let isQuestion = looksLikeQuestion(text)
@@ -692,7 +682,7 @@ enum SearchTool {
                 }
             }
 
-            let text = getMessageText(text: row.text, attributedBody: row.attributedBody)
+            let text = MessageTextExtractor.extract(text: row.text, attributedBody: row.attributedBody)
             let msgDate = AppleTime.toDate(row.date)
 
             // Get chat name with fallback
@@ -710,7 +700,7 @@ enum SearchTool {
             }
 
             var result = SearchResult(
-                id: "msg\(row.msgId)",
+                id: "msg_\(row.msgId)",
                 ts: TimeUtils.formatISO(msgDate),
                 ago: TimeUtils.formatCompactRelative(msgDate),
                 from: senderKey,
@@ -796,7 +786,7 @@ enum SearchTool {
                 }
             }
 
-            let text = getMessageText(text: row.text, attributedBody: row.attributedBody)
+            let text = MessageTextExtractor.extract(text: row.text, attributedBody: row.attributedBody)
             let msgDate = AppleTime.toDate(row.date)
 
             // Get chat name with fallback
@@ -839,7 +829,7 @@ enum SearchTool {
             // Add sample messages (up to 3)
             if chat.sampleMessages.count < 3 {
                 chat.sampleMessages.append(SearchSampleMessage(
-                    id: "msg\(row.msgId)",
+                    id: "msg_\(row.msgId)",
                     text: text,
                     from: senderKey,
                     ts: TimeUtils.formatISO(msgDate)
@@ -995,11 +985,11 @@ enum SearchTool {
             }
         }
 
-        let text = getMessageText(text: row.text, attributedBody: row.attributedBody)
+        let text = MessageTextExtractor.extract(text: row.text, attributedBody: row.attributedBody)
         let msgDate = AppleTime.toDate(row.date)
 
         return SearchContextMessage(
-            id: "msg\(row.msgId)",
+            id: "msg_\(row.msgId)",
             ts: TimeUtils.formatISO(msgDate),
             from: senderKey,
             text: text
@@ -1090,57 +1080,6 @@ enum SearchTool {
         return prevRow[n]
     }
 
-    private static func getMessageText(text: String?, attributedBody: Data?) -> String? {
-        // First try plain text
-        if let text = text, !text.isEmpty {
-            return text
-        }
-
-        // Try to extract from attributedBody (Apple typedstream format)
-        guard let data = attributedBody else { return nil }
-        return extractTextFromTypedstream(data)
-    }
-
-    /// Extract plain text from attributedBody blob (Apple typedstream format)
-    private static func extractTextFromTypedstream(_ blob: Data) -> String? {
-        // Look for NSString or NSMutableString marker in the typedstream
-        guard let nsStringRange = blob.range(of: Data("NSString".utf8)) ??
-              blob.range(of: Data("NSMutableString".utf8)) else {
-            return nil
-        }
-
-        // Skip past the class name marker to the length field
-        let idx = nsStringRange.upperBound + 5
-
-        guard idx < blob.count else { return nil }
-
-        let lengthByte = blob[idx]
-        let length: Int
-        let dataStart: Int
-
-        // Parse length based on prefix byte
-        if lengthByte == 0x81 {
-            // 2-byte length (little endian)
-            guard idx + 3 <= blob.count else { return nil }
-            length = Int(blob[idx + 1]) | (Int(blob[idx + 2]) << 8)
-            dataStart = idx + 3
-        } else if lengthByte == 0x82 {
-            // 3-byte length (little endian)
-            guard idx + 4 <= blob.count else { return nil }
-            length = Int(blob[idx + 1]) | (Int(blob[idx + 2]) << 8) | (Int(blob[idx + 3]) << 16)
-            dataStart = idx + 4
-        } else {
-            // Single byte length
-            length = Int(lengthByte)
-            dataStart = idx + 1
-        }
-
-        guard length > 0 && dataStart + length <= blob.count else { return nil }
-
-        let textData = blob[dataStart..<(dataStart + length)]
-        return String(data: textData, encoding: .utf8)
-    }
-
     private static func generateChatDisplayName(
         db: Database,
         chatId: Int64,
@@ -1171,13 +1110,7 @@ enum SearchTool {
             }
         }
 
-        // Generate display name like Messages.app
-        if names.count <= 4 {
-            return names.joined(separator: ", ")
-        } else {
-            let first3 = names.prefix(3).joined(separator: ", ")
-            return "\(first3) and \(names.count - 3) others"
-        }
+        return DisplayNameGenerator.fromNames(names)
     }
 }
 
