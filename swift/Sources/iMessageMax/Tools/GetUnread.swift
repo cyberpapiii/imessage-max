@@ -255,7 +255,7 @@ final class GetUnread {
                 if let name = name {
                     var key = name.split(separator: " ").first.map(String.init)?.lowercased() ?? "p"
                     let baseKey = key
-                    var suffix = 1
+                    var suffix = 2
                     while people[key] != nil {
                         key = "\(baseKey)\(suffix)"
                         suffix += 1

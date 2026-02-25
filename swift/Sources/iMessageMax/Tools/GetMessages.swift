@@ -173,6 +173,7 @@ actor GetMessagesTool {
             annotations: .init(
                 title: "Get Messages",
                 readOnlyHint: true,
+                destructiveHint: false,
                 idempotentHint: true,
                 openWorldHint: false
             )
