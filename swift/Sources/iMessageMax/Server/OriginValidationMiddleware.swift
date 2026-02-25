@@ -55,7 +55,9 @@ struct OriginValidationMiddleware<Context: RequestContext>: RouterMiddleware {
 
         // Also validate Host header to prevent DNS rebinding
         // Host validation is mandatory — reject if we cannot determine the host
-        guard let authority = request.uri.host else {
+        // Note: swift-http-types strips the Host header from HTTPFields and stores it
+        // in HTTPRequest.authority (for HTTP/1.1 Host and HTTP/2 :authority compatibility)
+        guard let authority = request.head.authority ?? request.uri.host else {
             return Response(
                 status: .forbidden,
                 headers: [.contentType: "application/json"],
