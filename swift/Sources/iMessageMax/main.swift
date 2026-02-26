@@ -56,9 +56,7 @@ struct iMessageMax: AsyncParsableCommand {
             )
 
             try await transport.connect()
-            await withCheckedContinuation { (_: CheckedContinuation<Void, Never>) in
-                // Server runs indefinitely until process is terminated
-            }
+            try await transport.waitForTermination()
         } else {
             // Stdio mode: Single Server instance managed by MCPServerWrapper
             let server = MCPServerWrapper()

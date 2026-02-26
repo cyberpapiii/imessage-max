@@ -128,6 +128,16 @@ public actor HTTPTransport: Transport {
         }
     }
 
+    /// Blocks until the server terminates, propagating any errors.
+    ///
+    /// Call this from main.swift after `connect()`. If the Hummingbird server
+    /// crashes or encounters an error, it propagates here — causing the process
+    /// to exit so launchd can restart it.
+    public func waitForTermination() async throws {
+        guard let task = serverTask else { return }
+        try await task.value
+    }
+
     /// Handles POST requests with JSON-RPC messages
     private func handlePost(
         request: Request,
