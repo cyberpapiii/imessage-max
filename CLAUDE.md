@@ -12,7 +12,28 @@ The core goal is to reduce tool calls per user intent from 3-5 down to 1-2 by pr
 
 The project has been rewritten in **Swift** (located in `/swift/`) for native macOS integration. The Python version in the root directory is legacy.
 
-### Build & Run
+### Build, Install & Run
+
+After making code changes, build and deploy with:
+
+```bash
+cd swift
+make install    # builds, signs, restarts launchd service, verifies health
+```
+
+This is the standard workflow — always use `make install` after code changes. It handles everything including code signing (so Full Disk Access persists across rebuilds).
+
+Other Makefile targets:
+- `make status` — check process, version, signature, health
+- `make logs` — tail stderr log
+- `make clean` — remove debug artifacts and clear logs
+- `make setup-signing` — one-time setup for persistent code signing identity
+
+The server runs as a launchd service (`local.imessage-max`) on port 8080, configured at `~/Library/LaunchAgents/local.imessage-max.plist`. It auto-starts on login and auto-restarts on crash.
+
+Connected via MCP Router as `remote-streamable` at `http://127.0.0.1:8080`. After restarting the service, MCP Router clients may need to reconnect (e.g. `/mcp` in Claude Code).
+
+### Manual Build & Run (without Makefile)
 
 ```bash
 cd swift
@@ -41,8 +62,8 @@ curl -X POST http://localhost:8080 \
 ## Architecture
 
 ### Swift Stack
-- **Language:** Swift 6.0
-- **MCP SDK:** modelcontextprotocol/swift-sdk v0.10.0
+- **Language:** Swift 6.1
+- **MCP SDK:** modelcontextprotocol/swift-sdk v0.11.0
 - **HTTP Server:** Hummingbird 2.x (for `--http` mode)
 - **Database:** Raw SQLite3 C API for `~/Library/Messages/chat.db`
 - **Contacts:** CNContactStore (native macOS)
