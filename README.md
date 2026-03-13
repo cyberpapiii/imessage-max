@@ -8,6 +8,16 @@ A high-performance MCP (Model Context Protocol) server for iMessage that lets AI
 
 Built in Swift for native macOS integration - single binary, no runtime dependencies.
 
+## Distribution Status
+
+The Swift binary is the primary supported distribution for current releases:
+- GitHub releases
+- Homebrew tap
+- local signed `make install` workflow
+
+The Python package remains in the repository as a legacy/secondary path and
+should not be assumed to have feature parity with the Swift implementation.
+
 ## Features
 
 - **12 Intent-Aligned Tools** - Work the way you naturally ask questions, not raw database queries

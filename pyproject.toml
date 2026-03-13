@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "imessage-max"
 version = "1.2.1"
-description = "Intent-aligned MCP server for iMessage"
+description = "Legacy Python package for iMessage Max. Swift releases are the primary supported distribution."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"

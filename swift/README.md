@@ -2,6 +2,9 @@
 
 Native macOS MCP server for iMessage, built in Swift for optimal performance.
 
+This is the primary supported implementation for current releases and the
+source of truth for the active install/update workflow.
+
 ## Building
 
 ```bash
