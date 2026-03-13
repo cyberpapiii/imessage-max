@@ -189,7 +189,7 @@ actor GetMessagesTool {
             let response = try await executeImpl(args: args)
             return [.text(try FormatUtils.encodeJSON(response))]
         } catch let error as GetMessagesToolError {
-            return [.text(try FormatUtils.encodeJSON(error.errorResponse))]
+            throw ToolError(content: [.text(try FormatUtils.encodeJSON(error.errorResponse))])
         } catch {
             let errorResponse = GetMessagesErrorResponse(
                 error: "internal_error",
@@ -197,7 +197,7 @@ actor GetMessagesTool {
                 candidates: nil,
                 suggestion: nil
             )
-            return [.text(try FormatUtils.encodeJSON(errorResponse))]
+            throw ToolError(content: [.text(try FormatUtils.encodeJSON(errorResponse))])
         }
     }
 

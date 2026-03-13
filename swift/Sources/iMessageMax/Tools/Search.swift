@@ -273,7 +273,7 @@ enum SearchTool {
                 let encoder = JSONEncoder()
                 encoder.outputFormatting = [.sortedKeys]
                 let errorJson = try encoder.encode(error)
-                return [.text(String(data: errorJson, encoding: .utf8) ?? "{}")]
+                throw ToolError(content: [.text(String(data: errorJson, encoding: .utf8) ?? "{}")])
             }
         }
     }

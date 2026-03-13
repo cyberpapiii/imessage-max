@@ -133,6 +133,15 @@ actor ToolHandlerRegistry {
     }
 }
 
+// MARK: - Tool Error
+
+/// Error type that tools throw to signal failure with content.
+/// The CallTool handler catches this and sets isError: true on the result,
+/// letting MCP clients programmatically distinguish errors from success.
+struct ToolError: Error {
+    let content: [Tool.Content]
+}
+
 // MARK: - Server Extension
 
 extension Server {
@@ -177,6 +186,8 @@ extension Server {
                 do {
                     let content = try await handler(params.arguments)
                     return CallTool.Result(content: content)
+                } catch let error as ToolError {
+                    return CallTool.Result(content: error.content, isError: true)
                 } catch let error as MCPError {
                     throw error
                 } catch {

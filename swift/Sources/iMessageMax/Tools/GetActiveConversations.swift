@@ -136,7 +136,7 @@ enum GetActiveConversations {
                 )
                 let encoder = JSONEncoder()
                 let json = try encoder.encode(errorResponse)
-                return [.text(String(data: json, encoding: .utf8) ?? "{}")]
+                throw ToolError(content: [.text(String(data: json, encoding: .utf8) ?? "{}")])
             }
         }
     }

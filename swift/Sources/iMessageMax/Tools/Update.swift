@@ -98,7 +98,7 @@ enum UpdateTool {
                     error: error,
                     manualCommand: "brew upgrade imessage-max"
                 )
-                return [.text(try FormatUtils.encodeJSON(result))]
+                throw ToolError(content: [.text(try FormatUtils.encodeJSON(result))])
             }
 
         case .checkFailed(let error):
@@ -109,7 +109,7 @@ enum UpdateTool {
                 error: error,
                 manualCommand: "brew outdated imessage-max"
             )
-            return [.text(try FormatUtils.encodeJSON(result))]
+            throw ToolError(content: [.text(try FormatUtils.encodeJSON(result))])
         }
     }
 

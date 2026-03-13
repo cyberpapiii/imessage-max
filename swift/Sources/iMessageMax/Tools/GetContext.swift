@@ -113,7 +113,7 @@ enum GetContext {
                 return [.text(String(data: json, encoding: .utf8) ?? "{}")]
             case .failure(let error):
                 let json = try encoder.encode(error)
-                return [.text(String(data: json, encoding: .utf8) ?? "{}")]
+                throw ToolError(content: [.text(String(data: json, encoding: .utf8) ?? "{}")])
             }
         }
     }

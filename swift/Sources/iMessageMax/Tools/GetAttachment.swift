@@ -54,7 +54,7 @@ struct GetAttachment {
             guard let attachmentId = arguments?["attachment_id"]?.stringValue else {
                 let errorResponse = ["error": "validation_error", "message": "attachment_id is required"]
                 let jsonData = try JSONSerialization.data(withJSONObject: errorResponse, options: [.sortedKeys])
-                return [.text(String(data: jsonData, encoding: .utf8) ?? "{}")]
+                throw ToolError(content: [.text(String(data: jsonData, encoding: .utf8) ?? "{}")])
             }
 
             let variant = arguments?["variant"]?.stringValue ?? "vision"
@@ -80,7 +80,7 @@ struct GetAttachment {
                     }
                 }
                 let jsonData = try JSONSerialization.data(withJSONObject: dict, options: [.sortedKeys])
-                return [.text(String(data: jsonData, encoding: .utf8) ?? "{}")]
+                throw ToolError(content: [.text(String(data: jsonData, encoding: .utf8) ?? "{}")])
             }
         }
     }
