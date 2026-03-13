@@ -1,7 +1,7 @@
 {
   "manifest_version": "0.2",
   "name": "imessage-max",
-  "version": "0.4.4",
+  "version": "1.2.1",
   "display_name": "iMessage Max",
   "description": "Intent-aligned MCP server for iMessage on macOS. Read, search, and send messages with contact resolution and attachment support.",
   "long_description": "iMessage Max provides intent-aligned tools for AI assistants to interact with your iMessage conversations. Features include contact name resolution, session grouping, full-text search, exact chat targeting, and attachment sending with transfer-aware confirmation semantics.",

@@ -113,7 +113,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 {
   "mcpServers": {
     "imessage": {
-      "command": "/opt/homebrew/Cellar/imessage-max/1.0.0/bin/imessage-max"
+      "command": "/opt/homebrew/Cellar/imessage-max/VERSION/bin/imessage-max"
     }
   }
 }
