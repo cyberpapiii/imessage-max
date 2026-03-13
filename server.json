@@ -1,18 +1,18 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.cyberpapiii/imessage-max",
-  "description": "AI-optimized MCP server for iMessage on macOS. Read, search, and send messages.",
+  "description": "Intent-aligned MCP server for iMessage on macOS. Read, search, and send messages with attachment support.",
   "icon": "https://raw.githubusercontent.com/cyberpapiii/imessage-max/main/icon.png",
   "repository": {
     "url": "https://github.com/cyberpapiii/imessage-max",
     "source": "github"
   },
-  "version": "0.1.7",
+  "version": "0.4.4",
   "packages": [
     {
       "registryType": "pypi",
       "identifier": "imessage-max",
-      "version": "0.1.7",
+      "version": "0.4.4",
       "runtimeHint": "uvx",
       "transport": {
         "type": "stdio"

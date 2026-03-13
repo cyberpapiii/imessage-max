@@ -4,6 +4,26 @@ import MCP
 
 /// Result type for diagnose tool
 struct DiagnoseResult: Codable {
+    struct Capabilities: Codable {
+        let sendTextToParticipant: Bool
+        let sendTextToChat: Bool
+        let sendFileToParticipant: Bool
+        let sendFileToChat: Bool
+        let replyToSupported: Bool
+        let tapbackSupported: Bool
+        let editUnsendSupported: Bool
+
+        enum CodingKeys: String, CodingKey {
+            case sendTextToParticipant = "send_text_to_participant"
+            case sendTextToChat = "send_text_to_chat"
+            case sendFileToParticipant = "send_file_to_participant"
+            case sendFileToChat = "send_file_to_chat"
+            case replyToSupported = "reply_to_supported"
+            case tapbackSupported = "tapback_supported"
+            case editUnsendSupported = "edit_unsend_supported"
+        }
+    }
+
     let version: String
     let processId: Int32
     let databaseAccessible: Bool
@@ -15,6 +35,7 @@ struct DiagnoseResult: Codable {
     let contactsLoaded: Int?
     let contactsFix: String?
     let status: String
+    let capabilities: Capabilities
 
     enum CodingKeys: String, CodingKey {
         case version
@@ -28,6 +49,7 @@ struct DiagnoseResult: Codable {
         case contactsLoaded = "contacts_loaded"
         case contactsFix = "contacts_fix"
         case status
+        case capabilities
     }
 }
 
@@ -116,7 +138,16 @@ enum DiagnoseTool {
             contactsStatus: contactsStatus,
             contactsLoaded: contactsLoaded,
             contactsFix: contactsFix,
-            status: overallStatus
+            status: overallStatus,
+            capabilities: .init(
+                sendTextToParticipant: true,
+                sendTextToChat: true,
+                sendFileToParticipant: true,
+                sendFileToChat: true,
+                replyToSupported: false,
+                tapbackSupported: false,
+                editUnsendSupported: false
+            )
         )
     }
 }

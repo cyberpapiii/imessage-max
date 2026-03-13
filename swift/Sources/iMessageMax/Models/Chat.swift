@@ -9,6 +9,7 @@ struct Chat: Codable {
     let participantCount: Int
     let isGroup: Bool
     let lastMessage: LastMessage?
+    let identity: ChatIdentity?
 
     struct LastMessage: Codable {
         let text: String?

@@ -39,6 +39,7 @@ struct ChatInfo: Codable {
     let group: Bool?
     let last: LastMessageInfo?
     let awaitingReply: Bool?
+    let identity: ChatIdentity
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -48,6 +49,7 @@ struct ChatInfo: Codable {
         case group
         case last
         case awaitingReply = "awaiting_reply"
+        case identity
     }
 }
 
@@ -146,7 +148,7 @@ enum ListChatsTool {
                 return [.text(String(data: json, encoding: .utf8) ?? "{}")]
             case .failure(let error):
                 let json = try encoder.encode(error)
-                return [.text(String(data: json, encoding: .utf8) ?? "{}")]
+                throw ToolError(content: [.text(String(data: json, encoding: .utf8) ?? "{}")])
             }
         }
     }
@@ -259,10 +261,14 @@ enum ListChatsTool {
                 )
 
                 var participants: [ListChatsParticipantInfo] = []
+                var identityParticipants: [ChatIdentity.Participant] = []
                 for p in participantRows {
-                    let displayName = p.name ?? PhoneUtils.formatDisplay(p.handle)
+                    let identityParticipant = ChatIdentity.makeParticipant(
+                        handle: p.handle,
+                        contactName: p.name
+                    )
                     participants.append(ListChatsParticipantInfo(
-                        name: displayName,
+                        name: identityParticipant.displayName,
                         handle: p.handle
                     ))
 
@@ -274,12 +280,17 @@ enum ListChatsTool {
                         service: p.service,
                         inContacts: p.name != nil
                     )
+
+                    identityParticipants.append(identityParticipant)
                 }
 
-                // Generate display name
-                let rawDisplayName = chatRow.displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
-                let displayName = (rawDisplayName?.isEmpty == false) ? rawDisplayName! : DisplayNameGenerator.fromNames(participants.map { $0.name })
-                let isGroupChat = chatRow.participantCount > 1
+                let identity = ChatIdentity(
+                    mcpId: "chat\(chatRow.id)",
+                    guid: chatRow.guid,
+                    explicitName: chatRow.displayName,
+                    participants: identityParticipants
+                )
+                let isGroupChat = identity.participantCount > 1
 
                 // Get last message
                 let lastMsg = try await getLastMessage(
@@ -289,13 +300,14 @@ enum ListChatsTool {
                 )
 
                 let chatInfo = ChatInfo(
-                    id: "chat\(chatRow.id)",
-                    name: displayName,
+                    id: identity.mcpId,
+                    name: identity.displayName,
                     participants: participants,
-                    participantCount: chatRow.participantCount,
+                    participantCount: identity.participantCount,
                     group: isGroupChat ? true : nil,
                     last: lastMsg?.info,
-                    awaitingReply: lastMsg?.awaitingReply
+                    awaitingReply: lastMsg?.awaitingReply,
+                    identity: identity
                 )
 
                 chats.append(chatInfo)

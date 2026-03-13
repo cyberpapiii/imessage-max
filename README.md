@@ -194,18 +194,40 @@ get_unread(mode="summary")    # Summary by chat
 ```
 
 ### send
-Send a message (requires Automation permission for Messages.app).
+Send a message or file attachment (requires Automation permission for Messages.app).
 
 ```python
 send(to="Nick", text="Hey!")
 send(chat_id="chat123", text="Running late")
+send(chat_id="chat123", file_paths=["/path/save-the-date.jpg"])
+send(to="Nick", file_paths=["/path/invite.png"], text="Save the date")
 ```
+
+Rules:
+- Exactly one of `to` or `chat_id`
+- At least one of `text` or `file_paths`
+- If both are provided, files are sent first and text is sent last
+- `reply_to` is currently unsupported
+
+Send result semantics:
+- `status: "sent"` means the message or attachment was confirmed successfully
+- `status: "pending_confirmation"` means Messages accepted an attachment send, but it was not confirmed as finished within the polling window
+- `status: "failed"` means the send failed
+- `status: "ambiguous"` means the target could not be resolved safely
+
+Notes:
+- `pending_confirmation` is a normal non-fatal attachment state, not the same as a hard failure
+- exact chat sends target the existing conversation identified by `chat_id`
+
+Examples:
+- `{"status":"sent","success":true,...}` means delivery was confirmed within the polling window
+- `{"status":"pending_confirmation","success":false,...}` means Messages accepted the attachment, but the MCP could not yet confirm final completion
 
 ### diagnose
 Troubleshoot configuration and permission issues.
 
 ```python
-diagnose()  # Returns: database status, contacts count, permissions
+diagnose()  # Returns: database status, contacts count, permissions, capabilities
 ```
 
 ## HTTP Mode

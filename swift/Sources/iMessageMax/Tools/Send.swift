@@ -18,11 +18,13 @@ struct RecipientCandidate: Encodable {
 
 /// Response from the send tool
 struct SendResponse: Encodable {
+    let status: String
     let success: Bool
     let messageId: String?
     let timestamp: String?
     let deliveredTo: [String]?
     let chatId: String?
+    let message: String?
     let error: String?
     let ambiguousRecipient: AmbiguousRecipientInfo?
 
@@ -32,22 +34,40 @@ struct SendResponse: Encodable {
     }
 
     enum CodingKeys: String, CodingKey {
+        case status
         case success
         case messageId = "message_id"
         case timestamp
         case deliveredTo = "delivered_to"
         case chatId = "chat_id"
+        case message
         case error
         case ambiguousRecipient = "ambiguous_recipient"
     }
 
     static func success(deliveredTo: [String], chatId: Int?) -> SendResponse {
         SendResponse(
+            status: "sent",
             success: true,
             messageId: nil,  // Cannot reliably retrieve new message ID
             timestamp: TimeUtils.formatISO(Date()),
             deliveredTo: deliveredTo,
             chatId: chatId.map { "chat\($0)" },
+            message: nil,
+            error: nil,
+            ambiguousRecipient: nil
+        )
+    }
+
+    static func pending(_ message: String, deliveredTo: [String], chatId: Int?) -> SendResponse {
+        SendResponse(
+            status: "pending_confirmation",
+            success: false,
+            messageId: nil,
+            timestamp: TimeUtils.formatISO(Date()),
+            deliveredTo: deliveredTo,
+            chatId: chatId.map { "chat\($0)" },
+            message: message,
             error: nil,
             ambiguousRecipient: nil
         )
@@ -55,11 +75,13 @@ struct SendResponse: Encodable {
 
     static func error(_ message: String) -> SendResponse {
         SendResponse(
+            status: "failed",
             success: false,
             messageId: nil,
             timestamp: nil,
             deliveredTo: nil,
             chatId: nil,
+            message: nil,
             error: message,
             ambiguousRecipient: nil
         )
@@ -67,11 +89,13 @@ struct SendResponse: Encodable {
 
     static func ambiguous(candidates: [RecipientCandidate]) -> SendResponse {
         SendResponse(
+            status: "ambiguous",
             success: false,
             messageId: nil,
             timestamp: nil,
             deliveredTo: nil,
             chatId: nil,
+            message: nil,
             error: nil,
             ambiguousRecipient: AmbiguousRecipientInfo(
                 message: "Multiple contacts match. Please specify using a phone number, email, or chat_id.",
@@ -87,6 +111,7 @@ struct SendResponse: Encodable {
 actor SendTool {
     private let db: Database
     private let resolver: ContactResolver
+    private lazy var sendResolver = SendResolver(db: db, resolver: resolver)
 
     init(db: Database = Database(), resolver: ContactResolver) {
         self.db = db
@@ -111,9 +136,12 @@ actor SendTool {
                     "to": .string(description: "Contact name, phone number, or email"),
                     "chat_id": .string(description: "Existing chat ID (for groups or disambiguation)"),
                     "text": .string(description: "Message content to send"),
+                    "file_paths": .array(
+                        description: "Local file paths to send as attachments. If combined with text, files are sent first and text is sent last.",
+                        items: .string(description: "Absolute or ~/expanded local file path")
+                    ),
                     "reply_to": .string(description: "Message ID to reply to (not yet implemented)"),
-                ],
-                required: ["text"]
+                ]
             ),
             annotations: Tool.Annotations(
                 title: "Send Message",
@@ -133,10 +161,21 @@ actor SendTool {
         let to = args?["to"]?.stringValue
         let chatId = args?["chat_id"]?.stringValue
         let text = args?["text"]?.stringValue
+        let filePaths = args?["file_paths"]?.arrayValue?.compactMap { $0.stringValue }
         let replyTo = args?["reply_to"]?.stringValue
 
-        let response = await send(to: to, chatId: chatId, text: text, replyTo: replyTo)
-        return [.text(try FormatUtils.encodeJSON(response))]
+        let response = await send(
+            to: to,
+            chatId: chatId,
+            text: text,
+            filePaths: filePaths,
+            replyTo: replyTo
+        )
+        let content: [Tool.Content] = [.text(try FormatUtils.encodeJSON(response))]
+        if !response.success && response.status != "pending_confirmation" {
+            throw ToolError(content: content)
+        }
+        return content
     }
 
     // MARK: - Send Implementation
@@ -146,6 +185,7 @@ actor SendTool {
         to: String?,
         chatId: String?,
         text: String?,
+        filePaths: [String]?,
         replyTo: String?
     ) async -> SendResponse {
         // Validation
@@ -153,353 +193,78 @@ actor SendTool {
             return .error("Either 'to' or 'chat_id' must be provided")
         }
 
-        guard let text = text, !text.isEmpty else {
-            return .error("Message 'text' is required")
-        }
-
         // reply_to is not yet implemented
         if replyTo != nil {
             return .error("reply_to is not yet implemented")
         }
 
+        let payloads: [SendPayload]
+        switch SendPayload.build(text: text, filePaths: filePaths) {
+        case .success(let built):
+            payloads = built
+        case .failure(let message):
+            return .error(message)
+        }
+
         // Initialize contacts resolver
         try? await resolver.initialize()
 
-        var recipientHandle: String?
-        var targetChatId: Int?
-        var deliveredTo: [String] = []
-
-        // Resolve recipient from chat_id
-        if let chatId = chatId {
-            let result = await resolveChatId(chatId)
-            switch result {
-            case .success(let info):
-                recipientHandle = info.handle
-                targetChatId = info.chatId
-                deliveredTo = info.deliveredTo
-            case .failure(let errorMsg):
-                return .error(errorMsg)
-            case .ambiguous:
-                // Chat ID resolution shouldn't return ambiguous
-                return .error("Unexpected ambiguous result from chat_id resolution")
-            }
-        }
-        // Resolve recipient from 'to' parameter
-        else if let to = to {
-            let result = await resolveRecipient(to)
-            switch result {
-            case .success(let info):
-                recipientHandle = info.handle
-                targetChatId = info.chatId
-                deliveredTo = info.deliveredTo
-            case .failure(let errorMsg):
-                return .error(errorMsg)
-            case .ambiguous(let candidates):
-                return .ambiguous(candidates: candidates)
-            }
+        let resolution = await sendResolver.resolve(chatId: chatId, to: to)
+        let resolved: SendResolution.ResolvedTarget
+        switch resolution {
+        case .success(let target):
+            resolved = target
+        case .failure(let errorMsg):
+            return .error(errorMsg)
+        case .ambiguous(let candidates):
+            return .ambiguous(candidates: candidates)
         }
 
-        guard let handle = recipientHandle else {
-            return .error("Could not determine recipient")
-        }
-
-        // Send the message via AppleScript
-        let sendResult = AppleScriptRunner.send(to: handle, message: text)
-
-        switch sendResult {
-        case .success:
-            return .success(deliveredTo: deliveredTo, chatId: targetChatId)
-        case .failure(let error):
-            return .error(error.localizedDescription)
-        }
-    }
-
-    // MARK: - Private Resolution Types
-
-    private struct RecipientInfo {
-        let handle: String
-        let chatId: Int?
-        let deliveredTo: [String]
-    }
-
-    private enum RecipientResolutionResult {
-        case success(RecipientInfo)
-        case failure(String)
-        case ambiguous([RecipientCandidate])
-    }
-
-    // MARK: - Chat ID Resolution
-
-    private func resolveChatId(_ chatId: String) async -> RecipientResolutionResult {
-        // Extract numeric ID from chat_id (e.g., "chat123" -> 123)
-        let numericString = chatId.replacingOccurrences(of: "chat", with: "")
-        guard let numericId = Int(numericString) else {
-            return .failure("Invalid chat_id format: \(chatId)")
-        }
-
-        do {
-            // Get chat info - column 0: guid, column 1: display_name
-            let chats: [(guid: String, displayName: String?)] = try db.query(
-                "SELECT guid, display_name FROM chat WHERE ROWID = ?",
-                params: [numericId]
-            ) { row in
-                (guid: row.string(0) ?? "", displayName: row.string(1))
-            }
-
-            guard !chats.isEmpty else {
-                return .failure("Chat not found: \(chatId)")
-            }
-
-            // Get participants for the chat
-            let participants = try await getParticipants(chatId: numericId)
-
-            guard !participants.isEmpty else {
-                return .failure("No participants found for chat: \(chatId)")
-            }
-
-            // Use first participant's handle for sending
-            let recipientHandle = participants[0].handle
-            let deliveredTo = participants.map { $0.displayName }
-
-            return .success(RecipientInfo(
-                handle: recipientHandle,
-                chatId: numericId,
-                deliveredTo: deliveredTo
-            ))
-        } catch {
-            return .failure("Database error: \(error.localizedDescription)")
-        }
-    }
-
-    // MARK: - Recipient Resolution
-
-    private func resolveRecipient(_ to: String) async -> RecipientResolutionResult {
-        // Check if it's a phone number
-        if PhoneUtils.isPhoneNumber(to) || to.hasPrefix("+") {
-            return await resolvePhoneNumber(to)
-        }
-
-        // Check if it's an email
-        if PhoneUtils.isEmail(to) {
-            return await resolveEmail(to)
-        }
-
-        // It's a name - search contacts
-        return await resolveContactName(to)
-    }
-
-    private func resolvePhoneNumber(_ phone: String) async -> RecipientResolutionResult {
-        guard let normalized = PhoneUtils.normalizeToE164(phone) else {
-            return .failure("Invalid phone number format: \(phone)")
-        }
-
-        do {
-            // Check if handle exists in database - column 0: id
-            var handles: [String] = try db.query(
-                "SELECT id FROM handle WHERE id = ?",
-                params: [normalized]
-            ) { row in
-                row.string(0) ?? ""
-            }
-
-            // Also try original format
-            if handles.isEmpty {
-                handles = try db.query(
-                    "SELECT id FROM handle WHERE id = ?",
-                    params: [phone]
-                ) { row in
-                    row.string(0) ?? ""
+        let targetChatId: Int?
+        let sendResults: [Result<Void, SendError>]
+        switch resolved.target {
+        case .participant(let handle, let resolvedChatId):
+            targetChatId = resolvedChatId
+            sendResults = payloads.map { payload in
+                switch payload {
+                case .text(let body):
+                    return AppleScriptRunner.sendTextToParticipant(handle: handle, message: body)
+                case .file(let path):
+                    return AppleScriptRunner.sendFileToParticipant(handle: handle, filePath: path)
                 }
             }
-
-            guard !handles.isEmpty else {
-                return .failure("No conversation found with \(phone)")
-            }
-
-            let handle = handles[0]
-            let chatId = try findChatForHandle(handle)
-            let name = await resolver.resolve(handle) ?? PhoneUtils.formatDisplay(handle)
-
-            return .success(RecipientInfo(
-                handle: handle,
-                chatId: chatId,
-                deliveredTo: [name]
-            ))
-        } catch {
-            return .failure("Database error: \(error.localizedDescription)")
-        }
-    }
-
-    private func resolveEmail(_ email: String) async -> RecipientResolutionResult {
-        do {
-            // Column 0: id
-            let handles: [String] = try db.query(
-                "SELECT id FROM handle WHERE LOWER(id) = LOWER(?)",
-                params: [email]
-            ) { row in
-                row.string(0) ?? ""
-            }
-
-            guard !handles.isEmpty else {
-                return .failure("No conversation found with \(email)")
-            }
-
-            let handle = handles[0]
-            let chatId = try findChatForHandle(handle)
-            let name = await resolver.resolve(handle) ?? email
-
-            return .success(RecipientInfo(
-                handle: handle,
-                chatId: chatId,
-                deliveredTo: [name]
-            ))
-        } catch {
-            return .failure("Database error: \(error.localizedDescription)")
-        }
-    }
-
-    private func resolveContactName(_ name: String) async -> RecipientResolutionResult {
-        let (authorized, _) = ContactResolver.authorizationStatus()
-        guard authorized else {
-            return .failure("Cannot search by name without contacts access")
-        }
-
-        let matches = await resolver.searchByName(name)
-
-        if matches.isEmpty {
-            return .failure("No contact found matching '\(name)'")
-        }
-
-        if matches.count == 1 {
-            let match = matches[0]
-            do {
-                let chatId = try findChatForHandle(match.handle)
-                return .success(RecipientInfo(
-                    handle: match.handle,
-                    chatId: chatId,
-                    deliveredTo: [match.name]
-                ))
-            } catch {
-                return .failure("Database error: \(error.localizedDescription)")
+        case .chat(let guid, let resolvedChatId):
+            targetChatId = resolvedChatId
+            sendResults = payloads.map { payload in
+                switch payload {
+                case .text(let body):
+                    return AppleScriptRunner.sendTextToChat(guid: guid, message: body)
+                case .file(let path):
+                    return AppleScriptRunner.sendFileToChat(guid: guid, filePath: path)
+                }
             }
         }
 
-        // Multiple matches - need disambiguation
-        var candidates: [(handle: String, name: String, lastContact: Date?)] = []
-        for match in matches {
-            let lastTime = try? getLastContactTime(handle: match.handle)
-            candidates.append((match.handle, match.name, lastTime))
-        }
-
-        // Sort by most recent contact (most recent first)
-        candidates.sort { lhs, rhs in
-            switch (lhs.lastContact, rhs.lastContact) {
-            case (nil, nil): return false
-            case (nil, _): return false
-            case (_, nil): return true
-            case (let l?, let r?): return l > r
+        var pendingMessages: [String] = []
+        for result in sendResults {
+            if case .failure(let error) = result {
+                switch error {
+                case .transferPending, .transferStatusUnknown:
+                    pendingMessages.append(error.localizedDescription)
+                default:
+                    return .error(error.localizedDescription)
+                }
             }
         }
 
-        let formattedCandidates = candidates.map { candidate in
-            RecipientCandidate(
-                name: candidate.name,
-                handle: candidate.handle,
-                lastContact: TimeUtils.formatCompactRelative(candidate.lastContact) ?? "never"
+        if !pendingMessages.isEmpty {
+            return .pending(
+                pendingMessages.joined(separator: " "),
+                deliveredTo: resolved.deliveredTo,
+                chatId: targetChatId
             )
         }
 
-        return .ambiguous(formattedCandidates)
-    }
-
-    // MARK: - Database Helpers
-
-    private struct SendParticipantInfo {
-        let handle: String
-        let displayName: String
-    }
-
-    private func getParticipants(chatId: Int) async throws -> [SendParticipantInfo] {
-        // Column 0: handle id
-        let handles: [String] = try db.query(
-            """
-            SELECT h.id
-            FROM handle h
-            JOIN chat_handle_join chj ON h.ROWID = chj.handle_id
-            WHERE chj.chat_id = ?
-            """,
-            params: [chatId]
-        ) { row in
-            row.string(0) ?? ""
-        }
-
-        var participants: [SendParticipantInfo] = []
-        for handle in handles {
-            let name = await resolver.resolve(handle) ?? PhoneUtils.formatDisplay(handle)
-            participants.append(SendParticipantInfo(handle: handle, displayName: name))
-        }
-
-        return participants
-    }
-
-    private func findChatForHandle(_ handle: String) throws -> Int? {
-        // Find 1:1 chat with this handle - column 0: ROWID
-        let oneOnOneChats: [Int64] = try db.query(
-            """
-            SELECT c.ROWID
-            FROM chat c
-            JOIN chat_handle_join chj ON c.ROWID = chj.chat_id
-            JOIN handle h ON chj.handle_id = h.ROWID
-            WHERE h.id = ?
-            GROUP BY c.ROWID
-            HAVING COUNT(DISTINCT chj.handle_id) = 1
-            LIMIT 1
-            """,
-            params: [handle]
-        ) { row in
-            row.int(0)
-        }
-
-        if let first = oneOnOneChats.first {
-            return Int(first)
-        }
-
-        // If no 1:1 chat, get any chat with this handle
-        let anyChats: [Int64] = try db.query(
-            """
-            SELECT c.ROWID
-            FROM chat c
-            JOIN chat_handle_join chj ON c.ROWID = chj.chat_id
-            JOIN handle h ON chj.handle_id = h.ROWID
-            WHERE h.id = ?
-            ORDER BY c.ROWID DESC
-            LIMIT 1
-            """,
-            params: [handle]
-        ) { row in
-            row.int(0)
-        }
-
-        return anyChats.first.map { Int($0) }
-    }
-
-    private func getLastContactTime(handle: String) throws -> Date? {
-        // Column 0: date
-        let dates: [Int64?] = try db.query(
-            """
-            SELECT m.date
-            FROM message m
-            JOIN handle h ON m.handle_id = h.ROWID
-            WHERE h.id = ?
-            ORDER BY m.date DESC
-            LIMIT 1
-            """,
-            params: [handle]
-        ) { row in
-            row.optionalInt(0)
-        }
-
-        guard let timestamp = dates.first, let ts = timestamp else { return nil }
-        return AppleTime.toDate(ts)
+        return .success(deliveredTo: resolved.deliveredTo, chatId: targetChatId)
     }
 }

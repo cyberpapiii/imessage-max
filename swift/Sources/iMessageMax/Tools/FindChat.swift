@@ -65,6 +65,7 @@ enum FindChatTool {
         let group: Bool?
         let last: LastMessage?
         let match: String
+        let identity: ChatIdentity
     }
 
     struct LastMessage: Codable {
@@ -117,7 +118,7 @@ enum FindChatTool {
                 error: "validation_error",
                 message: "At least one of participants, name, or contains_recent required"
             )
-            return [.text(try FormatUtils.encodeJSON(error))]
+            throw ToolError(content: [.text(try FormatUtils.encodeJSON(error))])
         }
 
         // Initialize contacts if available
@@ -139,7 +140,8 @@ enum FindChatTool {
                             participants: chatResult.participants,
                             group: chatResult.group,
                             last: chatResult.last,
-                            match: "participants"
+                            match: "participants",
+                            identity: chatResult.identity
                         )
                         results.append(chatResult)
                     }
@@ -157,7 +159,8 @@ enum FindChatTool {
                         participants: chatResult.participants,
                         group: chatResult.group,
                         last: chatResult.last,
-                        match: "name"
+                        match: "name",
+                        identity: chatResult.identity
                     )
                     results.append(chatResult)
                 }
@@ -174,7 +177,8 @@ enum FindChatTool {
                         participants: chatResult.participants,
                         group: chatResult.group,
                         last: chatResult.last,
-                        match: "content"
+                        match: "content",
+                        identity: chatResult.identity
                     )
                     results.append(chatResult)
                 }
@@ -217,10 +221,10 @@ enum FindChatTool {
             case .invalidData(let msg):
                 error = ErrorResponse(error: "invalid_data", message: msg)
             }
-            return [.text(try FormatUtils.encodeJSON(error))]
+            throw ToolError(content: [.text(try FormatUtils.encodeJSON(error))])
         } catch {
             let errorResp = ErrorResponse(error: "internal_error", message: error.localizedDescription)
-            return [.text(try FormatUtils.encodeJSON(errorResp))]
+            throw ToolError(content: [.text(try FormatUtils.encodeJSON(errorResp))])
         }
     }
 
@@ -436,6 +440,7 @@ enum FindChatTool {
             FROM chat_handle_join chj
             JOIN handle h ON chj.handle_id = h.ROWID
             WHERE chj.chat_id = ?
+            ORDER BY h.id ASC
             """
 
         let participantRows = try database.query(participantSql, params: [chat.id]) { row in
@@ -443,27 +448,30 @@ enum FindChatTool {
         }
 
         var participants: [[String: String]] = []
+        var identityParticipants: [ChatIdentity.Participant] = []
         for p in participantRows {
+            let resolvedName = await resolver.resolve(p.handle)
+            let identityParticipant = ChatIdentity.makeParticipant(
+                handle: p.handle,
+                contactName: resolvedName
+            )
             var info: [String: String] = ["handle": p.handle]
 
             // Try to resolve name from contacts
-            if let name = await resolver.resolve(p.handle) {
-                info["name"] = name
-            } else {
-                // Format phone number for display
-                info["name"] = PhoneUtils.formatDisplay(p.handle)
-            }
+            info["name"] = identityParticipant.displayName
 
             participants.append(info)
+            identityParticipants.append(identityParticipant)
         }
 
         let isGroup = participants.count > 1
 
-        // Generate display name if not set
-        var displayName = chat.displayName ?? ""
-        if displayName.isEmpty {
-            displayName = DisplayNameGenerator.fromNames(participants.compactMap { $0["name"] })
-        }
+        let identity = ChatIdentity(
+            mcpId: "chat\(chat.id)",
+            guid: chat.guid,
+            explicitName: chat.displayName,
+            participants: identityParticipants
+        )
 
         // Get last message
         let lastMsgSql = """
@@ -512,12 +520,13 @@ enum FindChatTool {
         }
 
         return ChatResult(
-            id: "chat\(chat.id)",
-            name: displayName,
+            id: identity.mcpId,
+            name: identity.displayName,
             participants: participants,
             group: isGroup ? true : nil,
             last: lastMessage,
-            match: ""
+            match: "",
+            identity: identity
         )
     }
 

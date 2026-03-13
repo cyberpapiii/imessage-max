@@ -1,10 +1,10 @@
 {
   "manifest_version": "0.2",
   "name": "imessage-max",
-  "version": "0.3.1",
+  "version": "0.4.4",
   "display_name": "iMessage Max",
-  "description": "AI-optimized MCP server for iMessage on macOS. Read, search, and send messages with contact resolution.",
-  "long_description": "iMessage Max provides intent-aligned tools for AI assistants to interact with your iMessage conversations. Features include contact name resolution, session grouping, full-text search, and token-efficient responses designed for AI consumption.",
+  "description": "Intent-aligned MCP server for iMessage on macOS. Read, search, and send messages with contact resolution and attachment support.",
+  "long_description": "iMessage Max provides intent-aligned tools for AI assistants to interact with your iMessage conversations. Features include contact name resolution, session grouping, full-text search, exact chat targeting, and attachment sending with transfer-aware confirmation semantics.",
   "author": {
     "name": "Rob Dezendorf",
     "url": "https://github.com/cyberpapiii"
@@ -29,7 +29,7 @@
     {"name": "get_context", "description": "Get messages surrounding a specific message"},
     {"name": "search", "description": "Full-text search across all messages"},
     {"name": "list_chats", "description": "Browse recent/active chats with previews"},
-    {"name": "send", "description": "Send a message to person or group"},
+    {"name": "send", "description": "Send text or attachments to a person or exact existing chat"},
     {"name": "get_active_conversations", "description": "Find chats with recent back-and-forth"},
     {"name": "list_attachments", "description": "Retrieve attachments by type, person, chat"},
     {"name": "get_unread", "description": "Get unread messages or summary"},
