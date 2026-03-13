@@ -52,6 +52,33 @@ swift build -c release
 # Binary is at .build/release/imessage-max
 ```
 
+### Stable Dev Install Workflow
+
+For local development, use the built-in `make` workflow in `swift/` instead of
+manually rebuilding and re-granting permissions:
+
+```bash
+cd swift
+make setup-signing   # one-time: create persistent signing identity
+make install         # build, sign, restart launchd service, verify health
+```
+
+Why this matters:
+- it signs the binary with a persistent local identity so Full Disk Access can persist across rebuilds
+- it replaces the release binary in place
+- it restarts the launchd-managed `local.imessage-max` service on port `8080`
+- it verifies the service is healthy after install
+
+Useful commands:
+
+```bash
+cd swift
+make status   # show process, signature, version, health
+make restart  # restart the launchd service
+make logs     # tail the stderr log
+make clean    # remove debug artifacts and clear logs
+```
+
 ## Setup
 
 ### 1. Grant Full Disk Access
@@ -106,6 +133,20 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 ### 4. Restart Claude Desktop
 
 The MCP should now appear in Claude's tools. You can verify with the `diagnose` tool.
+
+### Launchd Service
+
+If you are running iMessage Max as a background HTTP service, the intended
+development path is the launchd-managed binary at:
+
+`~/Library/LaunchAgents/local.imessage-max.plist`
+
+That plist should point at:
+
+`/Users/YOU/.../imessage-max/swift/.build/release/imessage-max --http --port 8080`
+
+The `make install` workflow updates that binary in place and restarts the
+service cleanly.
 
 ## Tools
 

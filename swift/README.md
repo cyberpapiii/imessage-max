@@ -9,6 +9,33 @@ swift build -c release
 # Binary: .build/release/imessage-max
 ```
 
+## Dev Install Workflow
+
+Use the `Makefile` for normal development updates:
+
+```bash
+make setup-signing   # one-time: create persistent signing identity
+make install         # build, sign, restart launchd service, verify health
+```
+
+This workflow exists to avoid the usual macOS development pain:
+- the release binary path stays stable
+- the binary is signed with a persistent local identity
+- Full Disk Access can persist across rebuilds
+- the launchd-managed HTTP service is restarted automatically
+
+Useful targets:
+
+```bash
+make status
+make restart
+make logs
+make clean
+```
+
+The launchd label used by this workflow is `local.imessage-max`, and the
+default HTTP port is `8080`.
+
 ## Requirements
 
 - macOS 13+ (Ventura)
