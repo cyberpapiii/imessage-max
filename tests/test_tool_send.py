@@ -6,45 +6,9 @@ import sqlite3
 
 from imessage_max.tools.send import (
     send_impl,
-    _escape_applescript,
     _send_via_applescript,
     _resolve_recipient,
 )
-
-
-class TestEscapeApplescript:
-    """Tests for AppleScript escaping function."""
-
-    def test_escape_quotes(self):
-        """Test that double quotes are escaped."""
-        result = _escape_applescript('Hello "World"')
-        assert result == 'Hello \\"World\\"'
-
-    def test_escape_backslashes(self):
-        """Test that backslashes are escaped."""
-        result = _escape_applescript('path\\to\\file')
-        assert result == 'path\\\\to\\\\file'
-
-    def test_escape_backslash_then_quote(self):
-        """Test escaping backslash followed by quote."""
-        result = _escape_applescript('test\\"value')
-        # Backslash becomes \\, quote becomes \"
-        assert result == 'test\\\\\\"value'
-
-    def test_escape_newlines(self):
-        """Test that newlines are replaced with spaces."""
-        result = _escape_applescript('Hello\nWorld\rTest')
-        assert result == 'Hello World Test'
-
-    def test_escape_empty_string(self):
-        """Test escaping empty string."""
-        result = _escape_applescript('')
-        assert result == ''
-
-    def test_escape_plain_text(self):
-        """Test that plain text is unchanged."""
-        result = _escape_applescript('Hello World')
-        assert result == 'Hello World'
 
 
 class TestSendViaApplescript:
@@ -129,16 +93,43 @@ class TestSendViaApplescript:
         assert result['error'] == 'timeout'
 
     @patch('subprocess.run')
-    def test_send_escapes_message(self, mock_run):
-        """Test that message content is escaped in AppleScript."""
+    def test_send_passes_message_as_argv(self, mock_run):
+        """Test that message is passed as argv argument, not embedded in script."""
         mock_run.return_value = MagicMock(returncode=0, stderr='')
 
-        _send_via_applescript('+19175551234', 'Hello "World"')
+        _send_via_applescript('+19175551234', 'Hello — "World" 🎳')
 
         call_args = mock_run.call_args
-        script = call_args[0][0][2]  # -e argument value
-        # The escaped quote should appear in the script
-        assert '\\"World\\"' in script
+        args = call_args[0][0]
+        # argv: ['osascript', '-e', script, recipient, message]
+        assert args[0] == 'osascript'
+        assert args[1] == '-e'
+        assert args[3] == '+19175551234'  # recipient as argv
+        assert args[4] == 'Hello — "World" 🎳'  # message as argv, unicode preserved
+
+    @patch('subprocess.run')
+    def test_send_preserves_unicode(self, mock_run):
+        """Test that Unicode characters (em dashes, emoji) are preserved."""
+        mock_run.return_value = MagicMock(returncode=0, stderr='')
+
+        message = 'peter was right — i just finished summarizing'
+        _send_via_applescript('+19175551234', message)
+
+        call_args = mock_run.call_args
+        args = call_args[0][0]
+        assert args[4] == message  # exact Unicode preserved
+
+    @patch('subprocess.run')
+    def test_send_preserves_newlines(self, mock_run):
+        """Test that newlines are preserved (not collapsed to spaces)."""
+        mock_run.return_value = MagicMock(returncode=0, stderr='')
+
+        message = 'Line 1\nLine 2\nLine 3'
+        _send_via_applescript('+19175551234', message)
+
+        call_args = mock_run.call_args
+        args = call_args[0][0]
+        assert args[4] == message  # newlines preserved
 
 
 class TestResolveRecipient:

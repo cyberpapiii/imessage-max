@@ -11,25 +11,13 @@ from ..queries import get_chat_by_id, get_chat_participants
 from ..time_utils import format_compact_relative
 
 
-def _escape_applescript(s: str) -> str:
-    """
-    Escape a string for safe use in AppleScript.
-
-    Handles:
-    - Backslashes (must be escaped first)
-    - Double quotes
-    - Newlines and carriage returns (replaced with spaces)
-    """
-    # Escape backslashes first, then quotes
-    result = s.replace("\\", "\\\\").replace('"', '\\"')
-    # Replace newlines with spaces
-    result = result.replace('\n', ' ').replace('\r', ' ')
-    return result
-
-
 def _send_via_applescript(recipient: str, message: str) -> dict:
     """
     Send message via AppleScript.
+
+    Uses `on run argv` to pass recipient and message as arguments rather than
+    embedding them in the script source. This ensures proper Unicode handling
+    (em dashes, curly quotes, emoji, etc.) and eliminates AppleScript injection.
 
     Args:
         recipient: Phone number, email, or chat GUID
@@ -38,20 +26,21 @@ def _send_via_applescript(recipient: str, message: str) -> dict:
     Returns:
         Dict with success=True or error details
     """
-    escaped_recipient = _escape_applescript(recipient)
-    escaped_message = _escape_applescript(message)
-
-    script = f'''
-    tell application "Messages"
-        set targetService to 1st account whose service type = iMessage
-        set targetBuddy to participant "{escaped_recipient}" of targetService
-        send "{escaped_message}" to targetBuddy
-    end tell
+    script = '''
+    on run argv
+        set recipientId to item 1 of argv
+        set messageText to item 2 of argv
+        tell application "Messages"
+            set targetService to 1st account whose service type = iMessage
+            set targetBuddy to participant recipientId of targetService
+            send messageText to targetBuddy
+        end tell
+    end run
     '''
 
     try:
         result = subprocess.run(
-            ['osascript', '-e', script],
+            ['osascript', '-e', script, recipient, message],
             capture_output=True,
             text=True,
             timeout=30
