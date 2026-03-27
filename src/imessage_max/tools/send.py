@@ -1,5 +1,6 @@
 """send tool implementation."""
 
+import base64
 import subprocess
 from datetime import datetime, timezone
 from typing import Optional, Any
@@ -15,32 +16,36 @@ def _send_via_applescript(recipient: str, message: str) -> dict:
     """
     Send message via AppleScript.
 
-    Uses `on run argv` to pass recipient and message as arguments rather than
-    embedding them in the script source. This ensures proper Unicode handling
-    (em dashes, curly quotes, emoji, etc.) and eliminates AppleScript injection.
+    Base64-encodes the message in Python and decodes it inside AppleScript
+    via `do shell script`. This is necessary because both AppleScript string
+    literals (-e flag) and `on run argv` mangle multi-byte UTF-8 characters
+    (em dashes, emoji, etc.) through legacy Mac Roman encoding. The
+    `do shell script` path returns proper UTF-8 text because it uses the
+    shell's UTF-8 locale.
 
     Args:
-        recipient: Phone number, email, or chat GUID
-        message: Message text to send
+        recipient: Phone number, email, or chat GUID (always ASCII)
+        message: Message text to send (may contain Unicode)
 
     Returns:
         Dict with success=True or error details
     """
-    script = '''
-    on run argv
-        set recipientId to item 1 of argv
-        set messageText to item 2 of argv
-        tell application "Messages"
-            set targetService to 1st account whose service type = iMessage
-            set targetBuddy to participant recipientId of targetService
-            send messageText to targetBuddy
-        end tell
-    end run
+    b64_recipient = base64.b64encode(recipient.encode('utf-8')).decode('ascii')
+    b64_message = base64.b64encode(message.encode('utf-8')).decode('ascii')
+
+    script = f'''
+    set recipientId to do shell script "echo {b64_recipient} | base64 --decode"
+    set messageText to do shell script "echo {b64_message} | base64 --decode"
+    tell application "Messages"
+        set targetService to 1st account whose service type = iMessage
+        set targetBuddy to participant recipientId of targetService
+        send messageText to targetBuddy
+    end tell
     '''
 
     try:
         result = subprocess.run(
-            ['osascript', '-e', script, recipient, message],
+            ['osascript', '-e', script],
             capture_output=True,
             text=True,
             timeout=30

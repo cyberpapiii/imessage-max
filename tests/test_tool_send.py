@@ -93,43 +93,55 @@ class TestSendViaApplescript:
         assert result['error'] == 'timeout'
 
     @patch('subprocess.run')
-    def test_send_passes_message_as_argv(self, mock_run):
-        """Test that message is passed as argv argument, not embedded in script."""
+    def test_send_uses_base64_encoding(self, mock_run):
+        """Test that message is base64-encoded in the script, not embedded raw."""
+        import base64
         mock_run.return_value = MagicMock(returncode=0, stderr='')
 
-        _send_via_applescript('+19175551234', 'Hello — "World" 🎳')
-
-        call_args = mock_run.call_args
-        args = call_args[0][0]
-        # argv: ['osascript', '-e', script, recipient, message]
-        assert args[0] == 'osascript'
-        assert args[1] == '-e'
-        assert args[3] == '+19175551234'  # recipient as argv
-        assert args[4] == 'Hello — "World" 🎳'  # message as argv, unicode preserved
-
-    @patch('subprocess.run')
-    def test_send_preserves_unicode(self, mock_run):
-        """Test that Unicode characters (em dashes, emoji) are preserved."""
-        mock_run.return_value = MagicMock(returncode=0, stderr='')
-
-        message = 'peter was right — i just finished summarizing'
+        message = 'Hello — "World" 🎳'
         _send_via_applescript('+19175551234', message)
 
         call_args = mock_run.call_args
         args = call_args[0][0]
-        assert args[4] == message  # exact Unicode preserved
+        script = args[2]  # -e argument value
+        # Script should contain base64-encoded message decoded via do shell script
+        b64_msg = base64.b64encode(message.encode('utf-8')).decode('ascii')
+        assert b64_msg in script
+        assert 'base64 --decode' in script
+        assert 'do shell script' in script
 
     @patch('subprocess.run')
-    def test_send_preserves_newlines(self, mock_run):
-        """Test that newlines are preserved (not collapsed to spaces)."""
+    def test_send_base64_handles_unicode(self, mock_run):
+        """Test that Unicode characters survive base64 round-trip in script."""
+        import base64
+        mock_run.return_value = MagicMock(returncode=0, stderr='')
+
+        message = 'peter was right — i just finished summarizing 🎳🔥'
+        _send_via_applescript('+19175551234', message)
+
+        call_args = mock_run.call_args
+        script = call_args[0][0][2]
+        # The script itself should be pure ASCII (base64 output)
+        assert script.isascii()
+        # Verify the base64 round-trips correctly
+        b64_msg = base64.b64encode(message.encode('utf-8')).decode('ascii')
+        assert base64.b64decode(b64_msg).decode('utf-8') == message
+
+    @patch('subprocess.run')
+    def test_send_base64_handles_newlines(self, mock_run):
+        """Test that newlines are preserved through base64 encoding."""
+        import base64
         mock_run.return_value = MagicMock(returncode=0, stderr='')
 
         message = 'Line 1\nLine 2\nLine 3'
         _send_via_applescript('+19175551234', message)
 
         call_args = mock_run.call_args
-        args = call_args[0][0]
-        assert args[4] == message  # newlines preserved
+        script = call_args[0][0][2]
+        b64_msg = base64.b64encode(message.encode('utf-8')).decode('ascii')
+        assert b64_msg in script
+        # Verify newlines survive round-trip
+        assert base64.b64decode(b64_msg).decode('utf-8') == message
 
 
 class TestResolveRecipient:
