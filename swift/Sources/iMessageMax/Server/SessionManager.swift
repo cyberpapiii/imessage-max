@@ -14,7 +14,7 @@ actor SessionManager {
         let messageContinuation: AsyncThrowingStream<Data, Error>.Continuation
         let createdAt: Date
         var lastActivity: Date
-        var serverTask: Task<Void, Error>?
+        var serverTask: Task<Void, Never>?
 
         init(
             id: String,
@@ -95,7 +95,7 @@ actor SessionManager {
         )
 
         // Register tools on this server instance
-        ToolRegistry.registerAll(on: server, db: database, resolver: resolver)
+        await ToolRegistry.registerAll(on: server, db: database, resolver: resolver)
 
         // Create message stream for this session
         var continuation: AsyncThrowingStream<Data, Error>.Continuation!
@@ -116,9 +116,15 @@ actor SessionManager {
             }
         )
 
-        // Start server in background
-        session.serverTask = Task {
+        do {
             try await server.start(transport: adapter)
+        } catch {
+            session.messageContinuation.finish()
+            return nil
+        }
+
+        session.serverTask = Task {
+            await server.waitUntilCompleted()
         }
 
         sessions[sessionId] = session
@@ -189,6 +195,16 @@ actor SessionManager {
     /// Returns all active session IDs
     func activeSessionIds() -> [String] {
         return Array(sessions.keys)
+    }
+
+    func registerMethodHandlerForTesting<M: MCP.Method>(
+        sessionId: String,
+        _ method: M.Type,
+        handler: @escaping @Sendable (M.Parameters) async throws -> M.Result
+    ) async -> Bool {
+        guard let server = sessions[sessionId]?.server else { return false }
+        await server.withMethodHandler(method, handler: handler)
+        return true
     }
 
     /// Returns session count for monitoring

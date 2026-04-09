@@ -5,10 +5,10 @@ import CoreImage
 import CoreGraphics
 
 struct VideoProcessor {
-    func getDuration(at path: String) -> Double? {
+    func getDuration(at path: String) async -> Double? {
         let url = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
         let asset = AVAsset(url: url)
-        let duration = asset.duration
+        guard let duration = try? await asset.load(.duration) else { return nil }
         return duration.seconds.isFinite ? duration.seconds : nil
     }
 
@@ -38,17 +38,21 @@ struct VideoProcessor {
         let height: Int?
     }
 
-    func getMetadata(at path: String) -> VideoMetadata? {
+    func getMetadata(at path: String) async -> VideoMetadata? {
         let url = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
         let asset = AVAsset(url: url)
 
-        guard let duration = getDuration(at: path) else { return nil }
+        guard let duration = await getDuration(at: path) else { return nil }
 
         var width: Int?
         var height: Int?
 
-        if let track = asset.tracks(withMediaType: .video).first {
-            let size = track.naturalSize.applying(track.preferredTransform)
+        if let track = try? await asset.loadTracks(withMediaType: .video).first {
+            guard let naturalSize = try? await track.load(.naturalSize),
+                  let preferredTransform = try? await track.load(.preferredTransform) else {
+                return VideoMetadata(duration: duration, width: width, height: height)
+            }
+            let size = naturalSize.applying(preferredTransform)
             width = Int(abs(size.width))
             height = Int(abs(size.height))
         }

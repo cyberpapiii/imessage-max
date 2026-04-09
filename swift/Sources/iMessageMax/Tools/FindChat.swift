@@ -118,7 +118,7 @@ enum FindChatTool {
                 error: "validation_error",
                 message: "At least one of participants, name, or contains_recent required"
             )
-            throw ToolError(content: [.text(try FormatUtils.encodeJSON(error))])
+            throw ToolError(content: [.plainText(try FormatUtils.encodeJSON(error))])
         }
 
         // Initialize contacts if available
@@ -207,7 +207,7 @@ enum FindChatTool {
                 more: results.count > params.limit
             )
 
-            return [.text(try FormatUtils.encodeJSON(response))]
+            return [.plainText(try FormatUtils.encodeJSON(response))]
 
         } catch let dbError as DatabaseError {
             let error: ErrorResponse
@@ -221,10 +221,10 @@ enum FindChatTool {
             case .invalidData(let msg):
                 error = ErrorResponse(error: "invalid_data", message: msg)
             }
-            throw ToolError(content: [.text(try FormatUtils.encodeJSON(error))])
+            throw ToolError(content: [.plainText(try FormatUtils.encodeJSON(error))])
         } catch {
             let errorResp = ErrorResponse(error: "internal_error", message: error.localizedDescription)
-            throw ToolError(content: [.text(try FormatUtils.encodeJSON(errorResp))])
+            throw ToolError(content: [.plainText(try FormatUtils.encodeJSON(errorResp))])
         }
     }
 

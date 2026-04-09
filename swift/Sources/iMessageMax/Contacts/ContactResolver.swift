@@ -9,6 +9,13 @@ actor ContactResolver {
     // This is safe because we only use it from within actor-isolated methods
     nonisolated(unsafe) private let store = CNContactStore()
 
+    init() {}
+
+    init(seedCache: [String: String]) {
+        self.cache = seedCache
+        self.isInitialized = true
+    }
+
     // MARK: - Authorization
 
     static func authorizationStatus() -> (authorized: Bool, status: String) {

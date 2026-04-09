@@ -48,6 +48,12 @@ enum SendError: LocalizedError {
 }
 
 enum AppleScriptRunner {
+    struct ScriptExecutionResult {
+        let stdout: String
+        let stderr: String
+        let terminationStatus: Int32
+    }
+
     struct PreparedOutgoingFile {
         let fileURL: URL
         let trackingName: String
@@ -61,51 +67,63 @@ enum AppleScriptRunner {
         case unknown
     }
 
+    // `system attribute` corrupts non-ASCII input from the environment, so all
+    // dynamic values are passed through `argv` to preserve Unicode end-to-end.
     private static let transferStatusesForNameScript = """
-        set trackingName to system attribute "IMSG_TRACKING_NAME"
-        tell application "Messages"
-            get transfer status of (every file transfer whose name is trackingName and direction is outgoing)
-        end tell
+        on run argv
+            set trackingName to item 1 of argv
+            tell application "Messages"
+                get transfer status of (every file transfer whose name is trackingName and direction is outgoing)
+            end tell
+        end run
         """
 
     private static let sendTextToParticipantScript = """
-        set recipientId to system attribute "IMSG_RECIPIENT"
-        set messageText to system attribute "IMSG_MESSAGE"
-        tell application "Messages"
-            set targetService to 1st account whose service type = iMessage
-            set targetBuddy to participant recipientId of targetService
-            send messageText to targetBuddy
-        end tell
+        on run argv
+            set recipientId to item 1 of argv
+            set messageText to item 2 of argv
+            tell application "Messages"
+                set targetService to 1st account whose service type = iMessage
+                set targetBuddy to participant recipientId of targetService
+                send messageText to targetBuddy
+            end tell
+        end run
         """
 
     private static let sendTextToChatScript = """
-        set chatGuid to system attribute "IMSG_CHAT_GUID"
-        set messageText to system attribute "IMSG_MESSAGE"
-        tell application "Messages"
-            set targetChat to chat id chatGuid
-            send messageText to targetChat
-        end tell
+        on run argv
+            set chatGuid to item 1 of argv
+            set messageText to item 2 of argv
+            tell application "Messages"
+                set targetChat to chat id chatGuid
+                send messageText to targetChat
+            end tell
+        end run
         """
 
     private static let sendFileToParticipantScript = """
-        set recipientId to system attribute "IMSG_RECIPIENT"
-        set filePath to system attribute "IMSG_FILE_PATH"
-        set attachmentFile to POSIX file filePath
-        tell application "Messages"
-            set targetService to 1st account whose service type = iMessage
-            set targetBuddy to participant recipientId of targetService
-            send attachmentFile to targetBuddy
-        end tell
+        on run argv
+            set recipientId to item 1 of argv
+            set filePath to item 2 of argv
+            set attachmentFile to POSIX file filePath
+            tell application "Messages"
+                set targetService to 1st account whose service type = iMessage
+                set targetBuddy to participant recipientId of targetService
+                send attachmentFile to targetBuddy
+            end tell
+        end run
         """
 
     private static let sendFileToChatScript = """
-        set chatGuid to system attribute "IMSG_CHAT_GUID"
-        set filePath to system attribute "IMSG_FILE_PATH"
-        set attachmentFile to POSIX file filePath
-        tell application "Messages"
-            set targetChat to chat id chatGuid
-            send attachmentFile to targetChat
-        end tell
+        on run argv
+            set chatGuid to item 1 of argv
+            set filePath to item 2 of argv
+            set attachmentFile to POSIX file filePath
+            tell application "Messages"
+                set targetChat to chat id chatGuid
+                send attachmentFile to targetChat
+            end tell
+        end run
         """
 
     static func sendTextToParticipant(handle: String, message: String) -> Result<Void, SendError> {
@@ -118,10 +136,7 @@ enum AppleScriptRunner {
 
         return run(
             script: sendTextToParticipantScript,
-            environment: [
-                "IMSG_RECIPIENT": handle,
-                "IMSG_MESSAGE": message
-            ],
+            arguments: [handle, message],
             missingTargetError: .recipientNotFound(handle)
         )
     }
@@ -136,10 +151,7 @@ enum AppleScriptRunner {
 
         return run(
             script: sendTextToChatScript,
-            environment: [
-                "IMSG_CHAT_GUID": guid,
-                "IMSG_MESSAGE": message
-            ],
+            arguments: [guid, message],
             missingTargetError: .chatNotFound(guid)
         )
     }
@@ -159,10 +171,7 @@ enum AppleScriptRunner {
 
         let handoff = run(
             script: sendFileToParticipantScript,
-            environment: [
-                "IMSG_RECIPIENT": handle,
-                "IMSG_FILE_PATH": preparedFile.fileURL.path
-            ],
+            arguments: [handle, preparedFile.fileURL.path],
             missingTargetError: .recipientNotFound(handle)
         )
         guard case .success = handoff else { return handoff }
@@ -184,10 +193,7 @@ enum AppleScriptRunner {
 
         let handoff = run(
             script: sendFileToChatScript,
-            environment: [
-                "IMSG_CHAT_GUID": guid,
-                "IMSG_FILE_PATH": preparedFile.fileURL.path
-            ],
+            arguments: [guid, preparedFile.fileURL.path],
             missingTargetError: .chatNotFound(guid)
         )
         guard case .success = handoff else { return handoff }
@@ -255,24 +261,19 @@ enum AppleScriptRunner {
     }
 
     private static func queryOutgoingTransferStatuses(trackingName: String) throws -> [String] {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        process.arguments = ["-e", transferStatusesForNameScript]
-        process.environment = ["IMSG_TRACKING_NAME": trackingName]
+        let result = execute(
+            script: transferStatusesForNameScript,
+            arguments: [trackingName],
+            timeoutSeconds: 30
+        )
+        switch result {
+        case .failure(let error):
+            throw error
+        case .success(let execution):
+            let output = execution.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = pipe
-
-        do {
-            try process.run()
-            process.waitUntilExit()
-
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            let output = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-
-            guard process.terminationStatus == 0 else {
-                throw SendError.failed(output)
+            guard execution.terminationStatus == 0 else {
+                throw SendError.failed(output.isEmpty ? execution.stderr : output)
             }
 
             if output.isEmpty || output == "missing value" {
@@ -282,11 +283,6 @@ enum AppleScriptRunner {
             return output
                 .split(separator: ",")
                 .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
-        } catch {
-            if let sendError = error as? SendError {
-                throw sendError
-            }
-            throw SendError.failed(error.localizedDescription)
         }
     }
 
@@ -360,40 +356,35 @@ enum AppleScriptRunner {
         }
     }
 
+    static func runScriptForTesting(
+        script: String,
+        arguments: [String]
+    ) -> Result<String, SendError> {
+        let result = execute(script: script, arguments: arguments, timeoutSeconds: 30)
+        switch result {
+        case .failure(let error):
+            return .failure(error)
+        case .success(let execution):
+            guard execution.terminationStatus == 0 else {
+                let message = execution.stderr.isEmpty ? execution.stdout : execution.stderr
+                return .failure(.failed(message))
+            }
+            return .success(execution.stdout)
+        }
+    }
+
     private static func run(
         script: String,
-        environment: [String: String],
+        arguments: [String],
         missingTargetError: SendError
     ) -> Result<Void, SendError> {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        process.arguments = ["-e", script]
-
-        process.environment = environment
-
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = pipe
-
-        do {
-            try process.run()
-
-            // Wait with timeout using semaphore
-            let semaphore = DispatchSemaphore(value: 0)
-            DispatchQueue.global().async {
-                process.waitUntilExit()
-                semaphore.signal()
-            }
-
-            let result = semaphore.wait(timeout: .now() + .seconds(30))
-            if result == .timedOut {
-                process.terminate()
-                return .failure(.timeout)
-            }
-
-            if process.terminationStatus != 0 {
-                let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                let stderr = String(data: data, encoding: .utf8)?.lowercased() ?? ""
+        let result = execute(script: script, arguments: arguments, timeoutSeconds: 30)
+        switch result {
+        case .failure(let error):
+            return .failure(error)
+        case .success(let execution):
+            if execution.terminationStatus != 0 {
+                let stderr = execution.stderr.lowercased()
 
                 // Detect Automation permission errors
                 if stderr.contains("not allowed") ||
@@ -414,8 +405,7 @@ enum AppleScriptRunner {
                     stderr.contains("file") && stderr.contains("wasn’t found") ||
                     stderr.contains("file") && stderr.contains("wasn't found")
                 {
-                    let missingPath = environment["IMSG_FILE_PATH"] ?? ""
-                    return .failure(.fileNotFound(missingPath))
+                    return .failure(.fileNotFound(arguments.last ?? ""))
                 }
 
                 if stderr.contains("can't get participant") ||
@@ -430,6 +420,51 @@ enum AppleScriptRunner {
             }
 
             return .success(())
+        }
+    }
+
+    private static func execute(
+        script: String,
+        arguments: [String],
+        timeoutSeconds: Int
+    ) -> Result<ScriptExecutionResult, SendError> {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        process.arguments = ["-e", script] + (arguments.isEmpty ? [] : ["--"] + arguments)
+
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
+
+        do {
+            try process.run()
+
+            let semaphore = DispatchSemaphore(value: 0)
+            DispatchQueue.global().async {
+                process.waitUntilExit()
+                semaphore.signal()
+            }
+
+            let result = semaphore.wait(timeout: .now() + .seconds(timeoutSeconds))
+            if result == .timedOut {
+                process.terminate()
+                return .failure(.timeout)
+            }
+
+            let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+            let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+
+            let stdout = String(data: stdoutData, encoding: .utf8) ?? ""
+            let stderr = String(data: stderrData, encoding: .utf8) ?? ""
+
+            return .success(
+                ScriptExecutionResult(
+                    stdout: stdout,
+                    stderr: stderr,
+                    terminationStatus: process.terminationStatus
+                )
+            )
         } catch {
             return .failure(.failed(error.localizedDescription))
         }

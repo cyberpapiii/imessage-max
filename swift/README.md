@@ -1,9 +1,9 @@
-# iMessage Max (Swift)
+# iMessage Max
 
 Native macOS MCP server for iMessage, built in Swift for optimal performance.
 
-This is the primary supported implementation for current releases and the
-source of truth for the active install/update workflow.
+This is the source of truth for the current project and its active
+install/update workflow.
 
 ## Building
 
@@ -61,7 +61,7 @@ Sources/iMessageMax/
 ├── Database/
 │   ├── Database.swift      # SQLite wrapper
 │   └── QueryBuilder.swift  # SQL construction
-├── Tools/                  # 12 MCP tools
+├── Tools/                  # 11 MCP tools
 │   ├── FindChat.swift
 │   ├── GetMessages.swift
 │   ├── ListChats.swift
@@ -72,7 +72,6 @@ Sources/iMessageMax/
 │   ├── GetUnread.swift
 │   ├── Send.swift
 │   ├── GetAttachment.swift
-│   ├── Update.swift
 │   └── Diagnose.swift
 ├── Contacts/
 │   └── ContactResolver.swift  # CNContactStore integration
@@ -96,7 +95,7 @@ Sources/iMessageMax/
 
 1. **Raw SQLite3** - Direct C API calls for maximum performance
 2. **Core Image** - GPU-accelerated image resizing for attachment variants
-3. **CNContactStore** - Native contact resolution without Python/PyObjC
+3. **CNContactStore** - Native contact resolution through the macOS Contacts framework
 4. **Typedstream Parsing** - Proper extraction of text from iMessage's `attributedBody` format
 5. **MCP Image Content** - Images returned as proper MCP image type, not base64 in JSON
 
@@ -160,14 +159,36 @@ swift test
 echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}' | ./imessage-max
 ```
 
+For real send-flow spot checks in Messages.app, use
+`Tests/iMessageMaxTests/SendManualValidation.md`.
+
+For a broader pre-release routine covering build, service health, permissions,
+attachments, and live MCP checks, use:
+
+- `../docs/validation/2026-04-09-release-checklist.md`
+- `Tests/iMessageMaxTests/SendManualValidation.md`
+
+## Recommended Tool Workflows
+
+The server is most effective when tools are combined in short, intent-shaped flows:
+
+- Find a conversation, then read it:
+  `find_chat(participants=["Contact A"])` → `get_messages(chat_id="chat123", since="24h")`
+- Search broadly, then zoom in:
+  `search(query="launch timeline")` → `get_context(message_id="msg_123", before=5, after=10)`
+- Discover attachments before fetching them:
+  `list_attachments(chat_id="chat123", type="image")` → `get_attachment(attachment_id="att123", variant="vision")`
+- Resolve an exact target before sending:
+  `find_chat(participants=["Contact A", "Contact B"])` → `send(chat_id="chat456", text="Please use the latest draft")`
+
 ## Performance
 
-The Swift implementation offers significant improvements over the Python version:
+The current implementation is optimized for native macOS use:
 
-- **Startup**: ~50ms vs ~2s (no interpreter startup)
-- **Memory**: ~15MB vs ~80MB (no runtime overhead)
-- **Image Processing**: GPU-accelerated via Core Image
-- **Binary Size**: ~10MB self-contained
+- **Fast startup** from a single compiled binary
+- **Low runtime overhead** without an interpreter layer
+- **GPU-accelerated image processing** via Core Image
+- **Self-contained distribution** for local installs and Homebrew
 
 ## License
 

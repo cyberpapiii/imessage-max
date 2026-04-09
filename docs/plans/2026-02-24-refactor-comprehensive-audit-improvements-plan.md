@@ -436,10 +436,10 @@ enum FormatUtils {
 
 **Format consistency (Pattern Recognition):** `GetAttachment.formatSize` uses `"45KB"` (no space) while `GetMessages.formatFileSize` uses `"45.0 KB"` (with space). Use the compact form without spaces — it's more token-efficient for AI consumption.
 
-**encodeJSON scope (Pattern Recognition + Architecture):** `encodeJSON` is duplicated in 4 files (`GetMessages.swift`, `FindChat.swift`, `Send.swift`, `Update.swift`) with identical implementations. Add it to `FormatUtils` for consolidation.
+**encodeJSON scope (Pattern Recognition + Architecture):** `encodeJSON` is duplicated in 3 files (`GetMessages.swift`, `FindChat.swift`, `Send.swift`) with identical implementations. Add it to `FormatUtils` for consolidation.
 
 Remove `formatFileSize` from: `GetMessages.swift`, `ListAttachments.swift`, `GetAttachment.swift`
-Remove `encodeJSON` from: `GetMessages.swift`, `FindChat.swift`, `Send.swift`, `Update.swift`
+Remove `encodeJSON` from: `GetMessages.swift`, `FindChat.swift`, `Send.swift`
 
 ---
 
@@ -649,7 +649,7 @@ if host != "127.0.0.1" && host != "::1" && host != "localhost" {
 
 **5f. Complete Tool Annotations** — all tool registration files
 
-Standardize annotations across all 12 tools and add `title` field.
+Standardize annotations across all 11 current tools and add `title` field.
 
 ```swift
 // Read-only tools (find_chat, get_messages, get_context, search, list_chats,
@@ -671,21 +671,13 @@ Tool.Annotations(
     openWorldHint: true       // Sends to external recipients
 )
 
-// update (marks messages as read + updates binary via Homebrew)
-Tool.Annotations(
-    title: "Update iMessage Max",
-    readOnlyHint: false,
-    destructiveHint: true,    // Replaces installed binary
-    idempotentHint: true,     // Updating twice is same as once
-    openWorldHint: true       // Network call to Homebrew
-)
 ```
 
 ### Research Insights — Phase 5f
 
 **Agent Native (Agent Native Reviewer + MCP Best Practices):** Claude Desktop uses `readOnlyHint: true` to auto-approve tool calls without user confirmation. Setting this correctly on all read tools reduces friction. The `send` tool is currently missing `destructiveHint`, `idempotentHint`, and `openWorldHint`.
 
-**SDK 0.11.0 (MCP Protocol Research):** Now fully supports `title` field on `Tool.Annotations`. Add human-readable titles to all 12 tools.
+**SDK 0.11.0 (MCP Protocol Research):** Now fully supports `title` field on `Tool.Annotations`. Add human-readable titles to all 11 current tools.
 
 ---
 
@@ -706,7 +698,7 @@ Tool.Annotations(
 
 - PR 1 (AppleScript): Only affects `send` tool → `AppleScript.swift` → `osascript` process. No other tools impacted.
 - PR 2 (Bug fixes): Search, OriginValidation, GetContext, **GetActiveConversations**, **Search** people keys, display names — all independent, no cross-impact.
-- PR 3 (Deduplication): Touches all 12 tools at the import level but doesn't change behavior — pure extraction. **Also fixes `ListChats.swift` reversed priority bug.**
+- PR 3 (Deduplication): Touches all 11 current tools at the import level but doesn't change behavior — pure extraction. **Also fixes `ListChats.swift` reversed priority bug.**
 - PR 4 (Transport): HTTPTransport handles all tools equally — batch removal + header validation affect all HTTP requests uniformly.
 - PR 5 (Hardening): Session cap applies at session layer before any tool execution. Tool annotations are cosmetic metadata.
 
@@ -751,7 +743,7 @@ Tool.Annotations(
 - [ ] SIGTERM/SIGINT triggers graceful shutdown via ServiceGroup
 - [ ] `swift build -c release` succeeds with SDK 0.11.0 and swift-tools-version 6.1
 - [ ] Session creation rejected at 100 concurrent sessions (returns 503)
-- [ ] All 12 tools have complete annotations with `title`
+- [ ] All 11 current tools have complete annotations with `title`
 - [ ] `send` annotations: `readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true`
 
 ### Quality Gates
@@ -759,7 +751,7 @@ Tool.Annotations(
 - [ ] `swift build -c release` succeeds with zero warnings
 - [ ] `swift test` passes
 - [ ] Manual test: stdio mode with `echo '...' | ./.build/release/imessage-max`
-- [ ] Manual test: HTTP mode with `curl` against all 12 tools
+- [ ] Manual test: HTTP mode with `curl` against all 11 tools
 - [ ] Verify message ID format is `msg_123` in all tool responses
 
 ## Dependencies & Prerequisites
@@ -781,7 +773,7 @@ Tool.Annotations(
 ## Success Metrics
 
 - Zero CRITICAL/HIGH security findings on re-audit
-- All 12 tools return correct results in manual testing
+- All 11 current tools return correct results in manual testing
 - Build succeeds on first try after each PR
 - No regressions in stdio mode (Claude Desktop) or HTTP mode (MCP Router)
 

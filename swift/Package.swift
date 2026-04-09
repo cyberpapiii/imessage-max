@@ -8,7 +8,7 @@ let package = Package(
         .executable(name: "imessage-max", targets: ["iMessageMax"])
     ],
     dependencies: [
-        .package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", from: "0.11.0"),
+        .package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", from: "0.12.0"),
         .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.3.0"),
         .package(url: "https://github.com/hummingbird-project/hummingbird.git", from: "2.0.0"),
     ],
@@ -27,8 +27,13 @@ let package = Package(
         ),
         .testTarget(
             name: "iMessageMaxTests",
-            dependencies: ["iMessageMax"],
-            path: "Tests/iMessageMaxTests"
+            dependencies: [
+                "iMessageMax",
+                .product(name: "Hummingbird", package: "hummingbird"),
+                .product(name: "HummingbirdTesting", package: "hummingbird"),
+            ],
+            path: "Tests/iMessageMaxTests",
+            exclude: ["SendManualValidation.md"]
         ),
     ]
 )

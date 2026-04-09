@@ -79,7 +79,7 @@ enum DiagnoseTool {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.sortedKeys]
             let json = try encoder.encode(result)
-            return [.text(String(data: json, encoding: .utf8) ?? "{}")]
+            return [.plainText(String(data: json, encoding: .utf8) ?? "{}")]
         }
     }
 

@@ -35,15 +35,21 @@ public actor HTTPTransport: Transport {
     private let sseManager = SSEConnectionManager()
 
     // Request correlation: maps JSON-RPC id to continuation for response
-    private var pendingRequests: [String: PendingRequest] = [:]
+    private var pendingRequests: [PendingRequestKey: PendingRequest] = [:]
+    private var routingConfigured = false
+    private let requestTimeout: Duration
 
     /// Background task running the Hummingbird server
     private var serverTask: Task<Void, Error>?
 
     /// Tracks a pending request with its session
     private struct PendingRequest {
-        let sessionId: String
         let continuation: CheckedContinuation<Data, Error>
+    }
+
+    private struct PendingRequestKey: Hashable {
+        let sessionId: String
+        let requestId: String
     }
 
     /// Creates a new HTTP server transport
@@ -59,10 +65,12 @@ public actor HTTPTransport: Transport {
         port: Int = 8080,
         database: Database,
         resolver: ContactResolver,
-        logger: Logger? = nil
+        logger: Logger? = nil,
+        requestTimeout: Duration = .seconds(300)
     ) {
         self.host = host
         self.port = port
+        self.requestTimeout = requestTimeout
         self.logger =
             logger
             ?? Logger(
@@ -80,43 +88,9 @@ public actor HTTPTransport: Transport {
     public func connect() async throws {
         guard !isConnected else { return }
 
-        // Set up response routing from per-session Servers
-        await sessionManager.setResponseHandler { [weak self] sessionId, data in
-            await self?.handleServerResponse(sessionId: sessionId, data: data)
-        }
+        await configureRoutingIfNeeded()
 
-        // Set up SSE cleanup when sessions expire
-        await sessionManager.setSessionTerminationHandler { [weak self] sessionId in
-            await self?.sseManager.terminateSession(sessionId: sessionId)
-            await self?.cleanupPendingRequestsAsync(for: sessionId)
-        }
-
-        // Create router with all routes
-        let router = Router()
-
-        // Add origin validation middleware
-        router.add(middleware: OriginValidationMiddleware())
-
-        // Register routes - capture self for route handlers
-        let transport = self
-        router.post("/") { request, context in
-            try await transport.handlePost(request: request, context: context)
-        }
-        router.get("/") { request, context in
-            try await transport.handleGet(request: request, context: context)
-        }
-        router.delete("/") { request, context in
-            try await transport.handleDelete(request: request, context: context)
-        }
-
-        // Create application
-        let app = Application(
-            router: router,
-            configuration: .init(
-                address: .hostname(host, port: port)
-            ),
-            logger: logger
-        )
+        let app = buildApplication()
 
         logger.info("Starting HTTP transport on \(host):\(port)")
 
@@ -126,6 +100,24 @@ public actor HTTPTransport: Transport {
         self.serverTask = Task {
             try await app.runService()
         }
+    }
+
+    func makeApplicationForTesting() async -> some ApplicationProtocol {
+        await configureRoutingIfNeeded()
+        isConnected = true
+        return buildApplication()
+    }
+
+    func registerMethodHandlerForTesting<M: MCP.Method>(
+        sessionId: String,
+        _ method: M.Type,
+        handler: @escaping @Sendable (M.Parameters) async throws -> M.Result
+    ) async -> Bool {
+        await sessionManager.registerMethodHandlerForTesting(
+            sessionId: sessionId,
+            method,
+            handler: handler
+        )
     }
 
     /// Blocks until the server terminates, propagating any errors.
@@ -139,7 +131,7 @@ public actor HTTPTransport: Transport {
     }
 
     /// Handles POST requests with JSON-RPC messages
-    private func handlePost(
+    func handlePost(
         request: Request,
         context: some Hummingbird.RequestContext
     ) async throws -> Response {
@@ -252,8 +244,8 @@ public actor HTTPTransport: Transport {
                 let responseData = try await withCheckedThrowingContinuation {
                     (continuation: CheckedContinuation<Data, Error>) in
                     self.storePendingRequest(
-                        id: jsonRpcId,
                         sessionId: sessionId,
+                        id: jsonRpcId,
                         continuation: continuation
                     )
 
@@ -265,7 +257,10 @@ public actor HTTPTransport: Transport {
                         )
                         if !routed {
                             // Session was terminated between validation and routing
-                            if let pending = await self.removePendingRequest(id: jsonRpcId) {
+                            if let pending = self.removePendingRequest(
+                                sessionId: sessionId,
+                                id: jsonRpcId
+                            ) {
                                 pending.continuation.resume(
                                     throwing: MCPError.connectionClosed
                                 )
@@ -304,7 +299,7 @@ public actor HTTPTransport: Transport {
     }
 
     /// Handles GET requests for SSE streaming
-    private func handleGet(
+    func handleGet(
         request: Request,
         context: some Hummingbird.RequestContext
     ) async throws -> Response {
@@ -378,7 +373,7 @@ public actor HTTPTransport: Transport {
     }
 
     /// Handles DELETE requests for session termination
-    private func handleDelete(
+    func handleDelete(
         request: Request,
         context: some Hummingbird.RequestContext
     ) async throws -> Response {
@@ -422,7 +417,8 @@ public actor HTTPTransport: Transport {
         let jsonRpcId = parseJsonRpcId(from: json)
 
         // Check if this matches a pending request
-        if let pending = pendingRequests.removeValue(forKey: jsonRpcId) {
+        let key = PendingRequestKey(sessionId: sessionId, requestId: jsonRpcId)
+        if let pending = pendingRequests.removeValue(forKey: key) {
             pending.continuation.resume(returning: data)
             logger.trace("Routed response for request: \(jsonRpcId)")
         } else {
@@ -483,16 +479,18 @@ public actor HTTPTransport: Transport {
 
     /// Stores a pending request continuation for later response matching
     private func storePendingRequest(
-        id: String,
         sessionId: String,
+        id: String,
         continuation: CheckedContinuation<Data, Error>
     ) {
-        pendingRequests[id] = PendingRequest(sessionId: sessionId, continuation: continuation)
+        let key = PendingRequestKey(sessionId: sessionId, requestId: id)
+        pendingRequests[key] = PendingRequest(continuation: continuation)
 
         // Set up a timeout to prevent indefinite waiting
         Task { [weak self] in
-            try? await Task.sleep(for: .seconds(300))  // 5 minute timeout
-            if let pending = await self?.removePendingRequest(id: id) {
+            guard let self else { return }
+            try? await Task.sleep(for: self.requestTimeout)
+            if let pending = await self.removePendingRequest(sessionId: sessionId, id: id) {
                 pending.continuation.resume(
                     throwing: MCPError.serverError(code: -32000, message: "Request timeout")
                 )
@@ -501,15 +499,16 @@ public actor HTTPTransport: Transport {
     }
 
     /// Removes and returns a pending request
-    private func removePendingRequest(id: String) -> PendingRequest? {
-        return pendingRequests.removeValue(forKey: id)
+    private func removePendingRequest(sessionId: String, id: String) -> PendingRequest? {
+        let key = PendingRequestKey(sessionId: sessionId, requestId: id)
+        return pendingRequests.removeValue(forKey: key)
     }
 
     /// Cleans up all pending requests for a terminated session
     private func cleanupPendingRequests(for sessionId: String) {
-        let toRemove = pendingRequests.filter { $0.value.sessionId == sessionId }
-        for (id, pending) in toRemove {
-            pendingRequests.removeValue(forKey: id)
+        let keysToRemove = pendingRequests.keys.filter { $0.sessionId == sessionId }
+        for key in keysToRemove {
+            guard let pending = pendingRequests.removeValue(forKey: key) else { continue }
             pending.continuation.resume(
                 throwing: MCPError.serverError(code: -32000, message: "Session terminated")
             )
@@ -519,6 +518,45 @@ public actor HTTPTransport: Transport {
     /// Async wrapper for cleanup (called from session termination handler)
     private func cleanupPendingRequestsAsync(for sessionId: String) async {
         cleanupPendingRequests(for: sessionId)
+    }
+
+    private func configureRoutingIfNeeded() async {
+        guard !routingConfigured else { return }
+
+        await sessionManager.setResponseHandler { [weak self] sessionId, data in
+            await self?.handleServerResponse(sessionId: sessionId, data: data)
+        }
+
+        await sessionManager.setSessionTerminationHandler { [weak self] sessionId in
+            await self?.sseManager.terminateSession(sessionId: sessionId)
+            await self?.cleanupPendingRequestsAsync(for: sessionId)
+        }
+
+        routingConfigured = true
+    }
+
+    private func buildApplication() -> some ApplicationProtocol {
+        let router = Router(context: BasicRequestContext.self)
+
+        router.add(middleware: OriginValidationMiddleware())
+
+        router.post("/") { request, context in
+            try await self.handlePost(request: request, context: context)
+        }
+        router.get("/") { request, context in
+            try await self.handleGet(request: request, context: context)
+        }
+        router.delete("/") { request, context in
+            try await self.handleDelete(request: request, context: context)
+        }
+
+        return Application(
+            router: router,
+            configuration: .init(
+                address: .hostname(host, port: port)
+            ),
+            logger: logger
+        )
     }
 
     /// Detects the type of JSON-RPC message

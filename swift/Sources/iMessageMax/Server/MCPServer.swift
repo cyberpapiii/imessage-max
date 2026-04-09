@@ -17,7 +17,7 @@ actor MCPServerWrapper {
 
     func start(transport: any Transport) async throws {
         // Register tools and start server FIRST so MCP handshake can complete
-        ToolRegistry.registerAll(on: server, db: database, resolver: resolver)
+        await ToolRegistry.registerAll(on: server, db: database, resolver: resolver)
 
         // Start server in background, then do startup checks
         // This allows MCP initialization to complete while contacts load

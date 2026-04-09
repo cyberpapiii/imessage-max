@@ -171,7 +171,7 @@ actor SendTool {
             filePaths: filePaths,
             replyTo: replyTo
         )
-        let content: [Tool.Content] = [.text(try FormatUtils.encodeJSON(response))]
+        let content: [Tool.Content] = [.plainText(try FormatUtils.encodeJSON(response))]
         if !response.success && response.status != "pending_confirmation" {
             throw ToolError(content: content)
         }

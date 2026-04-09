@@ -4,23 +4,23 @@
 
 # iMessage Max
 
-A high-performance MCP (Model Context Protocol) server for iMessage that lets AI assistants read, search, and send your messages with proper contact resolution.
+A high-performance MCP (Model Context Protocol) server for iMessage that lets AI agents read, search, and send your messages with proper contact resolution.
 
 Built in Swift for native macOS integration - single binary, no runtime dependencies.
 
 ## Distribution Status
 
-The Swift binary is the primary supported distribution for current releases:
+The project now ships a single Swift implementation:
 - GitHub releases
-- Homebrew tap
-- local signed `make install` workflow
+- Homebrew
+- source builds
 
-The Python package remains in the repository as a legacy/secondary path and
-should not be assumed to have feature parity with the Swift implementation.
+The old Python package has been retired and removed from the repository.
+Everything current lives under `swift/`.
 
 ## Features
 
-- **12 Intent-Aligned Tools** - Work the way you naturally ask questions, not raw database queries
+- **11 Intent-Aligned Tools** - Work the way you naturally ask questions, not raw database queries
 - **Contact Resolution** - See names instead of phone numbers via macOS Contacts
 - **Smart Image Handling** - Efficient image variants (vision/thumb/full) to avoid token bloat
 - **Session Grouping** - Messages grouped into conversation sessions with gap detection
@@ -33,15 +33,64 @@ should not be assumed to have feature parity with the Swift implementation.
 Most iMessage tools expose raw database structures, requiring 3-5 tool calls per user intent. This MCP provides intent-aligned tools:
 
 ```
-"What did Nick and I talk about yesterday?"
-→ find_chat(participants=["Nick"]) + get_messages(since="yesterday")
+"What did Contact A and I talk about yesterday?"
+→ find_chat(participants=["Contact A"]) + get_messages(since="yesterday")
 
 "Show me photos from the group chat"
 → list_attachments(chat_id="chat123", type="image")
 
-"Find where we discussed the trip"
-→ search(query="trip")
+"Find where we discussed the launch timeline"
+→ search(query="launch timeline")
 ```
+
+## Common Agent Workflows
+
+The tools work best when an agent uses them as short workflows instead of isolated one-off calls.
+
+### Find the right conversation, then read it
+
+```text
+find_chat(participants=["Contact A"])
+get_messages(chat_id="chat123", since="yesterday", limit=50)
+```
+
+Use this when the person matters more than the exact thread id.
+
+### Search first, then zoom in
+
+```text
+search(query="launch timeline", limit=10)
+get_context(message_id="msg_456", before=5, after=10)
+```
+
+Use this when you know the topic but not where it was discussed.
+
+### Check what needs attention
+
+```text
+get_unread()
+get_active_conversations(hours=24, min_exchanges=2)
+```
+
+Use this to surface active threads and unread messages without reading everything.
+
+### Work with attachments safely
+
+```text
+list_attachments(chat_id="chat123", type="image", since="30d")
+get_attachment(attachment_id="att123", variant="vision")
+```
+
+Use `list_attachments` to discover what exists first. It tells you whether a file is available locally before you try to fetch it.
+
+### Send with exact targeting when it matters
+
+```text
+find_chat(participants=["Contact A", "Contact B"])
+send(chat_id="chat456", text="Please use the latest draft")
+```
+
+For sensitive sends, prefer resolving the exact chat first and then using `chat_id` so the message lands in the intended thread.
 
 ## Installation
 
@@ -62,32 +111,9 @@ swift build -c release
 # Binary is at .build/release/imessage-max
 ```
 
-### Stable Dev Install Workflow
+For local development, advanced setup, and the signed install workflow, see:
 
-For local development, use the built-in `make` workflow in `swift/` instead of
-manually rebuilding and re-granting permissions:
-
-```bash
-cd swift
-make setup-signing   # one-time: create persistent signing identity
-make install         # build, sign, restart launchd service, verify health
-```
-
-Why this matters:
-- it signs the binary with a persistent local identity so Full Disk Access can persist across rebuilds
-- it replaces the release binary in place
-- it restarts the launchd-managed `local.imessage-max` service on port `8080`
-- it verifies the service is healthy after install
-
-Useful commands:
-
-```bash
-cd swift
-make status   # show process, signature, version, health
-make restart  # restart the launchd service
-make logs     # tail the stderr log
-make clean    # remove debug artifacts and clear logs
-```
+- [swift/README.md](swift/README.md)
 
 ## Setup
 
@@ -114,9 +140,11 @@ Required for resolving phone numbers to names. The app will request access on fi
 
 **System Settings** → **Privacy & Security** → **Contacts** → add `imessage-max`
 
-### 3. Configure Claude Desktop
+### 3. Configure Your MCP Client
 
-Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
+Add `imessage-max` to your MCP client's server configuration.
+
+Many MCP clients use a JSON structure like this:
 
 **For Homebrew:**
 ```json
@@ -140,49 +168,37 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 }
 ```
 
-### 4. Restart Claude Desktop
+If your client uses a different config format, point it at the same binary path.
 
-The MCP should now appear in Claude's tools. You can verify with the `diagnose` tool.
+### 4. Reconnect Your MCP Client
 
-### Launchd Service
-
-If you are running iMessage Max as a background HTTP service, the intended
-development path is the launchd-managed binary at:
-
-`~/Library/LaunchAgents/local.imessage-max.plist`
-
-That plist should point at:
-
-`/Users/YOU/.../imessage-max/swift/.build/release/imessage-max --http --port 8080`
-
-The `make install` workflow updates that binary in place and restarts the
-service cleanly.
+After saving the config, reconnect or restart your MCP client. The server should appear in the available tools, and you can verify the connection with `diagnose`.
 
 ## Tools
 
 ### find_chat
 Find chats by participants, name, or recent content.
 
-```python
-find_chat(participants=["Nick"])           # Find DM with Nick
-find_chat(participants=["Nick", "Andrew"]) # Find group with both
-find_chat(name="Family")                   # Find by chat name
-find_chat(contains_recent="dinner plans")  # Find by recent content
+```text
+find_chat(participants=["Contact A"])              # Find a direct chat
+find_chat(participants=["Contact A", "Contact B"]) # Find a group with both
+find_chat(name="Project Group")                    # Find by chat name
+find_chat(contains_recent="latest draft")          # Find by recent content
 ```
 
 ### get_messages
 Retrieve messages with flexible filtering. Returns metadata for media.
 
-```python
-get_messages(chat_id="chat123", limit=50)      # Recent messages
-get_messages(chat_id="chat123", since="24h")   # Last 24 hours
-get_messages(chat_id="chat123", from_person="Nick")  # From specific person
+```text
+get_messages(chat_id="chat123", limit=50)           # Recent messages
+get_messages(chat_id="chat123", since="24h")        # Last 24 hours
+get_messages(chat_id="chat123", from_person="Contact A")  # From specific person
 ```
 
 ### get_attachment
 Retrieve image content by attachment ID with resolution variants.
 
-```python
+```text
 get_attachment(attachment_id="att123")                 # Default: vision (1568px)
 get_attachment(attachment_id="att123", variant="thumb") # Quick preview (400px)
 get_attachment(attachment_id="att123", variant="full")  # Original resolution
@@ -197,7 +213,7 @@ get_attachment(attachment_id="att123", variant="full")  # Original resolution
 ### list_chats
 Browse recent chats with previews.
 
-```python
+```text
 list_chats(limit=20)          # Recent chats
 list_chats(is_group=True)     # Only group chats
 list_chats(since="7d")        # Active in last week
@@ -206,23 +222,23 @@ list_chats(since="7d")        # Active in last week
 ### search
 Full-text search across messages.
 
-```python
-search(query="dinner")                    # Search all messages
-search(query="meeting", from_person="Nick")  # From specific person
-search(query="party", is_group=True)      # Only in group chats
+```text
+search(query="draft")                           # Search all messages
+search(query="budget", from_person="Contact A") # From specific person
+search(query="launch", is_group=True)           # Only in group chats
 ```
 
 ### get_context
 Get messages surrounding a specific message.
 
-```python
+```text
 get_context(message_id="msg_123", before=5, after=10)
 ```
 
 ### get_active_conversations
 Find chats with recent back-and-forth activity.
 
-```python
+```text
 get_active_conversations(hours=24)
 get_active_conversations(is_group=True, min_exchanges=3)
 ```
@@ -230,7 +246,7 @@ get_active_conversations(is_group=True, min_exchanges=3)
 ### list_attachments
 List attachments with metadata. Includes `available` field showing if file is on disk.
 
-```python
+```text
 list_attachments(type="image", since="7d")
 list_attachments(chat_id="chat123", type="any")
 ```
@@ -238,7 +254,7 @@ list_attachments(chat_id="chat123", type="any")
 ### get_unread
 Get unread messages or summary.
 
-```python
+```text
 get_unread()                  # Unread from last 7 days
 get_unread(since="24h")       # Last 24 hours
 get_unread(mode="summary")    # Summary by chat
@@ -247,17 +263,26 @@ get_unread(mode="summary")    # Summary by chat
 ### send
 Send a message or file attachment (requires Automation permission for Messages.app).
 
-```python
-send(to="Nick", text="Hey!")
-send(chat_id="chat123", text="Running late")
+```text
+send(to="Contact A", text="Checking in")
+send(chat_id="chat123", text="Please use the latest draft")
 send(chat_id="chat123", file_paths=["/path/save-the-date.jpg"])
-send(to="Nick", file_paths=["/path/invite.png"], text="Save the date")
+send(to="Contact A", file_paths=["/path/reference.png"], text="Sharing the file here")
 ```
 
 Rules:
 - Exactly one of `to` or `chat_id`
 - At least one of `text` or `file_paths`
 - If both are provided, files are sent first and text is sent last
+
+## Release Checks
+
+For a lightweight pre-release routine, use:
+
+- [docs/validation/2026-04-09-release-checklist.md](docs/validation/2026-04-09-release-checklist.md)
+- [docs/validation/2026-03-13-send-manual-validation.md](docs/validation/2026-03-13-send-manual-validation.md)
+
+Additional send note:
 - `reply_to` is currently unsupported
 
 Send result semantics:
@@ -277,68 +302,9 @@ Examples:
 ### diagnose
 Troubleshoot configuration and permission issues.
 
-```python
+```text
 diagnose()  # Returns: database status, contacts count, permissions, capabilities
 ```
-
-## HTTP Mode
-
-For MCP Router, MCP Inspector, or other HTTP-based integrations:
-
-```bash
-imessage-max --http --port 8080
-```
-
-### Running as a Service (Recommended)
-
-Create a launchd plist at `~/Library/LaunchAgents/local.imessage-max.plist`:
-
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>local.imessage-max</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>/path/to/imessage-max</string>
-        <string>--http</string>
-        <string>--port</string>
-        <string>8080</string>
-    </array>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>KeepAlive</key>
-    <true/>
-    <key>StandardOutPath</key>
-    <string>/Users/YOU/Library/Logs/imessage-max.stdout.log</string>
-    <key>StandardErrorPath</key>
-    <string>/Users/YOU/Library/Logs/imessage-max.stderr.log</string>
-</dict>
-</plist>
-```
-
-Then load it:
-```bash
-launchctl load ~/Library/LaunchAgents/local.imessage-max.plist
-```
-
-### MCP Router Integration
-
-Add to MCP Router as a remote-streamable server:
-```sql
-INSERT INTO servers (id, name, server_type, remote_url, auto_start, disabled, created_at, updated_at)
-VALUES ('imessage', 'imessage', 'remote-streamable', 'http://127.0.0.1:8080', 1, 0, strftime('%s','now'), strftime('%s','now'));
-```
-
-### Session Management
-
-The HTTP transport supports clean reconnection:
-- Each client connection gets its own isolated session
-- Sessions auto-expire after 1 hour of inactivity
-- If MCP Router disconnects, it can reconnect seamlessly with a fresh session
-- No "Server already initialized" errors on reconnection
 
 ## Troubleshooting
 
@@ -355,18 +321,18 @@ Add the `imessage-max` binary to System Settings → Privacy & Security → Full
 
 Some attachments are stored in iCloud, not on disk. The `list_attachments` tool shows `available: true/false` for each attachment. To download offloaded attachments, open the conversation in Messages.app.
 
-### MCP not loading in Claude Desktop
+### MCP client not loading the server
 
 1. Check config file syntax is valid JSON
 2. Verify the binary path is correct
-3. Restart Claude Desktop completely (Cmd+Q)
+3. Reconnect or fully restart your MCP client
 
 ## Architecture
 
 ```
 ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│  Claude/AI      │◄───►│  iMessage Max   │◄───►│  chat.db        │
-│  Assistant      │     │  (Swift MCP)    │     │  (SQLite)       │
+│  MCP Client /   │◄───►│  iMessage Max   │◄───►│  chat.db        │
+│  Agent          │     │  (Swift MCP)    │     │  (SQLite)       │
 └─────────────────┘     └────────┬────────┘     └─────────────────┘
                                 │
                                 ▼
@@ -383,14 +349,12 @@ Some attachments are stored in iCloud, not on disk. The `list_attachments` tool 
 - Contacts permission (for name resolution)
 - Automation permission for Messages.app (send only)
 
-## Development
+## Advanced Setup
 
-```bash
-cd swift
-swift build           # Debug build
-swift build -c release  # Release build
-swift test            # Run tests
-```
+For HTTP mode, local background service setup, development commands, and
+contributor-focused workflow details, see:
+
+- [swift/README.md](swift/README.md)
 
 ## License
 

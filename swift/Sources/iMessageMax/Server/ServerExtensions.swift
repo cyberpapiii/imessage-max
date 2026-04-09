@@ -108,11 +108,12 @@ enum InputSchema {
 // MARK: - Tool Handler Registry
 
 /// Registry to hold tool handlers and definitions
-actor ToolHandlerRegistry {
+final class ToolHandlerRegistry: @unchecked Sendable {
     static let shared = ToolHandlerRegistry()
 
     private var tools: [String: Tool] = [:]
     private var handlers: [String: @Sendable ([String: Value]?) async throws -> [Tool.Content]] = [:]
+    private let lock = NSLock()
 
     private init() {}
 
@@ -120,16 +121,29 @@ actor ToolHandlerRegistry {
         tool: Tool,
         handler: @escaping @Sendable ([String: Value]?) async throws -> [Tool.Content]
     ) {
+        lock.lock()
+        defer { lock.unlock() }
         tools[tool.name] = tool
         handlers[tool.name] = handler
     }
 
     func getTools() -> [Tool] {
-        Array(tools.values)
+        lock.lock()
+        defer { lock.unlock() }
+        return Array(tools.values)
     }
 
     func getHandler(for name: String) -> (@Sendable ([String: Value]?) async throws -> [Tool.Content])? {
-        handlers[name]
+        lock.lock()
+        defer { lock.unlock() }
+        return handlers[name]
+    }
+
+    func resetForTesting() {
+        lock.lock()
+        defer { lock.unlock() }
+        tools.removeAll()
+        handlers.removeAll()
     }
 }
 
@@ -140,6 +154,16 @@ actor ToolHandlerRegistry {
 /// letting MCP clients programmatically distinguish errors from success.
 struct ToolError: Error {
     let content: [Tool.Content]
+}
+
+extension Tool.Content {
+    static func plainText(_ text: String) -> Self {
+        .text(text: text, annotations: nil, _meta: nil)
+    }
+
+    static func plainImage(data: String, mimeType: String) -> Self {
+        .image(data: data, mimeType: mimeType, annotations: nil, _meta: nil)
+    }
 }
 
 // MARK: - Server Extension
@@ -161,41 +185,37 @@ extension Server {
             annotations: annotations
         )
 
-        Task {
-            await ToolHandlerRegistry.shared.register(tool: tool, handler: handler)
-        }
+        ToolHandlerRegistry.shared.register(tool: tool, handler: handler)
 
         return self
     }
 
     /// Register built-in handlers for ListTools and CallTool
-    nonisolated func registerToolHandlers() {
-        Task {
-            // Register ListTools handler
-            await self.withMethodHandler(ListTools.self) { _ in
-                let tools = await ToolHandlerRegistry.shared.getTools()
-                return ListTools.Result(tools: tools)
+    func registerToolHandlers() async {
+        // Register ListTools handler
+        self.withMethodHandler(ListTools.self) { _ in
+            let tools = ToolHandlerRegistry.shared.getTools()
+            return ListTools.Result(tools: tools)
+        }
+
+        // Register CallTool handler
+        self.withMethodHandler(CallTool.self) { params in
+            guard let handler = ToolHandlerRegistry.shared.getHandler(for: params.name) else {
+                throw MCPError.methodNotFound("Unknown tool: \(params.name)")
             }
 
-            // Register CallTool handler
-            await self.withMethodHandler(CallTool.self) { params in
-                guard let handler = await ToolHandlerRegistry.shared.getHandler(for: params.name) else {
-                    throw MCPError.methodNotFound("Unknown tool: \(params.name)")
-                }
-
-                do {
-                    let content = try await handler(params.arguments)
-                    return CallTool.Result(content: content)
-                } catch let error as ToolError {
-                    return CallTool.Result(content: error.content, isError: true)
-                } catch let error as MCPError {
-                    throw error
-                } catch {
-                    return CallTool.Result(
-                        content: [.text("Error: \(error.localizedDescription)")],
-                        isError: true
-                    )
-                }
+            do {
+                let content = try await handler(params.arguments)
+                return CallTool.Result(content: content)
+            } catch let error as ToolError {
+                return CallTool.Result(content: error.content, isError: true)
+            } catch let error as MCPError {
+                throw error
+            } catch {
+                return CallTool.Result(
+                    content: [.plainText("Error: \(error.localizedDescription)")],
+                    isError: true
+                )
             }
         }
     }

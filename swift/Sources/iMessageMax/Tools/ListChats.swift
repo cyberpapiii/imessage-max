@@ -86,7 +86,7 @@ enum ListChatsTool {
                 ]),
                 "since": .object([
                     "type": "string",
-                    "description": "Only chats with activity since this time (ISO, relative, or natural)",
+                    "description": "Only chats with activity since this time (ISO, relative, or natural). Good for broad recent catch-up windows like \"2d\" or \"yesterday\".",
                 ]),
                 "is_group": .object([
                     "type": "boolean",
@@ -102,7 +102,7 @@ enum ListChatsTool {
                 ]),
                 "sort": .object([
                     "type": "string",
-                    "description": "Sort order",
+                    "description": "Sort order. Use \"recent\" for a broad recent-overview across conversations.",
                     "enum": ["recent", "alphabetical", "most_active"],
                 ]),
             ]),
@@ -111,7 +111,7 @@ enum ListChatsTool {
 
         server.registerTool(
             name: "list_chats",
-            description: "List recent chats with previews. Returns chat names, participants, last message, and metadata.",
+            description: "List chats with recent previews and metadata. A good starting point for broad catch-up or reviewing recent conversation activity before drilling deeper.",
             inputSchema: inputSchema,
             annotations: Tool.Annotations(
                 title: "List Chats",
@@ -145,10 +145,10 @@ enum ListChatsTool {
             switch result {
             case .success(let response):
                 let json = try encoder.encode(response)
-                return [.text(String(data: json, encoding: .utf8) ?? "{}")]
+                return [.plainText(String(data: json, encoding: .utf8) ?? "{}")]
             case .failure(let error):
                 let json = try encoder.encode(error)
-                throw ToolError(content: [.text(String(data: json, encoding: .utf8) ?? "{}")])
+                throw ToolError(content: [.plainText(String(data: json, encoding: .utf8) ?? "{}")])
             }
         }
     }

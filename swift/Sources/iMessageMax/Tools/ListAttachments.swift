@@ -151,10 +151,10 @@ final class ListAttachments {
             switch result {
             case .success(let response):
                 let json = try encoder.encode(response)
-                return [.text(String(data: json, encoding: .utf8) ?? "{}")]
+                return [.plainText(String(data: json, encoding: .utf8) ?? "{}")]
             case .failure(let error):
                 let json = try encoder.encode(error)
-                throw ToolError(content: [.text(String(data: json, encoding: .utf8) ?? "{}")])
+                throw ToolError(content: [.plainText(String(data: json, encoding: .utf8) ?? "{}")])
             }
         }
     }

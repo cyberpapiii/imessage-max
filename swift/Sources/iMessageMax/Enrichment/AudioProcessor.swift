@@ -3,10 +3,10 @@ import Foundation
 import AVFoundation
 
 struct AudioProcessor {
-    func getDuration(at path: String) -> Double? {
+    func getDuration(at path: String) async -> Double? {
         let url = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
         let asset = AVAsset(url: url)
-        let duration = asset.duration
+        guard let duration = try? await asset.load(.duration) else { return nil }
         return duration.seconds.isFinite ? duration.seconds : nil
     }
 
@@ -15,17 +15,17 @@ struct AudioProcessor {
         let codec: String?
     }
 
-    func getMetadata(at path: String) -> AudioMetadata? {
-        guard let duration = getDuration(at: path) else { return nil }
+    func getMetadata(at path: String) async -> AudioMetadata? {
+        guard let duration = await getDuration(at: path) else { return nil }
 
         let url = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
         let asset = AVAsset(url: url)
 
         var codec: String?
-        if let track = asset.tracks(withMediaType: .audio).first {
-            for desc in track.formatDescriptions {
-                let formatDesc = desc as! CMFormatDescription
-                let mediaSubType = CMFormatDescriptionGetMediaSubType(formatDesc)
+        if let track = try? await asset.loadTracks(withMediaType: .audio).first {
+            let descriptions = (try? await track.load(.formatDescriptions)) ?? []
+            for desc in descriptions {
+                let mediaSubType = CMFormatDescriptionGetMediaSubType(desc)
                 codec = String(format: "%c%c%c%c",
                               (mediaSubType >> 24) & 0xFF,
                               (mediaSubType >> 16) & 0xFF,

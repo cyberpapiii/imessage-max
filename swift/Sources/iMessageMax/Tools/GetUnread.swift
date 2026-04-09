@@ -77,16 +77,16 @@ final class GetUnread {
                 // Check if execute() returned an error dict
                 if let errorField = result["error"] as? String, !errorField.isEmpty {
                     let jsonData = try JSONSerialization.data(withJSONObject: result, options: [.sortedKeys])
-                    throw ToolError(content: [.text(String(data: jsonData, encoding: .utf8) ?? "{}")])
+                    throw ToolError(content: [.plainText(String(data: jsonData, encoding: .utf8) ?? "{}")])
                 }
                 let jsonData = try JSONSerialization.data(withJSONObject: result, options: [.sortedKeys])
-                return [.text(String(data: jsonData, encoding: .utf8) ?? "{}")]
+                return [.plainText(String(data: jsonData, encoding: .utf8) ?? "{}")]
             } catch let error as ToolError {
                 throw error
             } catch {
                 let errorResponse = ["error": "execution_error", "message": error.localizedDescription]
                 let jsonData = try JSONSerialization.data(withJSONObject: errorResponse, options: [.sortedKeys])
-                throw ToolError(content: [.text(String(data: jsonData, encoding: .utf8) ?? "{}")])
+                throw ToolError(content: [.plainText(String(data: jsonData, encoding: .utf8) ?? "{}")])
             }
         }
     }

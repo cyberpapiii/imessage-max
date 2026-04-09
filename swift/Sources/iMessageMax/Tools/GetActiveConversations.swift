@@ -128,7 +128,7 @@ enum GetActiveConversations {
                 let encoder = JSONEncoder()
                 encoder.outputFormatting = [.sortedKeys]
                 let json = try encoder.encode(result)
-                return [.text(String(data: json, encoding: .utf8) ?? "{}")]
+                return [.plainText(String(data: json, encoding: .utf8) ?? "{}")]
             } catch {
                 let errorResponse = ActiveConversationsError(
                     error: "execution_error",
@@ -136,7 +136,7 @@ enum GetActiveConversations {
                 )
                 let encoder = JSONEncoder()
                 let json = try encoder.encode(errorResponse)
-                throw ToolError(content: [.text(String(data: json, encoding: .utf8) ?? "{}")])
+                throw ToolError(content: [.plainText(String(data: json, encoding: .utf8) ?? "{}")])
             }
         }
     }

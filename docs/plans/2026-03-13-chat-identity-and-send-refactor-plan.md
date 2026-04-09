@@ -316,7 +316,7 @@ git commit -m "docs: report supported send capabilities explicitly"
 
 **Files:**
 - Create: `swift/Tests/iMessageMaxTests/SendManualValidation.md`
-- Modify: `tests/integration/test_real_database.py` only if Python-side notes or fixtures are still useful
+- No root-level Python harness; keep any optional validation notes in the Swift test/docs tree
 
 **Step 1: Write a manual validation checklist**
 
@@ -342,7 +342,7 @@ Expected: PASS
 **Step 4: Commit**
 
 ```bash
-git add swift/Tests/iMessageMaxTests/SendManualValidation.md tests/integration/test_real_database.py
+git add swift/Tests/iMessageMaxTests/SendManualValidation.md
 git commit -m "test: add manual validation plan for send scenarios"
 ```
 

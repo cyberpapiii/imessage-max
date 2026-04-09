@@ -8,7 +8,7 @@ private let defaultLimit = 50
 private let maxLimit = 200
 private let defaultUnansweredHours = 24
 private let sessionGapHours = 4
-private let sessionGapNanoseconds: Int64 = Int64(sessionGapHours) * 60 * 60 * 1_000_000_000
+let sessionGapNanoseconds: Int64 = Int64(sessionGapHours) * 60 * 60 * 1_000_000_000
 private let maxMedia = 10
 private let maxLinks = 10
 
@@ -120,8 +120,8 @@ struct GetMessagesErrorResponse: Encodable {
 // MARK: - Tool Implementation
 
 actor GetMessagesTool {
-    private let db: Database
-    private let resolver: ContactResolver
+    let db: Database
+    let resolver: ContactResolver
 
     init(db: Database, resolver: ContactResolver) {
         self.db = db
@@ -187,9 +187,9 @@ actor GetMessagesTool {
     func execute(args: [String: Value]?) async throws -> [Tool.Content] {
         do {
             let response = try await executeImpl(args: args)
-            return [.text(try FormatUtils.encodeJSON(response))]
+            return [.plainText(try FormatUtils.encodeJSON(response))]
         } catch let error as GetMessagesToolError {
-            throw ToolError(content: [.text(try FormatUtils.encodeJSON(error.errorResponse))])
+            throw ToolError(content: [.plainText(try FormatUtils.encodeJSON(error.errorResponse))])
         } catch {
             let errorResponse = GetMessagesErrorResponse(
                 error: "internal_error",
@@ -197,14 +197,13 @@ actor GetMessagesTool {
                 candidates: nil,
                 suggestion: nil
             )
-            throw ToolError(content: [.text(try FormatUtils.encodeJSON(errorResponse))])
+            throw ToolError(content: [.plainText(try FormatUtils.encodeJSON(errorResponse))])
         }
     }
 
     private func executeImpl(args: [String: Value]?) async throws -> GetMessagesResponse {
         let args = args ?? [:]
 
-        // Parse arguments
         var chatId = args["chat_id"]?.stringValue
         let participants = args["participants"]?.arrayValue?.compactMap { $0.stringValue }
         let since = args["since"]?.stringValue
@@ -219,7 +218,6 @@ actor GetMessagesTool {
         let unansweredHours = args["unanswered_hours"]?.intValue ?? defaultUnansweredHours
         let sessionFilter = args["session"]?.stringValue
 
-        // Validate input
         guard chatId != nil || (participants != nil && !participants!.isEmpty) else {
             throw GetMessagesToolError(errorResponse: GetMessagesErrorResponse(
                 error: "validation_error",
@@ -229,15 +227,12 @@ actor GetMessagesTool {
             ))
         }
 
-        // Initialize resolver
         try await resolver.initialize()
 
-        // Resolve participants to chat_id if needed
         if chatId == nil, let participants = participants {
             chatId = try await resolveParticipantsToChat(participants: participants)
         }
 
-        // Parse chat_id to numeric ID
         guard let numericChatId = parseChatId(chatId) else {
             throw GetMessagesToolError(errorResponse: GetMessagesErrorResponse(
                 error: "chat_not_found",
@@ -247,28 +242,22 @@ actor GetMessagesTool {
             ))
         }
 
-        // Get chat info
         let chatInfo = try getChatInfo(chatId: numericChatId)
-
-        // Get participants and build people map
         let (people, handleToKey) = try await buildPeopleMap(chatId: numericChatId)
 
-        // Parse time filters
         let sinceApple = since.flatMap { AppleTime.parse($0) }
         let beforeApple = before.flatMap { AppleTime.parse($0) }
-
-        // Resolve from_person
         let (fromHandle, fromMeOnly) = await resolveFromPerson(
             fromPerson: fromPerson,
             unanswered: unanswered
         )
 
-        // Build and execute query
         let fetchLimit = unanswered ? limit * 3 : limit
         var messageRows = try queryMessages(
             chatId: numericChatId,
             sinceApple: sinceApple,
             beforeApple: beforeApple,
+            cursor: cursor.flatMap(Self.decodeCursor),
             limit: fetchLimit,
             fromHandle: fromHandle,
             fromMeOnly: fromMeOnly,
@@ -276,7 +265,6 @@ actor GetMessagesTool {
             has: has
         )
 
-        // Filter for unanswered if requested
         if unanswered {
             messageRows = try filterUnanswered(
                 messageRows: messageRows,
@@ -286,7 +274,6 @@ actor GetMessagesTool {
             )
         }
 
-        // Get reactions
         let reactionsMap: [String: [(type: Int, fromHandle: String?)]]
         if includeReactions && !messageRows.isEmpty {
             reactionsMap = try getReactionsMap(messageGuids: messageRows.map { $0.guid })
@@ -294,10 +281,8 @@ actor GetMessagesTool {
             reactionsMap = [:]
         }
 
-        // Get attachments
         let attachmentsMap = try getAttachmentsMap(messageIds: messageRows.map { $0.id })
 
-        // Build messages
         var messages: [GetMessagesResponse.MessageInfo] = []
         var mediaCount = 0
 
@@ -311,7 +296,6 @@ actor GetMessagesTool {
                 fromKey = "unknown"
             }
 
-            // Build reactions
             var reactions: [String]? = nil
             if includeReactions, let rowReactions = reactionsMap[row.guid] {
                 var reactionStrings: [String] = []
@@ -332,7 +316,6 @@ actor GetMessagesTool {
                 }
             }
 
-            // Build media and attachments
             var media: [GetMessagesResponse.MediaInfo]? = nil
             var attachments: [GetMessagesResponse.AttachmentSummary]? = nil
 
@@ -340,28 +323,25 @@ actor GetMessagesTool {
                 for att in rowAttachments {
                     let attType = getAttachmentType(mimeType: att.mimeType, uti: att.uti)
 
-                    if attType == "image" && mediaCount < maxMedia {
-                        // Get image metadata
-                        if let path = att.filename {
-                            let expandedPath = (path as NSString).expandingTildeInPath
-                            let processor = ImageProcessor()
-                            if let metadata = processor.getMetadata(at: expandedPath) {
-                                if media == nil { media = [] }
-                                media?.append(GetMessagesResponse.MediaInfo(
-                                    type: "image",
-                                    id: "att\(att.id)",
-                                    filename: metadata.filename,
-                                    sizeBytes: metadata.sizeBytes,
-                                    sizeHuman: FormatUtils.fileSize(metadata.sizeBytes),
-                                    dimensions: .init(width: metadata.width, height: metadata.height)
-                                ))
-                                mediaCount += 1
-                                continue
-                            }
+                    if attType == "image" && mediaCount < maxMedia,
+                       let path = att.filename {
+                        let expandedPath = (path as NSString).expandingTildeInPath
+                        let processor = ImageProcessor()
+                        if let metadata = processor.getMetadata(at: expandedPath) {
+                            if media == nil { media = [] }
+                            media?.append(GetMessagesResponse.MediaInfo(
+                                type: "image",
+                                id: "att\(att.id)",
+                                filename: metadata.filename,
+                                sizeBytes: metadata.sizeBytes,
+                                sizeHuman: FormatUtils.fileSize(metadata.sizeBytes),
+                                dimensions: .init(width: metadata.width, height: metadata.height)
+                            ))
+                            mediaCount += 1
+                            continue
                         }
                     }
 
-                    // Fall back to attachment summary
                     if attachments == nil { attachments = [] }
                     attachments?.append(GetMessagesResponse.AttachmentSummary(
                         type: attType,
@@ -371,7 +351,6 @@ actor GetMessagesTool {
                 }
             }
 
-            // Extract links from text
             var links: [String]? = nil
             if let text = row.text {
                 let extractedLinks = extractLinks(from: text)
@@ -395,13 +374,11 @@ actor GetMessagesTool {
             ))
         }
 
-        // Assign sessions
         let (messagesWithSessions, sessions) = assignSessions(
             messages: messages,
             messageRows: messageRows
         )
 
-        // Filter by session if requested
         var finalMessages = messagesWithSessions
         var finalSessions = sessions
         if let sessionFilter = sessionFilter {
@@ -409,13 +386,11 @@ actor GetMessagesTool {
             finalSessions = finalSessions.filter { $0.sessionId == sessionFilter }
         }
 
-        // Build display name
         let rawDisplayName = chatInfo.displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
         let displayName = (rawDisplayName?.isEmpty == false) ? rawDisplayName! : DisplayNameGenerator.fromNames(
             people.filter { $0.key != "me" }.map { $0.value }
         )
 
-        // Build response
         let mediaTruncated = mediaCount > maxMedia
 
         return GetMessagesResponse(
@@ -424,549 +399,11 @@ actor GetMessagesTool {
             messages: finalMessages,
             sessions: finalSessions,
             more: messages.count == limit,
-            cursor: cursor,
+            cursor: Self.nextCursor(from: messageRows, limit: limit),
             mediaTruncated: mediaTruncated ? true : nil,
             mediaTotal: mediaTruncated ? mediaCount : nil,
             mediaIncluded: mediaTruncated ? maxMedia : nil,
             suggestions: messages.isEmpty ? ["Try different filters or time range"] : nil
         )
     }
-
-    // MARK: - Helper Functions
-
-    private func resolveParticipantsToChat(participants: [String]) async throws -> String {
-        // Build handle groups for each participant
-        var allHandles: Set<String> = []
-
-        for p in participants {
-            if p.hasPrefix("+") {
-                allHandles.insert(p)
-            } else if let normalized = PhoneUtils.normalizeToE164(p) {
-                allHandles.insert(normalized)
-            }
-
-            // Also search by name
-            let matches = await resolver.searchByName(p)
-            for (handle, _) in matches {
-                allHandles.insert(handle)
-            }
-        }
-
-        guard !allHandles.isEmpty else {
-            throw GetMessagesToolError(errorResponse: GetMessagesErrorResponse(
-                error: "invalid_participants",
-                message: "Could not resolve any handles for participants: \(participants)",
-                candidates: nil,
-                suggestion: nil
-            ))
-        }
-
-        // Find chats containing these handles
-        let placeholders = allHandles.map { _ in "?" }.joined(separator: ", ")
-        let sql = """
-            SELECT c.ROWID, c.display_name,
-                   (SELECT COUNT(DISTINCT chj.handle_id) FROM chat_handle_join chj WHERE chj.chat_id = c.ROWID) as participant_count
-            FROM chat c
-            JOIN chat_handle_join chj ON c.ROWID = chj.chat_id
-            JOIN handle h ON chj.handle_id = h.ROWID
-            WHERE h.id IN (\(placeholders))
-            GROUP BY c.ROWID
-            ORDER BY (SELECT MAX(m.date) FROM message m JOIN chat_message_join cmj ON m.ROWID = cmj.message_id WHERE cmj.chat_id = c.ROWID) DESC
-            LIMIT 10
-            """
-
-        let rows = try db.query(sql, params: Array(allHandles)) { row in
-            (
-                id: Int(row.int(0)),
-                displayName: row.string(1),
-                participantCount: Int(row.int(2))
-            )
-        }
-
-        let targetCount = participants.count + 1  // +1 for me
-        let exactMatches = rows.filter { $0.participantCount == targetCount }
-
-        if exactMatches.count == 1 {
-            return "chat\(exactMatches[0].id)"
-        } else if !exactMatches.isEmpty {
-            return "chat\(exactMatches[0].id)"
-        } else if rows.count == 1 {
-            return "chat\(rows[0].id)"
-        } else if !rows.isEmpty {
-            throw GetMessagesToolError(errorResponse: GetMessagesErrorResponse(
-                error: "ambiguous_participants",
-                message: "Multiple chats found with participants: \(participants)",
-                candidates: rows.prefix(5).map { row in
-                    GetMessagesErrorResponse.Candidate(
-                        chatId: "chat\(row.id)",
-                        name: row.displayName ?? "(Unnamed)",
-                        participantCount: row.participantCount
-                    )
-                },
-                suggestion: "Did you mean the \(rows[0].participantCount)-person chat or a different one?"
-            ))
-        } else {
-            throw GetMessagesToolError(errorResponse: GetMessagesErrorResponse(
-                error: "chat_not_found",
-                message: "No chat found with participants: \(participants)",
-                candidates: nil,
-                suggestion: nil
-            ))
-        }
-    }
-
-    private func parseChatId(_ chatId: String?) -> Int? {
-        guard let chatId = chatId else { return nil }
-
-        // Try "chatXXX" format
-        if chatId.hasPrefix("chat"), let numId = Int(chatId.dropFirst(4)) {
-            return numId
-        }
-
-        // Try GUID lookup
-        let rows = try? db.query(
-            "SELECT ROWID FROM chat WHERE guid LIKE ?",
-            params: ["%\(chatId)%"]
-        ) { row in
-            Int(row.int(0))
-        }
-
-        return rows?.first
-    }
-
-    private func getChatInfo(chatId: Int) throws -> (displayName: String?, serviceName: String?) {
-        let rows = try db.query(
-            "SELECT display_name, service_name FROM chat WHERE ROWID = ?",
-            params: [chatId]
-        ) { row in
-            (displayName: row.string(0), serviceName: row.string(1))
-        }
-
-        guard let info = rows.first else {
-            throw GetMessagesToolError(errorResponse: GetMessagesErrorResponse(
-                error: "chat_not_found",
-                message: "Chat not found: chat\(chatId)",
-                candidates: nil,
-                suggestion: nil
-            ))
-        }
-
-        return info
-    }
-
-    private func buildPeopleMap(chatId: Int) async throws -> (people: [String: String], handleToKey: [String: String]) {
-        let sql = """
-            SELECT h.id, h.service
-            FROM handle h
-            JOIN chat_handle_join chj ON h.ROWID = chj.handle_id
-            WHERE chj.chat_id = ?
-            """
-
-        let handles = try db.query(sql, params: [chatId]) { row in
-            (handle: row.string(0) ?? "", service: row.string(1))
-        }
-
-        var people: [String: String] = ["me": "Me"]
-        var handleToKey: [String: String] = [:]
-        var unknownCount = 0
-
-        for (i, h) in handles.enumerated() {
-            let handle = h.handle
-            let name = await resolver.resolve(handle)
-
-            if let name = name {
-                // Use first name as key
-                var key = name.components(separatedBy: " ").first?.lowercased() ?? "person\(i)"
-                // Handle duplicates
-                if people[key] != nil {
-                    key = "\(key)\(i)"
-                }
-                people[key] = name
-                handleToKey[handle] = key
-            } else {
-                unknownCount += 1
-                let key = "unknown\(unknownCount)"
-                people[key] = PhoneUtils.formatDisplay(handle)
-                handleToKey[handle] = key
-            }
-        }
-
-        return (people, handleToKey)
-    }
-
-    private func resolveFromPerson(
-        fromPerson: String?,
-        unanswered: Bool
-    ) async -> (fromHandle: String?, fromMeOnly: Bool) {
-        if unanswered {
-            return (nil, true)
-        }
-
-        guard let fromPerson = fromPerson else {
-            return (nil, false)
-        }
-
-        if fromPerson.lowercased() == "me" {
-            return (nil, true)
-        }
-
-        // Try to normalize as phone
-        if let normalized = PhoneUtils.normalizeToE164(fromPerson) {
-            return (normalized, false)
-        }
-
-        // Search by name
-        let matches = await resolver.searchByName(fromPerson)
-        if let first = matches.first {
-            return (first.handle, false)
-        }
-
-        return (nil, false)
-    }
-
-    private func queryMessages(
-        chatId: Int,
-        sinceApple: Int64?,
-        beforeApple: Int64?,
-        limit: Int,
-        fromHandle: String?,
-        fromMeOnly: Bool,
-        contains: String?,
-        has: String?
-    ) throws -> [MessageRow] {
-        let query = QueryBuilder()
-            .select(
-                "m.ROWID as id",
-                "m.guid",
-                "m.text",
-                "m.attributedBody",
-                "m.date",
-                "m.is_from_me",
-                "h.id as sender_handle"
-            )
-            .from("message m")
-            .join("chat_message_join cmj ON m.ROWID = cmj.message_id")
-            .leftJoin("handle h ON m.handle_id = h.ROWID")
-            .where("cmj.chat_id = ?", chatId)
-            .where("m.associated_message_type = 0")  // Exclude reactions
-
-        if let since = sinceApple {
-            query.where("m.date >= ?", since)
-        }
-
-        if let before = beforeApple {
-            query.where("m.date <= ?", before)
-        }
-
-        if fromMeOnly {
-            query.where("m.is_from_me = 1")
-        } else if let handle = fromHandle {
-            query.where("h.id = ?", handle)
-        }
-
-        if let contains = contains {
-            let escaped = QueryBuilder.escapeLike(contains)
-            query.where("m.text LIKE ? ESCAPE '\\'", "%\(escaped)%")
-        }
-
-        if let has = has {
-            switch has {
-            case "links":
-                query.where("(m.text LIKE '%http://%' OR m.text LIKE '%https://%')")
-            case "attachments", "images":
-                query.join("message_attachment_join maj ON m.ROWID = maj.message_id")
-            default:
-                break
-            }
-        }
-
-        query.orderBy("m.date DESC")
-            .limit(limit)
-
-        let (sql, params) = query.build()
-
-        return try db.query(sql, params: params) { row in
-            MessageRow(
-                id: Int(row.int(0)),
-                guid: row.string(1) ?? "",
-                text: MessageTextExtractor.extract(text: row.string(2), attributedBody: row.blob(3)),
-                date: row.optionalInt(4),
-                isFromMe: row.int(5) == 1,
-                senderHandle: row.string(6)
-            )
-        }
-    }
-
-    private func filterUnanswered(
-        messageRows: [MessageRow],
-        chatId: Int,
-        hours: Int,
-        limit: Int
-    ) throws -> [MessageRow] {
-        var filtered: [MessageRow] = []
-
-        for row in messageRows {
-            guard let text = row.text, looksLikeQuestion(text) else { continue }
-            guard let date = row.date else { continue }
-
-            let hasReply = try hasReplyWithinWindow(chatId: chatId, messageDate: date, hours: hours)
-            if !hasReply {
-                filtered.append(row)
-                if filtered.count >= limit {
-                    break
-                }
-            }
-        }
-
-        return filtered
-    }
-
-    private func looksLikeQuestion(_ text: String) -> Bool {
-        if text.contains("?") { return true }
-
-        let lower = text.lowercased().trimmingCharacters(in: .whitespaces)
-        let questionEndings = [
-            "what do you think",
-            "let me know",
-            "thoughts",
-            "can you",
-            "could you",
-            "would you",
-            "will you",
-            "please",
-            "lmk"
-        ]
-
-        for ending in questionEndings {
-            if lower.hasSuffix(ending) { return true }
-        }
-
-        return false
-    }
-
-    private func hasReplyWithinWindow(chatId: Int, messageDate: Int64, hours: Int) throws -> Bool {
-        let windowNs = Int64(hours) * 60 * 60 * 1_000_000_000
-
-        let rows = try db.query("""
-            SELECT 1 FROM message m
-            JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
-            WHERE cmj.chat_id = ?
-            AND m.date > ?
-            AND m.date <= ?
-            AND m.is_from_me = 0
-            AND m.associated_message_type = 0
-            LIMIT 1
-            """,
-            params: [chatId, messageDate, messageDate + windowNs]
-        ) { _ in true }
-
-        return !rows.isEmpty
-    }
-
-    private func getReactionsMap(messageGuids: [String]) throws -> [String: [(type: Int, fromHandle: String?)]] {
-        guard !messageGuids.isEmpty else { return [:] }
-
-        let placeholders = messageGuids.map { _ in "?" }.joined(separator: ", ")
-        let sql = """
-            SELECT m.associated_message_guid, m.associated_message_type, h.id
-            FROM message m
-            LEFT JOIN handle h ON m.handle_id = h.ROWID
-            WHERE m.associated_message_guid IN (\(placeholders))
-            AND m.associated_message_type >= 2000
-            """
-
-        var map: [String: [(type: Int, fromHandle: String?)]] = [:]
-
-        let rows = try db.query(sql, params: messageGuids) { row in
-            (
-                guid: row.string(0) ?? "",
-                type: Int(row.int(1)),
-                fromHandle: row.string(2)
-            )
-        }
-
-        for row in rows {
-            // Extract original message GUID from associated_message_guid
-            let originalGuid = row.guid.hasPrefix("p:") || row.guid.hasPrefix("bp:")
-                ? String(row.guid.split(separator: "/").last ?? "")
-                : row.guid
-
-            if map[originalGuid] == nil {
-                map[originalGuid] = []
-            }
-            map[originalGuid]?.append((type: row.type, fromHandle: row.fromHandle))
-        }
-
-        return map
-    }
-
-    private func getAttachmentsMap(messageIds: [Int]) throws -> [Int: [AttachmentRow]] {
-        guard !messageIds.isEmpty else { return [:] }
-
-        let placeholders = messageIds.map { _ in "?" }.joined(separator: ", ")
-        let sql = """
-            SELECT maj.message_id, a.ROWID, a.filename, a.mime_type, a.uti, a.total_bytes
-            FROM attachment a
-            JOIN message_attachment_join maj ON a.ROWID = maj.attachment_id
-            WHERE maj.message_id IN (\(placeholders))
-            """
-
-        var map: [Int: [AttachmentRow]] = [:]
-
-        let rows = try db.query(sql, params: messageIds) { row in
-            (
-                messageId: Int(row.int(0)),
-                attachment: AttachmentRow(
-                    id: Int(row.int(1)),
-                    filename: row.string(2),
-                    mimeType: row.string(3),
-                    uti: row.string(4),
-                    totalBytes: row.optionalInt(5).map { Int($0) }
-                )
-            )
-        }
-
-        for row in rows {
-            if map[row.messageId] == nil {
-                map[row.messageId] = []
-            }
-            map[row.messageId]?.append(row.attachment)
-        }
-
-        return map
-    }
-
-    private func getAttachmentType(mimeType: String?, uti: String?) -> String {
-        let mime = (mimeType ?? "").lowercased()
-        let utiStr = (uti ?? "").lowercased()
-
-        if mime.contains("image") || utiStr.contains("image") ||
-           utiStr.contains("jpeg") || utiStr.contains("png") || utiStr.contains("heic") {
-            return "image"
-        } else if mime.contains("video") || utiStr.contains("movie") || utiStr.contains("video") {
-            return "video"
-        } else if mime.contains("audio") || utiStr.contains("audio") {
-            return "audio"
-        } else if mime.contains("pdf") || utiStr.contains("pdf") {
-            return "pdf"
-        }
-        return "other"
-    }
-
-    private func extractLinks(from text: String) -> [String] {
-        let pattern = #"https?://[^\s<>\"{}|\\^`\[\]]+"#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
-
-        let range = NSRange(text.startIndex..., in: text)
-        let matches = regex.matches(in: text, range: range)
-
-        return matches.compactMap { match in
-            Range(match.range, in: text).map { String(text[$0]) }
-        }
-    }
-
-    private func assignSessions(
-        messages: [GetMessagesResponse.MessageInfo],
-        messageRows: [MessageRow]
-    ) -> ([GetMessagesResponse.MessageInfo], [GetMessagesResponse.SessionInfo]) {
-        guard !messages.isEmpty else { return ([], []) }
-
-        var updatedMessages = messages
-        var sessions: [GetMessagesResponse.SessionInfo] = []
-        var currentSession = 1
-        var sessionMessageCount = 0
-        var sessionStartTs: String? = nil
-
-        // Messages are in DESC order (most recent first)
-        // Reverse to process oldest first
-        let reversedIndices = (0..<messages.count).reversed()
-
-        for (i, idx) in reversedIndices.enumerated() {
-            let row = messageRows[idx]
-            let msgDate = row.date ?? 0
-
-            var sessionStart = false
-            var sessionGapHours: Double? = nil
-
-            if i > 0 {
-                let prevIdx = Array(reversedIndices)[i - 1]
-                let prevDate = messageRows[prevIdx].date ?? 0
-                let gap = msgDate - prevDate
-
-                if gap >= sessionGapNanoseconds {
-                    // Save previous session
-                    sessions.append(GetMessagesResponse.SessionInfo(
-                        sessionId: "session_\(currentSession)",
-                        started: sessionStartTs,
-                        messageCount: sessionMessageCount
-                    ))
-                    currentSession += 1
-                    sessionMessageCount = 0
-                    sessionStart = true
-                    sessionGapHours = Double(gap) / Double(60 * 60 * 1_000_000_000)
-                }
-            } else {
-                sessionStart = true
-            }
-
-            let sessionId = "session_\(currentSession)"
-            sessionMessageCount += 1
-
-            if sessionStart {
-                sessionStartTs = row.date.flatMap { AppleTime.toDate($0) }.flatMap { TimeUtils.formatISO($0) }
-            }
-
-            // Update message with session info
-            let msg = updatedMessages[idx]
-            updatedMessages[idx] = GetMessagesResponse.MessageInfo(
-                id: msg.id,
-                ts: msg.ts,
-                text: msg.text,
-                from: msg.from,
-                reactions: msg.reactions,
-                media: msg.media,
-                attachments: msg.attachments,
-                links: msg.links,
-                sessionId: sessionId,
-                sessionStart: sessionStart ? true : nil,
-                sessionGapHours: sessionGapHours
-            )
-        }
-
-        // Save final session
-        sessions.append(GetMessagesResponse.SessionInfo(
-            sessionId: "session_\(currentSession)",
-            started: sessionStartTs,
-            messageCount: sessionMessageCount
-        ))
-
-        // Reverse sessions so most recent is first
-        sessions.reverse()
-
-        return (updatedMessages, sessions)
-    }
-
-}
-
-// MARK: - Helper Types
-
-private struct MessageRow {
-    let id: Int
-    let guid: String
-    let text: String?
-    let date: Int64?
-    let isFromMe: Bool
-    let senderHandle: String?
-}
-
-private struct AttachmentRow {
-    let id: Int
-    let filename: String?
-    let mimeType: String?
-    let uti: String?
-    let totalBytes: Int?
-}
-
-private struct GetMessagesToolError: Error {
-    let errorResponse: GetMessagesErrorResponse
 }

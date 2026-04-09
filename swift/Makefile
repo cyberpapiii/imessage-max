@@ -18,6 +18,7 @@ IDENTITY     := iMessage Max Dev
 LAUNCHD_LABEL := local.imessage-max
 PORT         := 8080
 CERT_CN      := iMessage Max Dev
+VERIFY_ATTEMPTS := 45
 
 .PHONY: build sign install restart status logs clean setup-signing verify help
 
@@ -26,44 +27,57 @@ help: ## Show this help
 
 build: ## Build release binary
 	@echo "Building release..."
-	@swift build -c release 2>&1 | grep -E "Build complete|error:|warning:.*imessage" || true
+	@swift build -c release
 	@echo "✓ Built $(BINARY)"
 
 sign: build ## Build and sign with persistent identity
 	@if codesign --force --sign "$(IDENTITY)" $(BINARY) 2>/dev/null; then \
 		echo "✓ Signed with '$(IDENTITY)' — FDA persists across rebuilds"; \
 	elif security find-certificate -c "$(CERT_CN)" ~/Library/Keychains/login.keychain-db >/dev/null 2>&1; then \
-		codesign --force --sign "$(IDENTITY)" $(BINARY) 2>&1; \
-		echo "✓ Signed with '$(IDENTITY)'"; \
+		if codesign --force --sign "$(IDENTITY)" $(BINARY); then \
+			echo "✓ Signed with '$(IDENTITY)'"; \
+		else \
+			echo "✗ Failed to sign with '$(IDENTITY)'"; \
+			exit 1; \
+		fi; \
 	else \
 		echo "⚠ No signing identity '$(IDENTITY)' — using ad-hoc (FDA needs re-granting each build)"; \
 		echo "  Run 'make setup-signing' once to fix this permanently"; \
+		codesign --force --sign - $(BINARY); \
 	fi
 
 restart: ## Restart the launchd service
 	@echo "Restarting service..."
-	@launchctl kickstart -k gui/$$(id -u)/$(LAUNCHD_LABEL) 2>/dev/null || \
-		(launchctl bootstrap gui/$$(id -u) ~/Library/LaunchAgents/$(LAUNCHD_LABEL).plist 2>/dev/null && echo "Bootstrapped") || true
+	@launchctl bootout gui/$$(id -u) ~/Library/LaunchAgents/$(LAUNCHD_LABEL).plist 2>/dev/null || true
+	@launchctl bootstrap gui/$$(id -u) ~/Library/LaunchAgents/$(LAUNCHD_LABEL).plist
 	@echo "✓ Service restarted"
 
 verify: ## Verify server is healthy
 	@echo "Waiting for server..."
-	@for i in 1 2 3 4 5 6 7 8; do \
+	@BINARY_VERSION=$$($(BINARY) --version 2>/dev/null); \
+	i=1; \
+	while [ $$i -le $(VERIFY_ATTEMPTS) ]; do \
 		sleep 1; \
 		RESULT=$$(curl -sf http://127.0.0.1:$(PORT) -X POST \
 			-H "Content-Type: application/json" \
 			-H "Accept: application/json" \
 			-d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"verify","version":"1.0"}}}' 2>/dev/null); \
 		if [ -n "$$RESULT" ]; then \
-			echo "$$RESULT" | python3 -c "import sys,json; r=json.load(sys.stdin)['result']; print(f'✓ {r[\"serverInfo\"][\"name\"]} v{r[\"serverInfo\"][\"version\"]} healthy on port $(PORT)')"; \
-			exit 0; \
+			SERVER_VERSION=$$(echo "$$RESULT" | python3 -c "import sys,json; print(json.load(sys.stdin)['result']['serverInfo']['version'])"); \
+			if [ "$$SERVER_VERSION" = "$$BINARY_VERSION" ]; then \
+				echo "$$RESULT" | python3 -c "import sys,json; r=json.load(sys.stdin)['result']; print(f'✓ {r[\"serverInfo\"][\"name\"]} v{r[\"serverInfo\"][\"version\"]} healthy on port $(PORT)')"; \
+				exit 0; \
+			fi; \
 		fi; \
+		i=$$((i + 1)); \
 	done; \
 	echo "✗ Server not responding on port $(PORT)"; exit 1
 
 install: sign restart verify ## Build, sign, restart, verify (the full workflow)
+	@open -R $(BINARY)
 	@echo ""
-	@echo "Done! If MCP Router lost connection, reconnect with /mcp"
+	@echo "Done! Finder opened to the binary — drag it into Full Disk Access if needed."
+	@echo "If MCP Router lost connection, reconnect with /mcp"
 
 status: ## Show service status and version
 	@echo "=== Process ==="

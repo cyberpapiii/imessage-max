@@ -2,6 +2,9 @@
 import Foundation
 import SQLite3
 
+// Safe as @unchecked Sendable because instances only hold an immutable path string.
+// Every query opens its own short-lived read-only SQLite connection, so there is no
+// shared mutable connection state crossing actor/task boundaries.
 final class Database: @unchecked Sendable {
     static let defaultPath: String = {
         ("~/Library/Messages/chat.db" as NSString).expandingTildeInPath
@@ -131,7 +134,7 @@ final class Database: @unchecked Sendable {
             case let value as Double:
                 sqlite3_bind_double(stmt, idx, value)
             case let value as Data:
-                value.withUnsafeBytes { ptr in
+                _ = value.withUnsafeBytes { ptr in
                     sqlite3_bind_blob(stmt, idx, ptr.baseAddress, Int32(value.count), unsafeBitCast(-1, to: sqlite3_destructor_type.self))
                 }
             case is NSNull:

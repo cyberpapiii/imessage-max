@@ -3,11 +3,11 @@ import Foundation
 import MCP
 
 enum ToolRegistry {
-    static func registerAll(on server: Server, db: Database, resolver: ContactResolver) {
+    static func registerAll(on server: Server, db: Database, resolver: ContactResolver) async {
         // Register the MCP method handlers for tools
-        server.registerToolHandlers()
+        await server.registerToolHandlers()
 
-        // Register all 12 tools
+        // Register all 11 tools
 
         // Chat discovery tools
         FindChatTool.register(on: server, database: db, resolver: resolver)
@@ -26,7 +26,6 @@ enum ToolRegistry {
 
         // Action tools
         SendTool.register(on: server, resolver: resolver)
-        UpdateTool.register(on: server)
 
         // Utility tools
         DiagnoseTool.register(on: server, resolver: resolver)

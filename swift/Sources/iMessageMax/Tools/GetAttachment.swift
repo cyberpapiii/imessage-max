@@ -54,7 +54,7 @@ struct GetAttachment {
             guard let attachmentId = arguments?["attachment_id"]?.stringValue else {
                 let errorResponse = ["error": "validation_error", "message": "attachment_id is required"]
                 let jsonData = try JSONSerialization.data(withJSONObject: errorResponse, options: [.sortedKeys])
-                throw ToolError(content: [.text(String(data: jsonData, encoding: .utf8) ?? "{}")])
+                throw ToolError(content: [.plainText(String(data: jsonData, encoding: .utf8) ?? "{}")])
             }
 
             let variant = arguments?["variant"]?.stringValue ?? "vision"
@@ -66,8 +66,8 @@ struct GetAttachment {
                 // Return metadata as text + image as proper MCP image content
                 // This allows Claude to see the image visually without token overhead
                 return [
-                    .text(metadata),
-                    .image(data: imageData, mimeType: mimeType, metadata: nil)
+                    .plainText(metadata),
+                    .plainImage(data: imageData, mimeType: mimeType)
                 ]
             case .error(let type, let message, let details):
                 var dict: [String: Any] = [
@@ -80,7 +80,7 @@ struct GetAttachment {
                     }
                 }
                 let jsonData = try JSONSerialization.data(withJSONObject: dict, options: [.sortedKeys])
-                throw ToolError(content: [.text(String(data: jsonData, encoding: .utf8) ?? "{}")])
+                throw ToolError(content: [.plainText(String(data: jsonData, encoding: .utf8) ?? "{}")])
             }
         }
     }
