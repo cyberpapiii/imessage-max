@@ -1,0 +1,4 @@
+interface:
+  display_name: "Using iMessage Max"
+  short_description: "Choose the right iMessage tool flow"
+  default_prompt: "Use $using-imessage-max to handle iMessage review, catch-up, search, or send tasks with the right tool sequence."

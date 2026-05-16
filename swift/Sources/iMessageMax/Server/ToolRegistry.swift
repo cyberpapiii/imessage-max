@@ -7,10 +7,11 @@ enum ToolRegistry {
         // Register the MCP method handlers for tools
         await server.registerToolHandlers()
 
-        // Register all 11 tools
+        // Register all 12 tools
 
         // Chat discovery tools
         FindChatTool.register(on: server, database: db, resolver: resolver)
+        GetChatDetailsTool.register(on: server, db: db, resolver: resolver)
         ListChatsTool.register(on: server, db: db, resolver: resolver)
         GetActiveConversations.register(on: server, db: db, resolver: resolver)
 

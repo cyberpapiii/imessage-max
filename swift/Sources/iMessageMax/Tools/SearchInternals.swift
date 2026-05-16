@@ -34,11 +34,14 @@ struct ContextRow {
 
 struct GroupedChatData {
     let id: String
-    var name: String?
+    var name: String
+    var group: Bool?
+    var participantCount: Int
+    var participantsPreview: [String]
     var matchCount: Int
     var firstMatchDate: Date?
     var lastMatchDate: Date?
-    var sampleMessages: [SearchSampleMessage]
+    var results: [SearchSampleMessage]
 }
 
 extension SearchTool {
@@ -238,46 +241,22 @@ extension SearchTool {
     static func buildFlatResponse(
         db: Database,
         rows: [SearchRow],
+        query: String?,
         limit: Int,
         includeContext: Bool,
         resolver: ContactResolver
     ) async throws -> String {
         var results: [SearchResult] = []
-        var people: [String: SearchPersonInfo] = [:]
-        var handleToKey: [String: String] = [:]
-        var personCounter = 1
         var chatNamesCache: [Int64: String] = [:]
 
         for row in rows {
-            let senderKey: String
-            if row.isFromMe {
-                senderKey = "me"
-                if people["me"] == nil {
-                    people["me"] = SearchPersonInfo(name: "Me", handle: nil, isMe: true)
-                }
-            } else {
-                let handle = row.senderHandle ?? "unknown"
-                if let existingKey = handleToKey[handle] {
-                    senderKey = existingKey
-                } else {
-                    let name = await resolver.resolve(handle)
-                    let key: String
-                    if let resolvedName = name {
-                        let firstName = resolvedName.split(separator: " ").first.map(String.init)
-                                        ?? resolvedName
-                        key = generateUniqueKey(baseName: firstName.lowercased(), existing: people)
-                    } else {
-                        key = "p\(personCounter)"
-                        personCounter += 1
-                    }
-                    handleToKey[handle] = key
-                    people[key] = SearchPersonInfo(name: name ?? handle, handle: handle, isMe: nil)
-                    senderKey = key
-                }
-            }
-
             let text = MessageTextExtractor.extract(text: row.text, attributedBody: row.attributedBody)
             let msgDate = AppleTime.toDate(row.date)
+            let senderName = await resolveSenderName(
+                isFromMe: row.isFromMe,
+                handle: row.senderHandle,
+                resolver: resolver
+            )
 
             var chatName = row.chatDisplayName
             if chatName == nil || chatName?.isEmpty == true {
@@ -294,12 +273,11 @@ extension SearchTool {
 
             var result = SearchResult(
                 id: "msg_\(row.msgId)",
-                ts: TimeUtils.formatISO(msgDate),
+                chat: ChatReference(id: "chat\(row.chatId)", name: chatName ?? "Unknown Chat"),
+                from: senderName,
+                excerpt: makeExcerpt(text: text, query: query),
                 ago: TimeUtils.formatCompactRelative(msgDate),
-                from: senderKey,
-                text: text,
-                chat: "chat\(row.chatId)",
-                chatName: chatName,
+                ts: TimeUtils.formatISO(msgDate),
                 contextBefore: nil,
                 contextAfter: nil
             )
@@ -309,9 +287,6 @@ extension SearchTool {
                     db: db,
                     chatId: row.chatId,
                     msgDate: msgDate,
-                    people: &people,
-                    handleToKey: &handleToKey,
-                    personCounter: &personCounter,
                     resolver: resolver
                 )
                 result.contextBefore = before.isEmpty ? nil : before
@@ -323,16 +298,11 @@ extension SearchTool {
 
         let response = SearchFlatResponse(
             results: results,
-            people: people,
             total: results.count,
             more: results.count >= limit,
             cursor: nextCursor(from: rows, limit: limit)
         )
-
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
-        let data = try encoder.encode(response)
-        return String(data: data, encoding: .utf8) ?? "{}"
+        return try FormatUtils.encodeJSON(response)
     }
 
     static func buildGroupedResponse(
@@ -343,41 +313,16 @@ extension SearchTool {
         resolver: ContactResolver
     ) async throws -> String {
         var chatsData: [Int64: GroupedChatData] = [:]
-        var people: [String: SearchPersonInfo] = [:]
-        var handleToKey: [String: String] = [:]
-        var personCounter = 1
         var chatNamesCache: [Int64: String] = [:]
+        var chatSummaryCache: [Int64: ChatSummary] = [:]
 
         for row in rows {
             let chatId = row.chatId
-
-            let senderKey: String
-            if row.isFromMe {
-                senderKey = "me"
-                if people["me"] == nil {
-                    people["me"] = SearchPersonInfo(name: "Me", handle: nil, isMe: true)
-                }
-            } else {
-                let handle = row.senderHandle ?? "unknown"
-                if let existingKey = handleToKey[handle] {
-                    senderKey = existingKey
-                } else {
-                    let name = await resolver.resolve(handle)
-                    let key: String
-                    if let resolvedName = name {
-                        let firstName = resolvedName.split(separator: " ").first.map(String.init)
-                                        ?? resolvedName
-                        key = generateUniqueKey(baseName: firstName.lowercased(), existing: people)
-                    } else {
-                        key = "p\(personCounter)"
-                        personCounter += 1
-                    }
-                    handleToKey[handle] = key
-                    people[key] = SearchPersonInfo(name: name ?? handle, handle: handle, isMe: nil)
-                    senderKey = key
-                }
-            }
-
+            let senderName = await resolveSenderName(
+                isFromMe: row.isFromMe,
+                handle: row.senderHandle,
+                resolver: resolver
+            )
             let text = MessageTextExtractor.extract(text: row.text, attributedBody: row.attributedBody)
             let msgDate = AppleTime.toDate(row.date)
 
@@ -394,14 +339,31 @@ extension SearchTool {
                 }
             }
 
+            let chatSummary: ChatSummary
+            if let cached = chatSummaryCache[chatId] {
+                chatSummary = cached
+            } else {
+                let summary = try await buildChatSummary(
+                    db: db,
+                    chatId: chatId,
+                    explicitName: chatName,
+                    resolver: resolver
+                )
+                chatSummaryCache[chatId] = summary
+                chatSummary = summary
+            }
+
             if chatsData[chatId] == nil {
                 chatsData[chatId] = GroupedChatData(
-                    id: "chat\(chatId)",
-                    name: chatName,
+                    id: chatSummary.id,
+                    name: chatSummary.name,
+                    group: chatSummary.group,
+                    participantCount: chatSummary.participantCount,
+                    participantsPreview: chatSummary.participantsPreview,
                     matchCount: 0,
                     firstMatchDate: msgDate,
                     lastMatchDate: msgDate,
-                    sampleMessages: []
+                    results: []
                 )
             }
 
@@ -417,11 +379,11 @@ extension SearchTool {
                 }
             }
 
-            if chat.sampleMessages.count < 3 {
-                chat.sampleMessages.append(SearchSampleMessage(
+            if chat.results.count < 3 {
+                chat.results.append(SearchSampleMessage(
                     id: "msg_\(row.msgId)",
-                    text: text,
-                    from: senderKey,
+                    from: senderName,
+                    excerpt: makeExcerpt(text: text, query: query),
                     ts: TimeUtils.formatISO(msgDate)
                 ))
             }
@@ -433,37 +395,32 @@ extension SearchTool {
             SearchGroupedChat(
                 id: data.id,
                 name: data.name,
+                group: data.group,
+                participantCount: data.participantCount,
+                participantsPreview: data.participantsPreview,
                 matchCount: data.matchCount,
                 firstMatch: TimeUtils.formatISO(data.firstMatchDate),
                 lastMatch: TimeUtils.formatISO(data.lastMatchDate),
-                sampleMessages: data.sampleMessages
+                results: data.results
             )
         }
         chats.sort { $0.matchCount > $1.matchCount }
 
         let response = SearchGroupedResponse(
             chats: chats,
-            people: people,
             total: chats.reduce(0) { $0 + $1.matchCount },
             chatCount: chats.count,
             query: query,
             more: rows.count >= limit,
             cursor: nextCursor(from: rows, limit: limit)
         )
-
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
-        let data = try encoder.encode(response)
-        return String(data: data, encoding: .utf8) ?? "{}"
+        return try FormatUtils.encodeJSON(response)
     }
 
     static func getContext(
         db: Database,
         chatId: Int64,
         msgDate: Int64,
-        people: inout [String: SearchPersonInfo],
-        handleToKey: inout [String: String],
-        personCounter: inout Int,
         resolver: ContactResolver
     ) async throws -> ([SearchContextMessage], [SearchContextMessage]) {
         let beforeRows = try db.query("""
@@ -512,9 +469,6 @@ extension SearchTool {
         for row in beforeRows.reversed() {
             let msg = await formatContextMessage(
                 row: row,
-                people: &people,
-                handleToKey: &handleToKey,
-                personCounter: &personCounter,
                 resolver: resolver
             )
             contextBefore.append(msg)
@@ -523,9 +477,6 @@ extension SearchTool {
         for row in afterRows {
             let msg = await formatContextMessage(
                 row: row,
-                people: &people,
-                handleToKey: &handleToKey,
-                personCounter: &personCounter,
                 resolver: resolver
             )
             contextAfter.append(msg)
@@ -536,60 +487,107 @@ extension SearchTool {
 
     static func formatContextMessage(
         row: ContextRow,
-        people: inout [String: SearchPersonInfo],
-        handleToKey: inout [String: String],
-        personCounter: inout Int,
         resolver: ContactResolver
     ) async -> SearchContextMessage {
-        let senderKey: String
-        if row.isFromMe {
-            senderKey = "me"
-            if people["me"] == nil {
-                people["me"] = SearchPersonInfo(name: "Me", handle: nil, isMe: true)
-            }
-        } else {
-            let handle = row.senderHandle ?? "unknown"
-            if let existingKey = handleToKey[handle] {
-                senderKey = existingKey
-            } else {
-                let name = await resolver.resolve(handle)
-                let key: String
-                if let resolvedName = name {
-                    let firstName = resolvedName.split(separator: " ").first.map(String.init)
-                                    ?? resolvedName
-                    key = generateUniqueKey(baseName: firstName.lowercased(), existing: people)
-                } else {
-                    key = "p\(personCounter)"
-                    personCounter += 1
-                }
-                handleToKey[handle] = key
-                people[key] = SearchPersonInfo(name: name ?? handle, handle: handle, isMe: nil)
-                senderKey = key
-            }
-        }
-
         let text = MessageTextExtractor.extract(text: row.text, attributedBody: row.attributedBody)
         let msgDate = AppleTime.toDate(row.date)
 
         return SearchContextMessage(
             id: "msg_\(row.msgId)",
-            ts: TimeUtils.formatISO(msgDate),
-            from: senderKey,
-            text: text
+            from: await resolveSenderName(
+                isFromMe: row.isFromMe,
+                handle: row.senderHandle,
+                resolver: resolver
+            ),
+            text: text,
+            ts: TimeUtils.formatISO(msgDate)
         )
     }
 
-    static func generateUniqueKey(
-        baseName: String,
-        existing: [String: SearchPersonInfo]
-    ) -> String {
-        if existing[baseName] == nil { return baseName }
+    static func makeExcerpt(text: String?, query: String?) -> String {
+        guard let text else { return "" }
+        let normalized = SummaryPreviewFormatter.formattedTextPreview(
+            text: text,
+            attributedBody: nil,
+            maxLength: Int.max
+        ) ?? text
+        guard normalized.count > 160 else { return normalized }
 
-        var suffix = 2
-        while existing["\(baseName)\(suffix)"] != nil {
-            suffix += 1
+        let excerptLength = 160
+        let nsText = normalized as NSString
+
+        if let query, !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let lowerText = normalized.lowercased()
+            let lowerQuery = query.lowercased()
+            if let matchRange = lowerText.range(of: lowerQuery) {
+                let matchLocation = lowerText.distance(from: lowerText.startIndex, to: matchRange.lowerBound)
+                let halfWindow = excerptLength / 2
+                let start = max(0, matchLocation - halfWindow)
+                let length = min(excerptLength, nsText.length - start)
+                let excerpt = nsText.substring(with: NSRange(location: start, length: length))
+                let prefix = start > 0 ? "..." : ""
+                let suffix = (start + length) < nsText.length ? "..." : ""
+                return prefix + excerpt + suffix
+            }
         }
-        return "\(baseName)\(suffix)"
+
+        let excerpt = nsText.substring(to: min(excerptLength, nsText.length))
+        return nsText.length > excerptLength ? excerpt + "..." : excerpt
+    }
+
+    static func resolveSenderName(
+        isFromMe: Bool,
+        handle: String?,
+        resolver: ContactResolver
+    ) async -> String {
+        if isFromMe {
+            return "Me"
+        }
+        guard let handle else { return "Unknown" }
+        return await IdentityDisplayFormatter.displayName(handle: handle, resolver: resolver)
+    }
+
+    static func buildChatSummary(
+        db: Database,
+        chatId: Int64,
+        explicitName: String?,
+        resolver: ContactResolver
+    ) async throws -> ChatSummary {
+        let participants = try db.query("""
+            SELECT h.id as handle
+            FROM handle h
+            JOIN chat_handle_join chj ON h.ROWID = chj.handle_id
+            WHERE chj.chat_id = ?
+            ORDER BY h.id ASC
+            """,
+            params: [chatId]
+        ) { row in
+            row.string(0) ?? "unknown"
+        }
+
+        let identityParticipants = await withTaskGroup(of: ChatIdentity.Participant.self, returning: [ChatIdentity.Participant].self) { group in
+            for handle in participants {
+                group.addTask { [resolver] in
+                    ChatIdentity.makeParticipant(
+                        handle: handle,
+                        contactName: await resolver.resolve(handle)
+                    )
+                }
+            }
+            var resolved: [ChatIdentity.Participant] = []
+            for await participant in group {
+                resolved.append(participant)
+            }
+            return resolved
+        }
+
+        let identity = ChatIdentity(
+            mcpId: "chat\(chatId)",
+            guid: nil,
+            explicitName: explicitName,
+            participants: identityParticipants
+        )
+        return try ChatSummaryBuilder.buildSummary(db: db, chatId: chatId, identity: identity)
     }
 
     static func wordMatches(searchWord: String, in text: String, textWords: [String], fuzzy: Bool) -> Bool {

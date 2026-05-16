@@ -43,9 +43,10 @@ final class HTTPTransportIntegrationTests: XCTestCase {
             let body = try decodeJSON(from: toolsResponse.body)
             let result = try XCTUnwrap(body["result"] as? [String: Any])
             let tools = try XCTUnwrap(result["tools"] as? [[String: Any]])
-            XCTAssertEqual(tools.count, 11)
+            XCTAssertEqual(tools.count, 12)
             XCTAssertTrue(tools.contains { $0["name"] as? String == "send" })
             XCTAssertTrue(tools.contains { $0["name"] as? String == "diagnose" })
+            XCTAssertTrue(tools.contains { $0["name"] as? String == "get_chat_details" })
         }
     }
 
@@ -118,6 +119,39 @@ final class HTTPTransportIntegrationTests: XCTestCase {
             XCTAssertEqual(resultB.head.status, .ok)
             XCTAssertEqual(try slowMethodSource(from: resultA.body), "session-a")
             XCTAssertEqual(try slowMethodSource(from: resultB.body), "session-b")
+        }
+    }
+
+    func testCompletedRequestsDoNotLeaveCrashingTimeoutTasks() async throws {
+        let transport = HTTPTransport(
+            host: "127.0.0.1",
+            port: 0,
+            database: Database(),
+            resolver: ContactResolver(),
+            requestTimeout: .milliseconds(20)
+        )
+        let app = await transport.makeApplicationForTesting()
+
+        try await app.test(TestingSetup.router) { client in
+            let sessionId = try await initializeSession(using: client)
+
+            let firstResponse = try await client.executeRequest(
+                uri: "/",
+                method: HTTPRequest.Method.post,
+                headers: jsonHeaders(sessionId: sessionId),
+                body: byteBuffer(for: toolsListPayload(id: 2))
+            )
+            XCTAssertEqual(firstResponse.head.status, .ok)
+
+            try await Task.sleep(for: .milliseconds(80))
+
+            let secondResponse = try await client.executeRequest(
+                uri: "/",
+                method: HTTPRequest.Method.post,
+                headers: jsonHeaders(sessionId: sessionId),
+                body: byteBuffer(for: toolsListPayload(id: 3))
+            )
+            XCTAssertEqual(secondResponse.head.status, .ok)
         }
     }
 

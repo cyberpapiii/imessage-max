@@ -19,88 +19,74 @@ struct RecipientCandidate: Encodable {
 /// Response from the send tool
 struct SendResponse: Encodable {
     let status: String
-    let success: Bool
-    let messageId: String?
     let timestamp: String?
+    let chat: ChatReference?
     let deliveredTo: [String]?
     let chatId: String?
     let message: String?
     let error: String?
-    let ambiguousRecipient: AmbiguousRecipientInfo?
-
-    struct AmbiguousRecipientInfo: Encodable {
-        let message: String
-        let candidates: [RecipientCandidate]
-    }
+    let candidates: [RecipientCandidate]?
 
     enum CodingKeys: String, CodingKey {
         case status
-        case success
-        case messageId = "message_id"
         case timestamp
+        case chat
         case deliveredTo = "delivered_to"
         case chatId = "chat_id"
         case message
         case error
-        case ambiguousRecipient = "ambiguous_recipient"
+        case candidates
     }
 
-    static func success(deliveredTo: [String], chatId: Int?) -> SendResponse {
+    static func success(deliveredTo: [String], chat: ChatReference?) -> SendResponse {
         SendResponse(
             status: "sent",
-            success: true,
-            messageId: nil,  // Cannot reliably retrieve new message ID
             timestamp: TimeUtils.formatISO(Date()),
+            chat: chat,
             deliveredTo: deliveredTo,
-            chatId: chatId.map { "chat\($0)" },
+            chatId: chat?.id,
             message: nil,
             error: nil,
-            ambiguousRecipient: nil
+            candidates: nil
         )
     }
 
-    static func pending(_ message: String, deliveredTo: [String], chatId: Int?) -> SendResponse {
+    static func pending(_ message: String, deliveredTo: [String], chat: ChatReference?) -> SendResponse {
         SendResponse(
             status: "pending_confirmation",
-            success: false,
-            messageId: nil,
             timestamp: TimeUtils.formatISO(Date()),
+            chat: chat,
             deliveredTo: deliveredTo,
-            chatId: chatId.map { "chat\($0)" },
+            chatId: chat?.id,
             message: message,
             error: nil,
-            ambiguousRecipient: nil
+            candidates: nil
         )
     }
 
     static func error(_ message: String) -> SendResponse {
         SendResponse(
             status: "failed",
-            success: false,
-            messageId: nil,
             timestamp: nil,
+            chat: nil,
             deliveredTo: nil,
             chatId: nil,
             message: nil,
             error: message,
-            ambiguousRecipient: nil
+            candidates: nil
         )
     }
 
     static func ambiguous(candidates: [RecipientCandidate]) -> SendResponse {
         SendResponse(
             status: "ambiguous",
-            success: false,
-            messageId: nil,
             timestamp: nil,
+            chat: nil,
             deliveredTo: nil,
             chatId: nil,
-            message: nil,
+            message: "Multiple contacts match. Please specify using a phone number, email, or chat_id.",
             error: nil,
-            ambiguousRecipient: AmbiguousRecipientInfo(
-                message: "Multiple contacts match. Please specify using a phone number, email, or chat_id.",
-                candidates: candidates
-            )
+            candidates: candidates
         )
     }
 }
@@ -126,10 +112,11 @@ actor SendTool {
         server.registerTool(
             name: "send",
             description: """
-                Send a message to a person or group chat.
+                Send a message or file to a person or an existing chat.
 
-                Use 'to' for individual recipients (name, phone, or email).
-                Use 'chat_id' for group chats or when disambiguation is needed.
+                Prefer 'chat_id' when the exact thread matters.
+                Use 'to' when starting from a person is acceptable.
+                chat_id is an exact tool-call target; when talking to the user, refer to the destination by the returned chat.name or recipient names.
                 """,
             inputSchema: InputSchema.object(
                 properties: [
@@ -172,7 +159,7 @@ actor SendTool {
             replyTo: replyTo
         )
         let content: [Tool.Content] = [.plainText(try FormatUtils.encodeJSON(response))]
-        if !response.success && response.status != "pending_confirmation" {
+        if response.status == "failed" || response.status == "ambiguous" {
             throw ToolError(content: content)
         }
         return content
@@ -220,11 +207,9 @@ actor SendTool {
             return .ambiguous(candidates: candidates)
         }
 
-        let targetChatId: Int?
         let sendResults: [Result<Void, SendError>]
         switch resolved.target {
-        case .participant(let handle, let resolvedChatId):
-            targetChatId = resolvedChatId
+        case .participant(let handle, _):
             sendResults = payloads.map { payload in
                 switch payload {
                 case .text(let body):
@@ -233,8 +218,7 @@ actor SendTool {
                     return AppleScriptRunner.sendFileToParticipant(handle: handle, filePath: path)
                 }
             }
-        case .chat(let guid, let resolvedChatId):
-            targetChatId = resolvedChatId
+        case .chat(let guid, _):
             sendResults = payloads.map { payload in
                 switch payload {
                 case .text(let body):
@@ -261,10 +245,10 @@ actor SendTool {
             return .pending(
                 pendingMessages.joined(separator: " "),
                 deliveredTo: resolved.deliveredTo,
-                chatId: targetChatId
+                chat: resolved.chat
             )
         }
 
-        return .success(deliveredTo: resolved.deliveredTo, chatId: targetChatId)
+        return .success(deliveredTo: resolved.deliveredTo, chat: resolved.chat)
     }
 }

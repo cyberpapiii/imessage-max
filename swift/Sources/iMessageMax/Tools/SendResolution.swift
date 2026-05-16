@@ -14,6 +14,7 @@ enum SendResolution {
     struct ResolvedTarget {
         let target: Target
         let deliveredTo: [String]
+        let chat: ChatReference?
     }
 
     enum Result {
@@ -74,7 +75,14 @@ actor SendResolver {
             return .success(
                 SendResolution.ResolvedTarget(
                     target: .chat(guid: guid, chatId: numericId),
-                    deliveredTo: participants.map(\.displayName)
+                    deliveredTo: participants.map(\.displayName),
+                    chat: ChatReference(
+                        id: "chat\(numericId)",
+                        name: {
+                            let trimmed = chat.displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
+                            return (trimmed?.isEmpty == false) ? trimmed! : DisplayNameGenerator.fromNames(participants.map(\.displayName))
+                        }()
+                    )
                 )
             )
         } catch {
@@ -121,12 +129,13 @@ actor SendResolver {
             }
 
             let chatId = try findDirectChatForHandle(handle)
-            let name = await resolver.resolve(handle) ?? PhoneUtils.formatDisplay(handle)
+            let name = await IdentityDisplayFormatter.displayName(handle: handle, resolver: resolver)
 
             return .success(
                 SendResolution.ResolvedTarget(
                     target: .participant(handle: handle, chatId: chatId),
-                    deliveredTo: [name]
+                    deliveredTo: [name],
+                    chat: try chatId.flatMap { id in try chatReference(chatId: id) }
                 )
             )
         } catch {
@@ -148,12 +157,13 @@ actor SendResolver {
             }
 
             let chatId = try findDirectChatForHandle(handle)
-            let name = await resolver.resolve(handle) ?? email
+            let name = await IdentityDisplayFormatter.displayName(handle: handle, resolver: resolver)
 
             return .success(
                 SendResolution.ResolvedTarget(
                     target: .participant(handle: handle, chatId: chatId),
-                    deliveredTo: [name]
+                    deliveredTo: [name],
+                    chat: try chatId.flatMap { id in try chatReference(chatId: id) }
                 )
             )
         } catch {
@@ -179,7 +189,8 @@ actor SendResolver {
                 return .success(
                     SendResolution.ResolvedTarget(
                         target: .participant(handle: match.handle, chatId: chatId),
-                        deliveredTo: [match.name]
+                        deliveredTo: [match.name],
+                        chat: try chatId.flatMap { id in try chatReference(chatId: id) }
                     )
                 )
             } catch {
@@ -250,7 +261,7 @@ actor SendResolver {
 
         var participants: [SendResolution.ParticipantInfo] = []
         for handle in handles {
-            let name = await resolver.resolve(handle) ?? PhoneUtils.formatDisplay(handle)
+            let name = await IdentityDisplayFormatter.displayName(handle: handle, resolver: resolver)
             participants.append(.init(handle: handle, displayName: name))
         }
 
@@ -274,5 +285,18 @@ actor SendResolver {
 
         guard let timestamp = dates.first, let ts = timestamp else { return nil }
         return AppleTime.toDate(ts)
+    }
+
+    private func chatReference(chatId: Int) throws -> ChatReference? {
+        let rows: [(String?, String?)] = try db.query(
+            "SELECT guid, display_name FROM chat WHERE ROWID = ?",
+            params: [chatId]
+        ) { row in
+            (row.string(0), row.string(1))
+        }
+        guard let row = rows.first else { return nil }
+        let displayName = row.1?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let name = (displayName?.isEmpty == false) ? displayName! : "chat\(chatId)"
+        return ChatReference(id: "chat\(chatId)", name: name)
     }
 }

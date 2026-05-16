@@ -138,11 +138,12 @@ actor GetMessagesTool {
             description: """
                 Retrieve messages from a chat with flexible filtering. Either chat_id or participants must be provided.
                 Returns messages with metadata (images return metadata only - use get_attachment for content).
-                Messages are grouped into sessions (4+ hour gaps start new sessions).
+                Messages are grouped into sessions (4+ hour gaps start new sessions). Best used after you already know which conversation you want to review more closely.
+                Use chat.id/chat_id for follow-up tool calls only. When explaining results to the user, refer to chats by name using chat.name and participant names, not by the chat id.
 
                 Examples:
                 - get_messages(chat_id: "chat123") - get recent messages from chat
-                - get_messages(participants: ["Nick"]) - find chat with Nick and get messages
+                - get_messages(chat_id: "chat123", since: "2d") - review one chat after a broad recent overview
                 - get_messages(chat_id: "chat123", since: "24h") - messages from last 24 hours
                 - get_messages(chat_id: "chat123", from_person: "me") - only my messages
                 - get_messages(chat_id: "chat123", unanswered: true) - my questions without replies

@@ -84,7 +84,7 @@ swift/
 │   │   ├── OriginValidationMiddleware.swift
 │   │   └── ToolRegistry.swift  # Tool registration
 │   ├── Database/               # SQLite wrapper, query builder
-│   ├── Tools/                  # 11 MCP tools
+│   ├── Tools/                  # 12 MCP tools
 │   ├── Contacts/               # CNContactStore resolver
 │   ├── Enrichment/             # Image/video/audio processors
 │   └── Utilities/              # Time, phone formatting
@@ -140,18 +140,19 @@ Message text is often stored in `attributedBody` (binary typedstream format) ins
 3. Read length byte (0x81 = 2-byte length, 0x82 = 3-byte length, else single byte)
 4. Read UTF-8 text of that length
 
-## Eleven Core Tools
+## Twelve Core Tools
 
 | Tool | Purpose |
 |------|---------|
 | `find_chat` | Locate chat by participants, name, or content |
+| `get_chat_details` | Inspect a known chat's participants, handles, state, and recent shared summary |
 | `get_messages` | Retrieve messages with flexible filtering |
 | `get_context` | Get messages surrounding a specific message |
 | `search` | Full-text search with compound filters |
 | `list_chats` | Browse recent/active chats with previews |
 | `send` | Send a message to person or group |
 | `get_active_conversations` | Find chats with recent back-and-forth |
-| `list_attachments` | List attachments by type, person, chat (includes `available` field) |
+| `list_attachments` | Browse shared items grouped by message, with exact attachment ids for fetches |
 | `get_unread` | Get unread messages or summary |
 | `get_attachment` | Get image content with variant options (vision/thumb/full) |
 | `diagnose` | Troubleshoot configuration and permissions |
@@ -170,7 +171,7 @@ return [
 
 ### Attachment Availability
 
-Attachments can be offloaded to iCloud. `list_attachments` includes `available: true/false` field. When `get_attachment` encounters an offloaded file, it returns a helpful error message.
+Attachments can be offloaded to iCloud. `list_attachments` includes nested attachment summaries with `available: true/false` for each file. When `get_attachment` encounters an offloaded file, it returns a helpful error message.
 
 ### Reaction Type Mapping
 

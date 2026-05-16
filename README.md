@@ -36,6 +36,9 @@ Most iMessage tools expose raw database structures, requiring 3-5 tool calls per
 "What did Contact A and I talk about yesterday?"
 → find_chat(participants=["Contact A"]) + get_messages(since="yesterday")
 
+"Show me the exact details for this thread before I reply"
+→ get_chat_details(chat_id="chat123")
+
 "Show me photos from the group chat"
 → list_attachments(chat_id="chat123", type="image")
 
@@ -47,10 +50,13 @@ Most iMessage tools expose raw database structures, requiring 3-5 tool calls per
 
 The tools work best when an agent uses them as short workflows instead of isolated one-off calls.
 
+Agents should treat `chat_id` values like `chat123` as internal handles for tool calls and exact sends. When explaining results to a person, use the returned chat name, group name, or participant-derived label instead of saying "Chat 123."
+
 ### Find the right conversation, then read it
 
 ```text
 find_chat(participants=["Contact A"])
+get_chat_details(chat_id="chat123")
 get_messages(chat_id="chat123", since="yesterday", limit=50)
 ```
 
@@ -72,7 +78,7 @@ get_unread()
 get_active_conversations(hours=24, min_exchanges=2)
 ```
 
-Use this to surface active threads and unread messages without reading everything.
+Use this to surface unread threads and active conversations after a broad chat-list sweep.
 
 ### Work with attachments safely
 
@@ -81,7 +87,7 @@ list_attachments(chat_id="chat123", type="image", since="30d")
 get_attachment(attachment_id="att123", variant="vision")
 ```
 
-Use `list_attachments` to discover what exists first. It tells you whether a file is available locally before you try to fetch it.
+Use `list_attachments` to discover the message where files were shared first. It still returns exact attachment ids and local-availability state before you fetch a file.
 
 ### Send with exact targeting when it matters
 
@@ -186,6 +192,14 @@ find_chat(name="Project Group")                    # Find by chat name
 find_chat(contains_recent="latest draft")          # Find by recent content
 ```
 
+### get_chat_details
+Inspect a known thread without opening the full conversation.
+
+```text
+get_chat_details(chat_id="chat123")                          # Participants, handles, state, last message
+get_chat_details(chat_id="chat123", include_shared_summary=false) # Skip recent shared summary
+```
+
 ### get_messages
 Retrieve messages with flexible filtering. Returns metadata for media.
 
@@ -244,7 +258,7 @@ get_active_conversations(is_group=True, min_exchanges=3)
 ```
 
 ### list_attachments
-List attachments with metadata. Includes `available` field showing if file is on disk.
+Browse shared items grouped by message. Each row includes exact attachment ids for follow-up fetches.
 
 ```text
 list_attachments(type="image", since="7d")
@@ -252,12 +266,12 @@ list_attachments(chat_id="chat123", type="any")
 ```
 
 ### get_unread
-Get unread messages or summary.
+Get unread threads or unread messages. Default is summary by chat.
 
 ```text
-get_unread()                  # Unread from last 7 days
-get_unread(since="24h")       # Last 24 hours
-get_unread(mode="summary")    # Summary by chat
+get_unread()                         # Summary by chat for last 7 days
+get_unread(since="24h")              # Summary by chat for last 24 hours
+get_unread(format="messages")        # Row-level unread messages
 ```
 
 ### send
@@ -319,7 +333,7 @@ Add the `imessage-max` binary to System Settings → Privacy & Security → Full
 
 ### Images show "attachment_offloaded" error
 
-Some attachments are stored in iCloud, not on disk. The `list_attachments` tool shows `available: true/false` for each attachment. To download offloaded attachments, open the conversation in Messages.app.
+Some attachments are stored in iCloud, not on disk. `list_attachments` includes nested attachment summaries with `available: true/false` for each file. To download offloaded attachments, open the conversation in Messages.app.
 
 ### MCP client not loading the server
 

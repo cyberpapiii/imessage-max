@@ -17,18 +17,16 @@ enum SearchFormat: String {
 /// Individual search result
 struct SearchResult: Codable {
     let id: String
-    let ts: String?
-    let ago: String?
+    let chat: ChatReference
     let from: String
-    let text: String?
-    let chat: String
-    let chatName: String?
+    let excerpt: String
+    let ago: String?
+    let ts: String?
     var contextBefore: [SearchContextMessage]?
     var contextAfter: [SearchContextMessage]?
 
     enum CodingKeys: String, CodingKey {
-        case id, ts, ago, from, text, chat
-        case chatName = "chat_name"
+        case id, chat, from, excerpt, ago, ts
         case contextBefore = "context_before"
         case contextAfter = "context_after"
     }
@@ -37,53 +35,45 @@ struct SearchResult: Codable {
 /// Context message for search results
 struct SearchContextMessage: Codable {
     let id: String
-    let ts: String?
     let from: String
     let text: String?
+    let ts: String?
 }
 
 /// Grouped chat for grouped search response
 struct SearchGroupedChat: Codable {
     let id: String
-    let name: String?
+    let name: String
+    let group: Bool?
+    let participantCount: Int
+    let participantsPreview: [String]
     let matchCount: Int
     let firstMatch: String?
     let lastMatch: String?
-    let sampleMessages: [SearchSampleMessage]
+    let results: [SearchSampleMessage]
 
     enum CodingKeys: String, CodingKey {
-        case id, name
+        case id, name, group
+        case participantCount = "participant_count"
+        case participantsPreview = "participants_preview"
         case matchCount = "match_count"
         case firstMatch = "first_match"
         case lastMatch = "last_match"
-        case sampleMessages = "sample_messages"
+        case results
     }
 }
 
 /// Sample message in grouped response
 struct SearchSampleMessage: Codable {
     let id: String
-    let text: String?
     let from: String
+    let excerpt: String
     let ts: String?
-}
-
-/// Person info for search results
-struct SearchPersonInfo: Codable {
-    let name: String
-    let handle: String?
-    let isMe: Bool?
-
-    enum CodingKeys: String, CodingKey {
-        case name, handle
-        case isMe = "is_me"
-    }
 }
 
 /// Flat search response
 struct SearchFlatResponse: Codable {
     let results: [SearchResult]
-    let people: [String: SearchPersonInfo]
     let total: Int
     let more: Bool
     let cursor: String?
@@ -92,7 +82,6 @@ struct SearchFlatResponse: Codable {
 /// Grouped search response
 struct SearchGroupedResponse: Codable {
     let chats: [SearchGroupedChat]
-    let people: [String: SearchPersonInfo]
     let total: Int
     let chatCount: Int
     let query: String?
@@ -100,7 +89,7 @@ struct SearchGroupedResponse: Codable {
     let cursor: String?
 
     enum CodingKeys: String, CodingKey {
-        case chats, people, total, query, more, cursor
+        case chats, total, query, more, cursor
         case chatCount = "chat_count"
     }
 }
@@ -204,7 +193,8 @@ enum SearchTool {
         server.registerTool(
             name: "search",
             description: """
-                Full-text search across messages with advanced filtering.
+                Full-text search across messages with advanced filtering. Best when you know the topic or phrase you want to find, but not which conversation it appeared in.
+                Search results include chat ids for follow-up tool calls and chat names for user-facing summaries. When explaining results to the user, refer to chats by name, not by id.
 
                 Search features:
                 - Multi-word: "costa rica trip" matches ANY word by default
@@ -217,11 +207,11 @@ enum SearchTool {
                 - ISO: "2024-01-15T10:30:00Z"
 
                 Examples:
-                - search(query: "costa rica trip") - find any of these words
-                - search(query: "costa rica", match_all: true) - must have both words
+                - search(query: "launch timeline") - find any of these words
+                - search(query: "launch timeline", match_all: true) - must have both words
                 - search(query: "volcno", fuzzy: true) - finds "volcano" despite typo
                 - search(from_person: "me", since: "last monday") - my messages since Monday
-                - search(has: "link", in_chat: "chat123") - links in a specific chat
+                - search(has: "link", in_chat: "chat123") - links in one specific chat after narrowing down
                 - search(unanswered: true) - questions I sent without replies
                 """,
             inputSchema: inputSchema,
@@ -276,10 +266,7 @@ enum SearchTool {
             case .success(let json):
                 return [.plainText(json)]
             case .failure(let error):
-                let encoder = JSONEncoder()
-                encoder.outputFormatting = [.sortedKeys]
-                let errorJson = try encoder.encode(error)
-                throw ToolError(content: [.plainText(String(data: errorJson, encoding: .utf8) ?? "{}")])
+                throw ToolError(content: [.plainText(try FormatUtils.encodeJSON(error))])
             }
         }
     }
@@ -426,6 +413,7 @@ enum SearchTool {
                 jsonString = try await buildFlatResponse(
                     db: db,
                     rows: rows,
+                    query: query,
                     limit: clampedLimit,
                     includeContext: includeContext,
                     resolver: resolver

@@ -40,7 +40,7 @@ struct ChatIdentity: Codable {
     ) -> Participant {
         Participant(
             handle: handle,
-            displayName: contactName ?? PhoneUtils.formatDisplay(handle),
+            displayName: IdentityDisplayFormatter.displayName(handle: handle, contactName: contactName),
             contactName: contactName
         )
     }

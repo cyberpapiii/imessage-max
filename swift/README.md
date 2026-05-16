@@ -61,7 +61,7 @@ Sources/iMessageMax/
 ├── Database/
 │   ├── Database.swift      # SQLite wrapper
 │   └── QueryBuilder.swift  # SQL construction
-├── Tools/                  # 11 MCP tools
+├── Tools/                  # 12 MCP tools
 │   ├── FindChat.swift
 │   ├── GetMessages.swift
 │   ├── ListChats.swift
@@ -172,8 +172,12 @@ attachments, and live MCP checks, use:
 
 The server is most effective when tools are combined in short, intent-shaped flows:
 
+Use `chat_id` values such as `chat123` as internal handles for follow-up tool calls and exact sends. In user-facing summaries, refer to conversations by returned chat names, group names, or participant-derived labels.
+
 - Find a conversation, then read it:
   `find_chat(participants=["Contact A"])` → `get_messages(chat_id="chat123", since="24h")`
+- Inspect a known thread before opening message history:
+  `get_chat_details(chat_id="chat123")` → `get_messages(chat_id="chat123", since="24h")`
 - Search broadly, then zoom in:
   `search(query="launch timeline")` → `get_context(message_id="msg_123", before=5, after=10)`
 - Discover attachments before fetching them:

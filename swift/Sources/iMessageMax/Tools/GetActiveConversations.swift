@@ -9,7 +9,6 @@ struct ActiveConversationsResult: Codable {
     let windowHours: Int
     let more: Bool
     let cursor: String?
-    let people: PeopleMap?
 
     enum CodingKeys: String, CodingKey {
         case conversations
@@ -17,7 +16,6 @@ struct ActiveConversationsResult: Codable {
         case windowHours = "window_hours"
         case more
         case cursor
-        case people
     }
 }
 
@@ -25,25 +23,23 @@ struct ActiveConversationsResult: Codable {
 struct ActiveConversation: Codable {
     let id: String
     let name: String
-    let participants: [ParticipantRef]
-    let activity: ConversationActivity
-    let awaitingReply: Bool
     let group: Bool?
+    let participantCount: Int
+    let participantsPreview: [String]
+    let lastMessage: LastMessageSummary?
+    let awaitingReply: Bool
+    let activity: ConversationActivity
 
     enum CodingKeys: String, CodingKey {
         case id
         case name
-        case participants
-        case activity
-        case awaitingReply = "awaiting_reply"
         case group
+        case participantCount = "participant_count"
+        case participantsPreview = "participants_preview"
+        case lastMessage = "last_message"
+        case awaitingReply = "awaiting_reply"
+        case activity
     }
-}
-
-/// Compact participant reference for responses
-struct ParticipantRef: Codable {
-    let name: String
-    let handle: String
 }
 
 /// Activity metrics within the time window
@@ -80,11 +76,11 @@ enum GetActiveConversations {
             "properties": .object([
                 "hours": .object([
                     "type": "integer",
-                    "description": "Time window to consider (default 24, max 168 = 1 week)",
+                    "description": "Time window to consider for recent activity (default 24, max 168 = 1 week)",
                 ]),
                 "min_exchanges": .object([
                     "type": "integer",
-                    "description": "Minimum back-and-forth exchanges to qualify (default 2)",
+                    "description": "Minimum back-and-forth exchanges to qualify as active (default 2)",
                 ]),
                 "is_group": .object([
                     "type": "boolean",
@@ -92,7 +88,7 @@ enum GetActiveConversations {
                 ]),
                 "limit": .object([
                     "type": "integer",
-                    "description": "Max results (default 10, max 50)",
+                    "description": "Max recent active conversations to return (default 10, max 50)",
                 ]),
             ]),
             "additionalProperties": false,
@@ -100,7 +96,7 @@ enum GetActiveConversations {
 
         server.registerTool(
             name: "get_active_conversations",
-            description: "Find conversations with recent bidirectional activity. Returns chats where both parties have exchanged messages within the time window.",
+            description: "Find conversations with recent bidirectional activity. Returns chat ids for follow-up tool calls and chat names for user-facing summaries. When explaining results to the user, refer to chats by name, not by id. Helpful for surfacing threads that may deserve attention first, but not a complete recent overview across all chats.",
             inputSchema: inputSchema,
             annotations: Tool.Annotations(
                 title: "Get Active Conversations",
@@ -125,18 +121,13 @@ enum GetActiveConversations {
                     resolver: resolver
                 )
 
-                let encoder = JSONEncoder()
-                encoder.outputFormatting = [.sortedKeys]
-                let json = try encoder.encode(result)
-                return [.plainText(String(data: json, encoding: .utf8) ?? "{}")]
+                return [.plainText(try FormatUtils.encodeJSON(result))]
             } catch {
                 let errorResponse = ActiveConversationsError(
                     error: "execution_error",
                     message: error.localizedDescription
                 )
-                let encoder = JSONEncoder()
-                let json = try encoder.encode(errorResponse)
-                throw ToolError(content: [.plainText(String(data: json, encoding: .utf8) ?? "{}")])
+                throw ToolError(content: [.plainText(try FormatUtils.encodeJSON(errorResponse))])
             }
         }
     }
@@ -228,7 +219,6 @@ enum GetActiveConversations {
         }
 
         var conversations: [ActiveConversation] = []
-        var peopleMap: PeopleMap = [:]
 
         for row in chatRows {
             guard conversations.count < clampedLimit else { break }
@@ -246,33 +236,14 @@ enum GetActiveConversations {
                 resolver: resolver
             )
 
-            var participantRefs: [ParticipantRef] = []
-            for p in participantRows {
-                let displayName = p.name ?? PhoneUtils.formatDisplay(p.handle)
-                participantRefs.append(ParticipantRef(name: displayName, handle: p.handle))
-
-                // Add to people map with name-based keys
-                let key: String
-                if let name = p.name {
-                    let firstName = name.split(separator: " ").first.map(String.init) ?? name
-                    key = generateUniqueKey(baseName: firstName.lowercased(), existing: peopleMap)
-                } else {
-                    // Use p1, p2, etc. for unresolved handles
-                    var counter = 1
-                    while peopleMap["p\(counter)"] != nil {
-                        counter += 1
-                    }
-                    key = "p\(counter)"
+            let identity = ChatIdentity(
+                mcpId: "chat\(row.chatId)",
+                guid: nil,
+                explicitName: row.displayName,
+                participants: participantRows.map {
+                    ChatIdentity.makeParticipant(handle: $0.handle, contactName: $0.name)
                 }
-                peopleMap[key] = p
-            }
-
-            // Generate display name if not set
-            let raw = row.displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
-            let chatDisplayName = (raw?.isEmpty == false) ? raw! : DisplayNameGenerator.fromNames(
-                participantRows.map { p in p.name ?? PhoneUtils.formatDisplay(p.handle) }
             )
-            let isGroupChat = row.participantCount > 1
 
             // Determine awaiting reply
             let awaitingReply: Bool
@@ -293,13 +264,26 @@ enum GetActiveConversations {
                 started: formatTimestamp(row.firstInWindow)
             )
 
+            let lastPreview = try await getLastPreview(
+                chatId: row.chatId,
+                windowStartApple: windowStartApple,
+                database: database,
+                resolver: resolver
+            )
+
             let conversation = ActiveConversation(
-                id: "chat\(row.chatId)",
-                name: chatDisplayName,
-                participants: participantRefs,
-                activity: activity,
+                id: identity.mcpId,
+                name: identity.displayName,
+                group: identity.participantCount > 1 ? true : nil,
+                participantCount: identity.participantCount,
+                participantsPreview: try ChatSummaryBuilder.participantsPreview(
+                    db: database,
+                    chatId: row.chatId,
+                    identity: identity
+                ),
+                lastMessage: lastPreview,
                 awaitingReply: awaitingReply,
-                group: isGroupChat ? true : nil
+                activity: activity
             )
 
             conversations.append(conversation)
@@ -310,8 +294,7 @@ enum GetActiveConversations {
             total: conversations.count,
             windowHours: clampedHours,
             more: conversations.count >= clampedLimit,
-            cursor: nil,
-            people: peopleMap.isEmpty ? nil : peopleMap
+            cursor: nil
         )
     }
 
@@ -327,6 +310,15 @@ enum GetActiveConversations {
         let lastFromThem: Int64?
         let firstInWindow: Int64?
         let lastInWindow: Int64?
+    }
+
+    private struct LastPreviewRow {
+        let msgId: Int64
+        let text: String?
+        let attributedBody: Data?
+        let date: Int64?
+        let isFromMe: Bool
+        let senderHandle: String?
     }
 
     private static func getParticipants(
@@ -359,14 +351,75 @@ enum GetActiveConversations {
         return participants
     }
 
+    private static func getLastPreview(
+        chatId: Int64,
+        windowStartApple: Int64,
+        database: Database,
+        resolver: ContactResolver
+    ) async throws -> LastMessageSummary? {
+        let sql = """
+            SELECT m.ROWID, m.text, m.attributedBody, m.date, m.is_from_me, h.id as sender_handle
+            FROM message m
+            JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
+            LEFT JOIN handle h ON m.handle_id = h.ROWID
+            WHERE cmj.chat_id = ?
+            AND m.date >= ?
+            AND m.associated_message_type = 0
+            ORDER BY m.date DESC
+            LIMIT 1
+            """
 
-    private static func generateUniqueKey(baseName: String, existing: PeopleMap) -> String {
-        if existing[baseName] == nil { return baseName }
-        var suffix = 2
-        while existing["\(baseName)\(suffix)"] != nil {
-            suffix += 1
+        let rows = try database.query(sql, params: [chatId, windowStartApple]) { row in
+            LastPreviewRow(
+                msgId: row.int(0),
+                text: row.string(1),
+                attributedBody: row.blob(2),
+                date: row.optionalInt(3),
+                isFromMe: row.int(4) == 1,
+                senderHandle: row.string(5)
+            )
         }
-        return "\(baseName)\(suffix)"
+
+        guard let row = rows.first else { return nil }
+
+        let from: String
+        if row.isFromMe {
+            from = "Me"
+        } else if let handle = row.senderHandle {
+            from = await IdentityDisplayFormatter.displayName(handle: handle, resolver: resolver)
+        } else {
+            from = "Unknown"
+        }
+
+        let previewText = try await formatPreviewText(
+            messageId: row.msgId,
+            text: row.text,
+            attributedBody: row.attributedBody,
+            database: database
+        )
+
+        let date = AppleTime.toDate(row.date)
+        return LastMessageSummary(
+            from: from,
+            text: previewText,
+            ago: TimeUtils.formatCompactRelative(date),
+            ts: TimeUtils.formatISO(date)
+        )
+    }
+
+    private static func formatPreviewText(
+        messageId: Int64,
+        text: String?,
+        attributedBody: Data?,
+        database: Database
+    ) async throws -> String {
+        try MessagePreviewResolver.messageSummary(
+            db: database,
+            messageId: messageId,
+            text: text,
+            attributedBody: attributedBody,
+            maxLength: 80
+        )
     }
 
     private static func formatTimestamp(_ appleTimestamp: Int64?) -> String? {

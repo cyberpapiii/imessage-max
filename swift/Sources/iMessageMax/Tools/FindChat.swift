@@ -5,7 +5,7 @@ import MCP
 /// Find chats by participants, name, or recent content.
 enum FindChatTool {
     static let name = "find_chat"
-    static let description = "Find chats by participants, name, or recent content"
+    static let description = "Find a specific chat by participants, name, or recent content when you already have a targeted conversation in mind. Use returned chat ids for follow-up tool calls; when explaining results to the user, refer to chats by name, not by id."
 
     // MARK: - Input Schema
 
@@ -15,15 +15,15 @@ enum FindChatTool {
             "participants": .object([
                 "type": "array",
                 "items": .object(["type": "string"]),
-                "description": "List of participant names or phone numbers to match",
+                "description": "List of participant names or phone numbers to match for a targeted chat lookup",
             ]),
             "name": .object([
                 "type": "string",
-                "description": "Chat display name to search for (fuzzy match)",
+                "description": "Chat display name to search for when looking for a specific conversation (fuzzy match)",
             ]),
             "contains_recent": .object([
                 "type": "string",
-                "description": "Text that appears in recent messages",
+                "description": "Text that appears in recent messages for a targeted chat lookup",
             ]),
             "is_group": .object([
                 "type": "boolean",
@@ -61,17 +61,25 @@ enum FindChatTool {
     struct ChatResult: Codable {
         let id: String
         let name: String
-        let participants: [[String: String]]
         let group: Bool?
-        let last: LastMessage?
-        let match: String
+        let participantCount: Int
+        let participantsPreview: [String]
+        let lastMessage: LastMessageSummary?
+        let participants: [ChatParticipant]
+        let match: MatchInfo
         let identity: ChatIdentity
-    }
 
-    struct LastMessage: Codable {
-        let from: String
-        let text: String
-        let ago: String
+        enum CodingKeys: String, CodingKey {
+            case id
+            case name
+            case group
+            case participantCount = "participant_count"
+            case participantsPreview = "participants_preview"
+            case lastMessage = "last_message"
+            case participants
+            case match
+            case identity
+        }
     }
 
     struct Response: Codable {
@@ -137,10 +145,12 @@ enum FindChatTool {
                         chatResult = ChatResult(
                             id: chatResult.id,
                             name: chatResult.name,
-                            participants: chatResult.participants,
                             group: chatResult.group,
-                            last: chatResult.last,
-                            match: "participants",
+                            participantCount: chatResult.participantCount,
+                            participantsPreview: chatResult.participantsPreview,
+                            lastMessage: chatResult.lastMessage,
+                            participants: chatResult.participants,
+                            match: MatchInfo(type: "participants"),
                             identity: chatResult.identity
                         )
                         results.append(chatResult)
@@ -153,15 +163,17 @@ enum FindChatTool {
                 let chats = try findChatsByName(database: database, name: name, limit: params.limit)
                 for chat in chats {
                     var chatResult = try await buildChatResult(database: database, chat: chat, resolver: resolver)
-                    chatResult = ChatResult(
-                        id: chatResult.id,
-                        name: chatResult.name,
-                        participants: chatResult.participants,
-                        group: chatResult.group,
-                        last: chatResult.last,
-                        match: "name",
-                        identity: chatResult.identity
-                    )
+                        chatResult = ChatResult(
+                            id: chatResult.id,
+                            name: chatResult.name,
+                            group: chatResult.group,
+                            participantCount: chatResult.participantCount,
+                            participantsPreview: chatResult.participantsPreview,
+                            lastMessage: chatResult.lastMessage,
+                            participants: chatResult.participants,
+                            match: MatchInfo(type: "name"),
+                            identity: chatResult.identity
+                        )
                     results.append(chatResult)
                 }
             }
@@ -171,15 +183,17 @@ enum FindChatTool {
                 let chats = try findChatsByContent(database: database, content: containsRecent, limit: params.limit)
                 for chat in chats {
                     var chatResult = try await buildChatResult(database: database, chat: chat, resolver: resolver)
-                    chatResult = ChatResult(
-                        id: chatResult.id,
-                        name: chatResult.name,
-                        participants: chatResult.participants,
-                        group: chatResult.group,
-                        last: chatResult.last,
-                        match: "content",
-                        identity: chatResult.identity
-                    )
+                        chatResult = ChatResult(
+                            id: chatResult.id,
+                            name: chatResult.name,
+                            group: chatResult.group,
+                            participantCount: chatResult.participantCount,
+                            participantsPreview: chatResult.participantsPreview,
+                            lastMessage: chatResult.lastMessage,
+                            participants: chatResult.participants,
+                            match: MatchInfo(type: "content"),
+                            identity: chatResult.identity
+                        )
                     results.append(chatResult)
                 }
             }
@@ -447,7 +461,7 @@ enum FindChatTool {
             (handle: row.string(0) ?? "", service: row.string(1))
         }
 
-        var participants: [[String: String]] = []
+        var participants: [ChatParticipant] = []
         var identityParticipants: [ChatIdentity.Participant] = []
         for p in participantRows {
             let resolvedName = await resolver.resolve(p.handle)
@@ -455,12 +469,7 @@ enum FindChatTool {
                 handle: p.handle,
                 contactName: resolvedName
             )
-            var info: [String: String] = ["handle": p.handle]
-
-            // Try to resolve name from contacts
-            info["name"] = identityParticipant.displayName
-
-            participants.append(info)
+            participants.append(ChatParticipant(name: identityParticipant.displayName, handle: p.handle))
             identityParticipants.append(identityParticipant)
         }
 
@@ -475,7 +484,7 @@ enum FindChatTool {
 
         // Get last message
         let lastMsgSql = """
-            SELECT m.text, m.date, m.is_from_me, h.id as sender_handle
+            SELECT m.ROWID, m.text, m.attributedBody, m.date, m.is_from_me, h.id as sender_handle
             FROM message m
             JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
             LEFT JOIN handle h ON m.handle_id = h.ROWID
@@ -487,45 +496,55 @@ enum FindChatTool {
 
         let lastMsgRows = try database.query(lastMsgSql, params: [chat.id]) { row in
             (
-                text: row.string(0),
-                date: row.optionalInt(1),
-                isFromMe: row.int(2) == 1,
-                senderHandle: row.string(3)
+                messageId: row.int(0),
+                text: row.string(1),
+                attributedBody: row.blob(2),
+                date: row.optionalInt(3),
+                isFromMe: row.int(4) == 1,
+                senderHandle: row.string(5)
             )
         }
 
-        var lastMessage: LastMessage? = nil
+        var lastMessage: LastMessageSummary? = nil
         if let lastMsg = lastMsgRows.first {
             let sender: String
             if lastMsg.isFromMe {
-                sender = "me"
-            } else if let handle = lastMsg.senderHandle,
-                      let name = await resolver.resolve(handle) {
-                sender = name
+                sender = "Me"
             } else if let handle = lastMsg.senderHandle {
-                sender = PhoneUtils.formatDisplay(handle)
+                sender = await IdentityDisplayFormatter.displayName(handle: handle, resolver: resolver)
             } else {
                 sender = "unknown"
             }
 
             let date = AppleTime.toDate(lastMsg.date)
-            let ago = TimeUtils.formatCompactRelative(date) ?? ""
-            let text = (lastMsg.text ?? "").prefix(50)
 
-            lastMessage = LastMessage(
+            lastMessage = LastMessageSummary(
                 from: sender,
-                text: String(text),
-                ago: ago
+                text: try MessagePreviewResolver.messageSummary(
+                    db: database,
+                    messageId: lastMsg.messageId,
+                    text: lastMsg.text,
+                    attributedBody: lastMsg.attributedBody,
+                    maxLength: 50
+                ),
+                ago: TimeUtils.formatCompactRelative(date),
+                ts: TimeUtils.formatISO(date)
             )
         }
 
         return ChatResult(
             id: identity.mcpId,
             name: identity.displayName,
-            participants: participants,
             group: isGroup ? true : nil,
-            last: lastMessage,
-            match: "",
+            participantCount: identity.participantCount,
+            participantsPreview: try ChatSummaryBuilder.participantsPreview(
+                db: database,
+                chatId: chat.id,
+                identity: identity
+            ),
+            lastMessage: lastMessage,
+            participants: participants,
+            match: MatchInfo(type: ""),
             identity: identity
         )
     }

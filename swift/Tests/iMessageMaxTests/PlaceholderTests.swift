@@ -55,11 +55,15 @@ final class SendPayloadTests: XCTestCase {
 
 final class SendResponseTests: XCTestCase {
     func testSuccessResponseUsesSentStatus() {
-        let response = SendResponse.success(deliveredTo: ["Rob Dezendorf"], chatId: 123)
+        let response = SendResponse.success(
+            deliveredTo: ["Rob Dezendorf"],
+            chat: ChatReference(id: "chat123", name: "Rob Dezendorf")
+        )
 
         XCTAssertEqual(response.status, "sent")
-        XCTAssertTrue(response.success)
         XCTAssertNil(response.message)
+        XCTAssertEqual(response.chat?.id, "chat123")
+        XCTAssertEqual(response.chat?.name, "Rob Dezendorf")
         XCTAssertEqual(response.chatId, "chat123")
     }
 
@@ -67,13 +71,13 @@ final class SendResponseTests: XCTestCase {
         let response = SendResponse.pending(
             "Attachment accepted but still pending",
             deliveredTo: ["Rob Dezendorf"],
-            chatId: 456
+            chat: ChatReference(id: "chat456", name: "Project Group")
         )
 
         XCTAssertEqual(response.status, "pending_confirmation")
-        XCTAssertFalse(response.success)
         XCTAssertEqual(response.message, "Attachment accepted but still pending")
         XCTAssertNil(response.error)
+        XCTAssertEqual(response.chat?.name, "Project Group")
         XCTAssertEqual(response.chatId, "chat456")
     }
 
@@ -81,7 +85,6 @@ final class SendResponseTests: XCTestCase {
         let response = SendResponse.error("Send failed")
 
         XCTAssertEqual(response.status, "failed")
-        XCTAssertFalse(response.success)
         XCTAssertEqual(response.error, "Send failed")
         XCTAssertNil(response.message)
     }
@@ -92,9 +95,9 @@ final class SendResponseTests: XCTestCase {
         ])
 
         XCTAssertEqual(response.status, "ambiguous")
-        XCTAssertFalse(response.success)
         XCTAssertNil(response.error)
-        XCTAssertNotNil(response.ambiguousRecipient)
+        XCTAssertEqual(response.message, "Multiple contacts match. Please specify using a phone number, email, or chat_id.")
+        XCTAssertEqual(response.candidates?.count, 1)
     }
 }
 
@@ -228,6 +231,65 @@ final class ToolRegistryTests: XCTestCase {
 
         XCTAssertFalse(names.contains("update"))
     }
+
+    func testCatchUpToolDescriptionsBiasTowardBroadOverviewThenNarrowing() async throws {
+        ToolHandlerRegistry.shared.resetForTesting()
+
+        let server = Server(name: "test", version: "0")
+        await ToolRegistry.registerAll(on: server, db: Database(), resolver: ContactResolver())
+
+        let tools = Dictionary(
+            uniqueKeysWithValues: ToolHandlerRegistry.shared.getTools().map { ($0.name, $0) }
+        )
+
+        let listChats = try XCTUnwrap(tools["list_chats"])
+        let listChatsDescription = try XCTUnwrap(listChats.description)
+        XCTAssertTrue(listChatsDescription.contains("broad catch-ups"))
+        XCTAssertTrue(listChatsDescription.contains("discovery before drilling deeper"))
+
+        let getUnread = try XCTUnwrap(tools["get_unread"])
+        let getUnreadDescription = try XCTUnwrap(getUnread.description)
+        XCTAssertTrue(getUnreadDescription.contains("follow-up check"))
+        XCTAssertTrue(getUnreadDescription.contains("not a complete recent conversation overview"))
+
+        let getActive = try XCTUnwrap(tools["get_active_conversations"])
+        let getActiveDescription = try XCTUnwrap(getActive.description)
+        XCTAssertTrue(getActiveDescription.contains("deserve attention first"))
+        XCTAssertTrue(getActiveDescription.contains("not a complete recent overview"))
+
+        let findChat = try XCTUnwrap(tools["find_chat"])
+        let findChatDescription = try XCTUnwrap(findChat.description)
+        XCTAssertTrue(findChatDescription.contains("specific chat"))
+        XCTAssertTrue(findChatDescription.contains("targeted conversation"))
+    }
+
+    func testChatToolDescriptionsKeepIdsInternalAndNamesUserFacing() async throws {
+        ToolHandlerRegistry.shared.resetForTesting()
+
+        let server = Server(name: "test", version: "0")
+        await ToolRegistry.registerAll(on: server, db: Database(), resolver: ContactResolver())
+
+        let tools = Dictionary(
+            uniqueKeysWithValues: ToolHandlerRegistry.shared.getTools().map { ($0.name, $0) }
+        )
+
+        for name in [
+            "find_chat",
+            "get_chat_details",
+            "get_messages",
+            "get_context",
+            "search",
+            "list_chats",
+            "get_active_conversations",
+            "list_attachments",
+            "get_unread",
+        ] {
+            let tool = try XCTUnwrap(tools[name], "Expected \(name) to be registered")
+            let description = try XCTUnwrap(tool.description, "Expected \(name) to have a description")
+            XCTAssertTrue(description.contains("follow-up tool calls"), "\(name) should explain ids are for tool calls")
+            XCTAssertTrue(description.contains("refer to chats by name") || description.contains("refer to chat.name"), "\(name) should tell agents to use names in user-facing summaries")
+        }
+    }
 }
 
 final class GetAttachmentToolTests: XCTestCase {
@@ -246,7 +308,10 @@ final class GetAttachmentToolTests: XCTestCase {
         switch result {
         case .success(let metadata, let imageData, let mimeType):
             XCTAssertEqual(mimeType, "image/jpeg")
-            XCTAssertTrue(metadata.contains("1568x784"), metadata)
+            XCTAssertEqual(metadata.id, "att1")
+            XCTAssertEqual(metadata.type, "image")
+            XCTAssertEqual(metadata.name, "attachment-large.jpg")
+            XCTAssertTrue(metadata.available)
             XCTAssertFalse(imageData.isEmpty)
         case .error(let type, let message, _):
             XCTFail("Expected image success, got \(type): \(message)")

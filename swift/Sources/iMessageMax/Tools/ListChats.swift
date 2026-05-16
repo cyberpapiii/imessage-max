@@ -17,7 +17,6 @@ struct ListChatsResponse: Codable {
     let totalDms: Int
     let more: Bool
     let cursor: String?
-    let people: PeopleMap?
 
     enum CodingKeys: String, CodingKey {
         case chats
@@ -26,7 +25,6 @@ struct ListChatsResponse: Codable {
         case totalDms = "total_dms"
         case more
         case cursor
-        case people
     }
 }
 
@@ -34,36 +32,32 @@ struct ListChatsResponse: Codable {
 struct ChatInfo: Codable {
     let id: String
     let name: String
-    let participants: [ListChatsParticipantInfo]
-    let participantCount: Int
     let group: Bool?
-    let last: LastMessageInfo?
+    let participantCount: Int
+    let participantsPreview: [String]
+    let lastMessage: LastMessageSummary?
     let awaitingReply: Bool?
-    let identity: ChatIdentity
 
     enum CodingKeys: String, CodingKey {
         case id
         case name
-        case participants
-        case participantCount = "participant_count"
         case group
-        case last
+        case participantCount = "participant_count"
+        case participantsPreview = "participants_preview"
+        case lastMessage = "last_message"
         case awaitingReply = "awaiting_reply"
-        case identity
     }
-}
 
-/// Participant info with name and handle for ListChats response
-struct ListChatsParticipantInfo: Codable {
-    let name: String
-    let handle: String
-}
-
-/// Last message preview
-struct LastMessageInfo: Codable {
-    let from: String
-    let text: String
-    let ago: String
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(name, forKey: .name)
+        try container.encodeIfPresent(lastMessage, forKey: .lastMessage)
+        try container.encodeIfPresent(awaitingReply, forKey: .awaitingReply)
+        try container.encodeIfPresent(group, forKey: .group)
+        try container.encode(participantCount, forKey: .participantCount)
+        try container.encode(participantsPreview, forKey: .participantsPreview)
+    }
 }
 
 /// Error response
@@ -111,7 +105,7 @@ enum ListChatsTool {
 
         server.registerTool(
             name: "list_chats",
-            description: "List chats with recent previews and metadata. A good starting point for broad catch-up or reviewing recent conversation activity before drilling deeper.",
+            description: "List recent chats with previews. Returns chat ids for follow-up tool calls and chat names for user-facing summaries. When explaining results to the user, refer to chats by name, not by id. Good starting point for broad catch-ups and discovery before drilling deeper.",
             inputSchema: inputSchema,
             annotations: Tool.Annotations(
                 title: "List Chats",
@@ -140,15 +134,11 @@ enum ListChatsTool {
                 resolver: resolver
             )
 
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.sortedKeys]
             switch result {
             case .success(let response):
-                let json = try encoder.encode(response)
-                return [.plainText(String(data: json, encoding: .utf8) ?? "{}")]
+                return [.plainText(try FormatUtils.encodeJSON(response))]
             case .failure(let error):
-                let json = try encoder.encode(error)
-                throw ToolError(content: [.plainText(String(data: json, encoding: .utf8) ?? "{}")])
+                throw ToolError(content: [.plainText(try FormatUtils.encodeJSON(error))])
             }
         }
     }
@@ -250,7 +240,6 @@ enum ListChatsTool {
 
             // Build results
             var chats: [ChatInfo] = []
-            var allPeople: PeopleMap = [:]
 
             for chatRow in chatRows {
                 // Get participants
@@ -260,27 +249,12 @@ enum ListChatsTool {
                     resolver: resolver
                 )
 
-                var participants: [ListChatsParticipantInfo] = []
                 var identityParticipants: [ChatIdentity.Participant] = []
                 for p in participantRows {
                     let identityParticipant = ChatIdentity.makeParticipant(
                         handle: p.handle,
                         contactName: p.name
                     )
-                    participants.append(ListChatsParticipantInfo(
-                        name: identityParticipant.displayName,
-                        handle: p.handle
-                    ))
-
-                    // Add to people map
-                    let shortKey = makeShortKey(p.handle)
-                    allPeople[shortKey] = Participant(
-                        handle: p.handle,
-                        name: p.name,
-                        service: p.service,
-                        inContacts: p.name != nil
-                    )
-
                     identityParticipants.append(identityParticipant)
                 }
 
@@ -302,12 +276,15 @@ enum ListChatsTool {
                 let chatInfo = ChatInfo(
                     id: identity.mcpId,
                     name: identity.displayName,
-                    participants: participants,
-                    participantCount: identity.participantCount,
                     group: isGroupChat ? true : nil,
-                    last: lastMsg?.info,
-                    awaitingReply: lastMsg?.awaitingReply,
-                    identity: identity
+                    participantCount: identity.participantCount,
+                    participantsPreview: try ChatSummaryBuilder.participantsPreview(
+                        db: db,
+                        chatId: chatRow.id,
+                        identity: identity
+                    ),
+                    lastMessage: lastMsg?.info,
+                    awaitingReply: lastMsg?.awaitingReply
                 )
 
                 chats.append(chatInfo)
@@ -322,8 +299,7 @@ enum ListChatsTool {
                 totalGroups: totals.groups,
                 totalDms: totals.dms,
                 more: chats.count == clampedLimit,
-                cursor: nil,
-                people: allPeople.isEmpty ? nil : allPeople
+                cursor: nil
             ))
 
         } catch let error as DatabaseError {
@@ -375,7 +351,7 @@ enum ListChatsTool {
     }
 
     private struct LastMessageResult {
-        let info: LastMessageInfo
+        let info: LastMessageSummary
         let awaitingReply: Bool
     }
 
@@ -417,6 +393,7 @@ enum ListChatsTool {
     ) async throws -> LastMessageResult? {
         let sql = """
             SELECT m.text, m.attributedBody, m.is_from_me, h.id as sender_handle, m.date
+            , m.ROWID
             FROM message m
             JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
             LEFT JOIN handle h ON m.handle_id = h.ROWID
@@ -432,7 +409,8 @@ enum ListChatsTool {
                 attributedBody: row.blob(1),
                 isFromMe: row.int(2) == 1,
                 senderHandle: row.string(3),
-                date: row.optionalInt(4)
+                date: row.optionalInt(4),
+                messageId: row.int(5)
             )
         }
 
@@ -441,26 +419,29 @@ enum ListChatsTool {
         // Determine sender
         let sender: String
         if last.isFromMe {
-            sender = "me"
+            sender = "Me"
         } else if let handle = last.senderHandle {
-            let resolvedName = await resolver.resolve(handle)
-            sender = resolvedName ?? PhoneUtils.formatDisplay(handle)
+            sender = await IdentityDisplayFormatter.displayName(handle: handle, resolver: resolver)
         } else {
             sender = "unknown"
         }
-
-        // Get message text
-        let msgText = MessageTextExtractor.extract(text: last.text, attributedBody: last.attributedBody) ?? ""
 
         // Format time
         let date = AppleTime.toDate(last.date)
         let ago = TimeUtils.formatCompactRelative(date) ?? "unknown"
 
         return LastMessageResult(
-            info: LastMessageInfo(
+            info: LastMessageSummary(
                 from: sender,
-                text: String(msgText.prefix(50)),
-                ago: ago
+                text: try MessagePreviewResolver.messageSummary(
+                    db: db,
+                    messageId: last.messageId,
+                    text: last.text,
+                    attributedBody: last.attributedBody,
+                    maxLength: 50
+                ),
+                ago: ago,
+                ts: TimeUtils.formatISO(date)
             ),
             awaitingReply: !last.isFromMe
         )
@@ -490,21 +471,5 @@ enum ListChatsTool {
         }
 
         return rows.first ?? (0, 0, 0)
-    }
-
-    /// Create a short key for the people map
-    private static func makeShortKey(_ handle: String) -> String {
-        // For emails, use local part
-        if let atIndex = handle.firstIndex(of: "@") {
-            return String(handle[..<atIndex]).lowercased()
-        }
-
-        // For phones, use last 4 digits
-        let digits = handle.filter { $0.isNumber }
-        if digits.count >= 4 {
-            return String(digits.suffix(4))
-        }
-
-        return handle
     }
 }

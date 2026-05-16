@@ -8,6 +8,57 @@ enum UnreadFormat: String, CaseIterable {
     case summary
 }
 
+struct UnreadMessagesResponse: Codable {
+    let messages: [UnreadMessageItem]
+    let totalUnread: Int
+    let chatsWithUnread: Int
+    let more: Bool
+    let cursor: String?
+
+    enum CodingKeys: String, CodingKey {
+        case messages
+        case totalUnread = "total_unread"
+        case chatsWithUnread = "chats_with_unread"
+        case more
+        case cursor
+    }
+}
+
+struct UnreadMessageItem: Codable {
+    let id: String
+    let chat: ChatReference
+    let from: String
+    let text: String?
+    let ago: String?
+    let ts: String?
+}
+
+struct UnreadSummaryResponse: Codable {
+    let chats: [UnreadChatSummary]
+    let totalUnread: Int
+    let chatsWithUnread: Int
+
+    enum CodingKeys: String, CodingKey {
+        case chats
+        case totalUnread = "total_unread"
+        case chatsWithUnread = "chats_with_unread"
+    }
+}
+
+struct UnreadChatSummary: Codable {
+    let chat: ChatSummary
+    let unreadCount: Int
+    let oldestUnread: String?
+    let lastMessage: LastMessageSummary?
+
+    enum CodingKeys: String, CodingKey {
+        case chat
+        case unreadCount = "unread_count"
+        case oldestUnread = "oldest_unread"
+        case lastMessage = "last_message"
+    }
+}
+
 /// Get unread messages or summary
 final class GetUnread {
     private let database: Database
@@ -30,11 +81,11 @@ final class GetUnread {
                 ]),
                 "since": .object([
                     "type": "string",
-                    "description": "Time window (default \"7d\", use \"all\" for all time)",
+                    "description": "Time window for unread-only results (default \"7d\", use \"all\" for all time)",
                 ]),
                 "format": .object([
                     "type": "string",
-                    "description": "Response format",
+                    "description": "Response format for unread data (default summary)",
                     "enum": ["messages", "summary"],
                 ]),
                 "limit": .object([
@@ -47,7 +98,7 @@ final class GetUnread {
 
         server.registerTool(
             name: "get_unread",
-            description: "Get unread messages or summary of unread activity. Returns messages not sent by you that haven't been read.",
+            description: "Get a narrower view of still-unread messages or unread activity summary. Returns chat ids for follow-up tool calls and chat names for user-facing summaries. When explaining results to the user, refer to chats by name, not by id. Useful as a follow-up check, not a complete recent conversation overview.",
             inputSchema: inputSchema,
             annotations: Tool.Annotations(
                 title: "Get Unread Messages",
@@ -59,7 +110,7 @@ final class GetUnread {
         ) { arguments in
             let chatId = arguments?["chat_id"]?.stringValue
             let since = arguments?["since"]?.stringValue ?? "7d"
-            let formatStr = arguments?["format"]?.stringValue ?? "messages"
+            let formatStr = arguments?["format"]?.stringValue ?? "summary"
             let limit = arguments?["limit"]?.intValue ?? 50
 
             let format = UnreadFormat(rawValue: formatStr) ?? .messages
@@ -74,19 +125,12 @@ final class GetUnread {
             let tool = GetUnread(database: db, contactResolver: resolver)
             do {
                 let result = try await tool.execute(params: params)
-                // Check if execute() returned an error dict
-                if let errorField = result["error"] as? String, !errorField.isEmpty {
-                    let jsonData = try JSONSerialization.data(withJSONObject: result, options: [.sortedKeys])
-                    throw ToolError(content: [.plainText(String(data: jsonData, encoding: .utf8) ?? "{}")])
-                }
-                let jsonData = try JSONSerialization.data(withJSONObject: result, options: [.sortedKeys])
-                return [.plainText(String(data: jsonData, encoding: .utf8) ?? "{}")]
+                return [.plainText(try FormatUtils.encodeJSON(result))]
             } catch let error as ToolError {
                 throw error
             } catch {
                 let errorResponse = ["error": "execution_error", "message": error.localizedDescription]
-                let jsonData = try JSONSerialization.data(withJSONObject: errorResponse, options: [.sortedKeys])
-                throw ToolError(content: [.plainText(String(data: jsonData, encoding: .utf8) ?? "{}")])
+                throw ToolError(content: [.plainText(try FormatUtils.encodeJSONObject(errorResponse))])
             }
         }
     }
@@ -102,7 +146,7 @@ final class GetUnread {
         init(
             chatId: String? = nil,
             since: String = "7d",
-            format: UnreadFormat = .messages,
+            format: UnreadFormat = .summary,
             limit: Int = 50,
             cursor: String? = nil
         ) {
@@ -115,7 +159,7 @@ final class GetUnread {
     }
 
     /// Execute get_unread with given parameters
-    func execute(params: Parameters) async throws -> [String: Any] {
+    func execute(params: Parameters) async throws -> any Encodable {
         // Initialize contact resolver
         try await contactResolver.initialize()
 
@@ -130,10 +174,7 @@ final class GetUnread {
         if let chatId = params.chatId {
             numericChatId = try resolveChatId(chatId)
             if numericChatId == nil {
-                return [
-                    "error": "chat_not_found",
-                    "message": "Chat not found: \(chatId)"
-                ]
+                throw ToolError(content: [.plainText("{\"error\":\"chat_not_found\",\"message\":\"Chat not found: \(chatId)\"}")])
             }
         }
 
@@ -179,7 +220,7 @@ final class GetUnread {
         chatId: Int64?,
         sinceApple: Int64?,
         limit: Int
-    ) async throws -> [String: Any] {
+    ) async throws -> UnreadMessagesResponse {
         // Build query for unread messages
         // Unread = is_read = 0 AND is_from_me = 0
         var queryBuilder = QueryBuilder()
@@ -242,121 +283,70 @@ final class GetUnread {
             sinceApple: sinceApple
         )
 
-        // Build people map and messages
-        var people: [String: String] = [:]
-        var handleToKey: [String: String] = [:]
-        var unknownCount = 0
-
         // Cache for chat participants
         var chatParticipantsCache: [Int64: [ParticipantInfo]] = [:]
 
-        var unreadMessages: [[String: Any]] = []
+        var unreadMessages: [UnreadMessageItem] = []
 
         for row in rows {
             let msgChatId = row.chatId
             let senderHandle = row.senderHandle
 
-            // Build people map entry for sender
-            if let handle = senderHandle, handleToKey[handle] == nil {
-                let name = await contactResolver.resolve(handle)
-                if let name = name {
-                    var key = name.split(separator: " ").first.map(String.init)?.lowercased() ?? "p"
-                    let baseKey = key
-                    var suffix = 2
-                    while people[key] != nil {
-                        key = "\(baseKey)\(suffix)"
-                        suffix += 1
-                    }
-                    people[key] = name
-                    handleToKey[handle] = key
-                } else {
-                    unknownCount += 1
-                    let key = "p\(unknownCount)"
-                    people[key] = PhoneUtils.formatDisplay(handle)
-                    handleToKey[handle] = key
-                }
-            }
-
             // Ensure participants are cached for this chat
             if chatParticipantsCache[msgChatId] == nil {
                 chatParticipantsCache[msgChatId] = try await getChatParticipants(chatId: msgChatId)
             }
-
-            // Get chat display name
-            let rawDisplayName = row.chatDisplayName?.trimmingCharacters(in: .whitespacesAndNewlines)
-            var chatDisplayName: String?
-            if let raw = rawDisplayName, !raw.isEmpty {
-                chatDisplayName = raw
-            } else if let participants = chatParticipantsCache[msgChatId] {
-                let names = participants.map { p in
-                    if let name = p.name {
-                        return name.split(separator: " ").first.map(String.init) ?? name
-                    }
-                    return PhoneUtils.formatDisplay(p.handle)
-                }
-                chatDisplayName = DisplayNameGenerator.fromNames(names)
-            }
-
-            // Determine if group chat
-            let isGroup = (chatParticipantsCache[msgChatId]?.count ?? 0) > 1
+            let participants = chatParticipantsCache[msgChatId] ?? []
+            let identity = makeChatIdentity(
+                chatId: msgChatId,
+                explicitName: row.chatDisplayName,
+                participants: participants
+            )
 
             // Get message text
             let text = MessageTextExtractor.extract(text: row.text, attributedBody: row.attributedBody)
             let msgDate = AppleTime.toDate(row.date)
 
-            var msgItem: [String: Any] = [
-                "message": [
-                    "id": "msg_\(row.id)",
-                    "ts": TimeUtils.formatISO(msgDate) ?? "",
-                    "ago": TimeUtils.formatCompactRelative(msgDate) ?? "",
-                    "text": text ?? ""
-                ] as [String: Any],
-                "chat": [
-                    "id": "chat\(msgChatId)",
-                    "name": chatDisplayName ?? ""
-                ] as [String: Any]
-            ]
-
-            // Add sender
-            if let handle = senderHandle, let key = handleToKey[handle] {
-                if var message = msgItem["message"] as? [String: Any] {
-                    message["from"] = key
-                    msgItem["message"] = message
-                }
+            let senderName: String
+            if let handle = senderHandle {
+                senderName = await IdentityDisplayFormatter.displayName(handle: handle, resolver: contactResolver)
+            } else {
+                senderName = "Unknown"
             }
 
-            // Add is_group flag only if True (token efficiency)
-            if isGroup {
-                if var chat = msgItem["chat"] as? [String: Any] {
-                    chat["is_group"] = true
-                    msgItem["chat"] = chat
-                }
-            }
-
-            unreadMessages.append(msgItem)
+            unreadMessages.append(
+                UnreadMessageItem(
+                    id: "msg_\(row.id)",
+                    chat: ChatReference(id: identity.mcpId, name: identity.displayName),
+                    from: senderName,
+                    text: text,
+                    ago: TimeUtils.formatCompactRelative(msgDate),
+                    ts: TimeUtils.formatISO(msgDate)
+                )
+            )
         }
 
-        return [
-            "unread_messages": unreadMessages,
-            "people": people,
-            "total_unread": totalUnread,
-            "chats_with_unread": chatsWithUnread,
-            "more": unreadMessages.count < totalUnread,
-            "cursor": NSNull()
-        ]
+        return UnreadMessagesResponse(
+            messages: unreadMessages,
+            totalUnread: totalUnread,
+            chatsWithUnread: chatsWithUnread,
+            more: unreadMessages.count < totalUnread,
+            cursor: nil
+        )
     }
 
     private func getUnreadSummary(
         chatId: Int64?,
         sinceApple: Int64?
-    ) async throws -> [String: Any] {
+    ) async throws -> UnreadSummaryResponse {
         // Build query for summary by chat
         var queryBuilder = QueryBuilder()
             .select(
                 "cmj.chat_id",
                 "c.display_name as chat_display_name",
                 "COUNT(*) as unread_count",
-                "MIN(m.date) as oldest_unread_date"
+                "MIN(m.date) as oldest_unread_date",
+                "MAX(m.date) as latest_unread_date"
             )
             .from("message m")
             .join("chat_message_join cmj ON m.ROWID = cmj.message_id")
@@ -384,51 +374,64 @@ final class GetUnread {
                 chatId: row.int(0),
                 chatDisplayName: row.string(1),
                 unreadCount: Int(row.int(2)),
-                oldestUnreadDate: row.optionalInt(3)
+                oldestUnreadDate: row.optionalInt(3),
+                latestUnreadDate: row.optionalInt(4)
             )
         }
 
         var totalUnread = 0
-        var breakdown: [[String: Any]] = []
+        var chats: [UnreadChatSummary] = []
 
         for row in rows {
             let msgChatId = row.chatId
             let unreadCount = row.unreadCount
             totalUnread += unreadCount
 
-            // Get chat display name
-            let rawDisplayName = row.chatDisplayName?.trimmingCharacters(in: .whitespacesAndNewlines)
-            var chatDisplayName: String?
-            if let raw = rawDisplayName, !raw.isEmpty {
-                chatDisplayName = raw
-            } else {
-                let participants = try await getChatParticipants(chatId: msgChatId)
-                let names = participants.map { p in
-                    if let name = p.name {
-                        return name.split(separator: " ").first.map(String.init) ?? name
-                    }
-                    return PhoneUtils.formatDisplay(p.handle)
-                }
-                chatDisplayName = DisplayNameGenerator.fromNames(names)
-            }
-
             let oldestDt = AppleTime.toDate(row.oldestUnreadDate)
+            let participants = try await getChatParticipants(chatId: msgChatId)
+            let identity = makeChatIdentity(
+                chatId: msgChatId,
+                explicitName: row.chatDisplayName,
+                participants: participants
+            )
+            let summary = try ChatSummaryBuilder.buildSummary(
+                db: database,
+                chatId: msgChatId,
+                identity: identity
+            )
 
-            breakdown.append([
-                "chat_id": "chat\(msgChatId)",
-                "chat_name": chatDisplayName ?? "",
-                "unread_count": unreadCount,
-                "oldest_unread": TimeUtils.formatCompactRelative(oldestDt) ?? ""
-            ])
+            let lastMessage = try await getLatestUnreadMessageSummary(chatId: msgChatId, sinceApple: sinceApple)
+
+            chats.append(
+                UnreadChatSummary(
+                    chat: summary,
+                    unreadCount: unreadCount,
+                    oldestUnread: TimeUtils.formatCompactRelative(oldestDt),
+                    lastMessage: lastMessage
+                )
+            )
         }
 
-        return [
-            "summary": [
-                "total_unread": totalUnread,
-                "chats_with_unread": breakdown.count,
-                "breakdown": breakdown
-            ]
-        ]
+        return UnreadSummaryResponse(
+            chats: chats,
+            totalUnread: totalUnread,
+            chatsWithUnread: chats.count
+        )
+    }
+
+    private func makeChatIdentity(
+        chatId: Int64,
+        explicitName: String?,
+        participants: [ParticipantInfo]
+    ) -> ChatIdentity {
+        ChatIdentity(
+            mcpId: "chat\(chatId)",
+            guid: nil,
+            explicitName: explicitName,
+            participants: participants.map {
+                ChatIdentity.makeParticipant(handle: $0.handle, contactName: $0.name)
+            }
+        )
     }
 
     private func getUnreadCounts(
@@ -465,6 +468,66 @@ final class GetUnread {
         }
 
         return first
+    }
+
+    private func getLatestUnreadMessageSummary(
+        chatId: Int64,
+        sinceApple: Int64?
+    ) async throws -> LastMessageSummary? {
+        var queryBuilder = QueryBuilder()
+            .select(
+                "m.ROWID",
+                "m.text",
+                "m.attributedBody",
+                "m.date",
+                "h.id as sender_handle"
+            )
+            .from("message m")
+            .join("chat_message_join cmj ON m.ROWID = cmj.message_id")
+            .leftJoin("handle h ON m.handle_id = h.ROWID")
+            .where("cmj.chat_id = ?", chatId)
+            .where("m.is_read = 0")
+            .where("m.is_from_me = 0")
+            .where("m.associated_message_type = 0")
+            .orderBy("m.date DESC")
+            .limit(1)
+
+        if let sinceApple {
+            queryBuilder = queryBuilder.where("m.date >= ?", sinceApple)
+        }
+
+        let (sql, params) = queryBuilder.build()
+        let rows = try database.query(sql, params: params) { row in
+            (
+                messageId: row.int(0),
+                text: row.string(1),
+                attributedBody: row.blob(2),
+                date: row.optionalInt(3),
+                senderHandle: row.string(4)
+            )
+        }
+
+        guard let row = rows.first else { return nil }
+        let date = AppleTime.toDate(row.date)
+        let sender: String
+        if let handle = row.senderHandle {
+            sender = await IdentityDisplayFormatter.displayName(handle: handle, resolver: contactResolver)
+        } else {
+            sender = "Unknown"
+        }
+
+        return LastMessageSummary(
+            from: sender,
+            text: try MessagePreviewResolver.messageSummary(
+                db: database,
+                messageId: row.messageId,
+                text: row.text,
+                attributedBody: row.attributedBody,
+                maxLength: 50
+            ),
+            ago: TimeUtils.formatCompactRelative(date),
+            ts: TimeUtils.formatISO(date)
+        )
     }
 
     private func getChatParticipants(chatId: Int64) async throws -> [ParticipantInfo] {
@@ -513,6 +576,7 @@ private struct SummaryRow {
     let chatDisplayName: String?
     let unreadCount: Int
     let oldestUnreadDate: Int64?
+    let latestUnreadDate: Int64?
 }
 
 private struct ParticipantInfo {

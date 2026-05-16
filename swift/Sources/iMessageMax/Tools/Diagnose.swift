@@ -4,6 +4,20 @@ import MCP
 
 /// Result type for diagnose tool
 struct DiagnoseResult: Codable {
+    struct DatabaseStatus: Codable {
+        let accessible: Bool
+        let status: String
+        let path: String
+        let fix: String?
+    }
+
+    struct ContactsStatus: Codable {
+        let authorized: Bool
+        let status: String
+        let loaded: Int?
+        let fix: String?
+    }
+
     struct Capabilities: Codable {
         let sendTextToParticipant: Bool
         let sendTextToChat: Bool
@@ -26,29 +40,17 @@ struct DiagnoseResult: Codable {
 
     let version: String
     let processId: Int32
-    let databaseAccessible: Bool
-    let databaseStatus: String
-    let databasePath: String
-    let databaseFix: String?
-    let contactsAuthorized: Bool
-    let contactsStatus: String
-    let contactsLoaded: Int?
-    let contactsFix: String?
     let status: String
+    let database: DatabaseStatus
+    let contacts: ContactsStatus
     let capabilities: Capabilities
 
     enum CodingKeys: String, CodingKey {
         case version
         case processId = "process_id"
-        case databaseAccessible = "database_accessible"
-        case databaseStatus = "database_status"
-        case databasePath = "database_path"
-        case databaseFix = "database_fix"
-        case contactsAuthorized = "contacts_authorized"
-        case contactsStatus = "contacts_status"
-        case contactsLoaded = "contacts_loaded"
-        case contactsFix = "contacts_fix"
         case status
+        case database
+        case contacts
         case capabilities
     }
 }
@@ -76,10 +78,7 @@ enum DiagnoseTool {
             )
         ) { _ in
             let result = try await execute(resolver: resolver)
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.sortedKeys]
-            let json = try encoder.encode(result)
-            return [.plainText(String(data: json, encoding: .utf8) ?? "{}")]
+            return [.plainText(try FormatUtils.encodeJSON(result))]
         }
     }
 
@@ -130,15 +129,19 @@ enum DiagnoseTool {
         return DiagnoseResult(
             version: Version.current,
             processId: processId,
-            databaseAccessible: dbAccessible,
-            databaseStatus: dbStatus,
-            databasePath: databasePath,
-            databaseFix: databaseFix,
-            contactsAuthorized: contactsAuthorized,
-            contactsStatus: contactsStatus,
-            contactsLoaded: contactsLoaded,
-            contactsFix: contactsFix,
             status: overallStatus,
+            database: .init(
+                accessible: dbAccessible,
+                status: dbStatus,
+                path: databasePath,
+                fix: databaseFix
+            ),
+            contacts: .init(
+                authorized: contactsAuthorized,
+                status: contactsStatus,
+                loaded: contactsLoaded,
+                fix: contactsFix
+            ),
             capabilities: .init(
                 sendTextToParticipant: true,
                 sendTextToChat: true,

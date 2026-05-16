@@ -129,6 +129,9 @@ final class GetMessagesToolTests: XCTestCase {
         )
         let sessions = try decodeJSONArray(try XCTUnwrap(fullResponse["sessions"]))
         XCTAssertEqual(sessions.count, 2)
+        let fullMessages = try decodeJSONArray(try XCTUnwrap(fullResponse["messages"]))
+        let sessionStartMessage = try XCTUnwrap(fullMessages.first(where: { $0["id"] as? String == "msg_202" }))
+        XCTAssertEqual(sessionStartMessage["session_gap_hours"] as? Double, 16.0)
 
         let sessionFiltered = try await decodeGetMessagesResponse(
             await tool.execute(args: [
@@ -176,7 +179,7 @@ private func decodeGetMessagesResponse(_ contents: [Tool.Content]) async throws 
     return try decodeJSONDictionary(from: contents)
 }
 
-private func makeGetMessagesFixture() throws -> ToolTestDatabase {
+func makeGetMessagesFixture() throws -> ToolTestDatabase {
     let fixture = try ToolTestDatabase(name: "get-messages")
     let imageURL = try makeFixtureImage(name: "message-image.jpg")
 

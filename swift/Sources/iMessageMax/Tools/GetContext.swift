@@ -4,18 +4,18 @@ import MCP
 
 /// Response for the get_context tool
 struct GetContextResponse: Codable {
-    let target: ContextMessage
+    let chat: ChatInfo
+    let people: [String: PersonInfo]
+    let message: ContextMessage
     let before: [ContextMessage]
     let after: [ContextMessage]
-    let people: [String: PersonInfo]
-    let chat: ChatInfo
 
     struct ContextMessage: Codable {
         let id: String
-        let ts: String?
-        let ago: String?
         let from: String
         let text: String?
+        let ago: String?
+        let ts: String?
     }
 
     struct PersonInfo: Codable {
@@ -31,7 +31,7 @@ struct GetContextResponse: Codable {
 
     struct ChatInfo: Codable {
         let id: String
-        let name: String?
+        let name: String
     }
 }
 
@@ -79,7 +79,7 @@ enum GetContext {
 
         server.registerTool(
             name: "get_context",
-            description: "Get messages surrounding a specific message. Use to see the conversation context around a particular message.",
+            description: "Get messages surrounding a specific message. Returns the containing chat id for follow-up tool calls and chat name for user-facing summaries. When explaining results to the user, refer to chats by name, not by id.",
             inputSchema: inputSchema,
             annotations: Tool.Annotations(
                 title: "Get Context",
@@ -105,15 +105,11 @@ enum GetContext {
                 resolver: resolver
             )
 
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.sortedKeys]
             switch result {
             case .success(let response):
-                let json = try encoder.encode(response)
-                return [.plainText(String(data: json, encoding: .utf8) ?? "{}")]
+                return [.plainText(try FormatUtils.encodeJSON(response))]
             case .failure(let error):
-                let json = try encoder.encode(error)
-                throw ToolError(content: [.plainText(String(data: json, encoding: .utf8) ?? "{}")])
+                throw ToolError(content: [.plainText(try FormatUtils.encodeJSON(error))])
             }
         }
     }
@@ -399,10 +395,10 @@ enum GetContext {
 
                 return GetContextResponse.ContextMessage(
                     id: "msg_\(msgId)",
-                    ts: TimeUtils.formatISO(msgDate),
-                    ago: TimeUtils.formatCompactRelative(msgDate),
                     from: await getPersonKey(isFromMe: isFromMe, handle: senderHandle),
-                    text: messageText
+                    text: messageText,
+                    ago: TimeUtils.formatCompactRelative(msgDate),
+                    ts: TimeUtils.formatISO(msgDate)
                 )
             }
 
@@ -444,15 +440,22 @@ enum GetContext {
                 afterMessages.append(msg)
             }
 
+            let chatName = try await displayNameForChat(
+                chatId: targetChatId,
+                explicitName: targetResult.chatName,
+                database: database,
+                resolver: resolver
+            )
+
             let response = GetContextResponse(
-                target: targetMessage,
-                before: beforeMessages,
-                after: afterMessages,
-                people: people,
                 chat: GetContextResponse.ChatInfo(
                     id: "chat\(targetChatId)",
-                    name: targetResult.chatName
-                )
+                    name: chatName
+                ),
+                people: people,
+                message: targetMessage,
+                before: beforeMessages,
+                after: afterMessages
             )
 
             return .success(response)
@@ -503,6 +506,37 @@ enum GetContext {
             numStr = String(numStr.dropFirst(4))
         }
         return Int64(numStr)
+    }
+
+    private static func displayNameForChat(
+        chatId: Int64,
+        explicitName: String?,
+        database: Database,
+        resolver: ContactResolver
+    ) async throws -> String {
+        let trimmed = explicitName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let trimmed, !trimmed.isEmpty {
+            return trimmed
+        }
+
+        let handles = try database.query(
+            """
+            SELECT h.id
+            FROM handle h
+            JOIN chat_handle_join chj ON h.ROWID = chj.handle_id
+            WHERE chj.chat_id = ?
+            ORDER BY h.id ASC
+            """,
+            params: [chatId]
+        ) { row in
+            row.string(0) ?? ""
+        }
+
+        var names: [String] = []
+        for handle in handles {
+            names.append(await IdentityDisplayFormatter.displayName(handle: handle, resolver: resolver))
+        }
+        return DisplayNameGenerator.fromNames(names)
     }
 
 }

@@ -525,7 +525,8 @@ extension GetMessagesTool {
                     currentSession += 1
                     sessionMessageCount = 0
                     sessionStart = true
-                    sessionGapHours = Double(gap) / Double(60 * 60 * 1_000_000_000)
+                    let rawGapHours = Double(gap) / Double(60 * 60 * 1_000_000_000)
+                    sessionGapHours = (rawGapHours * 10).rounded() / 10
                 }
             } else {
                 sessionStart = true

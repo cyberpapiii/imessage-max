@@ -4,8 +4,16 @@ import MCP
 
 /// Result types for get_attachment tool
 enum GetAttachmentResult {
-    case success(metadata: String, imageData: String, mimeType: String)  // base64 encoded image
+    case success(metadata: AttachmentMetadataSummary, imageData: String, mimeType: String)
     case error(type: String, message: String, details: [String: Any]?)
+}
+
+struct AttachmentMetadataSummary: Codable {
+    let id: String
+    let type: String
+    let name: String
+    let chat: ChatReference?
+    let available: Bool
 }
 
 /// Get attachment content at specified resolution variant
@@ -53,8 +61,7 @@ struct GetAttachment {
         ) { arguments in
             guard let attachmentId = arguments?["attachment_id"]?.stringValue else {
                 let errorResponse = ["error": "validation_error", "message": "attachment_id is required"]
-                let jsonData = try JSONSerialization.data(withJSONObject: errorResponse, options: [.sortedKeys])
-                throw ToolError(content: [.plainText(String(data: jsonData, encoding: .utf8) ?? "{}")])
+                throw ToolError(content: [.plainText(try FormatUtils.encodeJSONObject(errorResponse))])
             }
 
             let variant = arguments?["variant"]?.stringValue ?? "vision"
@@ -63,10 +70,8 @@ struct GetAttachment {
 
             switch result {
             case .success(let metadata, let imageData, let mimeType):
-                // Return metadata as text + image as proper MCP image content
-                // This allows Claude to see the image visually without token overhead
                 return [
-                    .plainText(metadata),
+                    .plainText(try FormatUtils.encodeJSON(metadata)),
                     .plainImage(data: imageData, mimeType: mimeType)
                 ]
             case .error(let type, let message, let details):
@@ -79,8 +84,7 @@ struct GetAttachment {
                         dict[key] = value
                     }
                 }
-                let jsonData = try JSONSerialization.data(withJSONObject: dict, options: [.sortedKeys])
-                throw ToolError(content: [.plainText(String(data: jsonData, encoding: .utf8) ?? "{}")])
+                throw ToolError(content: [.plainText(try FormatUtils.encodeJSONObject(dict))])
             }
         }
     }
@@ -194,6 +198,7 @@ struct GetAttachment {
             // Determine attachment type
             let attType = getAttachmentType(mimeType: attachment.mimeType, uti: attachment.uti)
             let displayName = attachment.transferName ?? (expandedPath as NSString).lastPathComponent
+            let chat = try resolveAttachmentChat(rowId: rowId)
 
             // Process based on type
             switch attType {
@@ -206,20 +211,21 @@ struct GetAttachment {
                     )
                 }
 
-                // Build metadata string
-                let sizeHuman = FormatUtils.fileSize(result.data.count)
-                var metadata = "\(displayName) (\(result.width)x\(result.height), \(sizeHuman))"
-
-                // Add warning for full variant if large
-                if imageVariant == .full && result.data.count > 200 * 1024 {
-                    metadata += " [WARNING: Large file may impact performance]"
-                }
-
                 // Encode image data as base64
                 let base64Data = result.data.base64EncodedString()
 
                 // ImageProcessor outputs JPEG format
-                return .success(metadata: metadata, imageData: base64Data, mimeType: "image/jpeg")
+                return .success(
+                    metadata: AttachmentMetadataSummary(
+                        id: "att\(rowId)",
+                        type: attType,
+                        name: displayName,
+                        chat: chat,
+                        available: true
+                    ),
+                    imageData: base64Data,
+                    mimeType: "image/jpeg"
+                )
 
             case "video":
                 return .error(
@@ -291,6 +297,35 @@ struct GetAttachment {
         } else {
             return "other"
         }
+    }
+
+    private func resolveAttachmentChat(rowId: Int) throws -> ChatReference? {
+        let rows: [(Int64, String?)]
+        do {
+            rows = try db.query(
+                """
+                SELECT c.ROWID, c.display_name
+                FROM attachment a
+                JOIN message_attachment_join maj ON a.ROWID = maj.attachment_id
+                JOIN chat_message_join cmj ON maj.message_id = cmj.message_id
+                JOIN chat c ON cmj.chat_id = c.ROWID
+                WHERE a.ROWID = ?
+                LIMIT 1
+                """,
+                params: [rowId]
+            ) { row in
+                (row.int(0), row.string(1))
+            }
+        } catch {
+            return nil
+        }
+
+        guard let row = rows.first else { return nil }
+        let displayName = row.1?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return ChatReference(
+            id: "chat\(row.0)",
+            name: (displayName?.isEmpty == false) ? displayName! : "chat\(row.0)"
+        )
     }
 
     /// Try to download an iCloud file if it's offloaded

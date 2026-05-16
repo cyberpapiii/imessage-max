@@ -135,19 +135,12 @@ final class SearchToolTests: XCTestCase {
         XCTAssertEqual(chats.count, 2)
         XCTAssertTrue(chats.allSatisfy { (($0["name"] as? String) ?? "").isEmpty == false })
 
-        let people = try XCTUnwrap(response["people"] as? [String: Any])
-        let bobEntries = people.compactMap { key, value -> String? in
-            guard let dict = value as? [String: Any], dict["name"] as? String == "Bob Brown" else { return nil }
-            return key
-        }
-        XCTAssertEqual(bobEntries.count, 1)
-
         guard let firstChat = chats.first else {
             return XCTFail("Expected grouped chats")
         }
-        let sampleMessages = try decodeJSONArray(firstChat["sample_messages"])
+        let sampleMessages = try decodeJSONArray(firstChat["results"])
         let firstSample = try XCTUnwrap(sampleMessages.first)
-        XCTAssertEqual(firstSample["from"] as? String, bobEntries.first)
+        XCTAssertEqual(firstSample["from"] as? String, "Bob Brown")
     }
 
     func testUnansweredSearchReturnsOnlyMessagesWithoutReplies() async throws {
@@ -229,9 +222,39 @@ final class SearchToolTests: XCTestCase {
         }
         XCTAssertEqual(firstResult["id"] as? String, "msg_200")
     }
+
+    func testFlatSearchAddsExcerptForLongMessages() async throws {
+        let fixture = try makeSearchFixture()
+        let resolver = makeSeededResolver()
+
+        let response = try await decodeSearchResponse(
+            SearchTool.execute(
+                query: "appointment",
+                cursor: nil,
+                limit: 10,
+                sort: "recent_first",
+                format: "flat",
+                includeContext: false,
+                unanswered: false,
+                unansweredHours: 24,
+                matchAll: false,
+                fuzzy: false,
+                db: fixture.database(),
+                resolver: resolver
+            )
+        )
+
+        let results = try decodeJSONArray(try XCTUnwrap(response["results"]))
+        let longResult = try XCTUnwrap(results.first(where: { $0["id"] as? String == "msg_350" }))
+        let excerpt = try XCTUnwrap(longResult["excerpt"] as? String)
+        XCTAssertTrue(excerpt.contains("appointment"))
+        XCTAssertTrue(excerpt.count <= 166)
+        let chat = try XCTUnwrap(longResult["chat"] as? [String: Any])
+        XCTAssertEqual(chat["id"] as? String, "chat40")
+    }
 }
 
-private func decodeSearchResponse(_ result: Result<String, SearchError>) throws -> [String: Any] {
+func decodeSearchResponse(_ result: Result<String, SearchError>) throws -> [String: Any] {
     switch result {
     case .success(let json):
         return try decodeJSONDictionary(from: json)
@@ -241,7 +264,7 @@ private func decodeSearchResponse(_ result: Result<String, SearchError>) throws 
     }
 }
 
-private func makeSearchFixture() throws -> ToolTestDatabase {
+func makeSearchFixture() throws -> ToolTestDatabase {
     let fixture = try ToolTestDatabase(name: "search")
 
     try fixture.insertHandle(rowId: 1, handle: "+15550000001")
@@ -257,6 +280,9 @@ private func makeSearchFixture() throws -> ToolTestDatabase {
 
     try fixture.insertChat(rowId: 30, guid: "chat-bob-guid", displayName: nil)
     try fixture.joinChatHandle(chatId: 30, handleId: 2)
+
+    try fixture.insertChat(rowId: 40, guid: "chat-chris-guid", displayName: "Appointments")
+    try fixture.joinChatHandle(chatId: 40, handleId: 3)
 
     try fixture.insertMessage(rowId: 100, guid: "g100", text: "project alpha kickoff", date: 1_000_000_000, isFromMe: false, handleId: 1)
     try fixture.joinChatMessage(chatId: 10, messageId: 100)
@@ -281,6 +307,16 @@ private func makeSearchFixture() throws -> ToolTestDatabase {
 
     try fixture.insertMessage(rowId: 300, guid: "g300", text: "let me know about the trip?", date: 7_000_000_000, isFromMe: true)
     try fixture.joinChatMessage(chatId: 30, messageId: 300)
+
+    try fixture.insertMessage(
+        rowId: 350,
+        guid: "g350",
+        text: "This appointment reminder includes a lot of extra context about logistics, parking, timing, follow-up details, preparation steps, and confirmation notes so that the message is deliberately long enough to require an excerpt in flat search results.",
+        date: 8_000_000_000,
+        isFromMe: false,
+        handleId: 3
+    )
+    try fixture.joinChatMessage(chatId: 40, messageId: 350)
 
     return fixture
 }

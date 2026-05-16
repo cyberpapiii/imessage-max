@@ -45,6 +45,7 @@ public actor HTTPTransport: Transport {
     /// Tracks a pending request with its session
     private struct PendingRequest {
         let continuation: CheckedContinuation<Data, Error>
+        let timeoutWorkItem: DispatchWorkItem
     }
 
     private struct PendingRequestKey: Hashable {
@@ -243,11 +244,21 @@ public actor HTTPTransport: Transport {
             do {
                 let responseData = try await withCheckedThrowingContinuation {
                     (continuation: CheckedContinuation<Data, Error>) in
-                    self.storePendingRequest(
+                    let stored = self.storePendingRequest(
                         sessionId: sessionId,
                         id: jsonRpcId,
                         continuation: continuation
                     )
+
+                    guard stored else {
+                        continuation.resume(
+                            throwing: MCPError.serverError(
+                                code: -32600,
+                                message: "Duplicate in-flight JSON-RPC request id: \(jsonRpcId)"
+                            )
+                        )
+                        return
+                    }
 
                     // Route message to session's Server
                     Task {
@@ -454,6 +465,7 @@ public actor HTTPTransport: Transport {
 
         // Cancel all pending requests
         for (_, pending) in pendingRequests {
+            pending.timeoutWorkItem.cancel()
             pending.continuation.resume(throwing: MCPError.connectionClosed)
         }
         pendingRequests.removeAll()
@@ -482,26 +494,67 @@ public actor HTTPTransport: Transport {
         sessionId: String,
         id: String,
         continuation: CheckedContinuation<Data, Error>
-    ) {
+    ) -> Bool {
         let key = PendingRequestKey(sessionId: sessionId, requestId: id)
-        pendingRequests[key] = PendingRequest(continuation: continuation)
+        guard pendingRequests[key] == nil else {
+            return false
+        }
 
-        // Set up a timeout to prevent indefinite waiting
-        Task { [weak self] in
-            guard let self else { return }
-            try? await Task.sleep(for: self.requestTimeout)
-            if let pending = await self.removePendingRequest(sessionId: sessionId, id: id) {
-                pending.continuation.resume(
-                    throwing: MCPError.serverError(code: -32000, message: "Request timeout")
-                )
+        // Use a Dispatch timer instead of Task.sleep here. On this launchd-run
+        // service, sleeping unstructured Swift tasks have repeatedly aborted in
+        // swift_task_dealloc when they wake around the timeout boundary.
+        let timeout = requestTimeout
+        let timeoutWorkItem = DispatchWorkItem { [weak self] in
+            Task { [weak self] in
+                guard let self else { return }
+                await self.timeoutPendingRequest(sessionId: sessionId, id: id)
             }
+        }
+        DispatchQueue.global(qos: .utility).asyncAfter(
+            deadline: .now() + Self.dispatchInterval(for: timeout),
+            execute: timeoutWorkItem
+        )
+
+        pendingRequests[key] = PendingRequest(
+            continuation: continuation,
+            timeoutWorkItem: timeoutWorkItem
+        )
+
+        return true
+    }
+
+    private func timeoutPendingRequest(sessionId: String, id: String) {
+        if let pending = removePendingRequest(sessionId: sessionId, id: id, cancelTimeout: false) {
+            pending.continuation.resume(
+                throwing: MCPError.serverError(code: -32000, message: "Request timeout")
+            )
         }
     }
 
+    private nonisolated static func dispatchInterval(for duration: Duration) -> DispatchTimeInterval {
+        let components = duration.components
+        let maxWholeSeconds = Int64(Int.max / 1_000_000_000)
+        let clampedSeconds = max(0, min(components.seconds, maxWholeSeconds))
+        let secondNanoseconds = Int(clampedSeconds) * 1_000_000_000
+        let fractionalNanoseconds = max(0, Int(components.attoseconds / 1_000_000_000))
+        let nanoseconds = secondNanoseconds > Int.max - fractionalNanoseconds
+            ? Int.max
+            : secondNanoseconds + fractionalNanoseconds
+        return .nanoseconds(nanoseconds)
+    }
+
     /// Removes and returns a pending request
-    private func removePendingRequest(sessionId: String, id: String) -> PendingRequest? {
+    private func removePendingRequest(
+        sessionId: String,
+        id: String,
+        cancelTimeout: Bool = true
+    ) -> PendingRequest? {
         let key = PendingRequestKey(sessionId: sessionId, requestId: id)
-        return pendingRequests.removeValue(forKey: key)
+        let pending = pendingRequests.removeValue(forKey: key)
+        if cancelTimeout {
+            pending?.timeoutWorkItem.cancel()
+        }
+        return pending
     }
 
     /// Cleans up all pending requests for a terminated session
@@ -509,6 +562,7 @@ public actor HTTPTransport: Transport {
         let keysToRemove = pendingRequests.keys.filter { $0.sessionId == sessionId }
         for key in keysToRemove {
             guard let pending = pendingRequests.removeValue(forKey: key) else { continue }
+            pending.timeoutWorkItem.cancel()
             pending.continuation.resume(
                 throwing: MCPError.serverError(code: -32000, message: "Session terminated")
             )

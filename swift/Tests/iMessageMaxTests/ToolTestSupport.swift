@@ -65,6 +65,7 @@ final class ToolTestDatabase {
         text: String? = nil,
         date: Int64,
         isFromMe: Bool,
+        isRead: Bool = false,
         handleId: Int? = nil,
         associatedMessageType: Int = 0,
         associatedMessageGuid: String? = nil
@@ -75,9 +76,9 @@ final class ToolTestDatabase {
 
         try execute("""
             INSERT INTO message (
-                ROWID, guid, text, attributedBody, date, is_from_me, handle_id, associated_message_type, associated_message_guid
+                ROWID, guid, text, attributedBody, date, is_from_me, is_read, handle_id, associated_message_type, associated_message_guid
             ) VALUES (
-                \(rowId), '\(escape(guid))', \(textValue), NULL, \(date), \(isFromMe ? 1 : 0), \(handleValue), \(associatedMessageType), \(assocGuidValue)
+                \(rowId), '\(escape(guid))', \(textValue), NULL, \(date), \(isFromMe ? 1 : 0), \(isRead ? 1 : 0), \(handleValue), \(associatedMessageType), \(assocGuidValue)
             );
             """)
     }
@@ -139,6 +140,7 @@ final class ToolTestDatabase {
             attributedBody BLOB,
             date INTEGER,
             is_from_me INTEGER,
+            is_read INTEGER DEFAULT 0,
             handle_id INTEGER,
             associated_message_type INTEGER,
             associated_message_guid TEXT
