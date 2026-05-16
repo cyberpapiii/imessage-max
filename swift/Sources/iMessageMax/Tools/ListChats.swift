@@ -107,6 +107,7 @@ enum ListChatsTool {
             name: "list_chats",
             description: "List recent chats with previews. Returns chat ids for follow-up tool calls and chat names for user-facing summaries. When explaining results to the user, refer to chats by name, not by id. Good starting point for broad catch-ups and discovery before drilling deeper.",
             inputSchema: inputSchema,
+            outputSchema: OutputSchema.object,
             annotations: Tool.Annotations(
                 title: "List Chats",
                 readOnlyHint: true,

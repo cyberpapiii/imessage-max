@@ -24,18 +24,26 @@ final class HTTPTransportIntegrationTests: XCTestCase {
                 uri: "/",
                 method: HTTPRequest.Method.post,
                 headers: jsonHeaders(),
-                body: byteBuffer(for: initializePayload(id: 1))
+                body: byteBuffer(for: initializePayload(id: 1, protocolVersion: "2025-11-25"))
             )
 
             let initializeBody = try decodeJSONString(from: initializeResponse.body)
             XCTAssertEqual(initializeResponse.head.status, .ok, initializeBody)
+            let initializeJSON = try decodeJSON(from: initializeResponse.body)
+            let initializeResult = try XCTUnwrap(initializeJSON["result"] as? [String: Any])
+            XCTAssertEqual(initializeResult["protocolVersion"] as? String, "2025-11-25")
+            XCTAssertNotNil(initializeResult["instructions"])
+            let serverInfo = try XCTUnwrap(initializeResult["serverInfo"] as? [String: Any])
+            XCTAssertEqual(serverInfo["title"] as? String, "iMessage Max")
+            let capabilities = try XCTUnwrap(initializeResult["capabilities"] as? [String: Any])
+            XCTAssertNotNil(capabilities["tools"])
             let sessionId = try XCTUnwrap(initializeResponse.head.headerFields[.mcpSessionId])
             XCTAssertFalse(sessionId.isEmpty)
 
             let toolsResponse = try await client.executeRequest(
                 uri: "/",
                 method: HTTPRequest.Method.post,
-                headers: jsonHeaders(sessionId: sessionId),
+                headers: jsonHeaders(sessionId: sessionId, protocolVersion: "2025-11-25"),
                 body: byteBuffer(for: toolsListPayload(id: 2))
             )
 
@@ -47,6 +55,99 @@ final class HTTPTransportIntegrationTests: XCTestCase {
             XCTAssertTrue(tools.contains { $0["name"] as? String == "send" })
             XCTAssertTrue(tools.contains { $0["name"] as? String == "diagnose" })
             XCTAssertTrue(tools.contains { $0["name"] as? String == "get_chat_details" })
+            for tool in tools {
+                XCTAssertNotNil(tool["title"], "\(tool["name"] ?? "unknown") missing title")
+                if tool["name"] as? String != "get_attachment" {
+                    XCTAssertNotNil(tool["outputSchema"], "\(tool["name"] ?? "unknown") missing outputSchema")
+                }
+            }
+        }
+    }
+
+    func testLatestProtocolRequiresVersionHeaderAfterInitialize() async throws {
+        let transport = HTTPTransport(
+            host: "127.0.0.1",
+            port: 0,
+            database: Database(),
+            resolver: ContactResolver(),
+            requestTimeout: .seconds(5)
+        )
+        let app = await transport.makeApplicationForTesting()
+
+        try await app.test(TestingSetup.router) { client in
+            let sessionId = try await initializeSession(using: client, protocolVersion: "2025-11-25")
+
+            let missingHeaderResponse = try await client.executeRequest(
+                uri: "/",
+                method: HTTPRequest.Method.post,
+                headers: jsonHeaders(sessionId: sessionId),
+                body: byteBuffer(for: toolsListPayload(id: 2))
+            )
+            XCTAssertEqual(missingHeaderResponse.head.status, .badRequest)
+            XCTAssertTrue(try decodeJSONString(from: missingHeaderResponse.body).contains("MCP-Protocol-Version"))
+
+            let mismatchedHeaderResponse = try await client.executeRequest(
+                uri: "/",
+                method: HTTPRequest.Method.post,
+                headers: jsonHeaders(sessionId: sessionId, protocolVersion: "2025-06-18"),
+                body: byteBuffer(for: toolsListPayload(id: 3))
+            )
+            XCTAssertEqual(mismatchedHeaderResponse.head.status, .badRequest)
+        }
+    }
+
+    func testPostAcceptHeaderMustAdvertiseJsonAndEventStream() async throws {
+        let transport = HTTPTransport(
+            host: "127.0.0.1",
+            port: 0,
+            database: Database(),
+            resolver: ContactResolver(),
+            requestTimeout: .seconds(5)
+        )
+        let app = await transport.makeApplicationForTesting()
+
+        try await app.test(TestingSetup.router) { client in
+            let response = try await client.executeRequest(
+                uri: "/",
+                method: HTTPRequest.Method.post,
+                headers: [
+                    .contentType: "application/json",
+                    .accept: "application/json",
+                ],
+                body: byteBuffer(for: initializePayload(id: 1))
+            )
+
+            XCTAssertEqual(response.head.status, .notAcceptable)
+        }
+    }
+
+    func testJsonToolCallsReturnStructuredContentAndLegacyText() async throws {
+        let transport = HTTPTransport(
+            host: "127.0.0.1",
+            port: 0,
+            database: Database(),
+            resolver: ContactResolver(),
+            requestTimeout: .seconds(5)
+        )
+        let app = await transport.makeApplicationForTesting()
+
+        try await app.test(TestingSetup.router) { client in
+            let sessionId = try await initializeSession(using: client, protocolVersion: "2025-11-25")
+            let response = try await client.executeRequest(
+                uri: "/",
+                method: HTTPRequest.Method.post,
+                headers: jsonHeaders(sessionId: sessionId, protocolVersion: "2025-11-25"),
+                body: byteBuffer(for: """
+                    {"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"diagnose","arguments":{}}}
+                    """)
+            )
+
+            XCTAssertEqual(response.head.status, .ok)
+            let body = try decodeJSON(from: response.body)
+            let result = try XCTUnwrap(body["result"] as? [String: Any])
+            let content = try XCTUnwrap(result["content"] as? [[String: Any]])
+            XCTAssertEqual(content.first?["type"] as? String, "text")
+            XCTAssertNotNil(result["structuredContent"])
         }
     }
 
@@ -234,9 +335,9 @@ private struct TestSlowMethod: MCP.Method {
     }
 }
 
-private func initializePayload(id: Int) -> String {
+private func initializePayload(id: Int, protocolVersion: String = "2025-03-26") -> String {
     """
-    {"jsonrpc":"2.0","id":\(id),"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"tests","version":"1.0"}}}
+    {"jsonrpc":"2.0","id":\(id),"method":"initialize","params":{"protocolVersion":"\(protocolVersion)","capabilities":{},"clientInfo":{"name":"tests","version":"1.0"}}}
     """
 }
 
@@ -252,13 +353,16 @@ private func slowMethodPayload(id: String) -> String {
     """
 }
 
-private func jsonHeaders(sessionId: String? = nil) -> HTTPFields {
+private func jsonHeaders(sessionId: String? = nil, protocolVersion: String? = nil) -> HTTPFields {
     var headers: HTTPFields = [
         .contentType: "application/json",
-        .accept: "application/json",
+        .accept: "application/json, text/event-stream",
     ]
     if let sessionId {
         headers[.mcpSessionId] = sessionId
+    }
+    if let protocolVersion {
+        headers[.mcpProtocolVersion] = protocolVersion
     }
     return headers
 }
@@ -284,12 +388,15 @@ private func slowMethodSource(from buffer: ByteBuffer) throws -> String {
     return try XCTUnwrap(result["source"] as? String)
 }
 
-private func initializeSession(using client: any TestClientProtocol) async throws -> String {
+private func initializeSession(
+    using client: any TestClientProtocol,
+    protocolVersion: String = "2025-03-26"
+) async throws -> String {
     let response = try await client.executeRequest(
         uri: "/",
         method: HTTPRequest.Method.post,
         headers: jsonHeaders(),
-        body: byteBuffer(for: initializePayload(id: Int.random(in: 1...10_000)))
+        body: byteBuffer(for: initializePayload(id: Int.random(in: 1...10_000), protocolVersion: protocolVersion))
     )
     if response.head.status != .ok {
         let body = try decodeJSONString(from: response.body)

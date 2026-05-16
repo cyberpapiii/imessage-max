@@ -171,6 +171,7 @@ actor GetMessagesTool {
                     "session": .string(description: "Filter to specific session ID (e.g., 'session_1')")
                 ]
             ),
+            outputSchema: OutputSchema.object,
             annotations: .init(
                 title: "Get Messages",
                 readOnlyHint: true,

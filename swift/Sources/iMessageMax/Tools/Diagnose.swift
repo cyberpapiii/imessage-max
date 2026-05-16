@@ -69,6 +69,7 @@ enum DiagnoseTool {
             name: "diagnose",
             description: "Diagnose iMessage MCP configuration and permissions. Use this to troubleshoot database access, contacts, or permission issues.",
             inputSchema: inputSchema,
+            outputSchema: OutputSchema.object,
             annotations: Tool.Annotations(
                 title: "Diagnose",
                 readOnlyHint: true,

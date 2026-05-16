@@ -298,16 +298,19 @@ For a lightweight pre-release routine, use:
 
 Additional send note:
 - `reply_to` is currently unsupported
+- Risky sends, including group/file/long-message sends, require user confirmation. Clients with MCP elicitation support may be prompted inline; other clients should call `send` again with `confirm: true` after reviewing the destination and content.
 
 Send result semantics:
 - `status: "sent"` means the message or attachment was confirmed successfully
 - `status: "pending_confirmation"` means Messages accepted an attachment send, but it was not confirmed as finished within the polling window
+- `status: "cancelled"` means a confirmation prompt was declined/cancelled before Messages.app was invoked
 - `status: "failed"` means the send failed
 - `status: "ambiguous"` means the target could not be resolved safely
 
 Notes:
 - `pending_confirmation` is a normal non-fatal attachment state, not the same as a hard failure
 - exact chat sends target the existing conversation identified by `chat_id`
+- JSON-shaped tools return MCP `structuredContent` as well as legacy text content for older clients
 
 Examples:
 - `{"status":"sent","success":true,...}` means delivery was confirmed within the polling window

@@ -81,6 +81,19 @@ final class SendResponseTests: XCTestCase {
         XCTAssertEqual(response.chatId, "chat456")
     }
 
+    func testCancelledResponseUsesCancelledStatus() {
+        let response = SendResponse.cancelled(
+            "Send cancelled by user confirmation.",
+            deliveredTo: ["Project Group"],
+            chat: ChatReference(id: "chat456", name: "Project Group")
+        )
+
+        XCTAssertEqual(response.status, "cancelled")
+        XCTAssertEqual(response.message, "Send cancelled by user confirmation.")
+        XCTAssertNil(response.error)
+        XCTAssertEqual(response.chatId, "chat456")
+    }
+
     func testErrorResponseUsesFailedStatus() {
         let response = SendResponse.error("Send failed")
 

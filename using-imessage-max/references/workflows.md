@@ -74,3 +74,4 @@ Preferred sequence:
 2. Use `send(chat_id="...")` when exact placement matters
 
 Use `send(to="...")` only when the user is comfortable starting from a person rather than a specific thread.
+If `send` returns `pending_confirmation` for a risky destination, file, or long message, do not treat it as sent. Review the destination/content and call `send(..., confirm=true)` only when the user intent is clear.

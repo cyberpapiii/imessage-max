@@ -53,7 +53,7 @@ Sources/iMessageMax/
 ├── main.swift              # Entry point, CLI parsing
 ├── Server/
 │   ├── MCPServer.swift     # Server lifecycle (stdio mode)
-│   ├── HTTPTransport.swift # HTTP Streamable transport (MCP spec 2025-03-26)
+│   ├── HTTPTransport.swift # HTTP Streamable transport (MCP spec 2025-11-25)
 │   ├── SessionManager.swift # Per-session Server instances
 │   ├── SSEConnection.swift # Server-Sent Events streaming
 │   ├── OriginValidationMiddleware.swift # DNS rebinding protection
@@ -109,12 +109,13 @@ Sources/iMessageMax/
 
 ### HTTP Mode
 
-Implements MCP Streamable HTTP transport (spec 2025-03-26) with:
+Implements MCP Streamable HTTP transport (spec 2025-11-25) with:
 
 - **Per-session Server instances** - Each client gets isolated state, enabling clean reconnection
 - **Session management** - 1-hour timeout with automatic cleanup
 - **SSE streaming** - Server-Sent Events for server→client messages
 - **Origin validation** - DNS rebinding protection (localhost only by default)
+- **Structured output** - JSON-shaped tools return both legacy text content and MCP `structuredContent`
 
 ```bash
 ./imessage-max --http --port 8080
@@ -125,14 +126,15 @@ Test with curl:
 # Initialize session
 curl -X POST http://localhost:8080 \
   -H "Content-Type: application/json" \
-  -H "Accept: application/json" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}'
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}'
 
 # Use session (include Mcp-Session-Id from response)
 curl -X POST http://localhost:8080 \
   -H "Content-Type: application/json" \
-  -H "Accept: application/json" \
+  -H "Accept: application/json, text/event-stream" \
   -H "Mcp-Session-Id: <session-id>" \
+  -H "MCP-Protocol-Version: 2025-11-25" \
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
 ```
 

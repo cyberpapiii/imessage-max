@@ -98,6 +98,7 @@ enum GetActiveConversations {
             name: "get_active_conversations",
             description: "Find conversations with recent bidirectional activity. Returns chat ids for follow-up tool calls and chat names for user-facing summaries. When explaining results to the user, refer to chats by name, not by id. Helpful for surfacing threads that may deserve attention first, but not a complete recent overview across all chats.",
             inputSchema: inputSchema,
+            outputSchema: OutputSchema.object,
             annotations: Tool.Annotations(
                 title: "Get Active Conversations",
                 readOnlyHint: true,

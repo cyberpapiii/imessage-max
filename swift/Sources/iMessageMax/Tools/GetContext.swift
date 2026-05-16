@@ -81,6 +81,7 @@ enum GetContext {
             name: "get_context",
             description: "Get messages surrounding a specific message. Returns the containing chat id for follow-up tool calls and chat name for user-facing summaries. When explaining results to the user, refer to chats by name, not by id.",
             inputSchema: inputSchema,
+            outputSchema: OutputSchema.object,
             annotations: Tool.Annotations(
                 title: "Get Context",
                 readOnlyHint: true,

@@ -9,7 +9,10 @@ actor MCPServerWrapper {
     init() {
         self.server = Server(
             name: Version.name,
-            version: Version.current
+            version: Version.current,
+            title: Version.title,
+            instructions: Version.instructions,
+            capabilities: Version.serverCapabilities
         )
         self.database = Database()
         self.resolver = ContactResolver()

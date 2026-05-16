@@ -11,6 +11,7 @@ actor SessionManager {
     final class MCPSessionState: @unchecked Sendable {
         let id: String
         let server: Server
+        let protocolVersion: String
         let messageContinuation: AsyncThrowingStream<Data, Error>.Continuation
         let createdAt: Date
         var lastActivity: Date
@@ -19,11 +20,13 @@ actor SessionManager {
         init(
             id: String,
             server: Server,
+            protocolVersion: String,
             messageContinuation: AsyncThrowingStream<Data, Error>.Continuation,
             createdAt: Date = Date()
         ) {
             self.id = id
             self.server = server
+            self.protocolVersion = protocolVersion
             self.messageContinuation = messageContinuation
             self.createdAt = createdAt
             self.lastActivity = createdAt
@@ -76,7 +79,7 @@ actor SessionManager {
     /// Creates a new session with its own Server instance
     ///
     /// This is the key to supporting reconnection - each session gets a fresh Server.
-    func createSession() async -> MCPSessionState? {
+    func createSession(protocolVersion: String = MCPProtocolVersion.defaultAssumed) async -> MCPSessionState? {
         guard sessions.count < maxSessions else {
             return nil  // Caller returns 503 Service Unavailable
         }
@@ -91,7 +94,10 @@ actor SessionManager {
         // Create per-session Server instance
         let server = Server(
             name: Version.name,
-            version: Version.current
+            version: Version.current,
+            title: Version.title,
+            instructions: Version.instructions,
+            capabilities: Version.serverCapabilities
         )
 
         // Register tools on this server instance
@@ -104,6 +110,7 @@ actor SessionManager {
         let session = MCPSessionState(
             id: sessionId,
             server: server,
+            protocolVersion: protocolVersion,
             messageContinuation: continuation
         )
 
@@ -166,6 +173,11 @@ actor SessionManager {
     func touch(sessionId: String) {
         guard let session = sessions[sessionId] else { return }
         session.lastActivity = Date()
+    }
+
+    /// Returns the negotiated protocol version for a session.
+    func protocolVersion(for sessionId: String) -> String? {
+        sessions[sessionId]?.protocolVersion
     }
 
     /// Terminates a session and cleans up its Server
