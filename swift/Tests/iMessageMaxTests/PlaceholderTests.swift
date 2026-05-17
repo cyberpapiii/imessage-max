@@ -175,7 +175,13 @@ final class AppleScriptRunnerValidationTests: XCTestCase {
         try "hello".write(to: sourceURL, atomically: true, encoding: .utf8)
         defer { try? FileManager.default.removeItem(at: sourceURL) }
 
-        let prepared = try AppleScriptRunner.prepareTrackedOutgoingFile(sourcePath: sourceURL.path)
+        let prepared = try AppleScriptRunner.prepareTrackedOutgoingFile(
+            sourcePath: sourceURL.path,
+            existingOutgoingTransferStatuses: { trackingName in
+                XCTAssertEqual(trackingName, "imessage-max-source-test.txt")
+                return ["finished"]
+            }
+        )
         defer { try? FileManager.default.removeItem(at: prepared.fileURL.deletingLastPathComponent()) }
 
         XCTAssertNotEqual(prepared.fileURL.path, sourceURL.path)
