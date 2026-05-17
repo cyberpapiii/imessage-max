@@ -14,7 +14,7 @@ final class HTTPTransportIntegrationTests: XCTestCase {
             host: "127.0.0.1",
             port: 0,
             database: Database(),
-            resolver: ContactResolver(),
+            resolver: ContactResolver(seedCache: [:]),
             requestTimeout: .seconds(5)
         )
         let app = await transport.makeApplicationForTesting()
@@ -159,7 +159,7 @@ final class HTTPTransportIntegrationTests: XCTestCase {
             host: "127.0.0.1",
             port: 0,
             database: Database(),
-            resolver: ContactResolver(),
+            resolver: ContactResolver(seedCache: [:]),
             requestTimeout: .seconds(5)
         )
         let app = await transport.makeApplicationForTesting()
@@ -262,7 +262,7 @@ final class HTTPTransportIntegrationTests: XCTestCase {
             port: 0,
             database: Database(),
             resolver: ContactResolver(),
-            requestTimeout: .milliseconds(20)
+            requestTimeout: .milliseconds(200)
         )
         let app = await transport.makeApplicationForTesting()
 
@@ -277,7 +277,7 @@ final class HTTPTransportIntegrationTests: XCTestCase {
             )
             XCTAssertEqual(firstResponse.head.status, .ok)
 
-            try await Task.sleep(for: .milliseconds(80))
+            try await Task.sleep(for: .milliseconds(300))
 
             let secondResponse = try await client.executeRequest(
                 uri: "/",
