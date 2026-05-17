@@ -1,0 +1,42 @@
+{
+  "name": "imessage-max",
+  "version": "1.2.1",
+  "description": "Local MCP server for reading, searching, and sending iMessages on macOS.",
+  "author": {
+    "name": "Rob Dezendorf",
+    "url": "https://github.com/cyberpapiii"
+  },
+  "homepage": "https://github.com/cyberpapiii/imessage-max",
+  "repository": "https://github.com/cyberpapiii/imessage-max",
+  "license": "MIT",
+  "keywords": [
+    "imessage",
+    "messages",
+    "mcp",
+    "macos",
+    "contacts"
+  ],
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "iMessage Max",
+    "shortDescription": "Read, search, and send iMessages through MCP",
+    "longDescription": "Use iMessage Max in Codex to inspect local iMessage conversations, resolve contacts, search messages, fetch attachments, and send Messages.app replies through a local macOS MCP server.",
+    "developerName": "Rob Dezendorf",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/cyberpapiii/imessage-max",
+    "defaultPrompt": [
+      "Find the right iMessage thread before I reply.",
+      "Search my recent iMessages for a topic.",
+      "Summarize unread iMessages that need attention."
+    ],
+    "brandColor": "#1F7AFF",
+    "composerIcon": "./assets/codex/icon.png",
+    "logo": "./assets/codex/logo.png",
+    "screenshots": []
+  }
+}

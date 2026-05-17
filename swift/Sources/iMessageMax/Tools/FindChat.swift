@@ -99,6 +99,7 @@ enum FindChatTool {
             name: name,
             description: description,
             inputSchema: inputSchema,
+            outputSchema: OutputSchema.object,
             annotations: Tool.Annotations(
                 title: "Find Chat",
                 readOnlyHint: true,

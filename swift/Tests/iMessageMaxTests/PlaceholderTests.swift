@@ -81,6 +81,19 @@ final class SendResponseTests: XCTestCase {
         XCTAssertEqual(response.chatId, "chat456")
     }
 
+    func testCancelledResponseUsesCancelledStatus() {
+        let response = SendResponse.cancelled(
+            "Send cancelled by user confirmation.",
+            deliveredTo: ["Project Group"],
+            chat: ChatReference(id: "chat456", name: "Project Group")
+        )
+
+        XCTAssertEqual(response.status, "cancelled")
+        XCTAssertEqual(response.message, "Send cancelled by user confirmation.")
+        XCTAssertNil(response.error)
+        XCTAssertEqual(response.chatId, "chat456")
+    }
+
     func testErrorResponseUsesFailedStatus() {
         let response = SendResponse.error("Send failed")
 
@@ -162,7 +175,13 @@ final class AppleScriptRunnerValidationTests: XCTestCase {
         try "hello".write(to: sourceURL, atomically: true, encoding: .utf8)
         defer { try? FileManager.default.removeItem(at: sourceURL) }
 
-        let prepared = try AppleScriptRunner.prepareTrackedOutgoingFile(sourcePath: sourceURL.path)
+        let prepared = try AppleScriptRunner.prepareTrackedOutgoingFile(
+            sourcePath: sourceURL.path,
+            existingOutgoingTransferStatuses: { trackingName in
+                XCTAssertEqual(trackingName, "imessage-max-source-test.txt")
+                return ["finished"]
+            }
+        )
         defer { try? FileManager.default.removeItem(at: prepared.fileURL.deletingLastPathComponent()) }
 
         XCTAssertNotEqual(prepared.fileURL.path, sourceURL.path)

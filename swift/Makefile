@@ -60,8 +60,8 @@ verify: ## Verify server is healthy
 		sleep 1; \
 		RESULT=$$(curl -sf http://127.0.0.1:$(PORT) -X POST \
 			-H "Content-Type: application/json" \
-			-H "Accept: application/json" \
-			-d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"verify","version":"1.0"}}}' 2>/dev/null); \
+			-H "Accept: application/json, text/event-stream" \
+			-d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"verify","version":"1.0"}}}' 2>/dev/null); \
 		if [ -n "$$RESULT" ]; then \
 			SERVER_VERSION=$$(echo "$$RESULT" | python3 -c "import sys,json; print(json.load(sys.stdin)['result']['serverInfo']['version'])"); \
 			if [ "$$SERVER_VERSION" = "$$BINARY_VERSION" ]; then \
@@ -92,8 +92,8 @@ status: ## Show service status and version
 	@echo "=== Health ==="
 	@curl -sf http://127.0.0.1:$(PORT) -X POST \
 		-H "Content-Type: application/json" \
-		-H "Accept: application/json" \
-		-d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"status","version":"1.0"}}}' 2>/dev/null \
+		-H "Accept: application/json, text/event-stream" \
+		-d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"status","version":"1.0"}}}' 2>/dev/null \
 		| python3 -c "import sys,json; r=json.load(sys.stdin)['result']; print(f'✓ Responding — v{r[\"serverInfo\"][\"version\"]}')" 2>/dev/null \
 		|| echo "✗ Not responding"
 

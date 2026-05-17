@@ -64,6 +64,19 @@ struct SendResponse: Encodable {
         )
     }
 
+    static func cancelled(_ message: String, deliveredTo: [String], chat: ChatReference?) -> SendResponse {
+        SendResponse(
+            status: "cancelled",
+            timestamp: TimeUtils.formatISO(Date()),
+            chat: chat,
+            deliveredTo: deliveredTo,
+            chatId: chat?.id,
+            message: message,
+            error: nil,
+            candidates: nil
+        )
+    }
+
     static func error(_ message: String) -> SendResponse {
         SendResponse(
             status: "failed",
@@ -128,8 +141,10 @@ actor SendTool {
                         items: .string(description: "Absolute or ~/expanded local file path")
                     ),
                     "reply_to": .string(description: "Message ID to reply to (not yet implemented)"),
+                    "confirm": .boolean(description: "Explicitly confirm risky sends when elicitation is unavailable"),
                 ]
             ),
+            outputSchema: OutputSchema.object,
             annotations: Tool.Annotations(
                 title: "Send Message",
                 readOnlyHint: false,
@@ -138,25 +153,28 @@ actor SendTool {
                 openWorldHint: true
             )
         ) { args in
-            try await tool.execute(args: args)
+            try await tool.execute(args: args, server: server)
         }
     }
 
     // MARK: - Execution
 
-    func execute(args: [String: Value]?) async throws -> [Tool.Content] {
+    func execute(args: [String: Value]?, server: Server? = nil) async throws -> [Tool.Content] {
         let to = args?["to"]?.stringValue
         let chatId = args?["chat_id"]?.stringValue
         let text = args?["text"]?.stringValue
         let filePaths = args?["file_paths"]?.arrayValue?.compactMap { $0.stringValue }
         let replyTo = args?["reply_to"]?.stringValue
+        let confirm = args?["confirm"]?.boolValue ?? false
 
         let response = await send(
             to: to,
             chatId: chatId,
             text: text,
             filePaths: filePaths,
-            replyTo: replyTo
+            replyTo: replyTo,
+            confirm: confirm,
+            server: server
         )
         let content: [Tool.Content] = [.plainText(try FormatUtils.encodeJSON(response))]
         if response.status == "failed" || response.status == "ambiguous" {
@@ -173,7 +191,9 @@ actor SendTool {
         chatId: String?,
         text: String?,
         filePaths: [String]?,
-        replyTo: String?
+        replyTo: String?,
+        confirm: Bool,
+        server: Server?
     ) async -> SendResponse {
         // Validation
         guard to != nil || chatId != nil else {
@@ -205,6 +225,21 @@ actor SendTool {
             return .error(errorMsg)
         case .ambiguous(let candidates):
             return .ambiguous(candidates: candidates)
+        }
+
+        if shouldConfirmSend(resolved: resolved, text: text, filePaths: filePaths), !confirm {
+            switch await confirmSendWithClientIfAvailable(server: server, resolved: resolved, text: text, filePaths: filePaths) {
+            case .confirmed:
+                break
+            case .declined:
+                return .cancelled("Send cancelled by user confirmation.", deliveredTo: resolved.deliveredTo, chat: resolved.chat)
+            case .unavailable:
+                return .pending(
+                    "This send requires confirmation. Call send again with confirm: true after reviewing the destination and content.",
+                    deliveredTo: resolved.deliveredTo,
+                    chat: resolved.chat
+                )
+            }
         }
 
         let sendResults: [Result<Void, SendError>]
@@ -250,5 +285,67 @@ actor SendTool {
         }
 
         return .success(deliveredTo: resolved.deliveredTo, chat: resolved.chat)
+    }
+
+    private enum ConfirmationDecision {
+        case confirmed
+        case declined
+        case unavailable
+    }
+
+    private func shouldConfirmSend(
+        resolved: SendResolution.ResolvedTarget,
+        text: String?,
+        filePaths: [String]?
+    ) -> Bool {
+        if resolved.deliveredTo.count > 1 { return true }
+        if filePaths?.isEmpty == false { return true }
+        if let text, text.count > 500 { return true }
+        if case .chat = resolved.target { return true }
+        return false
+    }
+
+    private func confirmSendWithClientIfAvailable(
+        server: Server?,
+        resolved: SendResolution.ResolvedTarget,
+        text: String?,
+        filePaths: [String]?
+    ) async -> ConfirmationDecision {
+        guard let server else { return .unavailable }
+
+        let destination = resolved.chat?.name ?? resolved.deliveredTo.joined(separator: ", ")
+        let fileCount = filePaths?.count ?? 0
+        let textPreview = (text?.isEmpty == false) ? text! : "(no text)"
+        let clippedPreview = textPreview.count > 240
+            ? String(textPreview.prefix(240)) + "..."
+            : textPreview
+
+        do {
+            let result = try await server.requestElicitation(
+                message: """
+                    Confirm sending this iMessage to \(destination).
+
+                    Text: \(clippedPreview)
+                    Attachments: \(fileCount)
+                    """,
+                requestedSchema: .init(
+                    title: "Confirm iMessage Send",
+                    description: "Review the destination and content before sending.",
+                    properties: [
+                        "confirm": .object([
+                            "type": .string("boolean"),
+                            "description": .string("Set true to send this message."),
+                        ]),
+                    ],
+                    required: ["confirm"]
+                ),
+                mode: .form
+            )
+
+            guard result.action == .accept else { return .declined }
+            return result.content?["confirm"]?.boolValue == true ? .confirmed : .declined
+        } catch {
+            return .unavailable
+        }
     }
 }

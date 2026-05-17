@@ -69,6 +69,7 @@ enum DiagnoseTool {
             name: "diagnose",
             description: "Diagnose iMessage MCP configuration and permissions. Use this to troubleshoot database access, contacts, or permission issues.",
             inputSchema: inputSchema,
+            outputSchema: OutputSchema.object,
             annotations: Tool.Annotations(
                 title: "Diagnose",
                 readOnlyHint: true,
@@ -108,15 +109,21 @@ enum DiagnoseTool {
         }
 
         // Check Contacts access
-        let (contactsAuthorized, contactsStatus) = ContactResolver.authorizationStatus()
+        let (contactsAuthorized, authorizationStatus) = ContactResolver.authorizationStatus()
 
+        var contactsStatus = authorizationStatus
         var contactsLoaded: Int? = nil
         var contactsFix: String? = nil
 
         if contactsAuthorized {
-            try await resolver.initialize()
-            let stats = await resolver.getStats()
-            contactsLoaded = stats.handleCount
+            do {
+                try await resolver.initialize()
+                let stats = await resolver.getStats()
+                contactsLoaded = stats.handleCount
+            } catch {
+                contactsStatus = "\(authorizationStatus)_load_failed"
+                contactsFix = "Contacts permission is granted, but contacts could not be loaded: \(error.localizedDescription)"
+            }
         } else {
             contactsFix = "Grant Contacts access: System Settings -> Privacy & Security -> " +
                 "Contacts -> Add your terminal app or the imessage-max executable"

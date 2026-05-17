@@ -215,6 +215,7 @@ enum SearchTool {
                 - search(unanswered: true) - questions I sent without replies
                 """,
             inputSchema: inputSchema,
+            outputSchema: OutputSchema.object,
             annotations: Tool.Annotations(
                 title: "Search Messages",
                 readOnlyHint: true,

@@ -14,6 +14,8 @@ The project now ships a single Swift implementation:
 - GitHub releases
 - Homebrew
 - source builds
+- Codex plugin metadata
+- Claude Desktop MCPB metadata
 
 The old Python package has been retired and removed from the repository.
 Everything current lives under `swift/`.
@@ -120,6 +122,21 @@ swift build -c release
 For local development, advanced setup, and the signed install workflow, see:
 
 - [swift/README.md](swift/README.md)
+
+## Client Icon Metadata
+
+iMessage Max ships icons for the main MCP protocol surface and the client
+packaging surfaces that use their own metadata:
+
+- MCP `2025-11-25` initialize responses include PNG `serverInfo.icons`.
+- Each tool advertises a compact PNG tool icon.
+- Codex plugin metadata lives in `.codex-plugin/plugin.json` and uses
+  `assets/codex/icon.png` plus `assets/codex/logo.png`.
+- Claude Desktop / MCPB metadata lives in `mcpb/manifest.json` and uses PNG
+  assets under `mcpb/assets/`.
+
+The committed PNG source set is under `assets/icons/` at `16x16`, `32x32`,
+`64x64`, `128x128`, `256x256`, and `512x512`.
 
 ## Setup
 
@@ -298,16 +315,19 @@ For a lightweight pre-release routine, use:
 
 Additional send note:
 - `reply_to` is currently unsupported
+- Risky sends, including group/file/long-message sends, require user confirmation. Clients with MCP elicitation support may be prompted inline; other clients should call `send` again with `confirm: true` after reviewing the destination and content.
 
 Send result semantics:
 - `status: "sent"` means the message or attachment was confirmed successfully
 - `status: "pending_confirmation"` means Messages accepted an attachment send, but it was not confirmed as finished within the polling window
+- `status: "cancelled"` means a confirmation prompt was declined/cancelled before Messages.app was invoked
 - `status: "failed"` means the send failed
 - `status: "ambiguous"` means the target could not be resolved safely
 
 Notes:
 - `pending_confirmation` is a normal non-fatal attachment state, not the same as a hard failure
 - exact chat sends target the existing conversation identified by `chat_id`
+- JSON-shaped tools return MCP `structuredContent` as well as legacy text content for older clients
 
 Examples:
 - `{"status":"sent","success":true,...}` means delivery was confirmed within the polling window

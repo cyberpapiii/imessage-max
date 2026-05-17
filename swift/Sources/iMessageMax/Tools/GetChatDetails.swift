@@ -45,6 +45,7 @@ enum GetChatDetailsTool {
             name: name,
             description: "Get factual details for a known chat. Useful when you already have chat_id and need exact participants, handles, thread state, and recent shared-item context without reading the full conversation. Use chat.id for follow-up tool calls only; when explaining results to the user, refer to chat.name or participant names, not the id.",
             inputSchema: inputSchema,
+            outputSchema: OutputSchema.object,
             annotations: Tool.Annotations(
                 title: "Get Chat Details",
                 readOnlyHint: true,

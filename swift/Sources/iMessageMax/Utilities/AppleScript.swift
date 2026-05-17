@@ -200,15 +200,16 @@ enum AppleScriptRunner {
         return waitForTransferCompletion(preparedFile: preparedFile)
     }
 
-    static func prepareTrackedOutgoingFile(sourcePath: String) throws -> PreparedOutgoingFile {
+    static func prepareTrackedOutgoingFile(
+        sourcePath: String,
+        existingOutgoingTransferStatuses: (String) throws -> [String] = queryOutgoingTransferStatuses
+    ) throws -> PreparedOutgoingFile {
         cleanupOldStagedFilesIfPossible()
 
         let validatedPath = try validateFilePath(sourcePath)
         let sourceURL = URL(fileURLWithPath: validatedPath)
         let trackingName = sourceURL.lastPathComponent
-        let existingOutgoingTransferCount = try queryOutgoingTransferStatuses(
-            trackingName: trackingName
-        ).count
+        let existingOutgoingTransferCount = try existingOutgoingTransferStatuses(trackingName).count
         let stagedDirectory = stagingRootDirectory()
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         let stagedURL = stagedDirectory.appendingPathComponent(trackingName, isDirectory: false)

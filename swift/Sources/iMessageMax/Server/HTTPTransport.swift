@@ -5,9 +5,16 @@ import Logging
 import MCP
 import NIOCore
 
+enum MCPProtocolVersion {
+    static let latest = "2025-11-25"
+    static let defaultAssumed = "2025-03-26"
+    static let supported: Set<String> = [latest, "2025-06-18", defaultAssumed, "2024-11-05"]
+    static let requiresHeaderAfterInitialize: Set<String> = [latest, "2025-06-18"]
+}
+
 /// A production-ready implementation of the MCP Streamable HTTP transport for servers.
 ///
-/// This transport implements the [Streamable HTTP transport](https://modelcontextprotocol.io/specification/2025-03-26/basic/transports#streamable-http)
+/// This transport implements the [Streamable HTTP transport](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports)
 /// specification from the Model Context Protocol for server-side usage.
 ///
 /// Key features:
@@ -146,34 +153,20 @@ public actor HTTPTransport: Transport {
             )
         }
 
-        // Validate Accept header
+        // Validate Accept header. Streamable HTTP clients advertise both response
+        // shapes because a request can complete as JSON or as an SSE stream.
         guard let accept = request.headers[.accept],
-            accept.contains("application/json") || accept.contains("text/event-stream")
-                || accept.contains("*/*")
+            acceptsStreamableHTTP(accept)
         else {
             return errorResponse(
                 status: .notAcceptable,
-                message: "Invalid Accept header, expected application/json or text/event-stream"
+                message: "Invalid Accept header, expected application/json and text/event-stream"
             )
         }
 
         // Collect request body
         let body = try await request.body.collect(upTo: 512 * 1024)  // 512KB
         let requestData = Data(buffer: body)
-
-        // Validate client's protocol version header
-        if let versionHeader = request.headers[HTTPField.Name("Mcp-Protocol-Version")!] ??
-                               request.headers[HTTPField.Name("mcp-protocol-version")!] {
-            let supportedVersions: Set<String> = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"]
-            guard supportedVersions.contains(versionHeader) else {
-                return errorResponse(
-                    status: .badRequest,
-                    message: "Unsupported protocol version: \(versionHeader)",
-                    code: -32600
-                )
-            }
-        }
-        // If header is absent, assume 2025-03-26 for backwards compatibility
 
         // Reject batch requests (JSON arrays)
         let jsonString = String(data: requestData, encoding: .utf8) ?? ""
@@ -196,6 +189,18 @@ public actor HTTPTransport: Transport {
 
         let messageType = detectMessageType(json)
         let isInitialize = (json["method"] as? String) == "initialize"
+        let requestedProtocolVersion = isInitialize
+            ? parseInitializeProtocolVersion(from: json)
+            : nil
+
+        // Validate client's protocol version header. The header is required on
+        // subsequent HTTP requests for sessions negotiated at 2025-06-18+.
+        if let versionError = await validateProtocolVersionHeader(
+            request: request,
+            isInitialize: isInitialize
+        ) {
+            return versionError
+        }
 
         var sessionId: String
         var responseHeaders = HTTPFields()
@@ -203,7 +208,9 @@ public actor HTTPTransport: Transport {
 
         if isInitialize {
             // Create new session with its own Server instance
-            guard let session = await sessionManager.createSession() else {
+            guard let session = await sessionManager.createSession(
+                protocolVersion: requestedProtocolVersion ?? MCPProtocolVersion.latest
+            ) else {
                 return errorResponse(
                     status: .serviceUnavailable,
                     message: "Too many active sessions. Try again later."
@@ -613,6 +620,66 @@ public actor HTTPTransport: Transport {
         )
     }
 
+    private nonisolated func acceptsStreamableHTTP(_ accept: String) -> Bool {
+        if accept.contains("*/*") { return true }
+        return accept.contains("application/json") && accept.contains("text/event-stream")
+    }
+
+    private func validateProtocolVersionHeader(
+        request: Request,
+        isInitialize: Bool
+    ) async -> Response? {
+        let versionHeader = request.headers[.mcpProtocolVersion]
+
+        if let versionHeader {
+            guard MCPProtocolVersion.supported.contains(versionHeader) else {
+                return errorResponse(
+                    status: .badRequest,
+                    message: "Unsupported protocol version: \(versionHeader)",
+                    code: -32600
+                )
+            }
+        }
+
+        guard !isInitialize else { return nil }
+
+        guard let sessionId = request.headers[.mcpSessionId],
+            let negotiated = await sessionManager.protocolVersion(for: sessionId)
+        else {
+            return nil
+        }
+
+        if MCPProtocolVersion.requiresHeaderAfterInitialize.contains(negotiated) {
+            guard let versionHeader else {
+                return errorResponse(
+                    status: .badRequest,
+                    message: "Missing MCP-Protocol-Version header for negotiated protocol version \(negotiated)",
+                    code: -32600
+                )
+            }
+
+            guard versionHeader == negotiated else {
+                return errorResponse(
+                    status: .badRequest,
+                    message: "MCP-Protocol-Version header \(versionHeader) does not match negotiated version \(negotiated)",
+                    code: -32600
+                )
+            }
+        }
+
+        return nil
+    }
+
+    private nonisolated func parseInitializeProtocolVersion(from json: [String: Any]) -> String? {
+        guard let params = json["params"] as? [String: Any],
+            let version = params["protocolVersion"] as? String,
+            MCPProtocolVersion.supported.contains(version)
+        else {
+            return nil
+        }
+        return version
+    }
+
     /// Detects the type of JSON-RPC message
     private nonisolated func detectMessageType(_ json: [String: Any]) -> JSONRPCMessageType {
         if json["method"] != nil && json["id"] != nil {
@@ -677,4 +744,7 @@ extension HTTPField.Name {
 
     /// Connection header
     static let connection = HTTPField.Name("Connection")!
+
+    /// MCP protocol version header
+    static let mcpProtocolVersion = HTTPField.Name("MCP-Protocol-Version")!
 }

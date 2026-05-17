@@ -60,6 +60,7 @@ Use this when the user wants to reply, send an update, or share a file.
 - Prefer `chat_id` when the exact thread matters.
 - Use `to` only when starting from a person is acceptable.
 - If there is any ambiguity about the destination, resolve the chat first with `find_chat`.
+- Risky sends can require confirmation. If the tool returns `pending_confirmation` asking for confirmation, review the destination/content and call `send` again with `confirm: true` only when the user intent is clear.
 - In your response to the user, name the destination using the returned `chat.name` or participant labels, not the `chat_id`.
 
 ## Tool Selection

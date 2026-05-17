@@ -105,6 +105,12 @@ enum InputSchema {
     }
 }
 
+enum OutputSchema {
+    static let object: Value = .object([
+        "type": .string("object"),
+    ])
+}
+
 // MARK: - Tool Handler Registry
 
 /// Registry to hold tool handlers and definitions
@@ -173,16 +179,22 @@ extension Server {
     @discardableResult
     nonisolated func registerTool(
         name: String,
+        title: String? = nil,
         description: String,
         inputSchema: Value,
+        outputSchema: Value? = nil,
+        icons: [Icon]? = nil,
         annotations: Tool.Annotations = nil,
         handler: @escaping @Sendable ([String: Value]?) async throws -> [Tool.Content]
     ) -> Self {
         let tool = Tool(
             name: name,
+            title: title ?? annotations.title,
             description: description,
             inputSchema: inputSchema,
-            annotations: annotations
+            annotations: annotations,
+            outputSchema: outputSchema,
+            icons: icons ?? IconMetadata.toolIcons
         )
 
         ToolHandlerRegistry.shared.register(tool: tool, handler: handler)
@@ -206,7 +218,10 @@ extension Server {
 
             do {
                 let content = try await handler(params.arguments)
-                return CallTool.Result(content: content)
+                return CallTool.Result(
+                    content: content,
+                    structuredContent: Self.structuredContent(from: content)
+                )
             } catch let error as ToolError {
                 return CallTool.Result(content: error.content, isError: true)
             } catch let error as MCPError {
@@ -218,6 +233,17 @@ extension Server {
                 )
             }
         }
+    }
+
+    private nonisolated static func structuredContent(from content: [Tool.Content]) -> Value? {
+        guard content.count == 1,
+            case .text(let text, _, _) = content[0],
+            let data = text.data(using: .utf8)
+        else {
+            return nil
+        }
+
+        return try? JSONDecoder().decode(Value.self, from: data)
     }
 }
 
