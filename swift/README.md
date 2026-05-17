@@ -116,6 +116,8 @@ Implements MCP Streamable HTTP transport (spec 2025-11-25) with:
 - **SSE streaming** - Server-Sent Events for server→client messages
 - **Origin validation** - DNS rebinding protection (localhost only by default)
 - **Structured output** - JSON-shaped tools return both legacy text content and MCP `structuredContent`
+- **Icon metadata** - Latest-protocol initialize responses include PNG
+  `serverInfo.icons`; tools include compact PNG icon metadata.
 
 ```bash
 ./imessage-max --http --port 8080

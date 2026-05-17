@@ -58,7 +58,11 @@ final class HTTPTransportIntegrationTests: XCTestCase {
             XCTAssertTrue(tools.contains { $0["name"] as? String == "get_chat_details" })
             for tool in tools {
                 XCTAssertNotNil(tool["title"], "\(tool["name"] ?? "unknown") missing title")
-                XCTAssertNil(tool["icons"], "\(tool["name"] ?? "unknown") should not duplicate the server icon")
+                assertIconMetadata(
+                    tool["icons"],
+                    context: "\(tool["name"] ?? "unknown") tool",
+                    expectedSizes: ["16x16"]
+                )
                 if tool["name"] as? String != "get_attachment" {
                     XCTAssertNotNil(tool["outputSchema"], "\(tool["name"] ?? "unknown") missing outputSchema")
                 }
@@ -411,15 +415,25 @@ private func decodeJSON(from buffer: ByteBuffer) throws -> [String: Any] {
     return try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
 }
 
-private func assertIconMetadata(_ value: Any?, context: String, file: StaticString = #filePath, line: UInt = #line) {
-    guard let icons = value as? [[String: Any]], let icon = icons.first else {
+private func assertIconMetadata(
+    _ value: Any?,
+    context: String,
+    expectedSizes: [String] = ["64x64", "32x32", "16x16"],
+    file: StaticString = #filePath,
+    line: UInt = #line
+) {
+    guard let icons = value as? [[String: Any]], !icons.isEmpty else {
         return XCTFail("\(context) missing icons", file: file, line: line)
     }
-    let src = icon["src"] as? String
-    XCTAssertEqual(icon["mimeType"] as? String, "image/png", file: file, line: line)
-    XCTAssertEqual(icon["sizes"] as? [String], ["64x64"], file: file, line: line)
-    XCTAssertTrue(src?.hasPrefix("data:image/png;base64,") == true, "\(context) icon should use a PNG data URI", file: file, line: line)
-    assertPNGDataURI(src, context: context, file: file, line: line)
+    let sizes = icons.compactMap { ($0["sizes"] as? [String])?.first }
+    XCTAssertEqual(sizes, expectedSizes, file: file, line: line)
+
+    for icon in icons {
+        let src = icon["src"] as? String
+        XCTAssertEqual(icon["mimeType"] as? String, "image/png", file: file, line: line)
+        XCTAssertTrue(src?.hasPrefix("data:image/png;base64,") == true, "\(context) icon should use a PNG data URI", file: file, line: line)
+        assertPNGDataURI(src, context: context, file: file, line: line)
+    }
 }
 
 private func assertPNGDataURI(_ src: String?, context: String, file: StaticString = #filePath, line: UInt = #line) {

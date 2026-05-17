@@ -194,7 +194,7 @@ extension Server {
             inputSchema: inputSchema,
             annotations: annotations,
             outputSchema: outputSchema,
-            icons: icons
+            icons: icons ?? IconMetadata.toolIcons
         )
 
         ToolHandlerRegistry.shared.register(tool: tool, handler: handler)

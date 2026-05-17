@@ -1,0 +1,78 @@
+{
+  "manifest_version": "0.3",
+  "name": "imessage-max",
+  "display_name": "iMessage Max",
+  "version": "1.2.1",
+  "description": "Local MCP server for reading, searching, and sending iMessages on macOS.",
+  "long_description": "iMessage Max exposes intent-aligned MCP tools for local iMessage search, conversation inspection, attachment retrieval, unread triage, and Messages.app sending. It requires macOS Messages data access and runs locally.",
+  "author": {
+    "name": "Rob Dezendorf",
+    "url": "https://github.com/cyberpapiii"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cyberpapiii/imessage-max.git"
+  },
+  "homepage": "https://github.com/cyberpapiii/imessage-max",
+  "documentation": "https://github.com/cyberpapiii/imessage-max#readme",
+  "support": "https://github.com/cyberpapiii/imessage-max/issues",
+  "icon": "assets/icon-128.png",
+  "icons": [
+    {
+      "src": "assets/icon-16.png",
+      "size": "16x16"
+    },
+    {
+      "src": "assets/icon-32.png",
+      "size": "32x32"
+    },
+    {
+      "src": "assets/icon-64.png",
+      "size": "64x64"
+    },
+    {
+      "src": "assets/icon-128.png",
+      "size": "128x128"
+    },
+    {
+      "src": "assets/icon-256.png",
+      "size": "256x256"
+    },
+    {
+      "src": "assets/icon-512.png",
+      "size": "512x512"
+    }
+  ],
+  "server": {
+    "type": "binary",
+    "entry_point": "server/imessage-max",
+    "mcp_config": {
+      "command": "${user_config.binary_path}",
+      "args": []
+    }
+  },
+  "tools_generated": true,
+  "keywords": [
+    "imessage",
+    "messages",
+    "mcp",
+    "macos",
+    "productivity"
+  ],
+  "license": "MIT",
+  "compatibility": {
+    "claude_desktop": ">=1.0.0",
+    "platforms": [
+      "darwin"
+    ]
+  },
+  "user_config": {
+    "binary_path": {
+      "type": "file",
+      "title": "iMessage Max binary",
+      "description": "Path to the installed imessage-max binary.",
+      "required": true,
+      "default": "/opt/homebrew/bin/imessage-max"
+    }
+  }
+}
