@@ -35,6 +35,7 @@ final class HTTPTransportIntegrationTests: XCTestCase {
             XCTAssertNotNil(initializeResult["instructions"])
             let serverInfo = try XCTUnwrap(initializeResult["serverInfo"] as? [String: Any])
             XCTAssertEqual(serverInfo["title"] as? String, "iMessage Max")
+            assertIconMetadata(serverInfo["icons"], context: "serverInfo")
             let capabilities = try XCTUnwrap(initializeResult["capabilities"] as? [String: Any])
             XCTAssertNotNil(capabilities["tools"])
             let sessionId = try XCTUnwrap(initializeResponse.head.headerFields[.mcpSessionId])
@@ -57,10 +58,38 @@ final class HTTPTransportIntegrationTests: XCTestCase {
             XCTAssertTrue(tools.contains { $0["name"] as? String == "get_chat_details" })
             for tool in tools {
                 XCTAssertNotNil(tool["title"], "\(tool["name"] ?? "unknown") missing title")
+                XCTAssertNil(tool["icons"], "\(tool["name"] ?? "unknown") should not duplicate the server icon")
                 if tool["name"] as? String != "get_attachment" {
                     XCTAssertNotNil(tool["outputSchema"], "\(tool["name"] ?? "unknown") missing outputSchema")
                 }
             }
+        }
+    }
+
+    func testLegacyProtocolDoesNotReceiveIconMetadata() async throws {
+        let transport = HTTPTransport(
+            host: "127.0.0.1",
+            port: 0,
+            database: Database(),
+            resolver: ContactResolver(),
+            requestTimeout: .seconds(5)
+        )
+        let app = await transport.makeApplicationForTesting()
+
+        try await app.test(TestingSetup.router) { client in
+            let initializeResponse = try await client.executeRequest(
+                uri: "/",
+                method: HTTPRequest.Method.post,
+                headers: jsonHeaders(),
+                body: byteBuffer(for: initializePayload(id: 1, protocolVersion: "2025-03-26"))
+            )
+
+            let initializeJSON = try decodeJSON(from: initializeResponse.body)
+            XCTAssertEqual(initializeResponse.head.status, .ok)
+            let initializeResult = try XCTUnwrap(initializeJSON["result"] as? [String: Any])
+            XCTAssertEqual(initializeResult["protocolVersion"] as? String, "2025-03-26")
+            let serverInfo = try XCTUnwrap(initializeResult["serverInfo"] as? [String: Any])
+            XCTAssertNil(serverInfo["icons"])
         }
     }
 
@@ -380,6 +409,29 @@ private func decodeJSON(from buffer: ByteBuffer) throws -> [String: Any] {
     let body = try decodeJSONString(from: buffer)
     let data = Data(body.utf8)
     return try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+}
+
+private func assertIconMetadata(_ value: Any?, context: String, file: StaticString = #filePath, line: UInt = #line) {
+    guard let icons = value as? [[String: Any]], let icon = icons.first else {
+        return XCTFail("\(context) missing icons", file: file, line: line)
+    }
+    let src = icon["src"] as? String
+    XCTAssertEqual(icon["mimeType"] as? String, "image/png", file: file, line: line)
+    XCTAssertEqual(icon["sizes"] as? [String], ["64x64"], file: file, line: line)
+    XCTAssertTrue(src?.hasPrefix("data:image/png;base64,") == true, "\(context) icon should use a PNG data URI", file: file, line: line)
+    assertPNGDataURI(src, context: context, file: file, line: line)
+}
+
+private func assertPNGDataURI(_ src: String?, context: String, file: StaticString = #filePath, line: UInt = #line) {
+    let prefix = "data:image/png;base64,"
+    guard let src, src.hasPrefix(prefix) else {
+        return XCTFail("\(context) icon is not a PNG data URI", file: file, line: line)
+    }
+    let encoded = String(src.dropFirst(prefix.count))
+    guard let data = Data(base64Encoded: encoded) else {
+        return XCTFail("\(context) icon base64 is invalid", file: file, line: line)
+    }
+    XCTAssertEqual(Array(data.prefix(8)), [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A], file: file, line: line)
 }
 
 private func slowMethodSource(from buffer: ByteBuffer) throws -> String {

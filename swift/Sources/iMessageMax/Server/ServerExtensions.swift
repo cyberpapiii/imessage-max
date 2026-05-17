@@ -183,6 +183,7 @@ extension Server {
         description: String,
         inputSchema: Value,
         outputSchema: Value? = nil,
+        icons: [Icon]? = nil,
         annotations: Tool.Annotations = nil,
         handler: @escaping @Sendable ([String: Value]?) async throws -> [Tool.Content]
     ) -> Self {
@@ -192,7 +193,8 @@ extension Server {
             description: description,
             inputSchema: inputSchema,
             annotations: annotations,
-            outputSchema: outputSchema
+            outputSchema: outputSchema,
+            icons: icons
         )
 
         ToolHandlerRegistry.shared.register(tool: tool, handler: handler)

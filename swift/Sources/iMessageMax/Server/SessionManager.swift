@@ -285,7 +285,7 @@ actor SessionTransportAdapter: Transport {
 
     func send(_ data: Data) async throws {
         guard isConnected else { return }
-        await responseHandler(data)
+        await responseHandler(IconMetadata.injectServerIcons(into: data))
     }
 
     func receive() -> AsyncThrowingStream<Data, Error> {
