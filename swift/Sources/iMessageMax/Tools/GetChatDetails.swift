@@ -133,10 +133,10 @@ enum GetChatDetailsTool {
         } catch let error as DatabaseError {
             let payload: GetChatDetailsError
             switch error {
-            case .notFound(let path):
-                payload = GetChatDetailsError(error: "database_not_found", message: "Database not found at \(path)")
-            case .permissionDenied(let path):
-                payload = GetChatDetailsError(error: "permission_denied", message: "Permission denied for \(path)")
+            case .notFound:
+                payload = GetChatDetailsError(error: "database_not_found", message: ClientErrorMessages.databaseNotFound)
+            case .permissionDenied:
+                payload = GetChatDetailsError(error: "permission_denied", message: ClientErrorMessages.permissionDenied)
             case .queryFailed(let message):
                 payload = GetChatDetailsError(error: "query_failed", message: message)
             case .invalidData(let message):

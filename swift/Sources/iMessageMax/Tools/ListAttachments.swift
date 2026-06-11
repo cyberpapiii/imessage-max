@@ -184,15 +184,15 @@ final class ListAttachments {
 
         } catch let error as DatabaseError {
             switch error {
-            case .notFound(let path):
+            case .notFound:
                 return .failure(ListAttachmentsError(
                     error: "database_not_found",
-                    message: "Database not found at \(path)"
+                    message: ClientErrorMessages.databaseNotFound
                 ))
-            case .permissionDenied(let path):
+            case .permissionDenied:
                 return .failure(ListAttachmentsError(
                     error: "permission_denied",
-                    message: "Permission denied for \(path)"
+                    message: ClientErrorMessages.permissionDenied
                 ))
             case .queryFailed(let msg):
                 return .failure(ListAttachmentsError(

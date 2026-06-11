@@ -260,10 +260,10 @@ struct GetAttachment {
 
         } catch let error as DatabaseError {
             switch error {
-            case .notFound(let path):
+            case .notFound:
                 return .error(
                     type: "database_not_found",
-                    message: "Database not found at \(path)",
+                    message: ClientErrorMessages.databaseNotFound,
                     details: nil
                 )
             default:
