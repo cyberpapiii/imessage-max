@@ -19,6 +19,15 @@ struct iMessageMax: AsyncParsableCommand {
     @Option(name: .long, help: "Port for HTTP transport (default: 8080)")
     var port: Int = 8080
 
+    @Flag(name: .long, help: "Allow binding the HTTP transport to a non-loopback host (exposes iMessage data to the network; no authentication is provided)")
+    var allowExternalBind = false
+
+    func validate() throws {
+        if http, let message = HostBindingPolicy.validationError(host: host, allowExternalBind: allowExternalBind) {
+            throw ValidationError(message)
+        }
+    }
+
     mutating func run() async throws {
         if http {
             // HTTP mode: HTTPTransport manages per-session Server instances
@@ -41,8 +50,8 @@ struct iMessageMax: AsyncParsableCommand {
             }
             try? await resolver.initialize()
 
-            // Warn if binding to a non-localhost address
-            if host != "127.0.0.1" && host != "::1" && host != "localhost" {
+            // Warn if binding to a non-loopback address (only reachable when --allow-external-bind is set)
+            if !HostBindingPolicy.isLoopback(host) {
                 FileHandle.standardError.write(
                     "[WARNING] Binding to '\(host)' exposes iMessage data to the network. Use 127.0.0.1 for local-only access.\n"
                         .data(using: .utf8)!)
