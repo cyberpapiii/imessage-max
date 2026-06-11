@@ -42,6 +42,8 @@ is an operator action, not an executor step.
 | 006 | Client-facing error hygiene (no paths / error internals to clients) | P3 | S | 004 | DONE (2026-06-11, commit `1785edd` on `advisor/006-client-error-hygiene`, built on 004's `0347bc3`, reviewed & approved; merge 004 before 006) |
 | 007 | CI Swift build caching | P3 | S | — | DONE (2026-06-11, commit `a8a03ec` on `advisor/007-ci-build-cache`, reviewed & approved; cache effect observable on next push) |
 | 008 | Docs drift sweep (SDK version, tool count, protocol version) | P3 | S | — | DONE (2026-06-11, commit `a9ef361` on `advisor/008-docs-drift`, reviewed & approved) |
+| 010 | Migrate GetUnread summary loop onto ChatSummaryQueries | P2 | M | — | IN PROGRESS (dispatched 2026-06-11) |
+| 011 | Design spike: capability contract from diagnose (v2 R6–R9) | P2 | M | — | IN PROGRESS (dispatched 2026-06-11) |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) | REJECTED (with one-line rationale)
 
@@ -69,6 +71,7 @@ Recorded so future audits don't re-litigate:
 - **Unstructured `Task` around the routing continuation** (`HTTPTransport.swift:271-287`): the pending-request timeout (~line 514) already bounds the leak; hardening is possible but low-value relative to risk of touching transport code.
 - **SwiftLint/swift-format setup**: fine idea, low value for a single-maintainer repo right now; revisit if contributors arrive.
 - **Inconsistent tool error patterns** (`Result` returns vs `throws` across tools): real debt, but mechanical and low-impact; fold into a future tool-layer consolidation rather than a standalone pass.
+- **FindChat migration onto ChatSummaryQueries** (2026-06-11): rejected — `find_chat`'s per-candidate enrichment is bounded by small result counts (`targetCount ≤ ~5`), so the batching win is negligible against the refactor risk. Revisit only with reported find_chat latency.
 
 ## Direction findings not (yet) planned
 
