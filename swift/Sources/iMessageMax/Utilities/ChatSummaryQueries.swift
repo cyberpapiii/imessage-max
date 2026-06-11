@@ -91,6 +91,10 @@ enum ChatSummaryQueries {
     ///     and has no sender handle.
     ///   - agoFallback: Value for `ago` when the date cannot be formatted;
     ///     pass `nil` to keep `ago` nullable.
+    ///   - onlyUnreadInbound: When true, only unread inbound messages
+    ///     (`is_read = 0 AND is_from_me = 0`) are considered, matching
+    ///     `get_unread`'s latest-unread selection. Default false preserves
+    ///     the newest-message behavior for all existing callers.
     static func lastMessagesByChat(
         db: Database,
         chatIds: [Int64],
@@ -98,7 +102,8 @@ enum ChatSummaryQueries {
         sinceApple: Int64? = nil,
         previewMaxLength: Int = 50,
         unknownSenderLabel: String = "unknown",
-        agoFallback: String? = "unknown"
+        agoFallback: String? = "unknown",
+        onlyUnreadInbound: Bool = false
     ) async throws -> [Int64: LastMessage] {
         guard !chatIds.isEmpty else { return [:] }
 
@@ -110,6 +115,10 @@ enum ChatSummaryQueries {
             params.append(since)
         }
 
+        let unreadClause = onlyUnreadInbound
+            ? "\n    AND m.is_read = 0 AND m.is_from_me = 0"
+            : ""
+
         let sql = """
             SELECT chat_id, text, attributedBody, is_from_me, sender_handle, date, message_id FROM (
                 SELECT cmj.chat_id as chat_id, m.text, m.attributedBody, m.is_from_me,
@@ -118,7 +127,7 @@ enum ChatSummaryQueries {
                 FROM message m
                 JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
                 LEFT JOIN handle h ON m.handle_id = h.ROWID
-                WHERE cmj.chat_id IN (\(placeholders))\(sinceClause)
+                WHERE cmj.chat_id IN (\(placeholders))\(sinceClause)\(unreadClause)
                 AND m.associated_message_type = 0
             ) WHERE rn = 1
             """

@@ -216,6 +216,76 @@ final class ChatSummaryQueriesTests: XCTestCase {
         XCTAssertEqual(defaultLast.info.text.count, 50, "Default preview maxLength is 50")
     }
 
+    // MARK: - Unread-inbound filter
+
+    /// With `onlyUnreadInbound: true`, read messages and messages from me are
+    /// skipped, so the newest *unread inbound* message wins. With the flag
+    /// false (default), the overall newest non-reaction message wins.
+    func testOnlyUnreadInboundFilter() async throws {
+        let fixture = try ToolTestDatabase(name: "csq-unread-inbound")
+        let resolver = makeSeededResolver()
+
+        try fixture.insertHandle(rowId: 1, handle: "+15550000001")  // Alice
+        try fixture.insertChat(rowId: 1, guid: "unread-filter-guid")
+        try fixture.joinChatHandle(chatId: 1, handleId: 1)
+
+        let base = Int64(Date().timeIntervalSinceReferenceDate * 1_000_000_000) - 3_600_000_000_000
+        let sec: Int64 = 1_000_000_000
+
+        // Oldest: unread inbound — the one the filter must select.
+        try fixture.insertMessage(
+            rowId: 1,
+            guid: "unread-inbound",
+            text: "unread from alice",
+            date: base,
+            isFromMe: false,
+            isRead: false,
+            handleId: 1
+        )
+        try fixture.joinChatMessage(chatId: 1, messageId: 1)
+
+        // Newer: inbound but already read.
+        try fixture.insertMessage(
+            rowId: 2,
+            guid: "read-inbound",
+            text: "read from alice",
+            date: base + sec,
+            isFromMe: false,
+            isRead: true,
+            handleId: 1
+        )
+        try fixture.joinChatMessage(chatId: 1, messageId: 2)
+
+        // Newest: from me.
+        try fixture.insertMessage(
+            rowId: 3,
+            guid: "from-me",
+            text: "my reply",
+            date: base + (2 * sec),
+            isFromMe: true
+        )
+        try fixture.joinChatMessage(chatId: 1, messageId: 3)
+
+        let unreadOnly = try await ChatSummaryQueries.lastMessagesByChat(
+            db: fixture.database(),
+            chatIds: [1],
+            resolver: resolver,
+            onlyUnreadInbound: true
+        )
+        let unreadLast = try XCTUnwrap(unreadOnly[1], "Expected an unread-inbound match for chat 1")
+        XCTAssertEqual(unreadLast.info.text, "unread from alice", "Newest unread inbound must win")
+        XCTAssertEqual(unreadLast.info.from, "Alice Smith")
+
+        let newest = try await ChatSummaryQueries.lastMessagesByChat(
+            db: fixture.database(),
+            chatIds: [1],
+            resolver: resolver
+        )
+        let newestLast = try XCTUnwrap(newest[1])
+        XCTAssertEqual(newestLast.info.text, "my reply", "Default behavior picks the overall newest message")
+        XCTAssertEqual(newestLast.info.from, "Me")
+    }
+
     // MARK: - No-messages chat
 
     /// A chat with participants but zero messages: it appears in participantsByChat
