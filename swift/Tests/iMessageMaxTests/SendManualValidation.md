@@ -116,6 +116,60 @@ Expected:
 - Result status is `failed`
 - Error clearly says `reply_to` is unsupported
 
+## Verified-Send Proof Vocabulary (Plan 012)
+
+These scenarios validate the `confirmed` / `uncertain` / `mismatch` status values
+added in plan 012. Run against a real iMessage account with Full Disk Access granted.
+
+### 9. Confirmed delivery to a known 1:1 contact
+
+Call:
+
+```json
+{
+  "to": "+15555550123",
+  "text": "iMessage Max plan-012 confirm test"
+}
+```
+
+Expected:
+
+- `status` is `confirmed`
+- `verified_message_guid` is a non-empty string (the DB GUID)
+- `verified_at` is a recent ISO timestamp
+- `chat.id` matches the known DM chat ID
+- Message appears in the conversation on the device
+
+### 10. Uncertain — send to address with no prior chat.db row
+
+Call send to a valid handle where Messages.app accepts the command but the DB
+polling window expires (for example, a brand-new iMessage address with no
+previous DB rows). This is hard to reproduce reliably; alternatively, test with
+a sandbox handle that reliably does NOT write a DB row.
+
+Expected:
+
+- `status` is `uncertain`
+- `message` field contains "get_messages" hint
+- No `verified_message_guid` or `verified_at` in the response
+- The text appears in Messages.app even though status is uncertain
+
+### 11. Mismatch — message lands in a different chat
+
+This requires a contrived scenario where the AppleScript `send` routes the
+message to a different thread than the one resolved by `to`. This is most
+likely with a handle that appears in multiple group chats. Use the experiment
+in the design doc (docs/plans/2026-06-11-send-verification-design.md §3) to
+set up the condition.
+
+Expected:
+
+- `status` is `mismatch`
+- `intended_chat` reflects the originally resolved chat
+- `actual_chat_id` identifies the chat where the message actually landed
+- `message` contains routing-mismatch language
+- Agent should NOT treat this as a successful send
+
 ## Attachment Spot Checks
 
 ### 7. Existing image attachment variants
