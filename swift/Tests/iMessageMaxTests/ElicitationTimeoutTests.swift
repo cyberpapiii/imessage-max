@@ -41,6 +41,37 @@ final class ElicitationTimeoutTests: XCTestCase {
         XCTAssertNil(result, "Throwing operation should be reported as nil (same as timeout)")
     }
 
+    // MARK: - Dispatch-timer mechanism tests (plan 015)
+
+    /// AsyncTimeout.sleep uses a Dispatch timer, not Task.sleep.
+    /// Verifies the Dispatch-backed sleep fires within a sensible window.
+    func testDispatchSleepCompletes() async {
+        let start = ContinuousClock().now
+        await AsyncTimeout.sleep(.milliseconds(50))
+        let elapsed = ContinuousClock().now - start
+        XCTAssertGreaterThanOrEqual(elapsed, .milliseconds(40),
+            "Dispatch sleep should last at least 40ms")
+        XCTAssertLessThan(elapsed, .seconds(2),
+            "Dispatch sleep should complete well under 2s")
+    }
+
+    /// withTimeout cancels the operation task on deadline so the operation
+    /// exits soon after nil is returned to the caller.
+    func testTimeoutCancelsOperationTask() async {
+        let exitedExpectation = expectation(description: "operation exits after cancellation")
+
+        let result: Int? = await AsyncTimeout.withTimeout(.milliseconds(50)) {
+            while !Task.isCancelled {
+                await AsyncTimeout.sleep(.milliseconds(10))
+            }
+            exitedExpectation.fulfill()
+            return 99
+        }
+
+        XCTAssertNil(result, "withTimeout should return nil when the deadline fires first")
+        await fulfillment(of: [exitedExpectation], timeout: 1.0)
+    }
+
     // MARK: - End-to-end graceful path
 
     /// Pins the existing graceful path that the timeout now also routes to:

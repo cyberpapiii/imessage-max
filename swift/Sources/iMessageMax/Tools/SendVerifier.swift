@@ -46,7 +46,7 @@ struct SendVerifier: Sendable {
     ///   - sendTime: Wall-clock time captured immediately before the AppleScript call.
     ///   - expectedText: The text string passed to the AppleScript send command.
     /// - Returns: `.confirmed`, `.mismatch`, or `.notFound`.
-    /// - Throws: Rethrows `Database` errors and `CancellationError` from `Task.sleep`.
+    /// - Throws: Rethrows `Database` errors.
     func verify(
         intendedChatId: Int64?,
         handle: String?,
@@ -64,7 +64,7 @@ struct SendVerifier: Sendable {
 
         for attempt in 0..<maxAttempts {
             if attempt > 0 {
-                try await Task.sleep(for: pollInterval)
+                await AsyncTimeout.sleep(pollInterval)
             }
 
             // 1. Primary: look in the intended chat (if we have a chatId).

@@ -214,7 +214,7 @@ actor SendTool {
         resolver: ContactResolver,
         runner: any ScriptRunning = LiveScriptRunner(),
         verifier: SendVerifier? = nil,
-        confirmationTimeout: Duration = .seconds(60)
+        confirmationTimeout: Duration = .seconds(25)
     ) {
         self.db = db
         self.resolver = resolver

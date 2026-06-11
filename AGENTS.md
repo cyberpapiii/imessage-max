@@ -159,6 +159,15 @@ Message text is often stored in `attributedBody` (binary typedstream format) ins
 
 ## Critical Implementation Details
 
+### No Task.sleep in the service runtime
+
+Sleeping Swift tasks abort intermittently inside the launchd-run service
+(`swift_task_dealloc` / "freed pointer was not the last allocation").
+Use Dispatch timers instead: `AsyncTimeout.sleep` / `AsyncTimeout.withTimeout`
+for tool code, or the `DispatchWorkItem` pattern in
+`HTTPTransport.storePendingRequest`. This crashed production on 2026-06-11
+(send-confirmation timeout path); do not reintroduce.
+
 ### Image Handling
 
 Images are returned using MCP's native image content type (not base64 in JSON text) to avoid token bloat:
