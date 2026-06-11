@@ -322,7 +322,7 @@ final class GetAttachmentToolTests: XCTestCase {
         defer { try? FileManager.default.removeItem(atPath: dbPath) }
 
         let tool = GetAttachment(db: Database(path: dbPath))
-        let result = await tool.execute(attachmentId: "att1", variant: "vision")
+        let result = await tool.execute(attachmentId: "att1", variant: "vision", allowedRoots: [FileManager.default.temporaryDirectory.path])
 
         switch result {
         case .success(let metadata, let imageData, let mimeType):
@@ -348,7 +348,7 @@ final class GetAttachmentToolTests: XCTestCase {
         defer { try? FileManager.default.removeItem(atPath: dbPath) }
 
         let tool = GetAttachment(db: Database(path: dbPath))
-        let result = await tool.execute(attachmentId: "2", variant: "full")
+        let result = await tool.execute(attachmentId: "2", variant: "full", allowedRoots: [FileManager.default.temporaryDirectory.path])
 
         switch result {
         case .success:
@@ -370,7 +370,7 @@ final class GetAttachmentToolTests: XCTestCase {
         defer { try? FileManager.default.removeItem(atPath: dbPath) }
 
         let tool = GetAttachment(db: Database(path: dbPath))
-        let result = await tool.execute(attachmentId: "att3", variant: "thumb")
+        let result = await tool.execute(attachmentId: "att3", variant: "thumb", allowedRoots: [FileManager.default.temporaryDirectory.path])
 
         switch result {
         case .success:

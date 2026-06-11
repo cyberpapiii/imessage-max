@@ -184,15 +184,15 @@ final class ListAttachments {
 
         } catch let error as DatabaseError {
             switch error {
-            case .notFound(let path):
+            case .notFound:
                 return .failure(ListAttachmentsError(
                     error: "database_not_found",
-                    message: "Database not found at \(path)"
+                    message: ClientErrorMessages.databaseNotFound
                 ))
-            case .permissionDenied(let path):
+            case .permissionDenied:
                 return .failure(ListAttachmentsError(
                     error: "permission_denied",
-                    message: "Permission denied for \(path)"
+                    message: ClientErrorMessages.permissionDenied
                 ))
             case .queryFailed(let msg):
                 return .failure(ListAttachmentsError(
@@ -403,7 +403,8 @@ final class ListAttachments {
 
     func attachmentsForMessage(
         messageId: Int64,
-        typeFilter: String?
+        typeFilter: String?,
+        allowedRoots: [String] = AttachmentPathPolicy.defaultRoots
     ) throws -> [(id: Int64, type: AttachmentType, name: String?, available: Bool, sizeHuman: String?)] {
         var sql = """
             SELECT a.ROWID, a.filename, a.mime_type, a.uti, a.total_bytes
@@ -418,8 +419,10 @@ final class ListAttachments {
 
         return try db.query(sql, params: [messageId]) { row in
             let path = row.string(1)
-            let expandedPath = path.map { ($0 as NSString).expandingTildeInPath }
-            let available = expandedPath.map { FileManager.default.fileExists(atPath: $0) } ?? false
+            // Route through policy: paths outside allowed roots are treated as unavailable,
+            // identical to a missing file. List output stays total (no error thrown).
+            let validatedPath = path.flatMap { AttachmentPathPolicy.validatedPath($0, allowedRoots: allowedRoots) }
+            let available = validatedPath.map { FileManager.default.fileExists(atPath: $0) } ?? false
             let name = path.map { ($0 as NSString).lastPathComponent }
             let bytes = row.optionalInt(4).map { Int($0) }
             return (

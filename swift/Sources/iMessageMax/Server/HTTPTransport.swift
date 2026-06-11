@@ -293,9 +293,12 @@ public actor HTTPTransport: Transport {
                     body: .init(byteBuffer: ByteBuffer(data: responseData))
                 )
             } catch {
+                FileHandle.standardError.write(
+                    "[iMessage Max] Request handling failed: \(error)\n".data(using: .utf8)!
+                )
                 return errorResponse(
                     status: .internalServerError,
-                    message: "Failed to process request: \(error.localizedDescription)"
+                    message: ClientErrorMessages.internalError
                 )
             }
 

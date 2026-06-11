@@ -93,8 +93,10 @@ struct GetAttachment {
     /// - Parameters:
     ///   - attachmentId: Attachment identifier (e.g., "att123" or just "123")
     ///   - variant: Resolution variant - "vision" (1568px, default), "thumb" (400px), or "full" (original)
+    ///   - allowedRoots: File-system roots that attachment paths must reside under. Defaults to
+    ///                   `AttachmentPathPolicy.defaultRoots`. Inject a different value in tests.
     /// - Returns: GetAttachmentResult with image data or error
-    func execute(attachmentId: String, variant: String = "vision") async -> GetAttachmentResult {
+    func execute(attachmentId: String, variant: String = "vision", allowedRoots: [String] = AttachmentPathPolicy.defaultRoots) async -> GetAttachmentResult {
         // Validate variant
         guard let imageVariant = ImageVariant(rawValue: variant) else {
             let validVariants = ImageVariant.allCases.map { $0.rawValue }.sorted()
@@ -171,8 +173,14 @@ struct GetAttachment {
                 )
             }
 
-            // Expand ~ in path
-            let expandedPath = (filename as NSString).expandingTildeInPath
+            // Expand ~ in path and contain to allowed roots
+            guard let expandedPath = AttachmentPathPolicy.validatedPath(filename, allowedRoots: allowedRoots) else {
+                return .error(
+                    type: "attachment_path_invalid",
+                    message: "Attachment path is outside the Messages attachment store",
+                    details: nil
+                )
+            }
             let fileURL = URL(fileURLWithPath: expandedPath)
 
             // Check if file exists locally
@@ -252,10 +260,10 @@ struct GetAttachment {
 
         } catch let error as DatabaseError {
             switch error {
-            case .notFound(let path):
+            case .notFound:
                 return .error(
                     type: "database_not_found",
-                    message: "Database not found at \(path)",
+                    message: ClientErrorMessages.databaseNotFound,
                     details: nil
                 )
             default:

@@ -463,15 +463,15 @@ enum GetContext {
 
         } catch let error as DatabaseError {
             switch error {
-            case .notFound(let path):
+            case .notFound:
                 return .failure(GetContextError(
                     error: "database_not_found",
-                    message: "Database not found at \(path)"
+                    message: ClientErrorMessages.databaseNotFound
                 ))
-            case .permissionDenied(let path):
+            case .permissionDenied:
                 return .failure(GetContextError(
                     error: "permission_denied",
-                    message: "Permission denied accessing \(path)"
+                    message: ClientErrorMessages.permissionDenied
                 ))
             default:
                 return .failure(GetContextError(

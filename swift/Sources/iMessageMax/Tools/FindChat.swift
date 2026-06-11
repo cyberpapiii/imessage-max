@@ -227,10 +227,10 @@ enum FindChatTool {
         } catch let dbError as DatabaseError {
             let error: ErrorResponse
             switch dbError {
-            case .notFound(let path):
-                error = ErrorResponse(error: "database_not_found", message: "Database not found at \(path)")
-            case .permissionDenied(let path):
-                error = ErrorResponse(error: "permission_denied", message: "Permission denied for \(path)")
+            case .notFound:
+                error = ErrorResponse(error: "database_not_found", message: ClientErrorMessages.databaseNotFound)
+            case .permissionDenied:
+                error = ErrorResponse(error: "permission_denied", message: ClientErrorMessages.permissionDenied)
             case .queryFailed(let msg):
                 error = ErrorResponse(error: "query_failed", message: msg)
             case .invalidData(let msg):

@@ -425,10 +425,10 @@ enum SearchTool {
 
         } catch let dbError as DatabaseError {
             switch dbError {
-            case .notFound(let path):
-                return .failure(SearchError(error: "database_not_found", message: "Database not found at \(path)"))
-            case .permissionDenied(let path):
-                return .failure(SearchError(error: "permission_denied", message: "Permission denied for \(path)"))
+            case .notFound:
+                return .failure(SearchError(error: "database_not_found", message: ClientErrorMessages.databaseNotFound))
+            case .permissionDenied:
+                return .failure(SearchError(error: "permission_denied", message: ClientErrorMessages.permissionDenied))
             case .queryFailed(let msg):
                 return .failure(SearchError(error: "query_failed", message: msg))
             case .invalidData(let msg):
