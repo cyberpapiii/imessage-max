@@ -63,7 +63,7 @@ curl -X POST http://localhost:8080 \
 
 ### Swift Stack
 - **Language:** Swift 6.1
-- **MCP SDK:** modelcontextprotocol/swift-sdk v0.11.0
+- **MCP SDK:** modelcontextprotocol/swift-sdk (version pinned in `swift/Package.swift` / `swift/Package.resolved`)
 - **HTTP Server:** Hummingbird 2.x (for `--http` mode)
 - **Database:** Raw SQLite3 C API for `~/Library/Messages/chat.db`
 - **Contacts:** CNContactStore (native macOS)

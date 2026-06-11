@@ -22,7 +22,7 @@ Everything current lives under `swift/`.
 
 ## Features
 
-- **11 Intent-Aligned Tools** - Work the way you naturally ask questions, not raw database queries
+- **12 Intent-Aligned Tools** - Work the way you naturally ask questions, not raw database queries
 - **Contact Resolution** - See names instead of phone numbers via macOS Contacts
 - **Smart Image Handling** - Efficient image variants (vision/thumb/full) to avoid token bloat
 - **Session Grouping** - Messages grouped into conversation sessions with gap detection
