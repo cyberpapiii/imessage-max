@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "imessage-max": {
+      "command": "imessage-max",
+      "args": [],
+      "note": "Local macOS MCP server for iMessage. Requires Full Disk Access for Messages, Contacts permission for contact resolution, and Automation permission for sending."
+    }
+  }
+}
