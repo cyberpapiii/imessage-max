@@ -194,15 +194,23 @@ final class ResponseContractTests: XCTestCase {
             status: "ready",
             database: .init(accessible: true, status: "ok", path: "/tmp/chat.db", fix: nil),
             contacts: .init(authorized: true, status: "authorized", loaded: 10, fix: nil),
-            capabilities: .init(
-                sendTextToParticipant: true,
-                sendTextToChat: true,
-                sendFileToParticipant: true,
-                sendFileToChat: true,
-                replyToSupported: false,
-                tapbackSupported: false,
-                editUnsendSupported: false
-            )
+            capabilities: [
+                "send_text_dm":    Capability(state: "supported"),
+                "send_text_group": Capability(state: "supported"),
+                "send_file_dm":    Capability(state: "supported"),
+                "send_file_group": Capability(state: "risky-private"),
+                "verified_send":   Capability(state: "supported", detail: "db_reread"),
+                "attachments_read": Capability(state: "supported"),
+                "attachments_offloaded": Capability(state: "supported"),
+                "reply_threading": Capability(state: "unsupported"),
+                "tapbacks":        Capability(state: "unsupported"),
+                "edit_unsend":     Capability(state: "unsupported"),
+                "live_inbox":      Capability(state: "unavailable"),
+                "perm_full_disk":  Capability(state: "supported"),
+                "perm_contacts":   Capability(state: "supported"),
+                "perm_automation": Capability(state: "supported"),
+                "rich_backend":    Capability(state: "unavailable"),
+            ]
         )
 
         let encoded = try decodeJSONDictionary(from: try encodedJSONString(sample))
@@ -211,6 +219,12 @@ final class ResponseContractTests: XCTestCase {
         XCTAssertNotNil(encoded["capabilities"])
         XCTAssertNil(encoded["database_accessible"])
         XCTAssertNil(encoded["contacts_authorized"])
+
+        // Verify new state-based shape: capabilities is a dict of objects with "state" keys
+        let caps = try XCTUnwrap(encoded["capabilities"] as? [String: Any])
+        let sendDM = try XCTUnwrap(caps["send_text_dm"] as? [String: Any])
+        XCTAssertEqual(sendDM["state"] as? String, "supported")
+        XCTAssertEqual(caps.count, 15)
     }
 }
 

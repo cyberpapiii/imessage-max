@@ -2,7 +2,24 @@
 import Foundation
 import MCP
 
-/// Result type for diagnose tool
+/// A single capability entry in the capability contract.
+/// `state` uses the vocabulary from design §2.1.
+/// `note` / `fix` / `detail` are omitted when nil for token efficiency.
+struct Capability: Codable, Equatable {
+    let state: String
+    let note: String?
+    let fix: String?
+    let detail: String?
+
+    init(state: String, note: String? = nil, fix: String? = nil, detail: String? = nil) {
+        self.state = state
+        self.note = note
+        self.fix = fix
+        self.detail = detail
+    }
+}
+
+/// Result type for the diagnose tool.
 struct DiagnoseResult: Codable {
     struct DatabaseStatus: Codable {
         let accessible: Bool
@@ -18,32 +35,13 @@ struct DiagnoseResult: Codable {
         let fix: String?
     }
 
-    struct Capabilities: Codable {
-        let sendTextToParticipant: Bool
-        let sendTextToChat: Bool
-        let sendFileToParticipant: Bool
-        let sendFileToChat: Bool
-        let replyToSupported: Bool
-        let tapbackSupported: Bool
-        let editUnsendSupported: Bool
-
-        enum CodingKeys: String, CodingKey {
-            case sendTextToParticipant = "send_text_to_participant"
-            case sendTextToChat = "send_text_to_chat"
-            case sendFileToParticipant = "send_file_to_participant"
-            case sendFileToChat = "send_file_to_chat"
-            case replyToSupported = "reply_to_supported"
-            case tapbackSupported = "tapback_supported"
-            case editUnsendSupported = "edit_unsend_supported"
-        }
-    }
-
     let version: String
     let processId: Int32
     let status: String
     let database: DatabaseStatus
     let contacts: ContactsStatus
-    let capabilities: Capabilities
+    /// Capability contract: 15 keys per design §2.2.
+    let capabilities: [String: Capability]
 
     enum CodingKeys: String, CodingKey {
         case version
@@ -67,7 +65,23 @@ enum DiagnoseTool {
 
         server.registerTool(
             name: "diagnose",
-            description: "Diagnose iMessage MCP configuration and permissions. Use this to troubleshoot database access, contacts, or permission issues.",
+            description: """
+                Use diagnose before attempting any send, attachment, or live-inbox operation. \
+                Check capabilities.<key>.state for each feature you plan to use. \
+                "supported" means the feature is available and probed on this install. \
+                "unsupported" means the feature does not exist — do not attempt it or expose \
+                it to the user as an option. "permission-gated" means a macOS permission must \
+                be granted before the feature can work; surface the fix field to the user. \
+                "risky-private" means the feature requires explicit confirmation (pass confirm: true). \
+                "unverified" means the capability state cannot be determined at diagnose time; \
+                treat it as potentially available but proceed cautiously. "unavailable" means no \
+                implementation exists in the current backend — do not attempt and do not mention \
+                to the user as a near-term option. The database.accessible field governs whether \
+                all read tools (get_messages, list_chats, search, etc.) will work. A "needs_setup" \
+                top-level status means at least one required permission is missing; resolve it \
+                before proceeding. Use chat.name in user-facing summaries and chat ids only in \
+                follow-up tool calls. Refer to chats by name when talking to users.
+                """,
             inputSchema: inputSchema,
             outputSchema: OutputSchema.object,
             annotations: Tool.Annotations(
@@ -83,22 +97,25 @@ enum DiagnoseTool {
         }
     }
 
-    /// Diagnose iMessage MCP configuration and permissions.
+    /// Diagnose iMessage MCP configuration, permissions, and runtime capabilities.
     ///
-    /// Use this tool to troubleshoot issues with contact resolution,
-    /// database access, or permission problems.
-    ///
-    /// - Parameter resolver: ContactResolver for checking contacts status
-    /// - Returns: DiagnoseResult with database access status, contacts status, version info, and system info
-    static func execute(resolver: ContactResolver) async throws -> DiagnoseResult {
+    /// - Parameters:
+    ///   - resolver: ContactResolver for checking contacts status
+    ///   - automationProbe: Automation permission probe; inject a mock in tests because
+    ///     CI runners return "not_determined" rather than the live TCC result.
+    /// - Returns: DiagnoseResult with health fields and the full 15-key capability contract
+    static func execute(
+        resolver: ContactResolver,
+        automationProbe: AutomationProbe = { AutomationPermission.checkAutomationPermission() }
+    ) async throws -> DiagnoseResult {
         let processId = ProcessInfo.processInfo.processIdentifier
 
-        // Check database access (Full Disk Access)
-        let (dbAccessible, dbStatus) = Database.checkAccess()
+        // Probe 1: Full Disk Access via Database
+        let (dbOk, dbStatus) = Database.checkAccess()
         let databasePath = Database.defaultPath
 
         var databaseFix: String? = nil
-        if !dbAccessible {
+        if !dbOk {
             if dbStatus == "permission_denied" {
                 databaseFix = "Grant Full Disk Access: System Settings -> Privacy & Security -> " +
                     "Full Disk Access -> Add your terminal app or the imessage-max executable"
@@ -108,7 +125,7 @@ enum DiagnoseTool {
             }
         }
 
-        // Check Contacts access
+        // Probe 2: Contacts authorization
         let (contactsAuthorized, authorizationStatus) = ContactResolver.authorizationStatus()
 
         var contactsStatus = authorizationStatus
@@ -129,16 +146,158 @@ enum DiagnoseTool {
                 "Contacts -> Add your terminal app or the imessage-max executable"
         }
 
-        // Overall status
-        let allGood = dbAccessible && contactsAuthorized
+        // Probe 3: Automation permission (injected for testability)
+        let (automationOk, automationStatus) = automationProbe()
+
+        // Overall health status
+        let allGood = dbOk && contactsAuthorized
         let overallStatus = allGood ? "ready" : "needs_setup"
+
+        // MARK: - Capability derivation (design §2.4)
+
+        let automationFix = "Grant Automation access: System Settings -> Privacy & Security -> " +
+            "Automation -> Enable Messages for your terminal app or the imessage-max executable"
+
+        // Send modes: driven solely by automation probe
+        let sendState: String
+        let sendFix: String?
+        switch (automationOk, automationStatus) {
+        case (true, _):
+            sendState = "supported"
+            sendFix = nil
+        case (false, "denied"):
+            sendState = "permission-gated"
+            sendFix = automationFix
+        default:
+            sendState = "unverified"
+            sendFix = nil
+        }
+
+        // send_file_group: risky-private when automation ok; otherwise same as other send modes
+        let sendFileGroupState: String
+        let sendFileGroupNote: String?
+        let sendFileGroupFix: String?
+        switch (automationOk, automationStatus) {
+        case (true, _):
+            sendFileGroupState = "risky-private"
+            sendFileGroupNote = "Group file sends require confirm:true; routing cannot be verified before send"
+            sendFileGroupFix = nil
+        case (false, "denied"):
+            sendFileGroupState = "permission-gated"
+            sendFileGroupNote = nil
+            sendFileGroupFix = automationFix
+        default:
+            sendFileGroupState = "unverified"
+            sendFileGroupNote = nil
+            sendFileGroupFix = nil
+        }
+
+        // verified_send: db.ok && automation.ok → supported; db.ok && !automation.ok → degraded;
+        //                !db.ok → permission-gated
+        let verifiedSendState: String
+        let verifiedSendFix: String?
+        let verifiedSendDetail: String?
+        if !dbOk {
+            verifiedSendState = "permission-gated"
+            verifiedSendFix = "Grant Full Disk Access to enable DB re-read verification after sends"
+            verifiedSendDetail = nil
+        } else if automationOk {
+            verifiedSendState = "supported"
+            verifiedSendFix = nil
+            verifiedSendDetail = "db_reread"
+        } else {
+            verifiedSendState = "degraded"
+            verifiedSendFix = nil
+            verifiedSendDetail = nil
+        }
+
+        // attachments_read: db-gated
+        let attachmentsReadState = dbOk ? "supported" : "permission-gated"
+        let attachmentsReadFix = dbOk ? nil : "Grant Full Disk Access to read attachment content"
+
+        // attachments_offloaded: always supported when DB accessible (offload handled at call time)
+        let attachmentsOffloadedState = dbOk ? "supported" : "permission-gated"
+        let attachmentsOffloadedNote: String? = dbOk
+            ? "Offloaded files trigger iCloud download; retry get_attachment after a few seconds"
+            : nil
+
+        // perm_full_disk
+        let permFullDiskState: String
+        let permFullDiskFix: String?
+        switch dbStatus {
+        case "accessible":
+            permFullDiskState = "supported"
+            permFullDiskFix = nil
+        case "permission_denied":
+            permFullDiskState = "permission-gated"
+            permFullDiskFix = databaseFix
+        default:
+            permFullDiskState = "degraded"
+            permFullDiskFix = databaseFix
+        }
+
+        // perm_contacts
+        let permContactsState: String
+        let permContactsFix: String?
+        switch authorizationStatus {
+        case "authorized", "limited":
+            permContactsState = "supported"
+            permContactsFix = nil
+        case "denied", "restricted":
+            permContactsState = "permission-gated"
+            permContactsFix = contactsFix
+        default:
+            permContactsState = "unverified"
+            permContactsFix = nil
+        }
+
+        // perm_automation
+        let permAutomationState: String
+        let permAutomationFix: String?
+        switch (automationOk, automationStatus) {
+        case (true, _):
+            permAutomationState = "supported"
+            permAutomationFix = nil
+        case (false, "denied"):
+            permAutomationState = "permission-gated"
+            permAutomationFix = automationFix
+        default:
+            permAutomationState = "unverified"
+            permAutomationFix = nil
+        }
+
+        let capabilities: [String: Capability] = [
+            "send_text_dm":          Capability(state: sendState, fix: sendFix),
+            "send_text_group":       Capability(state: sendState, fix: sendFix),
+            "send_file_dm":          Capability(state: sendState, fix: sendFix),
+            "send_file_group":       Capability(
+                state: sendFileGroupState,
+                note: sendFileGroupNote,
+                fix: sendFileGroupFix
+            ),
+            "verified_send":         Capability(
+                state: verifiedSendState,
+                fix: verifiedSendFix,
+                detail: verifiedSendDetail
+            ),
+            "attachments_read":      Capability(state: attachmentsReadState, fix: attachmentsReadFix),
+            "attachments_offloaded": Capability(state: attachmentsOffloadedState, note: attachmentsOffloadedNote),
+            "reply_threading":       Capability(state: "unsupported"),
+            "tapbacks":              Capability(state: "unsupported"),
+            "edit_unsend":           Capability(state: "unsupported"),
+            "live_inbox":            Capability(state: "unavailable"),
+            "perm_full_disk":        Capability(state: permFullDiskState, fix: permFullDiskFix),
+            "perm_contacts":         Capability(state: permContactsState, fix: permContactsFix),
+            "perm_automation":       Capability(state: permAutomationState, fix: permAutomationFix),
+            "rich_backend":          Capability(state: "unavailable"),
+        ]
 
         return DiagnoseResult(
             version: Version.current,
             processId: processId,
             status: overallStatus,
             database: .init(
-                accessible: dbAccessible,
+                accessible: dbOk,
                 status: dbStatus,
                 path: databasePath,
                 fix: databaseFix
@@ -149,15 +308,7 @@ enum DiagnoseTool {
                 loaded: contactsLoaded,
                 fix: contactsFix
             ),
-            capabilities: .init(
-                sendTextToParticipant: true,
-                sendTextToChat: true,
-                sendFileToParticipant: true,
-                sendFileToChat: true,
-                replyToSupported: false,
-                tapbackSupported: false,
-                editUnsendSupported: false
-            )
+            capabilities: capabilities
         )
     }
 }
