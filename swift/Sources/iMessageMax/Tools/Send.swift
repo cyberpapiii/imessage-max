@@ -26,6 +26,12 @@ struct SendResponse: Encodable {
     let message: String?
     let error: String?
     let candidates: [RecipientCandidate]?
+    // Verification fields (non-nil only for "confirmed")
+    let verifiedMessageGuid: String?
+    let verifiedAt: String?
+    // Mismatch fields (non-nil only for "mismatch")
+    let intendedChat: ChatReference?
+    let actualChatId: String?
 
     enum CodingKeys: String, CodingKey {
         case status
@@ -36,8 +42,14 @@ struct SendResponse: Encodable {
         case message
         case error
         case candidates
+        case verifiedMessageGuid = "verified_message_guid"
+        case verifiedAt = "verified_at"
+        case intendedChat = "intended_chat"
+        case actualChatId = "actual_chat_id"
     }
 
+    // MARK: - Transport-only fallback ("sent")
+    // Returned only when verification cannot run (DB unreadable). Option D §4.3.
     static func success(deliveredTo: [String], chat: ChatReference?) -> SendResponse {
         SendResponse(
             status: "sent",
@@ -47,9 +59,75 @@ struct SendResponse: Encodable {
             chatId: chat?.id,
             message: nil,
             error: nil,
-            candidates: nil
+            candidates: nil,
+            verifiedMessageGuid: nil,
+            verifiedAt: nil,
+            intendedChat: nil,
+            actualChatId: nil
         )
     }
+
+    // MARK: - Verified-send proof states (design §4.1)
+
+    /// DB re-read found the outbound row in the intended chat with error = 0.
+    static func confirmed(guid: String, deliveredTo: [String], chat: ChatReference?) -> SendResponse {
+        SendResponse(
+            status: "confirmed",
+            timestamp: TimeUtils.formatISO(Date()),
+            chat: chat,
+            deliveredTo: deliveredTo,
+            chatId: chat?.id,
+            message: nil,
+            error: nil,
+            candidates: nil,
+            verifiedMessageGuid: guid,
+            verifiedAt: TimeUtils.formatISO(Date()),
+            intendedChat: nil,
+            actualChatId: nil
+        )
+    }
+
+    /// Transport succeeded but row not found in DB within the polling window.
+    static func uncertain(deliveredTo: [String], chat: ChatReference?) -> SendResponse {
+        let id = chat?.id
+        let name = chat?.name ?? id ?? "the intended chat"
+        let followUp = id.map { "Use get_messages on \($0) to confirm." }
+            ?? "Use get_messages on \(name) to confirm."
+        return SendResponse(
+            status: "uncertain",
+            timestamp: TimeUtils.formatISO(Date()),
+            chat: chat,
+            deliveredTo: deliveredTo,
+            chatId: id,
+            message: "Send accepted by Messages.app but could not be verified in chat.db within the polling window. The message was probably sent. \(followUp)",
+            error: nil,
+            candidates: nil,
+            verifiedMessageGuid: nil,
+            verifiedAt: nil,
+            intendedChat: nil,
+            actualChatId: nil
+        )
+    }
+
+    /// Row found in a different chat than intended. Routing mismatch (R5).
+    static func mismatch(intendedChat: ChatReference?, actualChatId: Int64, deliveredTo: [String]) -> SendResponse {
+        SendResponse(
+            status: "mismatch",
+            timestamp: TimeUtils.formatISO(Date()),
+            chat: nil,
+            deliveredTo: deliveredTo,
+            chatId: nil,
+            message: "Message was found in a different chat than intended. This is a routing mismatch. Do not treat as confirmed.",
+            error: nil,
+            candidates: nil,
+            verifiedMessageGuid: nil,
+            verifiedAt: nil,
+            intendedChat: intendedChat,
+            actualChatId: "chat\(actualChatId)"
+        )
+    }
+
+    // MARK: - Existing statuses (unchanged)
 
     static func pending(_ message: String, deliveredTo: [String], chat: ChatReference?) -> SendResponse {
         SendResponse(
@@ -60,7 +138,11 @@ struct SendResponse: Encodable {
             chatId: chat?.id,
             message: message,
             error: nil,
-            candidates: nil
+            candidates: nil,
+            verifiedMessageGuid: nil,
+            verifiedAt: nil,
+            intendedChat: nil,
+            actualChatId: nil
         )
     }
 
@@ -73,7 +155,11 @@ struct SendResponse: Encodable {
             chatId: chat?.id,
             message: message,
             error: nil,
-            candidates: nil
+            candidates: nil,
+            verifiedMessageGuid: nil,
+            verifiedAt: nil,
+            intendedChat: nil,
+            actualChatId: nil
         )
     }
 
@@ -86,7 +172,11 @@ struct SendResponse: Encodable {
             chatId: nil,
             message: nil,
             error: message,
-            candidates: nil
+            candidates: nil,
+            verifiedMessageGuid: nil,
+            verifiedAt: nil,
+            intendedChat: nil,
+            actualChatId: nil
         )
     }
 
@@ -99,7 +189,11 @@ struct SendResponse: Encodable {
             chatId: nil,
             message: "Multiple contacts match. Please specify using a phone number, email, or chat_id.",
             error: nil,
-            candidates: candidates
+            candidates: candidates,
+            verifiedMessageGuid: nil,
+            verifiedAt: nil,
+            intendedChat: nil,
+            actualChatId: nil
         )
     }
 }
@@ -111,12 +205,19 @@ actor SendTool {
     private let db: Database
     private let resolver: ContactResolver
     private let runner: any ScriptRunning
+    private let verifier: SendVerifier
     private lazy var sendResolver = SendResolver(db: db, resolver: resolver)
 
-    init(db: Database = Database(), resolver: ContactResolver, runner: any ScriptRunning = LiveScriptRunner()) {
+    init(
+        db: Database = Database(),
+        resolver: ContactResolver,
+        runner: any ScriptRunning = LiveScriptRunner(),
+        verifier: SendVerifier? = nil
+    ) {
         self.db = db
         self.resolver = resolver
         self.runner = runner
+        self.verifier = verifier ?? SendVerifier(db: db)
     }
 
     // MARK: - Tool Registration
@@ -132,6 +233,13 @@ actor SendTool {
                 Prefer 'chat_id' when the exact thread matters.
                 Use 'to' when starting from a person is acceptable.
                 chat_id is an exact tool-call target; when talking to the user, refer to the destination by the returned chat.name or recipient names.
+
+                Proof vocabulary for text sends (status field):
+                  confirmed — row found in chat.db with error=0; include verified_message_guid as evidence.
+                  uncertain — transport accepted but row not found within polling window; follow up with get_messages.
+                  mismatch  — row found in a different chat than intended; alert the user, do not treat as success.
+                  sent      — verification unavailable (DB unreadable); transport accepted only.
+                File sends and failed/cancelled/ambiguous states are unchanged.
                 """,
             inputSchema: InputSchema.object(
                 properties: [
@@ -244,6 +352,9 @@ actor SendTool {
             }
         }
 
+        // Capture send time before dispatch (design §5.2 option 1).
+        let sendTime = Date()
+
         let sendResults: [Result<Void, SendError>]
         switch resolved.target {
         case .participant(let handle, _):
@@ -286,7 +397,53 @@ actor SendTool {
             )
         }
 
-        return .success(deliveredTo: resolved.deliveredTo, chat: resolved.chat)
+        // All payloads succeeded. For text payloads, run post-send DB verification.
+        // File payloads keep the unchanged transfer-observation status.
+        let textBodies: [String] = payloads.compactMap {
+            if case .text(let body) = $0 { return body }
+            return nil
+        }
+
+        guard let lastText = textBodies.last else {
+            // File-only send — verification does not apply; status unchanged.
+            return .success(deliveredTo: resolved.deliveredTo, chat: resolved.chat)
+        }
+
+        // Extract chatId and handle from the resolved target for the verifier.
+        let intendedChatId: Int64?
+        let participantHandle: String?
+        switch resolved.target {
+        case .participant(let handle, let cid):
+            participantHandle = handle
+            intendedChatId = cid.map(Int64.init)
+        case .chat(_, let cid):
+            participantHandle = nil
+            intendedChatId = Int64(cid)
+        }
+
+        do {
+            let verification = try await verifier.verify(
+                intendedChatId: intendedChatId,
+                handle: participantHandle,
+                sendTime: sendTime,
+                expectedText: lastText
+            )
+            switch verification {
+            case .confirmed(let guid, _):
+                return .confirmed(guid: guid, deliveredTo: resolved.deliveredTo, chat: resolved.chat)
+            case .mismatch(let actualChatId, _):
+                return .mismatch(
+                    intendedChat: resolved.chat,
+                    actualChatId: actualChatId,
+                    deliveredTo: resolved.deliveredTo
+                )
+            case .notFound:
+                return .uncertain(deliveredTo: resolved.deliveredTo, chat: resolved.chat)
+            }
+        } catch {
+            // DB unreadable or task cancelled → Option D: transport-only fallback.
+            return .success(deliveredTo: resolved.deliveredTo, chat: resolved.chat)
+        }
     }
 
     private enum ConfirmationDecision {

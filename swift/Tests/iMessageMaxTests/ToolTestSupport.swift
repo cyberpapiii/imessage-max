@@ -68,7 +68,9 @@ final class ToolTestDatabase {
         isRead: Bool = false,
         handleId: Int? = nil,
         associatedMessageType: Int = 0,
-        associatedMessageGuid: String? = nil
+        associatedMessageGuid: String? = nil,
+        error: Int = 0,
+        isSent: Int = 0
     ) throws {
         let textValue = text.map { "'\(escape($0))'" } ?? "NULL"
         let handleValue = handleId.map(String.init) ?? "NULL"
@@ -76,9 +78,9 @@ final class ToolTestDatabase {
 
         try execute("""
             INSERT INTO message (
-                ROWID, guid, text, attributedBody, date, is_from_me, is_read, handle_id, associated_message_type, associated_message_guid
+                ROWID, guid, text, attributedBody, date, is_from_me, is_read, handle_id, associated_message_type, associated_message_guid, error, is_sent
             ) VALUES (
-                \(rowId), '\(escape(guid))', \(textValue), NULL, \(date), \(isFromMe ? 1 : 0), \(isRead ? 1 : 0), \(handleValue), \(associatedMessageType), \(assocGuidValue)
+                \(rowId), '\(escape(guid))', \(textValue), NULL, \(date), \(isFromMe ? 1 : 0), \(isRead ? 1 : 0), \(handleValue), \(associatedMessageType), \(assocGuidValue), \(error), \(isSent)
             );
             """)
     }
@@ -143,7 +145,9 @@ final class ToolTestDatabase {
             is_read INTEGER DEFAULT 0,
             handle_id INTEGER,
             associated_message_type INTEGER,
-            associated_message_guid TEXT
+            associated_message_guid TEXT,
+            error INTEGER DEFAULT 0,
+            is_sent INTEGER DEFAULT 0
         );
         CREATE TABLE chat_message_join (
             chat_id INTEGER,

@@ -225,6 +225,11 @@ actor SendResolver {
     }
 
     private func findDirectChatForHandle(_ handle: String) throws -> Int? {
+        // The participant count must be computed over the WHOLE chat, not just the
+        // rows surviving `WHERE h.id = ?`. A `GROUP BY ... HAVING COUNT(...) = 1`
+        // after the handle filter counts only the filtered handle's rows, so every
+        // chat containing the handle (including groups) passes — the correlated
+        // subquery below counts all participants of each candidate chat instead.
         let oneOnOneChats: [Int64] = try db.query(
             """
             SELECT c.ROWID
@@ -232,8 +237,9 @@ actor SendResolver {
             JOIN chat_handle_join chj ON c.ROWID = chj.chat_id
             JOIN handle h ON chj.handle_id = h.ROWID
             WHERE h.id = ?
-            GROUP BY c.ROWID
-            HAVING COUNT(DISTINCT chj.handle_id) = 1
+              AND (SELECT COUNT(DISTINCT chj2.handle_id)
+                   FROM chat_handle_join chj2
+                   WHERE chj2.chat_id = c.ROWID) = 1
             ORDER BY c.ROWID DESC
             LIMIT 1
             """,
