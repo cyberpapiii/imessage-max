@@ -163,10 +163,30 @@ Message text is often stored in `attributedBody` (binary typedstream format) ins
 
 Sleeping Swift tasks abort intermittently inside the launchd-run service
 (`swift_task_dealloc` / "freed pointer was not the last allocation").
-Use Dispatch timers instead: `AsyncTimeout.sleep` / `AsyncTimeout.withTimeout`
-for tool code, or the `DispatchWorkItem` pattern in
-`HTTPTransport.storePendingRequest`. This crashed production on 2026-06-11
-(send-confirmation timeout path); do not reintroduce.
+Use Dispatch timers instead: `AsyncTimeout.sleep` for tool code, or the
+`DispatchWorkItem` pattern in `HTTPTransport.storePendingRequest`. This
+crashed production on 2026-06-11 (send-confirmation timeout path); do not
+reintroduce.
+
+### Send contract (no confirmation gate)
+
+The `send` tool is agent-native (plan 017):
+
+- Exact destination → send immediately, then verify via chat.db →
+  `confirmed` / `uncertain` / `mismatch` / `sent`.
+- Ambiguous destination → status `ambiguous`, no send. Invalid input →
+  status `failed`, no send.
+- The `confirm` parameter is deprecated and inert: accepted for
+  compatibility, ignored.
+- File transfers keep the bounded Messages.app observation states
+  (`pending_confirmation` while a transfer hasn't completed).
+
+Interactive human-confirmation popups (MCP elicitation) and server-side send
+gating are intentionally not part of the send path: authorization happens in
+the user's conversation with the agent and in harness-level tool approval,
+and a send tool must return synchronously. Do not reintroduce either without
+operator sign-off and proof of a working elicitation round trip for the
+current session.
 
 ### Image Handling
 

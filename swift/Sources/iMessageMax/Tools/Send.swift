@@ -146,23 +146,6 @@ struct SendResponse: Encodable {
         )
     }
 
-    static func cancelled(_ message: String, deliveredTo: [String], chat: ChatReference?) -> SendResponse {
-        SendResponse(
-            status: "cancelled",
-            timestamp: TimeUtils.formatISO(Date()),
-            chat: chat,
-            deliveredTo: deliveredTo,
-            chatId: chat?.id,
-            message: message,
-            error: nil,
-            candidates: nil,
-            verifiedMessageGuid: nil,
-            verifiedAt: nil,
-            intendedChat: nil,
-            actualChatId: nil
-        )
-    }
-
     static func error(_ message: String) -> SendResponse {
         SendResponse(
             status: "failed",
@@ -206,21 +189,18 @@ actor SendTool {
     private let resolver: ContactResolver
     private let runner: any ScriptRunning
     private let verifier: SendVerifier
-    private let confirmationTimeout: Duration
     private lazy var sendResolver = SendResolver(db: db, resolver: resolver)
 
     init(
         db: Database = Database(),
         resolver: ContactResolver,
         runner: any ScriptRunning = LiveScriptRunner(),
-        verifier: SendVerifier? = nil,
-        confirmationTimeout: Duration = .seconds(25)
+        verifier: SendVerifier? = nil
     ) {
         self.db = db
         self.resolver = resolver
         self.runner = runner
         self.verifier = verifier ?? SendVerifier(db: db)
-        self.confirmationTimeout = confirmationTimeout
     }
 
     // MARK: - Tool Registration
@@ -242,7 +222,7 @@ actor SendTool {
                   uncertain — transport accepted but row not found within polling window; follow up with get_messages.
                   mismatch  — row found in a different chat than intended; alert the user, do not treat as success.
                   sent      — verification unavailable (DB unreadable); transport accepted only.
-                File sends and failed/cancelled/ambiguous states are unchanged.
+                Sends execute immediately when the destination is exact. Ambiguous destinations return status 'ambiguous' without sending. Invalid input returns status 'failed' without sending. File transfers may return 'pending_confirmation' while Messages.app completes the transfer.
                 """,
             inputSchema: InputSchema.object(
                 properties: [
@@ -254,7 +234,7 @@ actor SendTool {
                         items: .string(description: "Absolute or ~/expanded local file path")
                     ),
                     "reply_to": .string(description: "Message ID to reply to (not yet implemented)"),
-                    "confirm": .boolean(description: "Explicitly confirm risky sends when elicitation is unavailable"),
+                    "confirm": .boolean(description: "Deprecated; accepted for compatibility and ignored. Sends do not require confirmation — destination ambiguity is refused with status 'ambiguous', and results are verified post-send."),
                 ]
             ),
             outputSchema: OutputSchema.object,
@@ -266,28 +246,25 @@ actor SendTool {
                 openWorldHint: true
             )
         ) { args in
-            try await tool.execute(args: args, server: server)
+            try await tool.execute(args: args)
         }
     }
 
     // MARK: - Execution
 
-    func execute(args: [String: Value]?, server: Server? = nil) async throws -> [Tool.Content] {
+    func execute(args: [String: Value]?) async throws -> [Tool.Content] {
         let to = args?["to"]?.stringValue
         let chatId = args?["chat_id"]?.stringValue
         let text = args?["text"]?.stringValue
         let filePaths = args?["file_paths"]?.arrayValue?.compactMap { $0.stringValue }
         let replyTo = args?["reply_to"]?.stringValue
-        let confirm = args?["confirm"]?.boolValue ?? false
 
         let response = await send(
             to: to,
             chatId: chatId,
             text: text,
             filePaths: filePaths,
-            replyTo: replyTo,
-            confirm: confirm,
-            server: server
+            replyTo: replyTo
         )
         let content: [Tool.Content] = [.plainText(try FormatUtils.encodeJSON(response))]
         if response.status == "failed" || response.status == "ambiguous" {
@@ -304,9 +281,7 @@ actor SendTool {
         chatId: String?,
         text: String?,
         filePaths: [String]?,
-        replyTo: String?,
-        confirm: Bool,
-        server: Server?
+        replyTo: String?
     ) async -> SendResponse {
         // Validation
         guard to != nil || chatId != nil else {
@@ -340,20 +315,14 @@ actor SendTool {
             return .ambiguous(candidates: candidates)
         }
 
-        if shouldConfirmSend(resolved: resolved, text: text, filePaths: filePaths), !confirm {
-            switch await confirmSendWithClientIfAvailable(server: server, resolved: resolved, text: text, filePaths: filePaths) {
-            case .confirmed:
-                break
-            case .declined:
-                return .cancelled("Send cancelled by user confirmation.", deliveredTo: resolved.deliveredTo, chat: resolved.chat)
-            case .unavailable:
-                return .pending(
-                    "This send requires confirmation. Call send again with confirm: true after reviewing the destination and content.",
-                    deliveredTo: resolved.deliveredTo,
-                    chat: resolved.chat
-                )
-            }
-        }
+        // Sends are authorized by the user's request to the agent and by
+        // harness-level tool approval; the server does not gate exact sends —
+        // ambiguity and validation failures refuse above, and post-send
+        // verification reports the truth below. Interactive confirmation (MCP
+        // elicitation) was removed 2026-06-11 after it proved unable to
+        // round-trip through real agent stacks — see plans/README.md
+        // "Elicitation channel findings"; do not reintroduce without
+        // session-level proof of a working channel.
 
         // Capture send time before dispatch (design §5.2 option 1).
         let sendTime = Date()
@@ -449,63 +418,4 @@ actor SendTool {
         }
     }
 
-    private enum ConfirmationDecision {
-        case confirmed
-        case declined
-        case unavailable
-    }
-
-    private func shouldConfirmSend(
-        resolved: SendResolution.ResolvedTarget,
-        text: String?,
-        filePaths: [String]?
-    ) -> Bool {
-        if resolved.deliveredTo.count > 1 { return true }
-        if filePaths?.isEmpty == false { return true }
-        if let text, text.count > 500 { return true }
-        if case .chat = resolved.target { return true }
-        return false
-    }
-
-    private func confirmSendWithClientIfAvailable(
-        server: Server?,
-        resolved: SendResolution.ResolvedTarget,
-        text: String?,
-        filePaths: [String]?
-    ) async -> ConfirmationDecision {
-        guard let server else { return .unavailable }
-
-        let destination = resolved.chat?.name ?? resolved.deliveredTo.joined(separator: ", ")
-        let fileCount = filePaths?.count ?? 0
-        let textPreview = (text?.isEmpty == false) ? text! : "(no text)"
-        let clippedPreview = textPreview.count > 240
-            ? String(textPreview.prefix(240)) + "..."
-            : textPreview
-
-        let result = await AsyncTimeout.withTimeout(confirmationTimeout) {
-            try await server.requestElicitation(
-                message: """
-                    Confirm sending this iMessage to \(destination).
-
-                    Text: \(clippedPreview)
-                    Attachments: \(fileCount)
-                    """,
-                requestedSchema: .init(
-                    title: "Confirm iMessage Send",
-                    description: "Review the destination and content before sending.",
-                    properties: [
-                        "confirm": .object([
-                            "type": .string("boolean"),
-                            "description": .string("Set true to send this message."),
-                        ]),
-                    ],
-                    required: ["confirm"]
-                ),
-                mode: .form
-            )
-        }
-        guard let result else { return .unavailable }   // timeout or transport error
-        guard result.action == .accept else { return .declined }
-        return result.content?["confirm"]?.boolValue == true ? .confirmed : .declined
-    }
 }
