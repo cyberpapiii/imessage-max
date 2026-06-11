@@ -63,8 +63,13 @@ final class Database: @unchecked Sendable {
         defer { sqlite3_finalize(stmt) }
 
         var results: [T] = []
-        while sqlite3_step(stmt) == SQLITE_ROW {
+        var stepResult = sqlite3_step(stmt)
+        while stepResult == SQLITE_ROW {
             try results.append(map(SQLiteRow(stmt)))
+            stepResult = sqlite3_step(stmt)
+        }
+        guard stepResult == SQLITE_DONE else {
+            throw DatabaseError.queryFailed(String(cString: sqlite3_errmsg(conn)))
         }
         return results
     }
@@ -104,7 +109,13 @@ final class Database: @unchecked Sendable {
         // Safety settings
         sqlite3_busy_timeout(db, 1000)
         var errMsg: UnsafeMutablePointer<CChar>?
-        sqlite3_exec(db, "PRAGMA query_only = ON", nil, nil, &errMsg)
+        let pragmaResult = sqlite3_exec(db, "PRAGMA query_only = ON", nil, nil, &errMsg)
+        if pragmaResult != SQLITE_OK {
+            let detail = errMsg.map { String(cString: $0) } ?? "unknown error"
+            sqlite3_free(errMsg)
+            sqlite3_close(db)
+            throw DatabaseError.queryFailed("Failed to enforce read-only mode: \(detail)")
+        }
 
         return db
     }
@@ -125,6 +136,8 @@ final class Database: @unchecked Sendable {
         for (index, param) in params.enumerated() {
             let idx = Int32(index + 1)
             switch param {
+            case let value as Bool:
+                sqlite3_bind_int64(stmt, idx, value ? 1 : 0)
             case let value as Int:
                 sqlite3_bind_int64(stmt, idx, Int64(value))
             case let value as Int64:
@@ -140,7 +153,10 @@ final class Database: @unchecked Sendable {
             case is NSNull:
                 sqlite3_bind_null(stmt, idx)
             default:
-                sqlite3_bind_null(stmt, idx)
+                sqlite3_finalize(stmt)
+                throw DatabaseError.invalidData(
+                    "Unsupported SQL parameter type at index \(index): \(type(of: param))"
+                )
             }
         }
 
