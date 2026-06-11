@@ -1,6 +1,36 @@
 // Sources/iMessageMax/Utilities/AppleScript.swift
 import Foundation
 
+// MARK: - ScriptRunning protocol
+
+/// Abstraction over the four send-execution functions used by SendTool.
+/// The production implementation is LiveScriptRunner; tests inject a stub.
+protocol ScriptRunning: Sendable {
+    func sendTextToParticipant(handle: String, message: String) -> Result<Void, SendError>
+    func sendFileToParticipant(handle: String, filePath: String) -> Result<Void, SendError>
+    func sendTextToChat(guid: String, message: String) -> Result<Void, SendError>
+    func sendFileToChat(guid: String, filePath: String) -> Result<Void, SendError>
+}
+
+/// Production implementation: forwards to AppleScriptRunner statics.
+struct LiveScriptRunner: ScriptRunning {
+    func sendTextToParticipant(handle: String, message: String) -> Result<Void, SendError> {
+        AppleScriptRunner.sendTextToParticipant(handle: handle, message: message)
+    }
+
+    func sendFileToParticipant(handle: String, filePath: String) -> Result<Void, SendError> {
+        AppleScriptRunner.sendFileToParticipant(handle: handle, filePath: filePath)
+    }
+
+    func sendTextToChat(guid: String, message: String) -> Result<Void, SendError> {
+        AppleScriptRunner.sendTextToChat(guid: guid, message: message)
+    }
+
+    func sendFileToChat(guid: String, filePath: String) -> Result<Void, SendError> {
+        AppleScriptRunner.sendFileToChat(guid: guid, filePath: filePath)
+    }
+}
+
 enum SendError: LocalizedError {
     case automationPermissionRequired
     case messagesAppUnavailable

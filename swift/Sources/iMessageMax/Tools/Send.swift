@@ -110,11 +110,13 @@ struct SendResponse: Encodable {
 actor SendTool {
     private let db: Database
     private let resolver: ContactResolver
+    private let runner: any ScriptRunning
     private lazy var sendResolver = SendResolver(db: db, resolver: resolver)
 
-    init(db: Database = Database(), resolver: ContactResolver) {
+    init(db: Database = Database(), resolver: ContactResolver, runner: any ScriptRunning = LiveScriptRunner()) {
         self.db = db
         self.resolver = resolver
+        self.runner = runner
     }
 
     // MARK: - Tool Registration
@@ -248,18 +250,18 @@ actor SendTool {
             sendResults = payloads.map { payload in
                 switch payload {
                 case .text(let body):
-                    return AppleScriptRunner.sendTextToParticipant(handle: handle, message: body)
+                    return runner.sendTextToParticipant(handle: handle, message: body)
                 case .file(let path):
-                    return AppleScriptRunner.sendFileToParticipant(handle: handle, filePath: path)
+                    return runner.sendFileToParticipant(handle: handle, filePath: path)
                 }
             }
         case .chat(let guid, _):
             sendResults = payloads.map { payload in
                 switch payload {
                 case .text(let body):
-                    return AppleScriptRunner.sendTextToChat(guid: guid, message: body)
+                    return runner.sendTextToChat(guid: guid, message: body)
                 case .file(let path):
-                    return AppleScriptRunner.sendFileToChat(guid: guid, filePath: path)
+                    return runner.sendFileToChat(guid: guid, filePath: path)
                 }
             }
         }
