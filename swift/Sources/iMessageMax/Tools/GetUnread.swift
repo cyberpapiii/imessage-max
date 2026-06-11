@@ -383,13 +383,34 @@ final class GetUnread {
         var totalUnread = 0
         var chats: [UnreadChatSummary] = []
 
+        // Batched lookups: one participants query and one latest-unread query
+        // for all chats, instead of 2+ queries per unread chat.
+        let chatIds = rows.map(\.chatId)
+        let participantsByChat = try await ChatSummaryQueries.participantsByChat(
+            db: database,
+            chatIds: chatIds,
+            resolver: contactResolver
+        )
+        let lastByChat = try await ChatSummaryQueries.lastMessagesByChat(
+            db: database,
+            chatIds: chatIds,
+            resolver: contactResolver,
+            sinceApple: sinceApple,
+            previewMaxLength: 50,
+            unknownSenderLabel: "Unknown",
+            agoFallback: nil,
+            onlyUnreadInbound: true
+        )
+
         for row in rows {
             let msgChatId = row.chatId
             let unreadCount = row.unreadCount
             totalUnread += unreadCount
 
             let oldestDt = AppleTime.toDate(row.oldestUnreadDate)
-            let participants = try await getChatParticipants(chatId: msgChatId)
+            let participants = (participantsByChat[msgChatId] ?? []).map {
+                ParticipantInfo(handle: $0.handle, name: $0.name, service: $0.service)
+            }
             let identity = makeChatIdentity(
                 chatId: msgChatId,
                 explicitName: row.chatDisplayName,
@@ -401,7 +422,7 @@ final class GetUnread {
                 identity: identity
             )
 
-            let lastMessage = try await getLatestUnreadMessageSummary(chatId: msgChatId, sinceApple: sinceApple)
+            let lastMessage = lastByChat[msgChatId]?.info
 
             chats.append(
                 UnreadChatSummary(
@@ -471,66 +492,9 @@ final class GetUnread {
         return first
     }
 
-    private func getLatestUnreadMessageSummary(
-        chatId: Int64,
-        sinceApple: Int64?
-    ) async throws -> LastMessageSummary? {
-        var queryBuilder = QueryBuilder()
-            .select(
-                "m.ROWID",
-                "m.text",
-                "m.attributedBody",
-                "m.date",
-                "h.id as sender_handle"
-            )
-            .from("message m")
-            .join("chat_message_join cmj ON m.ROWID = cmj.message_id")
-            .leftJoin("handle h ON m.handle_id = h.ROWID")
-            .where("cmj.chat_id = ?", chatId)
-            .where("m.is_read = 0")
-            .where("m.is_from_me = 0")
-            .where("m.associated_message_type = 0")
-            .orderBy("m.date DESC")
-            .limit(1)
-
-        if let sinceApple {
-            queryBuilder = queryBuilder.where("m.date >= ?", sinceApple)
-        }
-
-        let (sql, params) = queryBuilder.build()
-        let rows = try database.query(sql, params: params) { row in
-            (
-                messageId: row.int(0),
-                text: row.string(1),
-                attributedBody: row.blob(2),
-                date: row.optionalInt(3),
-                senderHandle: row.string(4)
-            )
-        }
-
-        guard let row = rows.first else { return nil }
-        let date = AppleTime.toDate(row.date)
-        let sender: String
-        if let handle = row.senderHandle {
-            sender = await IdentityDisplayFormatter.displayName(handle: handle, resolver: contactResolver)
-        } else {
-            sender = "Unknown"
-        }
-
-        return LastMessageSummary(
-            from: sender,
-            text: try MessagePreviewResolver.messageSummary(
-                db: database,
-                messageId: row.messageId,
-                text: row.text,
-                attributedBody: row.attributedBody,
-                maxLength: 50
-            ),
-            ago: TimeUtils.formatCompactRelative(date),
-            ts: TimeUtils.formatISO(date)
-        )
-    }
-
+    /// Per-chat participant lookup used by the messages (detail) path, which
+    /// caches results per chat. The summary path uses the batched
+    /// `ChatSummaryQueries.participantsByChat` instead.
     private func getChatParticipants(chatId: Int64) async throws -> [ParticipantInfo] {
         let rows: [(Int64, String, String?)] = try database.query("""
             SELECT h.ROWID, h.id as handle, h.service
