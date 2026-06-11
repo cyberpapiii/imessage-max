@@ -160,7 +160,7 @@ OPTIONS:
 swift test
 
 # Test MCP protocol manually
-echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}' | ./imessage-max
+echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}' | ./imessage-max
 ```
 
 For real send-flow spot checks in Messages.app, use
