@@ -206,18 +206,21 @@ actor SendTool {
     private let resolver: ContactResolver
     private let runner: any ScriptRunning
     private let verifier: SendVerifier
+    private let confirmationTimeout: Duration
     private lazy var sendResolver = SendResolver(db: db, resolver: resolver)
 
     init(
         db: Database = Database(),
         resolver: ContactResolver,
         runner: any ScriptRunning = LiveScriptRunner(),
-        verifier: SendVerifier? = nil
+        verifier: SendVerifier? = nil,
+        confirmationTimeout: Duration = .seconds(60)
     ) {
         self.db = db
         self.resolver = resolver
         self.runner = runner
         self.verifier = verifier ?? SendVerifier(db: db)
+        self.confirmationTimeout = confirmationTimeout
     }
 
     // MARK: - Tool Registration
@@ -479,8 +482,8 @@ actor SendTool {
             ? String(textPreview.prefix(240)) + "..."
             : textPreview
 
-        do {
-            let result = try await server.requestElicitation(
+        let result = await AsyncTimeout.withTimeout(confirmationTimeout) {
+            try await server.requestElicitation(
                 message: """
                     Confirm sending this iMessage to \(destination).
 
@@ -500,11 +503,9 @@ actor SendTool {
                 ),
                 mode: .form
             )
-
-            guard result.action == .accept else { return .declined }
-            return result.content?["confirm"]?.boolValue == true ? .confirmed : .declined
-        } catch {
-            return .unavailable
         }
+        guard let result else { return .unavailable }   // timeout or transport error
+        guard result.action == .accept else { return .declined }
+        return result.content?["confirm"]?.boolValue == true ? .confirmed : .declined
     }
 }
