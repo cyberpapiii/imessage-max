@@ -18,24 +18,31 @@ final class StubScriptRunner: ScriptRunning, @unchecked Sendable {
 
     private(set) var invocations: [Call] = []
     var nextResult: Result<Void, SendError> = .success(())
+    /// Optional side effect run on every send call before nextResult is returned.
+    /// Used to simulate Messages.app writing the chat.db row between send and verify.
+    var onSend: (() -> Void)?
 
     func sendTextToParticipant(handle: String, message: String) -> Result<Void, SendError> {
         invocations.append(.textToParticipant(handle: handle, message: message))
+        onSend?()
         return nextResult
     }
 
     func sendFileToParticipant(handle: String, filePath: String) -> Result<Void, SendError> {
         invocations.append(.fileToParticipant(handle: handle, filePath: filePath))
+        onSend?()
         return nextResult
     }
 
     func sendTextToChat(guid: String, message: String) -> Result<Void, SendError> {
         invocations.append(.textToChat(guid: guid, message: message))
+        onSend?()
         return nextResult
     }
 
     func sendFileToChat(guid: String, filePath: String) -> Result<Void, SendError> {
         invocations.append(.fileToChat(guid: guid, filePath: filePath))
+        onSend?()
         return nextResult
     }
 }
@@ -163,24 +170,43 @@ final class SendToolExecuteTests: XCTestCase {
         XCTAssertEqual(stub.invocations.count, 1, "Stub should have been called once before the failure was detected")
     }
 
-    // Pre-insert a matching outbound row (error=0) → verifier returns confirmed.
-    // Uses a minimal fixture with ONLY the DM chat (Alice not in any other chat)
-    // to avoid any join cross-product artefact from the group chat in makeSendFixture().
+    // Regression test for the findDirectChatForHandle bug: the old SQL applied
+    // `WHERE h.id = ?` before GROUP BY, so HAVING COUNT(DISTINCT handle_id) = 1
+    // counted only the filtered handle's rows — every chat containing the handle
+    // passed, and ORDER BY ROWID DESC picked the group (chat 2) over the DM (chat 1).
+    func testResolverPicksDirectChatNotGroupForParticipantSend() async throws {
+        let fixture = try makeSendFixture()  // DM chat 1 (Alice) + group chat 2 (Alice+Bob)
+
+        let resolver = SendResolver(db: fixture.database(), resolver: makeSeededResolver())
+        let result = await resolver.resolve(chatId: nil, to: "+15550000001")
+
+        switch result {
+        case .failure(let message):
+            XCTFail("Unexpected failure: \(message)")
+        case .ambiguous:
+            XCTFail("Unexpected ambiguity")
+        case .success(let resolved):
+            guard case .participant(let handle, let chatId) = resolved.target else {
+                return XCTFail("Expected participant target, got \(resolved.target)")
+            }
+            XCTAssertEqual(handle, "+15550000001")
+            XCTAssertEqual(chatId, 1,
+                "Participant send must resolve to the true 1:1 DM (chat 1), not the group (chat 2) that also contains the handle")
+        }
+    }
+
+    // Pre-insert a matching outbound row (error=0) in the DM → verifier returns confirmed.
+    // Uses the FULL multi-chat fixture (DM chat 1 + group chat 2, both containing Alice):
+    // this is the common real-world topology that previously produced a false mismatch
+    // via the findDirectChatForHandle resolver bug.
     // Row is inserted before execute() so its date falls within the 2s skew window
     // (date = now, sendTime = now + tiny delta; skew covers this).
     func testStubSendWithMatchingRowConfirms() async throws {
-        // Minimal fixture: one handle, one DM chat. No group chats.
-        let fixture = try ToolTestDatabase(name: "send-confirm")
-        try fixture.insertHandle(rowId: 1, handle: "+15550000001")
-        try fixture.insertChat(rowId: 1, guid: "iMessage;-;alice-dm")
-        try fixture.joinChatHandle(chatId: 1, handleId: 1)
-
+        let fixture = try makeSendFixture()  // DM chat 1 (Alice) + group chat 2 (Alice+Bob)
         let stub = StubScriptRunner()
         stub.nextResult = .success(())
 
         // Pre-insert the expected outbound row in chat 1 (Alice DM).
-        // Date = now; sendTime is captured inside execute() a few ms later,
-        // so the row falls within the 2s look-behind skew.
         let rowDate = AppleTime.fromDate(Date())
         try fixture.insertMessage(
             rowId: 100, guid: "msg-guid-confirm", text: "Hello Alice",
@@ -202,21 +228,51 @@ final class SendToolExecuteTests: XCTestCase {
 
         let json = try decodeJSONDictionary(from: contents)
         XCTAssertEqual(json["status"] as? String, "confirmed",
-            "With a matching row (error=0) in the DB, status should be 'confirmed'")
+            "With a matching row (error=0) in the DM, status should be 'confirmed' even when the handle is also in a group chat")
         XCTAssertEqual(json["verified_message_guid"] as? String, "msg-guid-confirm",
             "verified_message_guid should carry the message GUID from chat.db")
         XCTAssertNotNil(json["verified_at"], "verified_at should be present for confirmed sends")
     }
 
+    // End-to-end variant of the previously false-mismatch scenario: the stub runner's
+    // side effect inserts the matching row into the DM during the send call (simulating
+    // Messages.app writing chat.db), then verification runs and must confirm.
+    func testStubSideEffectRowInDMConfirmsWithGroupPresent() async throws {
+        let fixture = try makeSendFixture()  // DM chat 1 (Alice) + group chat 2 (Alice+Bob)
+        let stub = StubScriptRunner()
+        stub.nextResult = .success(())
+        stub.onSend = {
+            // Simulate Messages.app writing the outbound row to the DM at send time.
+            try? fixture.insertMessage(
+                rowId: 102, guid: "msg-guid-side-effect", text: "Hello Alice",
+                date: AppleTime.fromDate(Date()), isFromMe: true, error: 0, isSent: 0
+            )
+            try? fixture.joinChatMessage(chatId: 1, messageId: 102)
+        }
+
+        let tool = SendTool(
+            db: fixture.database(),
+            resolver: makeSeededResolver(),
+            runner: stub,
+            verifier: fastVerifier(fixture: fixture)
+        )
+
+        let contents = try await tool.execute(args: [
+            "to": .string("+15550000001"),
+            "text": .string("Hello Alice"),
+        ])
+
+        let json = try decodeJSONDictionary(from: contents)
+        XCTAssertEqual(json["status"] as? String, "confirmed",
+            "Row written to the DM between send and verify must confirm; this exact topology previously produced a false mismatch")
+        XCTAssertEqual(json["verified_message_guid"] as? String, "msg-guid-side-effect")
+    }
+
     // Pre-insert a row with error=22 (measured failed-send pattern) → NOT confirmed.
     // Verifier must check error=0; a row with error=22 should yield "uncertain".
-    // Also uses a minimal fixture (no group chat) for the same reason as the confirm test.
+    // Uses the full multi-chat fixture (same topology as the confirm tests).
     func testFailedRowDoesNotConfirm() async throws {
-        let fixture = try ToolTestDatabase(name: "send-error-row")
-        try fixture.insertHandle(rowId: 1, handle: "+15550000001")
-        try fixture.insertChat(rowId: 1, guid: "iMessage;-;alice-dm-2")
-        try fixture.joinChatHandle(chatId: 1, handleId: 1)
-
+        let fixture = try makeSendFixture()  // DM chat 1 (Alice) + group chat 2 (Alice+Bob)
         let stub = StubScriptRunner()
         stub.nextResult = .success(())
 
