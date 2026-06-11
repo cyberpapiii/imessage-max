@@ -170,6 +170,52 @@ final class ChatSummaryQueriesTests: XCTestCase {
         XCTAssertTrue(lastMsgs.isEmpty, "Empty chatIds must return empty dict")
     }
 
+    // MARK: - Formatting parameterization
+
+    /// previewMaxLength and unknownSenderLabel must be honored so callers can
+    /// preserve their historical output (GetActiveConversations: 80 / "Unknown").
+    func testFormattingParametersAreHonored() async throws {
+        let fixture = try ToolTestDatabase(name: "csq-params")
+        let resolver = makeSeededResolver()
+
+        try fixture.insertChat(rowId: 1, guid: "params-chat-guid")
+
+        let base = Int64(Date().timeIntervalSinceReferenceDate * 1_000_000_000) - 3_600_000_000_000
+
+        // Incoming message with NO handle (handleId nil, isFromMe false)
+        // → sender falls back to unknownSenderLabel.
+        let longText = String(repeating: "a", count: 200)
+        try fixture.insertMessage(
+            rowId: 1,
+            guid: "params-msg",
+            text: longText,
+            date: base,
+            isFromMe: false
+        )
+        try fixture.joinChatMessage(chatId: 1, messageId: 1)
+
+        let custom = try await ChatSummaryQueries.lastMessagesByChat(
+            db: fixture.database(),
+            chatIds: [1],
+            resolver: resolver,
+            previewMaxLength: 80,
+            unknownSenderLabel: "Unknown",
+            agoFallback: nil
+        )
+        let customLast = try XCTUnwrap(custom[1])
+        XCTAssertEqual(customLast.info.from, "Unknown", "Custom unknown-sender label must be used")
+        XCTAssertEqual(customLast.info.text.count, 80, "Preview must be truncated to maxLength 80")
+
+        let defaults = try await ChatSummaryQueries.lastMessagesByChat(
+            db: fixture.database(),
+            chatIds: [1],
+            resolver: resolver
+        )
+        let defaultLast = try XCTUnwrap(defaults[1])
+        XCTAssertEqual(defaultLast.info.from, "unknown", "Default unknown-sender label is lowercase")
+        XCTAssertEqual(defaultLast.info.text.count, 50, "Default preview maxLength is 50")
+    }
+
     // MARK: - No-messages chat
 
     /// A chat with participants but zero messages: it appears in participantsByChat

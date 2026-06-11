@@ -76,18 +76,29 @@ enum ChatSummaryQueries {
 
     /// Returns the newest non-reaction message per chat, keyed by chat ID.
     ///
-    /// One query for all chats using a window function. Post-processing
-    /// mirrors `ListChats.getLastMessage` exactly (maxLength 50, "unknown"
-    /// sender fallback, `ago ?? "unknown"`, `awaitingReply = !isFromMe`).
+    /// One query for all chats using a window function. Formatting defaults
+    /// preserve `ListChats`' historical behavior exactly (maxLength 50,
+    /// "unknown" sender fallback, `ago ?? "unknown"`). Callers with different
+    /// historical output (GetActiveConversations: maxLength 80, "Unknown",
+    /// nullable `ago`) pass their own values. `awaitingReply = !isFromMe`.
     ///
-    /// - Parameter sinceApple: When non-nil, adds `AND m.date >= ?` so only
-    ///   messages at or after this Apple-epoch nanosecond timestamp are
-    ///   considered. Pass `nil` to search the full history.
+    /// - Parameters:
+    ///   - sinceApple: When non-nil, adds `AND m.date >= ?` so only messages
+    ///     at or after this Apple-epoch nanosecond timestamp are considered.
+    ///     Pass `nil` to search the full history.
+    ///   - previewMaxLength: Max length for the message text preview.
+    ///   - unknownSenderLabel: Sender label when the message is not from me
+    ///     and has no sender handle.
+    ///   - agoFallback: Value for `ago` when the date cannot be formatted;
+    ///     pass `nil` to keep `ago` nullable.
     static func lastMessagesByChat(
         db: Database,
         chatIds: [Int64],
         resolver: ContactResolver,
-        sinceApple: Int64? = nil
+        sinceApple: Int64? = nil,
+        previewMaxLength: Int = 50,
+        unknownSenderLabel: String = "unknown",
+        agoFallback: String? = "unknown"
     ) async throws -> [Int64: LastMessage] {
         guard !chatIds.isEmpty else { return [:] }
 
@@ -145,7 +156,7 @@ enum ChatSummaryQueries {
 
         var result: [Int64: LastMessage] = [:]
         for row in rows {
-            // Replicate ListChats.getLastMessage sender logic exactly.
+            // Sender logic shared by both list tools; only the unknown label differs.
             let sender: String
             if row.isFromMe {
                 sender = "Me"
@@ -154,11 +165,11 @@ enum ChatSummaryQueries {
                     handle: handle, contactName: nil
                 )
             } else {
-                sender = "unknown"
+                sender = unknownSenderLabel
             }
 
             let date = AppleTime.toDate(row.date)
-            let ago = TimeUtils.formatCompactRelative(date) ?? "unknown"
+            let ago = TimeUtils.formatCompactRelative(date) ?? agoFallback
 
             let summary = LastMessageSummary(
                 from: sender,
@@ -167,7 +178,7 @@ enum ChatSummaryQueries {
                     messageId: row.messageId,
                     text: row.text,
                     attributedBody: row.attributedBody,
-                    maxLength: 50
+                    maxLength: previewMaxLength
                 ),
                 ago: ago,
                 ts: TimeUtils.formatISO(date)
