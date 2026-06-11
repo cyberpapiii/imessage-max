@@ -334,6 +334,110 @@ final class SendToolExecuteTests: XCTestCase {
             "Runner should never be invoked when recipient resolution fails; got \(stub.invocations)"
         )
     }
+
+    // MARK: - Agent-native send contract (plan 017): no confirmation gate
+
+    // 1:1 DM targeted by exact chat_id with NO confirm flag sends immediately
+    // and verifies to "confirmed" via the staged-row side effect.
+    func testOneToOneChatSendWithoutConfirmSends() async throws {
+        let fixture = try makeSendFixture()  // DM chat 1 (Alice) + group chat 2
+        let stub = StubScriptRunner()
+        stub.nextResult = .success(())
+        stub.onSend = {
+            try? fixture.insertMessage(
+                rowId: 110, guid: "msg-guid-dm-017", text: "Hello Alice",
+                date: AppleTime.fromDate(Date()), isFromMe: true, error: 0, isSent: 0
+            )
+            try? fixture.joinChatMessage(chatId: 1, messageId: 110)
+        }
+
+        let tool = SendTool(
+            db: fixture.database(),
+            resolver: makeSeededResolver(),
+            runner: stub,
+            verifier: fastVerifier(fixture: fixture)
+        )
+
+        let contents = try await tool.execute(args: [
+            "chat_id": .string("chat1"),
+            "text": .string("Hello Alice"),
+            // confirm omitted — chat-target sends no longer gate.
+        ])
+
+        let json = try decodeJSONDictionary(from: contents)
+        XCTAssertEqual(json["status"] as? String, "confirmed",
+            "1:1 chat_id send without confirm must send immediately and verify to 'confirmed'")
+        XCTAssertEqual(stub.invocations.count, 1, "Stub should have been invoked exactly once")
+    }
+
+    // 501-char text with NO confirm flag sends immediately (long text no longer gates).
+    func testLongTextSendsWithoutConfirm() async throws {
+        let fixture = try makeSendFixture()
+        let stub = StubScriptRunner()
+        stub.nextResult = .success(())
+
+        let longText = String(repeating: "a", count: 501)
+        stub.onSend = {
+            try? fixture.insertMessage(
+                rowId: 111, guid: "msg-guid-long-017", text: longText,
+                date: AppleTime.fromDate(Date()), isFromMe: true, error: 0, isSent: 0
+            )
+            try? fixture.joinChatMessage(chatId: 1, messageId: 111)
+        }
+
+        let tool = SendTool(
+            db: fixture.database(),
+            resolver: makeSeededResolver(),
+            runner: stub,
+            verifier: fastVerifier(fixture: fixture)
+        )
+
+        let contents = try await tool.execute(args: [
+            "to": .string("+15550000001"),
+            "text": .string(longText),
+        ])
+
+        let json = try decodeJSONDictionary(from: contents)
+        XCTAssertEqual(json["status"] as? String, "confirmed",
+            "Long text (>500 chars) without confirm must send immediately; long text no longer gates")
+        XCTAssertEqual(stub.invocations.count, 1, "Stub should have been invoked exactly once")
+    }
+
+    // The confirm flag is inert: explicit true and explicit false produce the
+    // identical "confirmed" outcome.
+    func testConfirmFlagIsInert() async throws {
+        for (confirmValue, rowId, guid) in [(true, 120, "msg-guid-inert-true"), (false, 121, "msg-guid-inert-false")] {
+            let fixture = try makeSendFixture()
+            let stub = StubScriptRunner()
+            stub.nextResult = .success(())
+            stub.onSend = {
+                try? fixture.insertMessage(
+                    rowId: rowId, guid: guid, text: "Hello Alice",
+                    date: AppleTime.fromDate(Date()), isFromMe: true, error: 0, isSent: 0
+                )
+                try? fixture.joinChatMessage(chatId: 1, messageId: rowId)
+            }
+
+            let tool = SendTool(
+                db: fixture.database(),
+                resolver: makeSeededResolver(),
+                runner: stub,
+                verifier: fastVerifier(fixture: fixture)
+            )
+
+            let contents = try await tool.execute(args: [
+                "chat_id": .string("chat1"),
+                "text": .string("Hello Alice"),
+                "confirm": .bool(confirmValue),
+            ])
+
+            let json = try decodeJSONDictionary(from: contents)
+            XCTAssertEqual(json["status"] as? String, "confirmed",
+                "confirm: \(confirmValue) must be inert; outcome should be identical 'confirmed'")
+            XCTAssertEqual(stub.invocations.count, 1,
+                "Stub should have been invoked exactly once with confirm: \(confirmValue)")
+        }
+    }
 }
 
 // MARK: - Decode helper (reuse pattern from existing tests)
