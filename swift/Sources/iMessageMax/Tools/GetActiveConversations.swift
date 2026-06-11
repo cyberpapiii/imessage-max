@@ -219,23 +219,40 @@ enum GetActiveConversations {
             )
         }
 
+        // Pre-filter: same inclusion logic as the original loop (min-exchanges
+        // filter, then cap at clampedLimit) so the batched queries cover
+        // exactly the chats that will appear in the response.
+        var includedRows: [ChatActivityRow] = []
+        for row in chatRows {
+            guard includedRows.count < clampedLimit else { break }
+            guard min(row.myCount, row.theirCount) >= clampedMinExchanges else { continue }
+            includedRows.append(row)
+        }
+
+        // Batch-fetch participants and last previews for all included chats.
+        let chatIds = includedRows.map(\.chatId)
+        let participantsByChat = try await ChatSummaryQueries.participantsByChat(
+            db: database,
+            chatIds: chatIds,
+            resolver: resolver
+        )
+        let lastMessagesByChat = try await ChatSummaryQueries.lastMessagesByChat(
+            db: database,
+            chatIds: chatIds,
+            resolver: resolver,
+            sinceApple: windowStartApple,
+            previewMaxLength: 80,
+            unknownSenderLabel: "Unknown",
+            agoFallback: nil
+        )
+
         var conversations: [ActiveConversation] = []
 
-        for row in chatRows {
-            guard conversations.count < clampedLimit else { break }
-
+        for row in includedRows {
             // Calculate exchanges (min of my and their messages)
             let exchanges = min(row.myCount, row.theirCount)
 
-            // Filter by minimum exchanges
-            guard exchanges >= clampedMinExchanges else { continue }
-
-            // Get participants for this chat
-            let participantRows = try await getParticipants(
-                chatId: row.chatId,
-                database: database,
-                resolver: resolver
-            )
+            let participantRows = participantsByChat[row.chatId] ?? []
 
             let identity = ChatIdentity(
                 mcpId: "chat\(row.chatId)",
@@ -265,12 +282,7 @@ enum GetActiveConversations {
                 started: formatTimestamp(row.firstInWindow)
             )
 
-            let lastPreview = try await getLastPreview(
-                chatId: row.chatId,
-                windowStartApple: windowStartApple,
-                database: database,
-                resolver: resolver
-            )
+            let lastPreview = lastMessagesByChat[row.chatId]?.info
 
             let conversation = ActiveConversation(
                 id: identity.mcpId,
@@ -311,116 +323,6 @@ enum GetActiveConversations {
         let lastFromThem: Int64?
         let firstInWindow: Int64?
         let lastInWindow: Int64?
-    }
-
-    private struct LastPreviewRow {
-        let msgId: Int64
-        let text: String?
-        let attributedBody: Data?
-        let date: Int64?
-        let isFromMe: Bool
-        let senderHandle: String?
-    }
-
-    private static func getParticipants(
-        chatId: Int64,
-        database: Database,
-        resolver: ContactResolver
-    ) async throws -> [Participant] {
-        let sql = """
-            SELECT h.id as handle, h.service
-            FROM handle h
-            JOIN chat_handle_join chj ON h.ROWID = chj.handle_id
-            WHERE chj.chat_id = ?
-            """
-
-        let rows = try database.query(sql, params: [chatId]) { row in
-            (handle: row.string(0) ?? "", service: row.string(1))
-        }
-
-        var participants: [Participant] = []
-        for row in rows {
-            let name = await resolver.resolve(row.handle)
-            participants.append(Participant(
-                handle: row.handle,
-                name: name,
-                service: row.service,
-                inContacts: name != nil
-            ))
-        }
-
-        return participants
-    }
-
-    private static func getLastPreview(
-        chatId: Int64,
-        windowStartApple: Int64,
-        database: Database,
-        resolver: ContactResolver
-    ) async throws -> LastMessageSummary? {
-        let sql = """
-            SELECT m.ROWID, m.text, m.attributedBody, m.date, m.is_from_me, h.id as sender_handle
-            FROM message m
-            JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
-            LEFT JOIN handle h ON m.handle_id = h.ROWID
-            WHERE cmj.chat_id = ?
-            AND m.date >= ?
-            AND m.associated_message_type = 0
-            ORDER BY m.date DESC
-            LIMIT 1
-            """
-
-        let rows = try database.query(sql, params: [chatId, windowStartApple]) { row in
-            LastPreviewRow(
-                msgId: row.int(0),
-                text: row.string(1),
-                attributedBody: row.blob(2),
-                date: row.optionalInt(3),
-                isFromMe: row.int(4) == 1,
-                senderHandle: row.string(5)
-            )
-        }
-
-        guard let row = rows.first else { return nil }
-
-        let from: String
-        if row.isFromMe {
-            from = "Me"
-        } else if let handle = row.senderHandle {
-            from = await IdentityDisplayFormatter.displayName(handle: handle, resolver: resolver)
-        } else {
-            from = "Unknown"
-        }
-
-        let previewText = try await formatPreviewText(
-            messageId: row.msgId,
-            text: row.text,
-            attributedBody: row.attributedBody,
-            database: database
-        )
-
-        let date = AppleTime.toDate(row.date)
-        return LastMessageSummary(
-            from: from,
-            text: previewText,
-            ago: TimeUtils.formatCompactRelative(date),
-            ts: TimeUtils.formatISO(date)
-        )
-    }
-
-    private static func formatPreviewText(
-        messageId: Int64,
-        text: String?,
-        attributedBody: Data?,
-        database: Database
-    ) async throws -> String {
-        try MessagePreviewResolver.messageSummary(
-            db: database,
-            messageId: messageId,
-            text: text,
-            attributedBody: attributedBody,
-            maxLength: 80
-        )
     }
 
     private static func formatTimestamp(_ appleTimestamp: Int64?) -> String? {

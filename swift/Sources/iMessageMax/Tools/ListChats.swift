@@ -239,24 +239,27 @@ enum ListChatsTool {
                 )
             }
 
+            // Batch-fetch participants and last messages for all chats at once.
+            let chatIds = chatRows.map(\.id)
+            let participantsByChat = try await ChatSummaryQueries.participantsByChat(
+                db: db,
+                chatIds: chatIds,
+                resolver: resolver
+            )
+            let lastMessagesByChat = try await ChatSummaryQueries.lastMessagesByChat(
+                db: db,
+                chatIds: chatIds,
+                resolver: resolver
+            )
+
             // Build results
             var chats: [ChatInfo] = []
 
             for chatRow in chatRows {
-                // Get participants
-                let participantRows = try await getParticipants(
-                    db: db,
-                    chatId: chatRow.id,
-                    resolver: resolver
-                )
+                let participantRows = participantsByChat[chatRow.id] ?? []
 
-                var identityParticipants: [ChatIdentity.Participant] = []
-                for p in participantRows {
-                    let identityParticipant = ChatIdentity.makeParticipant(
-                        handle: p.handle,
-                        contactName: p.name
-                    )
-                    identityParticipants.append(identityParticipant)
+                let identityParticipants = participantRows.map { p in
+                    ChatIdentity.makeParticipant(handle: p.handle, contactName: p.name)
                 }
 
                 let identity = ChatIdentity(
@@ -267,12 +270,7 @@ enum ListChatsTool {
                 )
                 let isGroupChat = identity.participantCount > 1
 
-                // Get last message
-                let lastMsg = try await getLastMessage(
-                    db: db,
-                    chatId: chatRow.id,
-                    resolver: resolver
-                )
+                let lastMsg = lastMessagesByChat[chatRow.id]
 
                 let chatInfo = ChatInfo(
                     id: identity.mcpId,
@@ -343,109 +341,6 @@ enum ListChatsTool {
         let serviceName: String?
         let participantCount: Int
         let lastMessageDate: Int64?
-    }
-
-    private struct ParticipantRow {
-        let handle: String
-        let name: String?
-        let service: String?
-    }
-
-    private struct LastMessageResult {
-        let info: LastMessageSummary
-        let awaitingReply: Bool
-    }
-
-    /// Get participants for a chat
-    private static func getParticipants(
-        db: Database,
-        chatId: Int64,
-        resolver: ContactResolver
-    ) async throws -> [ParticipantRow] {
-        let sql = """
-            SELECT h.id as handle, h.service
-            FROM chat_handle_join chj
-            JOIN handle h ON chj.handle_id = h.ROWID
-            WHERE chj.chat_id = ?
-            """
-
-        let rows = try db.query(sql, params: [chatId]) { row in
-            (handle: row.string(0) ?? "", service: row.string(1))
-        }
-
-        var participants: [ParticipantRow] = []
-        for row in rows {
-            let name = await resolver.resolve(row.handle)
-            participants.append(ParticipantRow(
-                handle: row.handle,
-                name: name,
-                service: row.service
-            ))
-        }
-
-        return participants
-    }
-
-    /// Get last message for a chat
-    private static func getLastMessage(
-        db: Database,
-        chatId: Int64,
-        resolver: ContactResolver
-    ) async throws -> LastMessageResult? {
-        let sql = """
-            SELECT m.text, m.attributedBody, m.is_from_me, h.id as sender_handle, m.date
-            , m.ROWID
-            FROM message m
-            JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
-            LEFT JOIN handle h ON m.handle_id = h.ROWID
-            WHERE cmj.chat_id = ?
-            AND m.associated_message_type = 0
-            ORDER BY m.date DESC
-            LIMIT 1
-            """
-
-        let rows = try db.query(sql, params: [chatId]) { row in
-            (
-                text: row.string(0),
-                attributedBody: row.blob(1),
-                isFromMe: row.int(2) == 1,
-                senderHandle: row.string(3),
-                date: row.optionalInt(4),
-                messageId: row.int(5)
-            )
-        }
-
-        guard let last = rows.first else { return nil }
-
-        // Determine sender
-        let sender: String
-        if last.isFromMe {
-            sender = "Me"
-        } else if let handle = last.senderHandle {
-            sender = await IdentityDisplayFormatter.displayName(handle: handle, resolver: resolver)
-        } else {
-            sender = "unknown"
-        }
-
-        // Format time
-        let date = AppleTime.toDate(last.date)
-        let ago = TimeUtils.formatCompactRelative(date) ?? "unknown"
-
-        return LastMessageResult(
-            info: LastMessageSummary(
-                from: sender,
-                text: try MessagePreviewResolver.messageSummary(
-                    db: db,
-                    messageId: last.messageId,
-                    text: last.text,
-                    attributedBody: last.attributedBody,
-                    maxLength: 50
-                ),
-                ago: ago,
-                ts: TimeUtils.formatISO(date)
-            ),
-            awaitingReply: !last.isFromMe
-        )
     }
 
     /// Get total counts
