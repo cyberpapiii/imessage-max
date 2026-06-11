@@ -255,6 +255,14 @@ This means the AppleScript `send` command *should* return a `message` object
 from which `id` (the guid) can be extracted. However, the return value's
 reliability across macOS versions is not confirmed.
 
+> **MEASURED 2026-06-11 (macOS 25.5.0): the dictionary lies at runtime.**
+> Running the production send script with `set sendResult to send messageText
+> to targetBuddy` raises *"The variable sendResult is not defined"* — the
+> `send` verb returns **nothing** despite its declared `→ message` signature.
+> Guid-based matching via the send return value is **not available**; the
+> chat.db re-read (Section 2.2) is the only verification path. This closes
+> the open question — do not spend build time on stdout capture.
+
 **Current status in code: the return value is unconditionally discarded.**
 The production `run()` method (`AppleScript.swift:377–425`) captures stdout
 but never reads it — `stdoutPipe.fileHandleForReading.readDataToEndOfFile()`
@@ -321,11 +329,41 @@ it returns `transferPending` or `transferStatusUnknown`, the state is
 
 ## 3. Chat.db write latency measurement
 
-**NOT MEASURED — blocked on environment.**
+**MEASURED 2026-06-11** — 3 timed probes, self-sends to `robdezendorf@gmail.com`
+via the production AppleScript path, polled read-only at 100ms intervals using
+a ROWID watermark (text matching is impossible — see finding 2):
 
-The operator has not designated a test chat and has not consented to test
-messages. The following experiment must be run by the operator before the
-build plan for this slice can confirm the polling parameters in Section 2.5.
+| Probe | AppleScript accept | Row visible after accept | Total send→visible |
+|-------|-------------------:|-------------------------:|-------------------:|
+| 5 | 120ms | 26ms | 146ms |
+| 6 | 102ms | 26ms | 128ms |
+| 7 | 108ms | 26ms | 134ms |
+
+**Findings that change the design:**
+
+1. **Row visibility is effectively immediate** (~26ms after osascript returns,
+   first poll). The conservative 30s polling window in Section 2.3 is far too
+   generous for the row-existence check: 5 polls × 200ms (1s budget) suffices
+   for text sends, with `uncertain` after ~3s. (Delivery-status fields update
+   later and asynchronously — see finding 3.)
+2. **attributedBody storage confirmed in practice**: every probe row landed
+   with `text = NULL` and the content only in `attributedBody` (~200 bytes).
+   SQL text-equality matching is not merely risky — it matched 0 of 7 probe
+   rows. Extraction via `MessageTextExtractor` (or hex/blob matching) is
+   mandatory, exactly as Section 2.2 specifies.
+3. **A row in chat.db is NOT proof of sending.** All probe sends failed at the
+   iMessage layer (self-send via `participant` route → `error = 22`,
+   `is_sent = 0`) yet still wrote rows immediately. The verification query
+   MUST check `m.error = 0` before reporting `confirmed`, and should surface
+   `is_sent`/`date_delivered` as evidence fields. A re-read that only checks
+   row existence would have "confirmed" seven failed sends.
+4. **Caveat:** latency was measured on failed-send rows (the row write happens
+   at send time on the same path), and self-sends via the `participant` route
+   fail outright (`error = 22`) — the production verification loop should be
+   validated against a real conversation during the build slice.
+
+The original experiment script is retained below for re-runs on other
+machines/macOS versions.
 
 ### Experiment script
 
@@ -440,7 +478,9 @@ behavior with an honest proof vocabulary aligned to R1–R3.
 
 - *Trigger:* Primary SQL query (Section 2.2) returns at least one row whose
   extracted text matches the sent text (or whose `cache_has_attachments = 1`
-  matches a file send), within the polling window.
+  matches a file send), within the polling window, **and the row has
+  `error = 0`** (measured 2026-06-11: failed sends write rows immediately with
+  `error = 22` / `is_sent = 0` — row existence alone must never confirm).
 - *Response fields:*
   ```json
   {
