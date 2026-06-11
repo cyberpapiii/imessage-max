@@ -42,8 +42,8 @@ is an operator action, not an executor step.
 | 006 | Client-facing error hygiene (no paths / error internals to clients) | P3 | S | 004 | DONE (2026-06-11, commit `1785edd` on `advisor/006-client-error-hygiene`, built on 004's `0347bc3`, reviewed & approved; merge 004 before 006) |
 | 007 | CI Swift build caching | P3 | S | — | DONE (2026-06-11, commit `a8a03ec` on `advisor/007-ci-build-cache`, reviewed & approved; cache effect observable on next push) |
 | 008 | Docs drift sweep (SDK version, tool count, protocol version) | P3 | S | — | DONE (2026-06-11, commit `a9ef361` on `advisor/008-docs-drift`, reviewed & approved) |
-| 010 | Migrate GetUnread summary loop onto ChatSummaryQueries | P2 | M | — | IN PROGRESS (dispatched 2026-06-11) |
-| 011 | Design spike: capability contract from diagnose (v2 R6–R9) | P2 | M | — | IN PROGRESS (dispatched 2026-06-11) |
+| 010 | Migrate GetUnread summary loop onto ChatSummaryQueries | P2 | M | — | DONE (2026-06-11, commits `7d104e7`..`d08290d`, reviewed & approved, merged to main; 126/126 tests; `getChatParticipants` retained for the detail path per plan's anticipated exception) |
+| 011 | Design spike: capability contract from diagnose (v2 R6–R9) | P2 | M | — | DONE (2026-06-11, commit `693e078`, reviewed & approved, merged to main; deliverable: docs/plans/2026-06-11-capability-contract-design.md — flags Diagnose's hardcoded send-mode booleans as the honesty gap, designs the R7 state taxonomy + Automation probe) |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) | REJECTED (with one-line rationale)
 
