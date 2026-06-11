@@ -79,3 +79,4 @@ Recorded so future audits don't re-litigate:
 
 - **D2 — capability contract from `diagnose`** (v2 requirements R6-R9): evolve diagnose's health check into an agent-readable capability contract (supported / degraded / permission-gated / ...). Strong candidate for the next spike after 009.
 - **D3 — sidecar search index**: see the FTS rejection above; becomes relevant if/when search latency is a reported pain.
+- **Verifier error-row detection** (from the 2026-06-11 real-machine validation): `SendVerifier` excludes `error != 0` rows, so a failed delivery reads as `uncertain` rather than a precise failure state. Small refinement: scan for error rows in the window and surface the recorded send error. See `SendManualValidation.md` validation-run section.

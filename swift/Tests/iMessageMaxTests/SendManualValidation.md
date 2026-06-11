@@ -194,3 +194,25 @@ Expected:
 
 - Tool returns an `attachment_offloaded` error
 - The message clearly explains the iCloud/download state
+
+---
+
+## Real-machine validation run — 2026-06-11
+
+Performed against the production binary (commit `2f7f1f5`) over stdio MCP,
+sending to the operator's own handle (`robdezendorf@gmail.com`, self-DM
+chat ROWID 3813 — created by earlier latency probes).
+
+| Check | Result |
+|-------|--------|
+| Resolution picks the true 1:1 DM (post `findDirectChatForHandle` fix) | PASS — `chat3813` resolved as intended chat |
+| Full production send path (resolve → AppleScript → verify) | PASS — end-to-end through `tools/call send` |
+| Verifier polls real chat.db | PASS |
+| Failed delivery is NOT confirmed | PASS — iMessage refused self-delivery (row written with `error=22`, `is_sent=0`); verifier's `error = 0` gate excluded it; response was honest `uncertain` with `get_messages` guidance |
+| `confirmed` happy path on a real delivery | NOT VALIDATED — self-sends via the AppleScript participant route fail at the iMessage layer on this machine; demonstrating `confirmed` requires one send to a consenting third-party recipient (scenario 1 above) |
+
+Follow-up identified: the verifier excludes `error != 0` rows entirely, so it
+cannot distinguish "row never appeared" from "row appeared with a send error".
+Detecting error rows in the window could yield a more precise state than
+`uncertain` (e.g. surface the recorded send error). Tracked in
+`plans/README.md` direction notes.
