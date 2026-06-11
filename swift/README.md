@@ -147,7 +147,7 @@ USAGE: imessage-max [--http] [--host <host>] [--port <port>] [--version]
 
 OPTIONS:
   --http                  Run in HTTP mode instead of stdio
-  --host <host>           HTTP host (default: 127.0.0.1 for security)
+  --host <host>           HTTP host (default: 127.0.0.1 for security); non-loopback hosts additionally require --allow-external-bind
   --port <port>           HTTP port (default: 8080)
   --version               Show version
   -h, --help              Show help
