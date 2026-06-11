@@ -44,8 +44,8 @@ is an operator action, not an executor step.
 | 008 | Docs drift sweep (SDK version, tool count, protocol version) | P3 | S | — | DONE (2026-06-11, commit `a9ef361` on `advisor/008-docs-drift`, reviewed & approved) |
 | 010 | Migrate GetUnread summary loop onto ChatSummaryQueries | P2 | M | — | DONE (2026-06-11, commits `7d104e7`..`d08290d`, reviewed & approved, merged to main; 126/126 tests; `getChatParticipants` retained for the detail path per plan's anticipated exception) |
 | 012 | Build verified sends (proof states, Option D vocabulary) | P1 | L | — | DONE (2026-06-11, commits `a47ad1f`..`f9d0536`, reviewed & approved after one REVISE round, merged to main; the review caught a real pre-existing bug — `findDirectChatForHandle` counted participants after the handle filter, so it returned group chats as "the DM", which would have produced false `mismatch` verdicts for any recipient also in a group; fixed + regression-tested) |
-| 015 | Eliminate Task.sleep from send path (launchd task-allocator crash) | P0 | S | — | DONE (2026-06-11, commit `efe1c27`, reviewed & approved, merged; live acceptance pending deploy) |
-| 016 | Narrow confirmation gate to risky sends (drop blanket chat-target rule) | P1 | S | 015 | IN PROGRESS (dispatched 2026-06-11) |
+| 015 | Eliminate Task.sleep from send path (launchd task-allocator crash) | P0 | S | — | DONE (2026-06-11, commit `efe1c27`, reviewed & approved, merged, deployed; live acceptance PASS — no-confirm chat-id send through plug returned `pending_confirmation` in ~25s with stable PID, where the pre-015 binary aborted instantly) |
+| 016 | Narrow confirmation gate to risky sends (drop blanket chat-target rule) | P1 | S | 015 | ON HOLD (parked 2026-06-11 pending operator decision; live debugging confirmed the elicitation channel has never completed a round trip through plug — see "Elicitation channel findings" below — so gate policy and elicitation strategy should be decided together, not as separate patches) |
 | 014 | Bound the send-confirmation elicitation wait (plug/Cursor 300s hang) | P1 | S | — | DONE (2026-06-11, commit `5699d84`, reviewed & approved, merged, deployed; swallowed confirmation prompts now degrade to pending_confirmation after 60s instead of hanging) |
 | 013 | Build capability contract in diagnose (15 states + Automation probe) | P1 | M | — | DONE (2026-06-11, commits `973ceba`..`5cfb24b`, reviewed & approved, merged to main; 131/131 tests; probes made injectable for hermetic testing — sanctioned deviation) |
 | 011 | Design spike: capability contract from diagnose (v2 R6–R9) | P2 | M | — | DONE (2026-06-11, commit `693e078`, reviewed & approved, merged to main; deliverable: docs/plans/2026-06-11-capability-contract-design.md — flags Diagnose's hardcoded send-mode booleans as the honesty gap, designs the R7 state taxonomy + Automation probe) |
@@ -77,6 +77,33 @@ Recorded so future audits don't re-litigate:
 - **SwiftLint/swift-format setup**: fine idea, low value for a single-maintainer repo right now; revisit if contributors arrive.
 - **Inconsistent tool error patterns** (`Result` returns vs `throws` across tools): real debt, but mechanical and low-impact; fold into a future tool-layer consolidation rather than a standalone pass.
 - **FindChat migration onto ChatSummaryQueries** (2026-06-11): rejected — `find_chat`'s per-candidate enrichment is bounded by small result counts (`targetCount ≤ ~5`), so the batching win is negligible against the refactor risk. Revisit only with reported find_chat latency.
+
+## Elicitation channel findings (2026-06-11 live debugging)
+
+Established by direct testing through plug plus code/SDK inspection, independently
+corroborated by a second investigation (Codex):
+
+- The interactive send-confirmation prompt has **never completed a round trip**
+  in the plug client stack: pre-014 it hung until the client's 300s transport
+  timeout; the deployed 014 binary crashed (Task.sleep/launchd abort,
+  reproduced live, exit status 6); post-015 it degrades cleanly to
+  `pending_confirmation` after ~25s.
+- Two unverified preconditions are conflated: (1) the SDK's
+  `validateClientCapability(\.elicitation)` only enforces in strict mode, and
+  per-session Servers use the default `strict: false` — so client capability is
+  never checked; (2) server-originated requests that match no pending HTTP
+  request are broadcast via SSE, and `SSEConnection.broadcast` silently drops
+  the event when the session has no SSE connections — so the request can be
+  emitted into a dead channel while `requestElicitation` awaits forever.
+- Send mechanics are healthy: `confirm: true` chat-id sends and no-confirm
+  `to`-route sends both return `confirmed` with verified guids through plug.
+- Direction (not yet planned, decide as ONE policy): treat elicitation as an
+  optional enhancement, never a required safety mechanism — only attempt it
+  when the session has declared capability AND a live server-to-client channel;
+  otherwise return `pending_confirmation` immediately. Decide jointly with
+  016's gate-narrowing question. Instrumentation candidates: log client
+  capabilities at initialize, active SSE count at elicitation time, and
+  elicitation request/outcome pairs.
 
 ## Direction findings not (yet) planned
 
