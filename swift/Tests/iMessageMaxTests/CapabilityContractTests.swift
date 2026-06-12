@@ -58,8 +58,8 @@ final class CapabilityContractTests: XCTestCase {
         XCTAssertEqual(caps["send_text_group"]?.state, "supported")
         XCTAssertEqual(caps["send_file_dm"]?.state, "supported")
 
-        // send_file_group: always risky-private when automation granted
-        XCTAssertEqual(caps["send_file_group"]?.state, "risky-private")
+        // send_file_group: supported with a routing caveat when automation granted (plan 017)
+        XCTAssertEqual(caps["send_file_group"]?.state, "supported")
         XCTAssertNotNil(caps["send_file_group"]?.note)
 
         // verified_send: db ok + automation ok → supported with db_reread detail
@@ -137,7 +137,7 @@ final class CapabilityContractTests: XCTestCase {
 
         // Send modes are driven only by automation, not DB
         XCTAssertEqual(caps["send_text_dm"]?.state, "supported")
-        XCTAssertEqual(caps["send_file_group"]?.state, "risky-private")
+        XCTAssertEqual(caps["send_file_group"]?.state, "supported")
     }
 
     // MARK: - Test 5: JSON contract — all 15 keys present with correct names

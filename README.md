@@ -315,12 +315,14 @@ For a lightweight pre-release routine, use:
 
 Additional send note:
 - `reply_to` is currently unsupported
-- Risky sends, including group/file/long-message sends, require user confirmation. Clients with MCP elicitation support may be prompted inline; other clients should call `send` again with `confirm: true` after reviewing the destination and content.
+- Sends execute immediately when the destination is exact; there is no confirmation gate. Ambiguous destinations are refused with `status: "ambiguous"`. The `confirm` parameter is deprecated and ignored (kept only for compatibility). Authorization happens in the user's conversation with the agent and in the client's tool-approval UI, not server-side.
 
-Send result semantics:
-- `status: "sent"` means the message or attachment was confirmed successfully
-- `status: "pending_confirmation"` means Messages accepted an attachment send, but it was not confirmed as finished within the polling window
-- `status: "cancelled"` means a confirmation prompt was declined/cancelled before Messages.app was invoked
+Send result semantics (text sends are verified post-send against chat.db):
+- `status: "confirmed"` means the message row was found in chat.db with no error; `verified_message_guid` is the evidence
+- `status: "uncertain"` means transport accepted the send but the row was not found within the polling window; follow up with `get_messages`
+- `status: "mismatch"` means the message landed in a different chat than intended; do not treat as success
+- `status: "sent"` means verification was unavailable (DB unreadable); transport accepted only
+- `status: "pending_confirmation"` means Messages accepted an attachment send, but the file transfer was not confirmed as finished within the polling window
 - `status: "failed"` means the send failed
 - `status: "ambiguous"` means the target could not be resolved safely
 
@@ -330,7 +332,7 @@ Notes:
 - JSON-shaped tools return MCP `structuredContent` as well as legacy text content for older clients
 
 Examples:
-- `{"status":"sent","success":true,...}` means delivery was confirmed within the polling window
+- `{"status":"confirmed","verified_message_guid":"...",...}` means delivery was verified in chat.db
 - `{"status":"pending_confirmation","success":false,...}` means Messages accepted the attachment, but the MCP could not yet confirm final completion
 
 ### diagnose

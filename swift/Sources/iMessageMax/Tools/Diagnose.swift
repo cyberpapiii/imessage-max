@@ -78,7 +78,6 @@ enum DiagnoseTool {
                 "unsupported" means the feature does not exist — do not attempt it or expose \
                 it to the user as an option. "permission-gated" means a macOS permission must \
                 be granted before the feature can work; surface the fix field to the user. \
-                "risky-private" means the feature requires explicit confirmation (pass confirm: true). \
                 "unverified" means the capability state cannot be determined at diagnose time; \
                 treat it as potentially available but proceed cautiously. "unavailable" means no \
                 implementation exists in the current backend — do not attempt and do not mention \
@@ -186,14 +185,15 @@ enum DiagnoseTool {
             sendFix = nil
         }
 
-        // send_file_group: risky-private when automation ok; otherwise same as other send modes
+        // send_file_group: supported with a routing caveat when automation ok;
+        // otherwise same as other send modes (plan 017: no confirmation gate)
         let sendFileGroupState: String
         let sendFileGroupNote: String?
         let sendFileGroupFix: String?
         switch (automationOk, automationStatus) {
         case (true, _):
-            sendFileGroupState = "risky-private"
-            sendFileGroupNote = "Group file sends require confirm:true; routing cannot be verified before send"
+            sendFileGroupState = "supported"
+            sendFileGroupNote = "Group file routing cannot be verified before send; check the delivered_to and chat fields in the response"
             sendFileGroupFix = nil
         case (false, "denied"):
             sendFileGroupState = "permission-gated"
