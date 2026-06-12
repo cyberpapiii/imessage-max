@@ -26,7 +26,8 @@ Call:
 
 Expected:
 
-- MCP returns `status: "sent"`
+- MCP returns `status: "confirmed"` with a `verified_message_guid`
+  (`status: "sent"` only if chat.db verification was unavailable)
 - Message lands in the expected 1:1 thread
 - `delivered_to` contains the resolved participant display name
 
@@ -43,9 +44,12 @@ Call:
 
 Expected:
 
-- MCP returns `status: "sent"`
+- MCP returns `status: "confirmed"` with a `verified_message_guid`
+  (`status: "sent"` only if chat.db verification was unavailable)
 - Message lands in the exact thread referenced by `chat_id`
 - No DM fallback to a different conversation
+- No confirmation step occurs; the deprecated `confirm` parameter is
+  not required and is ignored if passed
 
 ### 3. Exact Group Chat Text Send
 
@@ -60,9 +64,11 @@ Call:
 
 Expected:
 
-- MCP returns `status: "sent"`
+- MCP returns `status: "confirmed"` with a `verified_message_guid`
+  (`status: "sent"` only if chat.db verification was unavailable)
 - Message lands in the exact existing group thread
 - No participant fallback to a 1:1 conversation
+- No confirmation step occurs
 
 ### 4. Participant File Send
 
@@ -110,8 +116,10 @@ Call:
 
 Expected:
 
-- MCP returns `status: "sent"` if both payloads are confirmed
-- MCP returns `status: "pending_confirmation"` if attachment confirmation remains pending
+- MCP returns `status: "confirmed"` (text verified in chat.db) if the
+  attachment transfer also completed
+- MCP returns `status: "pending_confirmation"` if attachment transfer
+  confirmation remains pending
 - Attachment is sent before the text bubble
 - Thread target remains exact
 
@@ -151,6 +159,12 @@ Expected:
 
 ## Notes
 
+- There is no confirmation gate: exact-destination sends execute
+  immediately, and text sends are verified post-send against chat.db
+  (`confirmed` / `uncertain` / `mismatch`, with `sent` as the
+  transport-only fallback). See "Send contract (no confirmation gate)"
+  in `AGENTS.md`. If a text send returns `uncertain`, follow up with
+  `get_messages` instead of retrying.
 - Conversation presentation is intentionally first-person:
   - chat labels show the other people in the thread
   - `me` appears in message history for outbound messages
