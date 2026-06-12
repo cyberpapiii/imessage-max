@@ -233,3 +233,12 @@ Attachments can be offloaded to iCloud. `list_attachments` includes nested attac
 For current tradeoffs and "why we did it this way" context, see:
 
 - `docs/maintainers/2026-04-09-maintainer-notes.md`
+
+### Knowledge Store
+
+- `docs/solutions/` — documented solved problems and durable
+  design lessons with searchable YAML frontmatter. Search here
+  before re-investigating an error or re-litigating a design
+  decision (e.g. the send confirmation gate).
+- `CONCEPTS.md` — shared domain vocabulary (send statuses,
+  verified send, capability contract).
