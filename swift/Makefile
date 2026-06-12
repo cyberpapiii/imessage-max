@@ -122,8 +122,8 @@ setup-signing: ## Create persistent code signing identity (one-time)
 		-keyout /tmp/_im_key.pem -out /tmp/_im_cert.pem \
 		-days 3650 -nodes \
 		-subj "/CN=$(CERT_CN)" \
-		-addext "extendedKeyUsage=codeSigning" \
-		-addext "keyUsage=digitalSignature" \
+		-addext "keyUsage=critical,digitalSignature" \
+		-addext "extendedKeyUsage=critical,codeSigning" \
 		2>/dev/null
 	@# Package as PKCS12 (legacy format for macOS Keychain compatibility)
 	openssl pkcs12 -export \
@@ -141,6 +141,12 @@ setup-signing: ## Create persistent code signing identity (one-time)
 	@# Allow codesign to access the key without prompting
 	security set-key-partition-list -S apple-tool:,apple:,codesign: \
 		-s -k "" ~/Library/Keychains/login.keychain-db >/dev/null 2>&1 || true
+	@# Trust the cert for code signing — makes `find-identity -v` list it as valid
+	@# and removes the need for the manual Keychain Access trust step below. Pops a
+	@# login-password dialog (expected). Signing already works without this; trust
+	@# only affects how the cert is reported, not signability.
+	@echo "Trusting the cert for code signing (a login-password dialog is expected)..."
+	security add-trusted-cert -r trustRoot -p codeSign /tmp/_im_cert.pem 2>/dev/null || true
 	@# Clean up temp files
 	@rm -f /tmp/_im_key.pem /tmp/_im_cert.pem /tmp/_im.p12
 	@echo ""
