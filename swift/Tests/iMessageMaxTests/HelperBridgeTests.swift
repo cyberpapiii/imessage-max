@@ -87,3 +87,33 @@ final class HelperBridgeTests: XCTestCase {
         XCTAssertFalse(ok)
     }
 }
+
+extension HelperBridgeTests {
+    func testUnixSocketTransportRoundTripsOverSocketpair() async throws {
+        var fds: [Int32] = [0, 0]
+        let rc = fds.withUnsafeMutableBufferPointer { buf in
+            socketpair(AF_UNIX, SOCK_STREAM, 0, buf.baseAddress)
+        }
+        try XCTSkipUnless(rc == 0, "socketpair unavailable")
+        let clientFD = fds[0]
+        let serverFD = fds[1]
+
+        // Fake server: read one line, reply with a pong echoing the request id.
+        let server = Thread {
+            var buf = [UInt8](repeating: 0, count: 4096)
+            let n = read(serverFD, &buf, buf.count)
+            let line = String(decoding: buf[0..<max(0, n)], as: UTF8.self)
+            let req = try! JSONDecoder().decode(HelperRequest.self,
+                                                from: Data(line.trimmingCharacters(in: .newlines).utf8))
+            let reply = #"{"v":1,"id":"\#(req.id)","ok":true}\#("\n")"#
+            _ = Data(reply.utf8).withUnsafeBytes { write(serverFD, $0.baseAddress, $0.count) }
+            close(serverFD)
+        }
+        server.start()
+
+        let transport = UnixSocketTransport(connectedFD: clientFD)
+        let bridge = HelperBridge(transport: transport, timeout: 2, idFactory: { "pp" })
+        let ok = await bridge.probe()
+        XCTAssertTrue(ok)
+    }
+}
