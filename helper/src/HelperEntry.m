@@ -11,7 +11,7 @@
     NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
     if ([self shouldActivateForBundleIdentifier:bundleID]) {
         NSLog(@"[imessage-max-helper] activating in %@", bundleID);
-        // Listener wiring added in Task 4.
+        // Listener wiring added on-device in Task 5 (live IMCore facade + +load).
     }
 }
 
