@@ -3,7 +3,7 @@ CC = clang
 SDK = $(shell xcrun --show-sdk-path)
 FRAMEWORKS = -framework Foundation
 CFLAGS = -isysroot $(SDK) -fobjc-arc -Wall -Wextra -Iinclude
-TESTCFLAGS = -fobjc-arc -Wall -Wextra -Iinclude -fmodules
+TESTCFLAGS = -isysroot $(SDK) -fobjc-arc -Wall -Wextra -Iinclude -fmodules
 BUILD = build
 
 .PHONY: dylib test clean
@@ -17,7 +17,7 @@ $(BUILD):
 
 XCTEST = $(shell xcrun -f xctest)
 TESTBUNDLE = $(BUILD)/HelperTests.xctest
-XCODE_FRAMEWORKS = -F/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks
+XCODE_FRAMEWORKS = -F$(shell xcrun --show-sdk-platform-path)/Developer/Library/Frameworks
 
 test: $(TESTBUNDLE)
 	xcrun xctest $(TESTBUNDLE)
