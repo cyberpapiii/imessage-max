@@ -77,4 +77,36 @@ final class MessageTextExtractorTests: XCTestCase {
         let blob = typedstreamBlob(marker: "NSMutableString", lengthField: [5], payload: Array("hello".utf8))
         XCTAssertEqual(MessageTextExtractor.extractFromTypedstream(blob), "hello")
     }
+
+    // MARK: - Step 2: slice-safe indexing
+
+    func testSliceInputDoesNotTrap() {
+        let validBlob = typedstreamBlob(lengthField: [5], payload: Array("hello".utf8))
+        let rebasedResult = MessageTextExtractor.extractFromTypedstream(Data(validBlob))
+
+        var fullData = Data([0xAA, 0xBB, 0xCC, 0xDD])   // 4 junk bytes prepended
+        fullData.append(validBlob)
+        let slice = fullData[4...]   // startIndex == 4, count relative to the slice
+        XCTAssertEqual(slice.startIndex, 4)
+
+        let sliceResult = MessageTextExtractor.extractFromTypedstream(slice)
+        XCTAssertEqual(sliceResult, rebasedResult)
+        XCTAssertEqual(sliceResult, "hello")
+    }
+
+    // MARK: - Step 3: reject unknown length markers
+
+    func testUnknownMarker0x83ReturnsNil() {
+        let blob = typedstreamBlob(
+            lengthField: [0x83, 0x05, 0x00, 0x00, 0x00],
+            payload: Array("hello".utf8)
+        )
+        XCTAssertNil(MessageTextExtractor.extractFromTypedstream(blob), "0x83 is an unrecognized marker, not a literal length of 131")
+    }
+
+    func testHighLiteralByteReturnsNil() {
+        // Documents that >= 0x80 is always treated as marker space, never a literal length.
+        let blob = typedstreamBlob(lengthField: [0x9C], payload: Array(repeating: UInt8(0x41), count: 156))
+        XCTAssertNil(MessageTextExtractor.extractFromTypedstream(blob))
+    }
 }

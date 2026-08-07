@@ -16,9 +16,17 @@ enum MessageTextExtractor {
 
     /// Parse Apple typedstream format to extract plain text.
     /// Searches for "NSString" / "NSMutableString" marker, skips 5 bytes,
-    /// reads length byte (0x81 = 2-byte, 0x82 = 3-byte, else single byte),
-    /// then reads UTF-8 text of that length.
+    /// reads length byte (0x81 = 2-byte, 0x82 = 3-byte, < 0x80 = literal
+    /// single byte). Any other byte (0x80-0x83, 0x84+) is an unrecognized
+    /// length marker and returns nil rather than misreading it as a literal
+    /// length — garbage extraction is worse than nil here, since
+    /// SendVerifier.textMatches matches send-verification text against it.
+    /// Then reads UTF-8 text of the parsed length.
     static func extractFromTypedstream(_ data: Data) -> String? {
+        // Re-base: callers may pass a Data slice whose indices don't start
+        // at 0; all math below assumes zero-based absolute indexing.
+        let data = data.startIndex == 0 ? data : Data(data)
+
         // Look for NSString or NSMutableString marker in the typedstream
         guard let nsStringRange = data.range(of: Data("NSString".utf8)) ??
               data.range(of: Data("NSMutableString".utf8)) else {
@@ -46,8 +54,13 @@ enum MessageTextExtractor {
             guard idx + 4 <= data.count else { return nil }
             length = Int(data[idx + 1]) | (Int(data[idx + 2]) << 8) | (Int(data[idx + 3]) << 16)
             dataStart = idx + 4
+        } else if lengthByte >= 0x80 {
+            // Unknown typedstream length marker (e.g. 0x83+). Misreading it
+            // as a literal length extracts garbage — and garbage is worse
+            // than nil here: SendVerifier matches on this text. Refuse.
+            return nil
         } else {
-            // Single byte length
+            // Single byte literal length (< 0x80)
             length = Int(lengthByte)
             dataStart = idx + 1
         }
