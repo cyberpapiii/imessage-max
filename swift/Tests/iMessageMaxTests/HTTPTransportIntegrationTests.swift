@@ -289,6 +289,41 @@ final class HTTPTransportIntegrationTests: XCTestCase {
         }
     }
 
+    /// The request timeout must still fire now that the pending-request timer
+    /// is a cancellable DispatchSourceTimer (R0-02) rather than asyncAfter.
+    func testRequestTimeoutFiresWhenHandlerNeverResponds() async throws {
+        let transport = HTTPTransport(
+            host: "127.0.0.1",
+            port: 0,
+            database: Database(),
+            resolver: ContactResolver(seedCache: [:]),
+            requestTimeout: .milliseconds(200)
+        )
+        let app = await transport.makeApplicationForTesting()
+
+        try await app.test(TestingSetup.router) { client in
+            let sessionId = try await initializeSession(using: client)
+
+            let didRegister = await transport.registerMethodHandlerForTesting(sessionId: sessionId, TestSlowMethod.self) { _ in
+                try await Task.sleep(for: .seconds(2))
+                return .init(source: "too-late")
+            }
+            XCTAssertTrue(didRegister)
+
+            let start = ContinuousClock().now
+            let response = try await client.executeRequest(
+                uri: "/",
+                method: HTTPRequest.Method.post,
+                headers: jsonHeaders(sessionId: sessionId),
+                body: byteBuffer(for: slowMethodPayload(id: "timeout-probe"))
+            )
+            let elapsed = ContinuousClock().now - start
+
+            XCTAssertEqual(response.head.status, .internalServerError)
+            XCTAssertLessThan(elapsed, .seconds(2), "timeout must fire before the stuck handler completes")
+        }
+    }
+
     func testHugeJsonRpcIdDoesNotCrashTheServer() async throws {
         let transport = HTTPTransport(
             host: "127.0.0.1",
