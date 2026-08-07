@@ -5,7 +5,9 @@
 // request carrying per-request `_meta` protocol metadata; they never
 // reach the legacy SDK Server. Everything else (the legacy `initialize`
 // handshake and session traffic) passes through untouched, so existing
-// stdio clients keep their exact wire behavior.
+// stdio clients keep their exact wire behavior. `initialize` always stays
+// on the legacy lane, no matter what `_meta` it carries, mirroring
+// HTTPTransport's era selection.
 import Foundation
 import Logging
 import MCP
@@ -39,6 +41,7 @@ actor DualEraStdioTransport: Transport {
             do {
                 for try await data in upstream {
                     if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                        (json["method"] as? String) != "initialize",
                         ModernDispatcher.isModernMessage(json) {
                         let result = await ModernDispatcher.handle(data, transport: "stdio")
                         if let responseData = result.data {
