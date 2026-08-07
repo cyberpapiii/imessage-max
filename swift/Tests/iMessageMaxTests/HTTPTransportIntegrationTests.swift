@@ -644,7 +644,28 @@ final class HTTPTransportIntegrationTests: XCTestCase {
             )
             let secondBody = try decodeJSONString(from: secondResponse.body)
             XCTAssertEqual(secondResponse.head.status, .serviceUnavailable, secondBody)
-            XCTAssertTrue(secondBody.contains("Too many active sessions"), secondBody)
+            XCTAssertTrue(secondBody.contains("Session capacity reached"), secondBody)
+            XCTAssertTrue(secondBody.contains("Reuse an existing session"), secondBody)
+            XCTAssertTrue(secondBody.contains("DELETE"), secondBody)
+            XCTAssertTrue(secondBody.contains("Mcp-Session-Id"), secondBody)
+            XCTAssertTrue(secondBody.contains("idle sessions expire"), secondBody)
+
+            let deleteResponse = try await client.executeRequest(
+                uri: "/",
+                method: HTTPRequest.Method.delete,
+                headers: jsonHeaders(sessionId: firstSessionId),
+                body: ByteBuffer()
+            )
+            XCTAssertEqual(deleteResponse.head.status, .noContent)
+
+            let recoveredResponse = try await client.executeRequest(
+                uri: "/",
+                method: HTTPRequest.Method.post,
+                headers: jsonHeaders(),
+                body: byteBuffer(for: initializePayload(id: 3))
+            )
+            let recoveredBody = try decodeJSONString(from: recoveredResponse.body)
+            XCTAssertEqual(recoveredResponse.head.status, .ok, recoveredBody)
         }
     }
 }
