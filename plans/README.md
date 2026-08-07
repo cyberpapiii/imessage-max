@@ -48,6 +48,17 @@ Ordered by recommended land sequence, not plan number.
 | 036 | DX hardening (make test, dual-era verify probe, mktemp signing, CI parallel, dispatchInterval dedup) | P3 | S-M | — | DONE 2026-08-07, merged to `main` (`9e6a62d`, on the transport-chain branch; 192/0 re-verified; shipped probe differs from the plan's broken sketch — see follow-ups) |
 | 037 | Resolve the signing identity by hash so duplicate certs cannot break `make sign` | P2 | S | — | DONE 2026-08-07, merged to `main` (`76fc529`; 233/0 re-verified; hash-vs-name evidence gathered against the real duplicate state, not the plan's scratch-keychain script — see follow-ups) |
 
+### Follow-up plans from this round's deferrals (written, not yet executed)
+
+Written after the round merged, from the "Follow-ups surfaced during
+execution" list below. Both are planned against commit `0ff6b8f` with a
+233-test baseline. Independent of each other; either can land first.
+
+| Plan | Title | Priority | Effort | Depends on | Status |
+|------|-------|----------|--------|------------|--------|
+| 038 | SSE GET endpoint coverage — the four `handleGet` guards + the 503 capacity wire response | P2 | S | — | TODO |
+| 039 | Manual-validation refresh for the full send vocabulary + AppleScript error hygiene round 3 | P3 | S | — | TODO |
+
 Status values: TODO | IN PROGRESS | DONE (date, commit, one-line evidence —
 merged to main) | BLOCKED (one-line reason) | REJECTED (one-line rationale)
 
@@ -159,6 +170,9 @@ Raised by executors while implementing this round; recorded so they aren't lost:
   outside their in-scope lists. Two deferrals now. The manual-validation doc
   needs a pass after this round merges and deploys; a small follow-up plan is
   the right vehicle.
+  **Now planned as 039** — which found it was three deferrals, not two: plan
+  026's `partial_failure` is missing from the doc as well, and the section
+  numbering has drifted out of document order (1-6, 9-11, 7-8).
 - **Two HTTP-transport paths are compile-checked but never executed by a
   test**, surfaced by plan 029's executor rather than papered over: the
   `.startFailed` → HTTP 500 mapping has no test (inducing a `Server.start`
@@ -166,6 +180,13 @@ Raised by executors while implementing this round; recorded so they aren't lost:
   endpoint has no end-to-end coverage at all — before or after 029. Only POST
   tests set the `text/event-stream` Accept header. Worth knowing when
   reviewing the streaming path.
+  **The GET gap is now planned as 038**, confirmed still open at `0ff6b8f`
+  (`grep -rn '\.get\b\|method: \.get\|"GET"' Tests/iMessageMaxTests/*Integration*.swift`
+  → no output). 038 deliberately leaves `.startFailed` → 500 uncovered and
+  says why in the plan: reaching it needs a test-only failure hook inside
+  `SessionManager` to cover a three-line mapping. Recorded as a decision, not
+  an oversight. 038 does cover the adjacent `.atCapacity` → 503 wire response,
+  which only needed `maxSessions` forwarded through `HTTPTransport.init`.
 - **Two done criteria in the plans as written were defective**, found by
   executors who refused to tick them rather than contort code to match:
   plan 025's "4 protocol + 4 impl = 8" arithmetic omitted the
@@ -296,6 +317,17 @@ Raised by executors while implementing this round; recorded so they aren't lost:
   (owned by 024/025). This is not a database-path leak — `sanitized()` would
   pass it through unchanged anyway — so it is low-severity, but it is the one
   remaining raw-error surface in the send path.
+  **Now planned as 039**, which found **four** such sites at `0ff6b8f`, not
+  one (`AppleScript.swift:221, 246, 378, 572`), and that two of them are worse
+  than recorded here: 221 and 246 catch `prepareTrackedOutgoingFile`, whose
+  `FileManager` errors embed the staging path
+  `/Users/<username>/Pictures/imessage-max-staging/<uuid>/…` — the same class
+  of leak 023 fixed for database paths. The note above is right that
+  `sanitized()` is the wrong tool: it only maps `DatabaseError` and passes
+  everything else through verbatim. 039 adds a second helper
+  (`ClientErrorMessages.internalDetail(_:context:)`) that always logs the
+  detail to stderr and never echoes it, rather than widening `sanitized` under
+  19 existing call sites.
 
 ### Why 032 was held back until after the merge (resolved)
 
