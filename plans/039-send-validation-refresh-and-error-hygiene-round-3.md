@@ -160,7 +160,7 @@ authored messages. **Do not touch them.** Only the bare `catch` arms change.
 ```
 
 `removeStagedDirectory(for:)` deletes the per-send UUID directory, guarded so
-it can only ever delete inside that root. This is what Part A's new check 12
+it can only ever delete inside that root. This is what Part A's new check 14
 verifies by hand.
 
 ### The status constructors (`swift/Sources/iMessageMax/Tools/Send.swift:130-180`)
@@ -224,7 +224,7 @@ Then grep the whole repo for cross-references to the old numbers and update
 any that exist:
 
 ```bash
-cd swift && grep -rn "SendManualValidation" --include=*.md --include=*.swift .. | grep -v "^\.\./swift/Tests/iMessageMaxTests/SendManualValidation.md"
+cd swift && grep -rn "SendManualValidation" --include="*.md" --include="*.swift" .. | grep -v "^\.\./swift/Tests/iMessageMaxTests/SendManualValidation.md"
 ```
 
 If a hit references a specific check number, update it. If none do, note that.
@@ -278,9 +278,9 @@ Expected bullets:
 
 **`### N+1. Partial failure — multi-payload send fails partway`**
 
-How to provoke it: call `send` with both `text` and `file_path`, where the
+How to provoke it: call `send` with both `text` and `file_paths`, where the
 text will dispatch fine and the attachment will not — for example a
-`file_path` pointing at a file that exists at validation time but is
+a `file_paths` entry pointing at a file that exists at validation time but is
 unreadable when the transfer starts, or an oversized file the transfer
 rejects.
 
@@ -328,7 +328,8 @@ Expected: at least `3`.
 cd swift && grep -n '^### ' Tests/iMessageMaxTests/SendManualValidation.md
 ```
 
-Expected: thirteen headings, numbered 1 through 13 ascending.
+Expected: fourteen headings, numbered 1 through 14 ascending (11 originally,
+plus 2 from Step 2 and 1 from Step 3).
 
 ```bash
 cd swift && grep -c 'Plan 012' Tests/iMessageMaxTests/SendManualValidation.md
@@ -453,11 +454,11 @@ the plan's arithmetic to match.
 ## Done criteria
 
 1. `cd swift && swift build` — exits 0, no new warnings.
-2. `cd swift && swift test 2>&1 | tail -3` — `Executed 235 tests, with 0 failures`.
+2. `cd swift && swift test 2>&1 | grep -E 'Executed [0-9]+ tests' | tail -1` — `Executed 235 tests, with 0 failures`. (`tail -3` shows the swift-testing trailer, not the XCTest count — this package runs both.)
 3. `cd swift && grep -c "localizedDescription" Sources/iMessageMax/Utilities/AppleScript.swift` — `0`.
 4. `cd swift && grep -c "ClientErrorMessages.internalDetail" Sources/iMessageMax/Utilities/AppleScript.swift` — `4`.
 5. `cd swift && grep -c "Plan 012" Tests/iMessageMaxTests/SendManualValidation.md` — `0`.
-6. `cd swift && grep -n '^### ' Tests/iMessageMaxTests/SendManualValidation.md` — thirteen headings, numbered 1-13 ascending with no gaps or repeats.
+6. `cd swift && grep -n '^### ' Tests/iMessageMaxTests/SendManualValidation.md` — fourteen headings, numbered 1-14 ascending with no gaps or repeats.
 7. `cd swift && grep -c "failed_delivery" Tests/iMessageMaxTests/SendManualValidation.md` — at least `1`.
 8. `cd swift && grep -c "partial_failure" Tests/iMessageMaxTests/SendManualValidation.md` — at least `1`.
 9. `cd swift && grep -c "imessage-max-staging" Tests/iMessageMaxTests/SendManualValidation.md` — at least `1`.

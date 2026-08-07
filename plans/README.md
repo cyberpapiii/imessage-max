@@ -54,10 +54,46 @@ Written after the round merged, from the "Follow-ups surfaced during
 execution" list below. Both are planned against commit `0ff6b8f` with a
 233-test baseline. Independent of each other; either can land first.
 
+Both plans have been corrected in place for defects their executors reported
+— see "Defects in plans 038/039 as written" below. The files on disk are the
+fixed versions.
+
 | Plan | Title | Priority | Effort | Depends on | Status |
 |------|-------|----------|--------|------------|--------|
 | 038 | SSE GET endpoint coverage — the four `handleGet` guards + the 503 capacity wire response | P2 | S | — | TODO |
-| 039 | Manual-validation refresh for the full send vocabulary + AppleScript error hygiene round 3 | P3 | S | — | TODO |
+| 039 | Manual-validation refresh for the full send vocabulary + AppleScript error hygiene round 3 | P3 | S | — | DONE 2026-08-07, merged to `main` (`4a25d8b`, branch `advisor/039-validation-and-hygiene`; 235/0 re-verified by reviewer; both new tests mutation-tested — replacing the fixed guidance with `error.localizedDescription` fails 6 assertions across both methods) |
+
+#### Defects in plans 038/039 as written
+
+Reported by their executors, confirmed by the reviewer, and fixed in the plan
+files. Recorded because the failure modes recur:
+
+- **039 done criterion 6 was off by one.** It called for thirteen headings.
+  The doc starts with 11; Step 2 adds 2 and Step 3 adds 1 — that is 14. The
+  plan author bumped the count for Step 2's additions and forgot Step 3's.
+  The executor shipped the correct 14 and flagged the arithmetic rather than
+  dropping a check to hit the stated number. **Same class of error as plan
+  025's "4 + 4 = 8" defect last round: a hand-computed count in a done
+  criterion, written before the steps were final.** Prefer criteria that
+  assert a *property* (ascending with no gaps) over ones that assert a
+  number.
+- **039 named the send parameter `file_path`; it is `file_paths`, an array**
+  (`swift/Sources/iMessageMax/Tools/Send.swift:273`). The rest of the
+  checklist already used the correct name, so the plan would have introduced
+  an inconsistency into the very doc it was fixing.
+- **039's cross-reference grep used unquoted `--include=*.md` globs**, which
+  zsh expands before `grep` ever sees them:
+  `no matches found: --include=*.md`. Quoting fixes it. Once fixed it found
+  no file referencing a specific check number, so nothing needed updating.
+  **Third vacuous-grep defect across the two rounds** (plan 020's
+  double-backslash, plan 037's `grep -c 'sign "$(IDENTITY)"'`). A grep in a
+  plan is worth writing only if it has been run.
+- **039 done criterion 2 used `swift test 2>&1 | tail -3`**, which shows the
+  swift-testing trailer (`Test run with 0 tests in 0 suites passed`), not the
+  XCTest count — this package runs both harnesses. Use
+  `grep -E 'Executed [0-9]+ tests' | tail -1`. Every prior plan in this index
+  carries the same `tail -3` habit; it happened to work only because the
+  reviewer read more of the output than the criterion asked for.
 
 Status values: TODO | IN PROGRESS | DONE (date, commit, one-line evidence —
 merged to main) | BLOCKED (one-line reason) | REJECTED (one-line rationale)
