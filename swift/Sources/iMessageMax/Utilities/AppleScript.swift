@@ -218,7 +218,7 @@ enum AppleScriptRunner {
         } catch let error as SendError {
             return .failure(error)
         } catch {
-            return .failure(.failed(error.localizedDescription))
+            return .failure(.failed(ClientErrorMessages.internalDetail(error, context: "Preparing the attachment")))
         }
 
         let handoff = run(
@@ -243,7 +243,7 @@ enum AppleScriptRunner {
         } catch let error as SendError {
             return .failure(error)
         } catch {
-            return .failure(.failed(error.localizedDescription))
+            return .failure(.failed(ClientErrorMessages.internalDetail(error, context: "Preparing the attachment")))
         }
 
         let handoff = run(
@@ -375,7 +375,7 @@ enum AppleScriptRunner {
             } catch let error as SendError {
                 return .failure(error)
             } catch {
-                return .failure(.failed(error.localizedDescription))
+                return .failure(.failed(ClientErrorMessages.internalDetail(error, context: "Checking attachment transfer status")))
             }
 
             Thread.sleep(forTimeInterval: pollInterval)
@@ -569,7 +569,7 @@ enum AppleScriptRunner {
                 )
             )
         } catch {
-            return .failure(.failed(error.localizedDescription))
+            return .failure(.failed(ClientErrorMessages.internalDetail(error, context: "Running AppleScript")))
         }
     }
 }

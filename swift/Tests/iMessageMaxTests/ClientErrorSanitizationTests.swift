@@ -59,4 +59,41 @@ final class ClientErrorSanitizationTests: XCTestCase {
             DatabaseError.permissionDenied(samplePath).localizedDescription.contains(samplePath),
             "The log-side description must keep the path; only the client payload is sanitized")
     }
+
+    // 5. internalDetail never echoes the underlying description. Unlike
+    //    sanitized, it drops non-DatabaseError detail too — that is the whole
+    //    point at FileManager/Process catch sites, where the description
+    //    embeds the staging path and the operator's username (plan 039).
+    func testInternalDetailNeverEchoesTheUnderlyingDescription() {
+        let stagingPath = "/Users/testuser/Pictures/imessage-max-staging/abc/photo.jpg"
+        let underlying = NSError(
+            domain: NSCocoaErrorDomain,
+            code: NSFileWriteUnknownError,
+            userInfo: [NSLocalizedDescriptionKey: "Could not copy file to \(stagingPath)"]
+        )
+
+        let detail = ClientErrorMessages.internalDetail(
+            underlying, context: "Preparing the attachment"
+        )
+
+        XCTAssertFalse(detail.contains("imessage-max-staging"),
+            "internalDetail must not leak the staging directory name")
+        XCTAssertFalse(detail.contains("/Users/"),
+            "internalDetail must not leak the home directory or username")
+        XCTAssertFalse(detail.contains(stagingPath),
+            "internalDetail must not echo the staged file path")
+        XCTAssertTrue(detail.contains("Preparing the attachment"),
+            "internalDetail must name the operation that failed")
+    }
+
+    // 6. The guidance wording is pinned so it cannot drift accidentally.
+    func testInternalDetailReturnsStableGuidance() {
+        let detail = ClientErrorMessages.internalDetail(
+            SendError.timeout, context: "Running AppleScript"
+        )
+
+        XCTAssertTrue(detail.hasSuffix("failed. Check the server log for details."),
+            "internalDetail guidance wording changed: \(detail)")
+        XCTAssertEqual(detail, "Running AppleScript failed. Check the server log for details.")
+    }
 }

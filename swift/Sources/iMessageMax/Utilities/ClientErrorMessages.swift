@@ -22,4 +22,20 @@ enum ClientErrorMessages {
         case .queryFailed, .invalidData: return internalError
         }
     }
+
+    /// Client-safe rendering of an error that may embed internal filesystem
+    /// paths — staged-attachment directories, tool binaries, temp files.
+    /// Unlike `sanitized`, this never passes the underlying description
+    /// through: the detail goes to stderr for the operator and the client
+    /// gets a fixed string plus the caller-supplied context.
+    ///
+    /// Use this at `catch` sites whose errors come from FileManager, Process,
+    /// or AppleScript execution. Use `sanitized` when the error may be a
+    /// `DatabaseError` and its guidance strings are what the client needs.
+    static func internalDetail(_ error: Error, context: String) -> String {
+        FileHandle.standardError.write(
+            Data("[imessage-max] \(context): \(error.localizedDescription)\n".utf8)
+        )
+        return "\(context) failed. Check the server log for details."
+    }
 }

@@ -116,12 +116,17 @@ Expected:
 - Result status is `failed`
 - Error clearly says `reply_to` is unsupported
 
-## Verified-Send Proof Vocabulary (Plan 012)
+## Verified-Send Proof Vocabulary
 
-These scenarios validate the `confirmed` / `uncertain` / `mismatch` status values
-added in plan 012. Run against a real iMessage account with Full Disk Access granted.
+Run these against a real iMessage account with Full Disk Access granted. The
+`send` tool can return `confirmed`, `uncertain`, `mismatch`, `failed_delivery`,
+`partial_failure`, `sent`, `pending_confirmation`, `ambiguous`, or `failed`. The
+checks in this section cover the five statuses that report what actually happened
+after Messages.app accepted the send. `sent`, `pending_confirmation`, and
+`failed` are exercised by the Core and Failure Checks above; `ambiguous` has no
+manual check yet.
 
-### 9. Confirmed delivery to a known 1:1 contact
+### 7. Confirmed delivery to a known 1:1 contact
 
 Call:
 
@@ -140,7 +145,7 @@ Expected:
 - `chat.id` matches the known DM chat ID
 - Message appears in the conversation on the device
 
-### 10. Uncertain — send to address with no prior chat.db row
+### 8. Uncertain — send to address with no prior chat.db row
 
 Call send to a valid handle where Messages.app accepts the command but the DB
 polling window expires (for example, a brand-new iMessage address with no
@@ -154,7 +159,7 @@ Expected:
 - No `verified_message_guid` or `verified_at` in the response
 - The text appears in Messages.app even though status is uncertain
 
-### 11. Mismatch — message lands in a different chat
+### 9. Mismatch — message lands in a different chat
 
 This requires a contrived scenario where the AppleScript `send` routes the
 message to a different thread than the one resolved by `to`. This is most
@@ -170,9 +175,41 @@ Expected:
 - `message` contains routing-mismatch language
 - Agent should NOT treat this as a successful send
 
+### 10. Failed delivery — chat.db records a delivery error
+
+Send to a handle that Messages.app will accept but cannot deliver to. The
+reliable case is an iMessage-only send to a number with no iMessage
+registration while SMS fallback is unavailable. Messages.app shows the red
+"Not Delivered" badge and chat.db writes a non-zero `error` on the row.
+
+Expected:
+
+- `status` is `failed_delivery`
+- `verified_message_guid` is a non-empty string — the row **was** found
+- `message` states the message was NOT delivered and names the error code
+- The agent must not report this as a successful send
+- Messages.app shows the send as not delivered
+
+### 11. Partial failure — multi-payload send fails partway
+
+Call `send` with both `text` and `file_paths`, where the text will dispatch
+fine and the attachment will not. For example, point `file_paths` at a file
+that exists at validation time but is unreadable when the transfer starts, or
+at an oversized file the transfer rejects.
+
+Expected:
+
+- `status` is `partial_failure`
+- `message` begins `PARTIAL SEND:` and names which payload was dispatched and
+  which failed
+- `message` says explicitly not to resend the already-dispatched payload
+- The text is visible in the conversation; the attachment is not
+- Re-running the same call blind would duplicate the text — confirm the
+  response makes that obvious
+
 ## Attachment Spot Checks
 
-### 7. Existing image attachment variants
+### 12. Existing image attachment variants
 
 Run `get_attachment` against a known local image attachment with:
 
@@ -186,7 +223,7 @@ Expected:
 - Thumb is visibly smaller than vision/full
 - Vision stays within the documented AI-friendly size
 
-### 8. Offloaded attachment
+### 13. Offloaded attachment
 
 Run `get_attachment` against an attachment that is no longer local.
 
@@ -194,6 +231,26 @@ Expected:
 
 - Tool returns an `attachment_offloaded` error
 - The message clearly explains the iCloud/download state
+
+### 14. Staged outgoing file is cleaned up
+
+Outgoing attachments are copied into a per-send directory under
+`~/Pictures/imessage-max-staging/` and the directory is removed once the
+transfer completes. Check that it actually gets cleaned up:
+
+1. Before the send, run `ls ~/Pictures/imessage-max-staging/ 2>/dev/null` and
+   note what is there. An empty or missing directory is the normal state.
+2. Send an attachment to a 1:1 contact and wait for the response.
+3. After the response, run `ls ~/Pictures/imessage-max-staging/` again.
+
+Expected:
+
+- During the send, a UUID-named subdirectory exists containing a copy of the
+  file under its original name
+- After the send completes, that subdirectory is gone
+- No accumulation across repeated sends — the directory count does not grow
+- The original source file is untouched (the staging copy is a copy, never a
+  move)
 
 ---
 
