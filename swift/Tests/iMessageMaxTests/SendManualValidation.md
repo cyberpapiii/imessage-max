@@ -177,10 +177,17 @@ Expected:
 
 ### 10. Failed delivery: chat.db records a delivery error
 
-Send to a handle that Messages.app will accept but cannot deliver to. The
-reliable case is an iMessage-only send to a number with no iMessage
-registration while SMS fallback is unavailable. Messages.app shows the red
-"Not Delivered" badge and chat.db writes a non-zero `error` on the row.
+Send to a handle that Messages.app will accept but cannot deliver to. chat.db
+writes a non-zero `error` on the row and the verifier reports the failure
+instead of confirming it.
+
+The reproduction that needs no one else: send text to the account's own
+sending alias by the participant route, meaning `to` is the same email the
+account sends from. iMessage refuses self-delivery and writes an `error=22`
+row immediately. Verified on 2026-08-07. An iMessage-only send to a number
+with no iMessage registration, with SMS fallback unavailable, is the other
+case, but it puts a message in a stranger's hands if the number turns out to
+be reachable. Prefer the self-alias route.
 
 Expected:
 
@@ -192,10 +199,15 @@ Expected:
 
 ### 11. Partial failure: multi-payload send fails partway
 
-Call `send` with both `text` and `file_paths`, where the text will dispatch
-fine and the attachment will not. For example, point `file_paths` at a file
-that exists at validation time but is unreadable when the transfer starts, or
-at an oversized file the transfer rejects.
+`partial_failure` needs an earlier payload to dispatch and a later one to hard
+fail. Files go before text, so the combination to aim for is two files where
+the first succeeds and the second fails. A bad file in a single-file call is
+caught by validation before anything dispatches and returns `failed`.
+
+Both paths are validated up front and each file is staged at its own dispatch,
+so the second file has to break after the call starts. What worked on
+2026-08-07: send two readable files, then delete the second one about half a
+second in, while the first is still transferring.
 
 Expected:
 
@@ -258,31 +270,76 @@ Expected:
 
 Nothing is sent in this check. The resolver refuses ahead of the send.
 
-Pick a first name that matches more than one entry in Contacts, where each
-entry has a different handle. `to` must be that name, not a phone number or
-email, because only name resolution can be ambiguous.
+`to` must be a name. A phone number or email resolves directly and can never
+be ambiguous.
+
+`ContactResolver.searchByName` does a case-insensitive substring match over
+the full display name and returns one row per handle, so the count that
+matters is handles, not people. A single contact with a phone number and two
+email addresses is already ambiguous on its own. A shared surname is the
+easiest way to guarantee the condition.
+
+Before running this, confirm the name you picked really does match more than
+one handle. A name that matches exactly one handle sends the text for real.
 
 Call:
 
 ```json
 {
-  "to": "Alex",
+  "to": "<a surname several of your contacts share>",
   "text": "iMessage Max manual validation: ambiguous destination"
 }
 ```
 
 Expected:
 
+- The MCP call comes back as a tool error, not a normal result. The JSON below
+  is the error payload
 - `status` is `ambiguous`
 - `message` is "Multiple contacts match. Please specify using a phone number,
   email, or chat_id."
-- `candidates` lists every match, each with `name`, `handle`, and
+- `candidates` lists every matching handle, each with `name`, `handle`, and
   `last_contact`
-- Candidates are ordered by most recent contact first. Anyone you have never
+- The same person appears once per handle, under the same `name`
+- Candidates are ordered by most recent contact first. A handle you have never
   messaged shows `last_contact` of `never` and sorts last
 - No `chat`, `chat_id`, or `delivered_to` in the response
 - Nothing appears in any Messages conversation. Confirm this on the device
 - Repeating the call with one candidate's `handle` as `to` sends normally
+
+---
+
+## Real-machine validation run, 2026-08-07
+
+Ran checks 10, 11, 14, and 15 against the installed v1.4.0 binary over the
+stdio MCP server, all targeting the operator's own handles. Every previously
+unrun check now has a result.
+
+| Check | Result |
+|-------|--------|
+| 15, ambiguous destination | PASS. `to` set to a surname eleven contacts share returned `status: "ambiguous"` with all eleven handles, ordered most recent first, the four never-messaged handles last with `last_contact: "never"`. Nothing was sent |
+| 10, failed delivery | PASS. Text to the account's own sending alias returned `status: "failed_delivery"` naming error 22, with a `verified_message_guid`, so the row was found rather than missed |
+| 11, partial failure | PASS. Two files with the second deleted mid-call returned `status: "partial_failure"`, naming the dispatched file and the failed one, and saying not to resend the dispatched one |
+| 14, staged file cleanup | PASS. A sampler watching `~/Pictures/imessage-max-staging/` caught a UUID directory holding the file under its original name, gone by the time the call returned. Two sends left nothing behind, and the source files were untouched |
+
+Cleanup also runs on the failure path: a chat-route send that failed in
+AppleScript staged its directory and removed it anyway.
+
+Two findings came out of the run.
+
+The `any;-;` service chat cannot be targeted by `chat_id`. A chat-route send
+to the operator's own SMS-service self-DM failed with AppleScript error -1728,
+`can't get chat id "any;-;<handle>"`. The participant route to the same
+conversation worked and landed in the same chat. Worth knowing before using
+`chat_id` on a chat whose GUID starts with `any;-;`.
+
+That failure surfaced a real bug, now fixed. AppleScript writes the
+typographic apostrophe in its errors, so `can’t get chat` never matched the
+straight-form `can't get chat` test in the stderr classifier. Every one of
+those errors fell through to the raw-stderr branch, and the client got
+`186:202: execution error: ...` instead of "Could not find chat ... in
+Messages.app." The classifier now normalizes the apostrophe first, and
+`AppleScriptRunnerValidationTests` covers both forms.
 
 ---
 
