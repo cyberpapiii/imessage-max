@@ -401,7 +401,7 @@ Some attachments are stored in iCloud, not on disk. `list_attachments` includes 
 
 ## Requirements
 
-- macOS 13+ (Ventura or later)
+- macOS 14+ (Sonoma or later)
 - Full Disk Access permission
 - Contacts permission (for name resolution)
 - Automation permission for Messages.app (send only)

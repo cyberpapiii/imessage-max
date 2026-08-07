@@ -1,12 +1,14 @@
 class ImessageMax < Formula
   desc "MCP server for iMessage - AI assistant integration"
   homepage "https://github.com/cyberpapiii/imessage-max"
-  url "https://github.com/cyberpapiii/imessage-max/releases/download/v1.0.2/imessage-max-macos.tar.gz"
-  sha256 "9359d6e8142b3473dd55877cd6a1f38f7629751f59f24e72600b17d0adce2e68"
+  url "https://github.com/cyberpapiii/imessage-max/releases/download/v1.3.0/imessage-max-macos.tar.gz"
+  # TODO(release): replace after publishing the v1.3.0 asset —
+  # `shasum -a 256 imessage-max-macos.tar.gz`
+  sha256 "0000000000000000000000000000000000000000000000000000000000000000"
   license "MIT"
 
   depends_on :macos
-  depends_on macos: :ventura
+  depends_on macos: :sonoma
 
   def install
     bin.install "imessage-max"
