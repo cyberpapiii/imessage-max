@@ -251,7 +251,11 @@ public actor HTTPTransport: Transport {
             case .atCapacity:
                 return errorResponse(
                     status: .serviceUnavailable,
-                    message: "Too many active sessions. Try again later."
+                    message: """
+                        Session capacity reached. Reuse an existing session, terminate unused \
+                        sessions with DELETE and their Mcp-Session-Id, or retry after idle \
+                        sessions expire.
+                        """
                 )
             case .startFailed:
                 return errorResponse(
