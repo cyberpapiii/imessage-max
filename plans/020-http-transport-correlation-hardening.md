@@ -3,8 +3,8 @@
 > **Executor instructions**: Follow this plan step by step. Run every
 > verification command and confirm the expected result before moving to the
 > next step. If anything in the "STOP conditions" section occurs, stop and
-> report — do not improvise. When done, update the status row for this plan
-> in `plans/README.md` — unless a reviewer dispatched you and told you they
+> report, do not improvise. When done, update the status row for this plan
+> in `plans/README.md`, unless a reviewer dispatched you and told you they
 > maintain the index.
 >
 > **Drift check (run first)**: `git diff --stat e3d14da..HEAD -- swift/Sources/iMessageMax/Server/HTTPTransport.swift swift/Tests/iMessageMaxTests/HTTPTransportIntegrationTests.swift`
@@ -29,7 +29,7 @@ Four defects live in the same ~120 lines of `HTTPTransport.swift`:
    `String(Int(doubleId))`; a POST with `"id": 1e300` makes `Int(_:)` trap
    ("Double value cannot be converted to Int"). The function runs for every
    request on the legacy lane (`HTTPTransport.swift:290`), so an `initialize`
-   with that id aborts the process on the first unauthenticated POST — and a
+   with that id aborts the process on the first unauthenticated POST, and a
    repeated POST is a restart loop against launchd.
 2. **Ids of different JSON types collide.** `1` (int) and `"1"` (string) both
    canonicalize to `"1"`; the second concurrent request is rejected as a
@@ -41,7 +41,7 @@ Four defects live in the same ~120 lines of `HTTPTransport.swift`:
 4. **Every successful request leaks an armed 300-second timer.** The success
    path removes the pending request without cancelling its
    `DispatchWorkItem`, so each served request leaves a timer plus a wakeup
-   `Task` behind — steady-state churn in a runtime with a documented
+   `Task` behind, steady-state churn in a runtime with a documented
    sensitivity to stray task wakeups.
 
 ## Current state
@@ -63,7 +63,7 @@ The pending-request plumbing (`:55-63`):
     }
 ```
 
-The id parser (`:842-856`) — defect 1 and 2:
+The id parser (`:842-856`), defect 1 and 2:
 
 ```swift
     /// Parses the JSON-RPC id from a message
@@ -88,7 +88,7 @@ Call sites: `:290` (`case .request` in `handlePost`, feeds
 Both go through this one function, which is what makes a canonical-form change
 safe: store and lookup always agree.
 
-The error body builder (`:858-871`) — defect 3:
+The error body builder (`:858-871`), defect 3:
 
 ```swift
     /// Creates a JSON-RPC error response
@@ -121,7 +121,7 @@ Client-controlled input reaches it at `:783-787` (and `:801-813`):
         }
 ```
 
-The success path that skips timer cancellation (`:584-588`) — defect 4:
+The success path that skips timer cancellation (`:584-588`), defect 4:
 
 ```swift
         // Check if this matches a pending request
@@ -131,7 +131,7 @@ The success path that skips timer cancellation (`:584-588`) — defect 4:
             logger.trace("Routed response for request: \(jsonRpcId)")
 ```
 
-The helper that does it correctly (`:700-712`) — already exists, use it:
+The helper that does it correctly (`:700-712`), already exists, use it:
 
 ```swift
     /// Removes and returns a pending request
@@ -159,7 +159,7 @@ The correct serializer pattern to mirror (`ModernProtocol.swift:321-324`):
 ```
 
 Repo conventions: actor-isolated transport; conventional-commit messages;
-tests use Hummingbird's `app.test` client — see
+tests use Hummingbird's `app.test` client, see
 `HTTPTransportIntegrationTests.swift:12-31` for the pattern (build
 `HTTPTransport(host:"127.0.0.1", port: 0, database: Database(), resolver:
 ContactResolver(seedCache: [:]), requestTimeout: .seconds(5))`, then
@@ -180,18 +180,18 @@ ContactResolver(seedCache: [:]), requestTimeout: .seconds(5))`, then
 - `swift/Sources/iMessageMax/Server/HTTPTransport.swift`
 - `swift/Tests/iMessageMaxTests/HTTPTransportIntegrationTests.swift`
 - `swift/Tests/iMessageMaxTests/HTTPTransportTests.swift` (if you add the unit
-  tests there instead — either test file is fine, be consistent)
+  tests there instead, either test file is fine, be consistent)
 - `plans/README.md` (status row only)
 
 **Out of scope** (do NOT touch, even though they look related):
-- `swift/Sources/iMessageMax/Server/ModernProtocol.swift` — its own hygiene
+- `swift/Sources/iMessageMax/Server/ModernProtocol.swift`, its own hygiene
   fixes are plan 026.
-- `swift/Sources/iMessageMax/Server/OriginValidationMiddleware.swift` — its
+- `swift/Sources/iMessageMax/Server/OriginValidationMiddleware.swift`, its
   hand-built JSON uses constant strings only; leave it.
-- The era-selection branch in `handlePost` (`:216-224`) — behavior must not
+- The era-selection branch in `handlePost` (`:216-224`), behavior must not
   change; plan 027 owns its test coverage.
 - Any change to `requestTimeout` defaults or the Dispatch-timer pattern
-  itself (`:657-670`) — that pattern is load-bearing (launchd crash lesson).
+  itself (`:657-670`), that pattern is load-bearing (launchd crash lesson).
 
 ## Git workflow
 
@@ -240,7 +240,7 @@ The duplicate-id error message at `:305` will now show the tagged form (e.g.
 `Duplicate in-flight JSON-RPC request id: i:2`); that is acceptable.
 
 Note the deliberate choice: an *exactly integral* double maps to the `i:`
-namespace because JSON does not distinguish `2` from `2.0` — a client that
+namespace because JSON does not distinguish `2` from `2.0`, a client that
 sends `2` and gets a response echoing `2.0` (or vice versa through the SDK)
 must still correlate.
 
@@ -287,7 +287,7 @@ with the existing helper so the work item is cancelled:
             logger.trace("Routed response for request: \(jsonRpcId)")
 ```
 
-(`removePendingRequest` defaults `cancelTimeout: true` — that is the point.)
+(`removePendingRequest` defaults `cancelTimeout: true`, that is the point.)
 
 **Verify**: `cd swift && swift build` → exit 0, and
 `grep -n "pendingRequests.removeValue" swift/Sources/iMessageMax/Server/HTTPTransport.swift`
@@ -353,7 +353,7 @@ Add to `HTTPTransportIntegrationTests.swift`, following the existing
    JSON string manually if the helper only takes Int ids). Assert: the call
    returns an HTTP response (any status) and a subsequent normal `initialize`
    with `id: 1` still succeeds with `.ok`. Before this plan, the first POST
-   aborted the test process — the assertion that *any* response arrives is
+   aborted the test process, the assertion that *any* response arrives is
    the regression test.
 2. **Malicious protocol-version header yields well-formed JSON.** POST a
    normal `initialize` with header `MCP-Protocol-Version` set to
@@ -392,7 +392,7 @@ Stop and report back (do not improvise) if:
 
 - The excerpts above don't match the live code (drift).
 - Changing `parseJsonRpcId` to `static` breaks callers you weren't told
-  about — `grep -n "parseJsonRpcId" swift/Sources/` should show exactly the
+  about, `grep -n "parseJsonRpcId" swift/Sources/` should show exactly the
   two call sites (`:290`, `:582`) plus the definition; if there are more, stop.
 - Any *existing* test fails after step 1 in a way that isn't a trivially
   updated assertion about the duplicate-id error message text.
@@ -401,7 +401,7 @@ Stop and report back (do not improvise) if:
 ## Maintenance notes
 
 - The type-tag namespace (`s:`/`i:`/`d:`/`n:`/`u:`) is internal to the
-  pending-request table — it never appears on the wire except inside the
+  pending-request table, it never appears on the wire except inside the
   duplicate-id error message. If someone later surfaces ids in more client
   messages, strip the tag for display.
 - Reviewer should scrutinize: branch order in `parseJsonRpcId` (Int before

@@ -179,7 +179,7 @@ final class SendToolExecuteTests: XCTestCase {
 
     // Regression test for the findDirectChatForHandle bug: the old SQL applied
     // `WHERE h.id = ?` before GROUP BY, so HAVING COUNT(DISTINCT handle_id) = 1
-    // counted only the filtered handle's rows — every chat containing the handle
+    // counted only the filtered handle's rows. Every chat containing the handle
     // passed, and ORDER BY ROWID DESC picked the group (chat 2) over the DM (chat 1).
     func testResolverPicksDirectChatNotGroupForParticipantSend() async throws {
         let fixture = try makeSendFixture()  // DM chat 1 (Alice) + group chat 2 (Alice+Bob)
@@ -318,9 +318,9 @@ final class SendToolExecuteTests: XCTestCase {
         // However, resolveContactName() checks CNContactStore.authorizationStatus() before
         // searching the seeded cache; on this machine and in CI the status is notDetermined,
         // so name-based resolution always returns a 'failed' status rather than 'ambiguous'.
-        // This test characterizes the same invariant — runner is never invoked when send
-        // cannot resolve a recipient — via a path that does not require Contacts authorization:
-        // a phone number that does not exist in the fixture DB.
+        // This test characterizes the same invariant, that the runner is never invoked
+        // when send cannot resolve a recipient, via a path that does not require Contacts
+        // authorization: a phone number that does not exist in the fixture DB.
         let fixture = try makeSendFixture()
         let stub = StubScriptRunner()
 
@@ -373,7 +373,7 @@ final class SendToolExecuteTests: XCTestCase {
         let contents = try await tool.execute(args: [
             "chat_id": .string("chat1"),
             "text": .string("Hello Alice"),
-            // confirm omitted — chat-target sends no longer gate.
+            // confirm omitted. Chat-target sends no longer gate.
         ])
 
         let json = try decodeJSONDictionary(from: contents)
@@ -455,7 +455,7 @@ final class SendToolExecuteTests: XCTestCase {
 
     // NOTE on payload order: SendPayload.build appends FILES first, then the
     // text. So for `text` + one `file_paths` entry the dispatch order is
-    // [file, text] — the file is payload 0 and the text is payload 1.
+    // [file, text]. The file is payload 0 and the text is payload 1.
 
     // An earlier payload was dispatched and a later one hard-failed: the
     // response must say so, not report a blanket "failed" that invites a
@@ -498,7 +498,7 @@ final class SendToolExecuteTests: XCTestCase {
             "Both payloads should have been attempted before the failure stopped the loop")
     }
 
-    // When the very first payload fails, nothing was dispatched — the response
+    // When the very first payload fails, nothing was dispatched. The response
     // stays a plain "failed", and later payloads are never attempted.
     func testFirstPayloadFailureReturnsPlainFailedAndStopsSending() async throws {
         let fixture = try makeSendFixture()
@@ -523,7 +523,7 @@ final class SendToolExecuteTests: XCTestCase {
         } catch let error as ToolError {
             let json = try decodeJSONDictionary(from: error.content)
             XCTAssertEqual(json["status"] as? String, "failed",
-                "Nothing was dispatched, so this stays a plain 'failed' — not 'partial_failure'")
+                "Nothing was dispatched, so this stays a plain 'failed', not 'partial_failure'")
         }
 
         XCTAssertEqual(stub.invocations.count, 1,

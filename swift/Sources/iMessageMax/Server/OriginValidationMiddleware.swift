@@ -41,7 +41,7 @@ struct OriginValidationMiddleware<Context: RequestContext>: RouterMiddleware {
                 )
             }
         } else if requireOrigin {
-            // Origin header is required but missing — 403 per MCP spec
+            // Origin header is required but missing, so 403 per MCP spec
             return Response(
                 status: .forbidden,
                 headers: [.contentType: "application/json"],
@@ -54,7 +54,7 @@ struct OriginValidationMiddleware<Context: RequestContext>: RouterMiddleware {
         }
 
         // Also validate Host header to prevent DNS rebinding
-        // Host validation is mandatory — reject if we cannot determine the host
+        // Host validation is mandatory. Reject if we cannot determine the host
         // Note: swift-http-types strips the Host header from HTTPFields and stores it
         // in HTTPRequest.authority (for HTTP/1.1 Host and HTTP/2 :authority compatibility)
         guard let authority = request.head.authority ?? request.uri.host else {
@@ -79,7 +79,7 @@ struct OriginValidationMiddleware<Context: RequestContext>: RouterMiddleware {
                 hostWithoutPort = authority
             }
         } else if authority.filter({ $0 == ":" }).count > 1 {
-            // Bare IPv6 without brackets (e.g., ::1) — contains multiple colons,
+            // Bare IPv6 without brackets (e.g., ::1) contains multiple colons,
             // so don't attempt port stripping which would mangle the address
             hostWithoutPort = authority
         } else {

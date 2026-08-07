@@ -3,13 +3,13 @@
 > **Executor instructions**: Follow this plan step by step. Run every
 > verification command and confirm the expected result before moving to the
 > next step. If anything in the "STOP conditions" section occurs, stop and
-> report — do not improvise. When done, update the status row for this plan
-> in `plans/README.md` — unless a reviewer dispatched you and told you they
+> report, do not improvise. When done, update the status row for this plan
+> in `plans/README.md`, unless a reviewer dispatched you and told you they
 > maintain the index.
 >
 > **Drift check (run first)**: `git diff --stat e3d14da..HEAD -- swift/Sources/iMessageMax/Utilities/AppleScript.swift swift/Sources/iMessageMax/Tools/Send.swift swift/Tests/iMessageMaxTests/SendToolExecuteTests.swift`
 > Plans 021, 023, and 024 also touch these files and should land first. After
-> they land the line numbers below will have shifted — match on the code
+> they land the line numbers below will have shifted, match on the code
 > shapes, not the numbers. If a *shape* is missing (e.g. the semaphore wait
 > is gone), treat it as a STOP condition.
 
@@ -19,7 +19,7 @@
 - **Effort**: M
 - **Risk**: MED (concurrency boundary change on the only write path)
 - **Depends on**: 021, 024 (both edit the same files; this plan restructures
-  around their changes and must preserve them — notably 024's
+  around their changes and must preserve them, notably 024's
   `removeStagedDirectory` calls and 023's stderr clamp)
 - **Category**: bug
 - **Planned at**: commit `e3d14da`, 2026-08-07
@@ -32,7 +32,7 @@ async context. `SendTool` (an actor) calls `LiveScriptRunner`, which calls
 `semaphore.wait(timeout:)` for up to the script timeout while `osascript`
 runs, and `Thread.sleep(forTimeInterval: 0.5)` in a poll loop for up to 15
 more seconds for file transfers. Because the caller is Swift-concurrency
-code, that thread is a **cooperative-pool thread** — a resource sized to the
+code, that thread is a **cooperative-pool thread**, a resource sized to the
 CPU count that every actor and async task in the process shares. One slow
 Messages.app interaction can pin a pool thread for ~45 seconds; in the
 launchd HTTP service that means unrelated requests (list_chats, get_messages,
@@ -48,7 +48,7 @@ times out, and the send is falsely reported as `.timeout`.
 
 The fix has two parts, deliberately conservative: (1) make the
 `ScriptRunning` boundary async and hop the blocking work onto a GCD
-background thread — `Thread.sleep` and semaphores are *fine* on GCD threads
+background thread, `Thread.sleep` and semaphores are *fine* on GCD threads
 (GCD scales its thread pool; the repo's launchd crash pattern is about
 `Task.sleep`, which this plan does not introduce); (2) drain the pipes
 concurrently with the exit wait.
@@ -104,7 +104,7 @@ struct LiveScriptRunner: ScriptRunning {
 ```
 
 The transfer poll (`waitForTransferCompletion`, `:320-361`) blocks with
-`Thread.sleep(forTimeInterval: pollInterval)` at `:351` — after this plan it
+`Thread.sleep(forTimeInterval: pollInterval)` at `:351`, after this plan it
 runs on a GCD thread where that is acceptable; do not rewrite it.
 
 ### The call sites that gain `await`
@@ -129,7 +129,7 @@ runs on a GCD thread where that is acceptable; do not rewrite it.
         }
 ```
 
-(`payloads.map` with a non-async closure — will need a `for` loop once the
+(`payloads.map` with a non-async closure, will need a `for` loop once the
 calls are `await`ed.)
 
 ### The test stub
@@ -162,13 +162,13 @@ four methods appending to `invocations`, running `onSend?()`, returning
 - `plans/README.md` (status row only)
 
 **Out of scope** (do NOT touch, even though they look related):
-- Rewriting `waitForTransferCompletion` polling with AsyncTimeout or timers —
+- Rewriting `waitForTransferCompletion` polling with AsyncTimeout or timers,
   the GCD hop makes `Thread.sleep` acceptable; a rewrite adds risk for no
   service-level gain.
-- `SendVerifier` — already async and launchd-safe.
-- Error strings (023), staged-file cleanup logic (024) — preserve both
+- `SendVerifier`, already async and launchd-safe.
+- Error strings (023), staged-file cleanup logic (024), preserve both
   verbatim through the restructuring.
-- Introducing `Task.sleep` anywhere — plan 019's `LaunchdSafetyTests`
+- Introducing `Task.sleep` anywhere, plan 019's `LaunchdSafetyTests`
   tripwire will fail the build of any such attempt; that is by design.
 
 ## Git workflow
@@ -225,7 +225,7 @@ queues **before** waiting for exit, then join after:
 
 (If the compiler rejects the captured `var`s under strict concurrency, use a
 small `final class` box with `@unchecked Sendable` or `DispatchQueue`-confined
-storage — match whatever pattern compiles cleanly; the invariant is
+storage, match whatever pattern compiles cleanly; the invariant is
 "reads start before the wait, join after".)
 
 **Verify**: `cd swift && swift build` → exit 0.
@@ -273,7 +273,7 @@ sites and the test stub (expected; next steps).
 ### Step 3: Await at the call sites
 
 In `Send.swift`, replace the two `payloads.map { ... }` blocks (`:330-350`
-shape) with sequential loops — payload order must be preserved (a text
+shape) with sequential loops, payload order must be preserved (a text
 following a file must send after it):
 
 ```swift
@@ -305,7 +305,7 @@ In `SendToolExecuteTests.swift`, add `async` to the four `StubScriptRunner`
 method signatures (bodies unchanged). Fix any test call sites the compiler
 flags (tests already run in async contexts). If `PlaceholderTests.swift`
 classes call the four `AppleScriptRunner.send*` statics directly, they are
-**unchanged** (the statics stay synchronous — only the protocol/LiveScriptRunner
+**unchanged** (the statics stay synchronous, only the protocol/LiveScriptRunner
 boundary went async), so no edits should be needed there; verify by building.
 
 **Verify**: `cd swift && swift test` → exit 0, 0 failures.
@@ -323,13 +323,13 @@ Read your own diff and confirm:
 
 ## Test plan
 
-No new test files — this plan is a concurrency-boundary refactor whose
+No new test files, this plan is a concurrency-boundary refactor whose
 behavior is locked by the existing `SendToolExecuteTests` (routing, failure
 propagation, verification statuses) and `AppleScriptRunnerValidationTests`.
 The pipe-drain fix is not practically unit-testable without spawning real
 processes; if you want a cheap smoke test, a single test may run
 `AppleScriptRunner.runScriptForTesting`-style execution of `/usr/bin/true`
-via the existing test seams **only if** one already exists — do not add new
+via the existing test seams **only if** one already exists, do not add new
 process-spawning machinery.
 
 ## Done criteria
@@ -348,14 +348,14 @@ Machine-checkable. ALL must hold:
 
 Stop and report back (do not improvise) if:
 
-- Plans 021/023/024 have not landed and their shapes are absent — land order
+- Plans 021/023/024 have not landed and their shapes are absent, land order
   matters; report rather than merging their work into this branch.
 - Strict-concurrency errors push you toward marking types `@unchecked
-  Sendable` beyond the one pipe-drain box — that's a design smell; report.
+  Sendable` beyond the one pipe-drain box, that's a design smell; report.
 - Any existing send test changes *behavioral* expectations (not just
-  signatures) to pass — the refactor must be behavior-preserving.
+  signatures) to pass, the refactor must be behavior-preserving.
 - You find additional cooperative-pool blocking in the send path not listed
-  here (e.g. in `SendResolution`) — report; it extends this plan's scope.
+  here (e.g. in `SendResolution`), report; it extends this plan's scope.
 
 ## Maintenance notes
 
@@ -363,7 +363,7 @@ Stop and report back (do not improvise) if:
   thread** unless it has been hopped to GCD first. `LiveScriptRunner` is the
   single sanctioned hop point for the send path.
 - If the send path is ever parallelized across payloads, the sequential
-  `for` loop in Step 3 is the thing being deliberately given up — don't
+  `for` loop in Step 3 is the thing being deliberately given up, don't
   parallelize; Messages.app ordering matters.
 - Manual validation (operator action): one real text send + one real file
   send after deploy; add rows to

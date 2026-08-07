@@ -3,8 +3,8 @@
 > **Executor instructions**: Follow this plan step by step. Run every
 > verification command and confirm the expected result before moving to the
 > next step. If anything in the "STOP conditions" section occurs, stop and
-> report — do not improvise. When done, update the status row for this plan
-> in `plans/README.md` — unless a reviewer dispatched you and told you they
+> report, do not improvise. When done, update the status row for this plan
+> in `plans/README.md`, unless a reviewer dispatched you and told you they
 > maintain the index.
 >
 > **Drift check (run first)**: `git diff --stat 57a2ff3..HEAD -- .github/workflows/build.yml`
@@ -23,7 +23,7 @@
 
 ## Why this matters
 
-Every push and PR triggers a from-scratch `swift build` + `swift test` on a macOS-15 runner, recompiling all dependencies (MCP swift-sdk, Hummingbird, ArgumentParser) each time — several minutes of latency per run and unnecessary runner cost. Caching `.build` keyed on `Package.resolved` makes dependency compilation incremental across runs.
+Every push and PR triggers a from-scratch `swift build` + `swift test` on a macOS-15 runner, recompiling all dependencies (MCP swift-sdk, Hummingbird, ArgumentParser) each time, several minutes of latency per run and unnecessary runner cost. Caching `.build` keyed on `Package.resolved` makes dependency compilation incremental across runs.
 
 ## Current state
 
@@ -69,7 +69,7 @@ Note: the lockfile is at `swift/Package.resolved` (repo has the Swift package in
 | Purpose | Command | Expected on success |
 |---------|---------|---------------------|
 | YAML sanity | `python3 -c "import yaml,sys; yaml.safe_load(open('.github/workflows/build.yml')); print('ok')"` | prints `ok` (if PyYAML is missing, use the actionlint check instead) |
-| Action lint (optional) | `brew list actionlint >/dev/null 2>&1 && actionlint .github/workflows/build.yml` | no output / exit 0 (skip if actionlint not installed — do NOT install anything) |
+| Action lint (optional) | `brew list actionlint >/dev/null 2>&1 && actionlint .github/workflows/build.yml` | no output / exit 0 (skip if actionlint not installed, do NOT install anything) |
 | Local tests still fine | `cd swift && swift test` | all pass (CI change shouldn't affect local, this is a sanity baseline) |
 
 ## Scope
@@ -79,9 +79,9 @@ Note: the lockfile is at `swift/Package.resolved` (repo has the Swift package in
 - `plans/README.md` (status row)
 
 **Out of scope** (do NOT touch):
-- `.github/workflows/release.yml` — release builds should stay clean/reproducible; do not add caching there.
+- `.github/workflows/release.yml`, release builds should stay clean/reproducible; do not add caching there.
 - The Makefile, Package.swift, any Swift source.
-- Do not pin a Swift toolchain version or add new jobs — caching only.
+- Do not pin a Swift toolchain version or add new jobs, caching only.
 
 ## Git workflow
 
@@ -115,7 +115,7 @@ Insert between "Checkout code" and "Build":
 ls swift/Package.resolved
 ```
 
-**Verify**: file exists (it is checked in). If it does not exist, STOP — the cache key strategy needs rethinking, and `swift build` resolving freshly each run may be intentional.
+**Verify**: file exists (it is checked in). If it does not exist, STOP, the cache key strategy needs rethinking, and `swift build` resolving freshly each run may be intentional.
 
 ## Test plan
 
@@ -137,5 +137,5 @@ Stop and report back (do not improvise) if:
 
 ## Maintenance notes
 
-- If CI later pins Swift toolchain versions, add the Swift version to the cache key (a stale `.build` across toolchains can cause confusing failures — `restore-keys` makes this possible; if mysterious CI-only build errors appear after a toolchain bump, clearing the cache is the first move).
+- If CI later pins Swift toolchain versions, add the Swift version to the cache key (a stale `.build` across toolchains can cause confusing failures, `restore-keys` makes this possible; if mysterious CI-only build errors appear after a toolchain bump, clearing the cache is the first move).
 - Reviewer should scrutinize: the repo-root-relative `path`/`hashFiles` vs the job's `working-directory: swift` (an easy mismatch).

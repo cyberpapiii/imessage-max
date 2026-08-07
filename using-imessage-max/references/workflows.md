@@ -1,6 +1,6 @@
 # iMessage Max Workflow Reference
 
-## Catch-Up Patterns
+## Catch-up patterns
 
 Use `chat_id` values only as internal handles for follow-up tool calls and exact sends. In summaries to the user, refer to conversations by returned chat names, explicit group names, or participant-derived labels.
 
@@ -49,7 +49,7 @@ Preferred sequence:
 1. `search(query="...")`
 2. `get_context(message_id="...")` or `get_messages(chat_id="...")`
 
-## Attachment Pattern
+## Attachment pattern
 
 User request examples:
 - "Show me the screenshots from this week"
@@ -63,7 +63,7 @@ Reasoning:
 - `list_attachments` is grouped by message, which matches how shared content is usually remembered
 - `get_attachment` is still the exact fetch step for one known file
 
-## Sending Pattern
+## Sending pattern
 
 User request examples:
 - "Reply in that group"
@@ -74,4 +74,4 @@ Preferred sequence:
 2. Use `send(chat_id="...")` when exact placement matters
 
 Use `send(to="...")` only when the user is comfortable starting from a person rather than a specific thread.
-Sends are not gated: an exact destination sends immediately and is verified post-send (`confirmed` / `uncertain` / `mismatch` / `failed_delivery` / `partial_failure`). The `confirm` parameter is deprecated and ignored. `pending_confirmation` appears only for file attachments whose transfer hasn't completed — do not treat it as sent, and do not retry; check later with `list_attachments` or `get_messages`.
+Sends are not gated. An exact destination sends immediately and is verified afterward, returning `confirmed`, `uncertain`, `mismatch`, `failed_delivery`, or `partial_failure`. The `confirm` parameter is deprecated and ignored. `pending_confirmation` appears only for file attachments whose transfer has not completed. Do not treat it as sent and do not retry. Check later with `list_attachments` or `get_messages`.

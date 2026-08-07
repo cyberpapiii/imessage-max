@@ -1,6 +1,6 @@
 # Plan 014: Bound the send-confirmation elicitation wait
 
-> **Executor instructions**: BASE CHECK FIRST — run
+> **Executor instructions**: BASE CHECK FIRST, run
 > `ls plans/014-bounded-confirmation-elicitation.md`. If missing, your worktree
 > snapshot is stale: `git checkout -b advisor/014-bounded-elicitation <PLANS_COMMIT>`
 > (SHA in dispatch message) and re-check; otherwise
@@ -22,14 +22,14 @@
 
 Observed in production today: a client (Cursor, via the plug MCP multiplexer)
 called `send` with a `chat_id` and no `confirm: true`. The confirmation gate
-fired and the server called `server.requestElicitation(...)` —
-`Send.swift:483`, inside `confirmSendWithClientIfAvailable` — which is an
+fired and the server called `server.requestElicitation(...)`,
+`Send.swift:483`, inside `confirmSendWithClientIfAvailable`, which is an
 **unbounded await**. Somewhere in the multiplexer chain the elicitation was
 accepted but never answered, so the tool call hung until the client's own
 300-second MCP timeout killed it. A trustworthy-core server must never hang a
 tool call indefinitely: if confirmation can't be obtained within a bounded
 window, the existing graceful path already exists (`.unavailable` → `pending`
-status telling the agent to re-call with `confirm: true`) — we just need to
+status telling the agent to re-call with `confirm: true`), we just need to
 reach it on timeout.
 
 ## Current state
@@ -46,7 +46,7 @@ reach it on timeout.
   timeout**; `catch { return .unavailable }`.
 - `actor SendTool` init: `init(db:resolver:runner:verifier:)` (defaults for
   all but resolver).
-- `server` is the MCP SDK `Server` type — not mockable in tests; the timeout
+- `server` is the MCP SDK `Server` type, not mockable in tests; the timeout
   logic must therefore live in a small testable helper, not be tested through
   a fake Server.
 
@@ -65,7 +65,7 @@ reach it on timeout.
 - `swift/Sources/iMessageMax/Utilities/AsyncTimeout.swift` (create)
 - `swift/Tests/iMessageMaxTests/ElicitationTimeoutTests.swift` (create)
 
-**Out of scope**: everything else — especially `SendVerifier.swift`,
+**Out of scope**: everything else, especially `SendVerifier.swift`,
 `SendResolution.swift`, `Diagnose.swift`, the elicitation prompt wording, and
 `shouldConfirmSend`'s rules (which sends require confirmation is policy, not
 this bug).
@@ -111,7 +111,7 @@ enum AsyncTimeout {
 
 CAUTION on semantics: with this shape, an operation that THROWS quickly
 returns nil (indistinguishable from timeout). That is acceptable HERE because
-the caller maps both cases to `.unavailable` — document it in the doc comment.
+the caller maps both cases to `.unavailable`, document it in the doc comment.
 
 **Verify**: `cd swift && swift build` → exit 0.
 
@@ -138,23 +138,23 @@ In `SendTool`:
   prompt construction code untouched above the call.
 
 **Verify**: `cd swift && swift build` → exit 0; `cd swift && swift test` →
-142 pass (no behavior change for test paths — they pass `server: nil` or
+142 pass (no behavior change for test paths, they pass `server: nil` or
 `confirm: true`).
 
 ### Step 3: Tests
 
 `swift/Tests/iMessageMaxTests/ElicitationTimeoutTests.swift`:
 
-1. `testTimeoutReturnsNilWhenOperationHangs` — operation awaits
+1. `testTimeoutReturnsNilWhenOperationHangs`, operation awaits
    `Task.sleep(for: .seconds(30))`; timeout `.milliseconds(50)`; expect nil;
    assert elapsed < 1s.
-2. `testFastOperationWinsOverTimeout` — operation returns 42 immediately;
+2. `testFastOperationWinsOverTimeout`, operation returns 42 immediately;
    timeout `.seconds(5)`; expect 42; assert elapsed < 1s.
-3. `testThrowingOperationReturnsNil` — operation throws; expect nil.
-4. `testHangingConfirmationYieldsPendingStatus` — end-to-end through
+3. `testThrowingOperationReturnsNil`, operation throws; expect nil.
+4. `testHangingConfirmationYieldsPendingStatus`, end-to-end through
    `SendTool` IF feasible without a real `Server`: since `server` is nil in
    the test harness, the gate already short-circuits to `.unavailable` before
-   the timeout code — so instead assert the EXISTING behavior still holds
+   the timeout code, so instead assert the EXISTING behavior still holds
    (chat-route send without `confirm` and `server: nil` → status
    `pending_confirmation` with the re-call guidance). This pins the graceful
    path the timeout now also routes to.
@@ -172,7 +172,7 @@ pass; full suite green (report count).
 ## STOP conditions
 
 - `requestElicitation`'s return type is not Sendable (the task-group helper
-  won't compile) — report the exact type; do not work around with unchecked
+  won't compile), report the exact type; do not work around with unchecked
   Sendable on SDK types.
 - Any existing test fails after Step 2.
 

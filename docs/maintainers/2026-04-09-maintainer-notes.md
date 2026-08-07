@@ -1,4 +1,4 @@
-# Maintainer Notes — 2026-04-09
+# Maintainer notes, 2026-04-09
 
 This note captures a few design choices that are correct for the current project shape, but easy to second-guess later if the context gets lost.
 

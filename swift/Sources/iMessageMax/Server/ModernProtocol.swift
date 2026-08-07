@@ -263,8 +263,8 @@ enum ModernDispatcher {
         ]
     }
 
-    /// Three constant strings — build the dictionary once rather than on every
-    /// response. Immutable after init, hence `nonisolated(unsafe)`.
+    /// Three constant strings, so build the dictionary once rather than on
+    /// every response. Immutable after init, hence `nonisolated(unsafe)`.
     nonisolated(unsafe) private static let serverInfoJSON: [String: Any] = [
         "name": Version.name,
         "title": Version.title,

@@ -140,7 +140,7 @@ final class CapabilityContractTests: XCTestCase {
         XCTAssertEqual(caps["send_file_group"]?.state, "supported")
     }
 
-    // MARK: - Test 5: JSON contract — all 15 keys present with correct names
+    // MARK: - Test 5: JSON contract, all 15 keys present with correct names
 
     func testJSONContractContainsAll15Keys() async throws {
         let result = try await run()

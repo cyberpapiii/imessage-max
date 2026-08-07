@@ -12,10 +12,10 @@ enum AutomationPermission {
     ///
     /// This is a non-prompting read-only TCC check (askUserIfNeeded: false).
     /// Returns:
-    ///   - (true, "authorized")      — permission is granted
-    ///   - (false, "denied")         — TCC explicitly denied (errAEEventNotPermitted)
-    ///   - (false, "not_determined") — TCC entry not yet established
-    ///   - (false, "messages_not_found") — descriptor could not be created
+    ///   - (true, "authorized"): permission is granted
+    ///   - (false, "denied"): TCC explicitly denied (errAEEventNotPermitted)
+    ///   - (false, "not_determined"): TCC entry not yet established
+    ///   - (false, "messages_not_found"): descriptor could not be created
     static func checkAutomationPermission() -> (ok: Bool, status: String) {
         guard let bundleIDData = "com.apple.MobileSMS".data(using: .utf8) else {
             return (false, "messages_not_found")

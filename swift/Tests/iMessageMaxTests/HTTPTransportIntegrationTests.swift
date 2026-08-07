@@ -360,7 +360,7 @@ final class HTTPTransportIntegrationTests: XCTestCase {
             XCTAssertEqual(response.head.status, .badRequest)
 
             // decodeJSON parses with JSONSerialization, so it throws if the
-            // body is malformed — that parse IS the injection assertion.
+            // body is malformed. That parse IS the injection assertion.
             let json = try decodeJSON(from: response.body)
             let error = try XCTUnwrap(json["error"] as? [String: Any])
             XCTAssertEqual(error["code"] as? Int, -32600)
@@ -518,7 +518,7 @@ final class HTTPTransportIntegrationTests: XCTestCase {
 
     // The GET here calls `handleGet` directly rather than going through
     // `client.executeRequest`, unlike every other test in this file. That is
-    // deliberate — do not "fix" it back, it will hang the whole suite.
+    // deliberate. Do not "fix" it back, it will hang the whole suite.
     //
     // `handleGet` answers with a long-lived streaming body that pumps the SSE
     // channel (keep-alives included) until the connection is unregistered, and

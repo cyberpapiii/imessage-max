@@ -3,13 +3,13 @@
 > **Executor instructions**: Follow this plan step by step. Run every
 > verification command and confirm the expected result before moving to the
 > next step. If anything in the "STOP conditions" section occurs, stop and
-> report — do not improvise. When done, update the status row for this plan
-> in `plans/README.md` — unless a reviewer dispatched you and told you they
+> report, do not improvise. When done, update the status row for this plan
+> in `plans/README.md`, unless a reviewer dispatched you and told you they
 > maintain the index.
 >
 > **Drift check (run first)**: `git diff --stat e3d14da..HEAD -- swift/Sources/iMessageMax/Tools/Send.swift swift/Tests/iMessageMaxTests/SendToolExecuteTests.swift`
 > Plans 021, 023, and 025 edit these files first, so expect shifted line
-> numbers — match on code shapes. In particular, after plan 025 the
+> numbers, match on code shapes. In particular, after plan 025 the
 > `payloads.map` blocks become sequential `for` loops with `await`; this plan
 > builds on that shape. If the results-handling shape differs from BOTH the
 > `e3d14da` excerpt and 025's specified replacement, STOP.
@@ -26,22 +26,22 @@
 
 ## Why this matters
 
-`send` accepts multiple payloads per call — a text plus one or more files
+`send` accepts multiple payloads per call, a text plus one or more files
 (`SendPayload.build(text:filePaths:)`). Payloads are sent sequentially, but
 failure handling pretends the call was atomic: on the first hard failure it
 returns `status: "failed"` with only that error. If payload 1 (the text)
 already went out and payload 2 (a file) failed, the agent is told the send
-*failed* — no mention that a message already reached the recipient. The
+*failed*, no mention that a message already reached the recipient. The
 predictable agent behavior is a retry, which duplicates the text the human
 already received. On the only write path in the server, the response must
-state exactly what was and wasn't delivered — same "send truth" principle as
+state exactly what was and wasn't delivered, same "send truth" principle as
 plans 017 and 021.
 
 ## Current state
 
 `swift/Sources/iMessageMax/Tools/Send.swift`. Payload construction
 (`:296-302`; `SendPayload` is `enum SendPayload { case text(String), case file(String) }`
-in `swift/Sources/iMessageMax/Models/SendPayload.swift` — order is text
+in `swift/Sources/iMessageMax/Models/SendPayload.swift`, order is text
 first, then files, as built):
 
 ```swift
@@ -59,7 +59,7 @@ plan 025 it is a sequential `for payload in payloads` loop appending to
 `var sendResults: [Result<Void, SendError>]`. **Important existing behavior
 this plan changes**: at `e3d14da` the `map` sends ALL payloads even after
 one fails; the failure is only detected afterwards. Preserve whichever
-send-everything vs stop-at-failure behavior plan 025 left in place — see
+send-everything vs stop-at-failure behavior plan 025 left in place, see
 Step 1's decision.
 
 The results handling (`:352-370` at `e3d14da`):
@@ -92,7 +92,7 @@ statuses `"failed"`, `"ambiguous"`, `"failed_delivery"` throw `ToolError`.
 
 Test stub (`swift/Tests/iMessageMaxTests/SendToolExecuteTests.swift:11-48`):
 `StubScriptRunner` records `invocations` and returns a single shared
-`nextResult` for every call — it cannot express "payload 1 succeeds,
+`nextResult` for every call, it cannot express "payload 1 succeeds,
 payload 2 fails" yet.
 
 Docs stating the status vocabulary (extended by plan 021; this plan adds one
@@ -120,9 +120,9 @@ block in the `send` tool description (`Send.swift:220-225` at `e3d14da`).
 
 **Out of scope** (do NOT touch, even though they look related):
 - `SendPayload.build` validation or payload ordering.
-- `SendVerifier` and the verification mapping (021 owns it) — partial
+- `SendVerifier` and the verification mapping (021 owns it), partial
   failures return before verification, by design (see Step 2).
-- The `pending_confirmation` accumulation for file transfers — unchanged.
+- The `pending_confirmation` accumulation for file transfers, unchanged.
 - Retry logic. This plan is about *reporting*, not recovery.
 
 ## Git workflow
@@ -136,7 +136,7 @@ block in the `send` tool description (`Send.swift:220-225` at `e3d14da`).
 ### Step 1: Stop sending after the first hard failure
 
 In the send loop (post-025 `for` loop shape), break out on the first hard
-failure — continuing to fire later payloads after one failed produces
+failure, continuing to fire later payloads after one failed produces
 out-of-order conversations and compounds the reporting problem:
 
 ```swift
@@ -263,7 +263,7 @@ tool-description proof vocabulary:
    `nextResult` untouched).
 
 2. New tests in `SendToolExecuteTests` (follow the file's existing fixture +
-   decode patterns; the partial case throws `ToolError` — use the existing
+   decode patterns; the partial case throws `ToolError`, use the existing
    do/catch decode idiom):
    - **Text sent, file fails → partial_failure**: payloads text + file via
      `text:` and `file_paths:` args; `queuedResults = [.success(()), .failure(.fileNotFound("x.jpg"))]`.
@@ -271,14 +271,14 @@ tool-description proof vocabulary:
      contains `"text message"` and `"x.jpg"`, and stub `invocations.count == 2`.
    - **First payload fails → plain failed, nothing else sent**:
      `queuedResults = [.failure(.messagesAppUnavailable)]` with text + file.
-     Assert `status == "failed"` and `invocations.count == 1` (early exit —
+     Assert `status == "failed"` and `invocations.count == 1` (early exit,
      the file was never attempted).
    - **Soft pending keeps sending**: file + file with
      `queuedResults = [.failure(.transferPending("a.jpg")), .success(())]`.
      Assert `status == "pending_confirmation"` and `invocations.count == 2`
      (unchanged behavior, now locked by a test).
 
-   (Check how `SendPayload.build` orders text vs files — text first — and
+   (Check how `SendPayload.build` orders text vs files, text first, and
    construct args to match the intended order; if a files-only or
    file-then-text order isn't expressible, use text+file and file+file cases
    as above.)
@@ -313,13 +313,13 @@ Machine-checkable. ALL must hold:
 
 Stop and report back (do not improvise) if:
 
-- Plans 021/025 haven't landed (their shapes are missing) — order matters.
+- Plans 021/025 haven't landed (their shapes are missing), order matters.
 - `SendContractTests` or schema-level tests assert a closed status set in a
-  way that adding `partial_failure` doesn't cleanly extend — report.
+  way that adding `partial_failure` doesn't cleanly extend, report.
 - You find the send loop already stops-on-failure or already reports
-  partials (i.e. someone fixed this since planning) — reconcile, don't
+  partials (i.e. someone fixed this since planning), reconcile, don't
   duplicate.
-- Changing `SendResponse`'s stored fields seems necessary — it shouldn't be;
+- Changing `SendResponse`'s stored fields seems necessary, it shouldn't be;
   the breakdown lives in `message`/`error`. Report if that proves false.
 
 ## Maintenance notes
@@ -330,8 +330,8 @@ Stop and report back (do not improvise) if:
   the classification must switch to explicit per-result bookkeeping.
 - "Dispatched, not verified" is deliberate: text verification (plan 017/021)
   does not run on the partial path. A future refinement could verify the
-  already-sent text and upgrade the message with evidence — note it as an
+  already-sent text and upgrade the message with evidence, note it as an
   option, not a commitment.
 - Docs: any future status additions must update the same four doc locations
-  plus the tool description — this is the third plan (017, 021, 026) to
+  plus the tool description, this is the third plan (017, 021, 026) to
   touch that list; keep it in lockstep.

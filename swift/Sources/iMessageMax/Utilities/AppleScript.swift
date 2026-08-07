@@ -14,8 +14,8 @@ protocol ScriptRunning: Sendable {
 
 /// Production implementation: forwards to AppleScriptRunner statics.
 /// The statics block their thread (process wait, transfer polling), so run
-/// them on a GCD background thread — never on the cooperative pool. GCD grows
-/// its pool to absorb blocked threads; the cooperative pool does not, so a
+/// them on a GCD background thread, never on the cooperative pool. GCD grows
+/// its pool to absorb blocked threads. The cooperative pool does not, so a
 /// blocked send there would stall unrelated requests service-wide.
 struct LiveScriptRunner: ScriptRunning {
     private func onBackgroundThread(
@@ -392,7 +392,7 @@ enum AppleScriptRunner {
 
     /// Removes one per-send staging directory. Safe only at terminal
     /// transfer states (finished/failed) or before Messages was handed the
-    /// file — never while a transfer may still be reading the copy.
+    /// file, never while a transfer may still be reading the copy.
     /// Guarded to the staging root so a bug can never delete anything else.
     static func removeStagedDirectory(for preparedFile: PreparedOutgoingFile) {
         let directory = preparedFile.fileURL.deletingLastPathComponent()

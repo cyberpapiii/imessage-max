@@ -1,10 +1,10 @@
-# Plan 036: DX hardening — make test, dual-era verify probe, mktemp in setup-signing, faster CI, dispatchInterval dedup
+# Plan 036: DX hardening, make test, dual-era verify probe, mktemp in setup-signing, faster CI, dispatchInterval dedup
 
 > **Executor instructions**: Follow this plan step by step. Run every
 > verification command and confirm the expected result before moving to the
 > next step. If anything in the "STOP conditions" section occurs, stop and
-> report — do not improvise. When done, update the status row for this plan
-> in `plans/README.md` — unless a reviewer dispatched you and told you they
+> report, do not improvise. When done, update the status row for this plan
+> in `plans/README.md`, unless a reviewer dispatched you and told you they
 > maintain the index.
 >
 > **Drift check (run first)**: `git diff --stat e3d14da..HEAD -- swift/Makefile .github/workflows/build.yml swift/Sources/iMessageMax/Utilities/AsyncTimeout.swift swift/Sources/iMessageMax/Server/HTTPTransport.swift AGENTS.md`
@@ -28,7 +28,7 @@ Five small frictions, batched because each is under an hour:
 
 1. **No `make test`, and AGENTS.md never says how to run tests.**
    `grep -c "swift test" AGENTS.md` → 0. The Makefile (`swift/Makefile`)
-   has build/sign/install/verify/status/logs/clean/setup-signing — no test
+   has build/sign/install/verify/status/logs/clean/setup-signing, no test
    target. Every agent and contributor has to already know
    `cd swift && swift test`.
 2. **`make verify` only proves the legacy lane.** Its health probe
@@ -37,7 +37,7 @@ Five small frictions, batched because each is under an hour:
    `server/discover` lane sails through `make install`'s verification.
 3. **`setup-signing` writes the private key to fixed, predictable `/tmp`
    paths** (`/tmp/_im_key.pem`, `/tmp/_im_cert.pem`, `/tmp/_im.p12` at
-   `swift/Makefile:121-151`) — world-readable location, guessable names, no
+   `swift/Makefile:121-151`), world-readable location, guessable names, no
    cleanup on failure (the `rm -f` only runs if every prior step succeeds).
    `mktemp -d` fixes all three.
 4. **CI serializes build and tests redundantly.** `build.yml` runs
@@ -45,14 +45,14 @@ Five small frictions, batched because each is under an hour:
    anyway). `swift build --build-tests` + `swift test --skip-build
    --parallel` builds once and runs the suite in parallel.
 5. **`dispatchInterval(for:)` is duplicated byte-for-byte** in
-   `AsyncTimeout.swift:17-27` and `HTTPTransport.swift:688-698` — the
+   `AsyncTimeout.swift:17-27` and `HTTPTransport.swift:688-698`, the
    Duration→DispatchTimeInterval clamp math is exactly the kind of overflow-
    sensitive code that must not drift into two versions.
 
 ## Current state
 
 **Makefile** (`swift/Makefile`): `.PHONY: build sign install restart status
-logs clean setup-signing verify help` (`:23`) — no test target. The verify
+logs clean setup-signing verify help` (`:23`), no test target. The verify
 loop probes with a legacy initialize body only (`:61-64`). setup-signing's
 temp usage (`:121-151`): `openssl req ... -keyout /tmp/_im_key.pem -out
 /tmp/_im_cert.pem`, `openssl pkcs12 -export -out /tmp/_im.p12 ...`,
@@ -70,7 +70,7 @@ temp usage (`:121-151`): `openssl req ... -keyout /tmp/_im_key.pem -out
         run: swift test
 ```
 
-**The duplicated function** — `AsyncTimeout.swift:17-27` (private static)
+**The duplicated function**, `AsyncTimeout.swift:17-27` (private static)
 and `HTTPTransport.swift:688-698` (`private nonisolated static`), identical
 bodies:
 
@@ -91,7 +91,7 @@ bodies:
 `HTTPTransport` uses its copy at `:668`
 (`deadline: .now() + Self.dispatchInterval(for: timeout)`).
 
-**Modern-lane probe shape** (for the verify addition) — the stateless lane
+**Modern-lane probe shape** (for the verify addition), the stateless lane
 accepts, per `swift/Sources/iMessageMax/Server/ModernProtocol.swift`:
 `method == "server/discover"` with
 `params._meta["io.modelcontextprotocol/protocolVersion"] == "2026-07-28"`
@@ -127,9 +127,9 @@ Working example body (used by existing integration tests):
 - `plans/README.md` (status row only)
 
 **Out of scope** (do NOT touch, even though they look related):
-- `release.yml` — release packaging is plan 035's / the operator's domain.
+- `release.yml`, release packaging is plan 035's / the operator's domain.
 - The verify loop's retry structure, port, or timeout values.
-- `AsyncTimeout.sleep`'s semantics (non-throwing, non-cancellable — that's
+- `AsyncTimeout.sleep`'s semantics (non-throwing, non-cancellable, that's
   the documented launchd-crash-safe contract; only the helper's access
   level changes).
 - Any HTTPTransport logic beyond deleting the duplicate and retargeting its
@@ -183,7 +183,7 @@ add a modern-lane probe:
 				fi; \
 ```
 
-(Adapt the exact escaping to the existing recipe's style — it's one shell
+(Adapt the exact escaping to the existing recipe's style, it's one shell
 program with `\;` continuations; test with `make -n`.)
 
 **Verify**: `make -n -C swift verify` prints a coherent recipe. If the
@@ -197,7 +197,7 @@ Rework the temp handling in `setup-signing`: at the top of the recipe create
 `$$SIGNTMP/cert.pem` / `$$SIGNTMP/bundle.p12`, and make cleanup
 unconditional (`trap 'rm -rf "$$SIGNTMP"' EXIT` at the start of the shell
 program, replacing the tail `rm -f`). Note the recipe currently spans
-multiple `@`-prefixed logical lines — each make recipe line is a separate
+multiple `@`-prefixed logical lines, each make recipe line is a separate
 shell, so either join them into one shell program (preferred; the recipe
 already mostly chains) or export the path via a single line. Verify the
 joined recipe still prints its guidance messages in order.
@@ -261,14 +261,14 @@ Machine-checkable. ALL must hold:
 
 Stop and report back (do not improvise) if:
 
-- `--parallel` produces failures that serial runs don't — report the
+- `--parallel` produces failures that serial runs don't, report the
   colliding tests (that's a real isolation bug worth its own finding), ship
   `--skip-build` without `--parallel`.
 - The setup-signing recipe restructure (multi-line → single shell) changes
-  observable behavior you can't verify without touching the keychain —
+  observable behavior you can't verify without touching the keychain,
   report the recipe diff for operator review instead of running it.
 - `AsyncTimeout.dispatchInterval` being non-private tempts you to also
-  "clean up" `AsyncTimeout.sleep` or HTTPTransport's deadline logic — out
+  "clean up" `AsyncTimeout.sleep` or HTTPTransport's deadline logic, out
   of scope; report the temptation as a note.
 
 ## Maintenance notes
@@ -276,7 +276,7 @@ Stop and report back (do not improvise) if:
 - `make verify` is now the dual-era smoke test; if a third protocol era ever
   ships, add its probe here alongside the era-routing test matrix (plan 027).
 - CI intentionally builds tests in the Build step so a compile error is
-  attributed to "Build", not "Run tests" — keep that split when editing the
+  attributed to "Build", not "Run tests", keep that split when editing the
   workflow.
 - `dispatchInterval` is shared precisely because its overflow clamping is
   subtle; any future change to it must keep the Int.max saturation and gets

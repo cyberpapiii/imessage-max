@@ -4,11 +4,11 @@
 
 # iMessage Max
 
-A high-performance MCP (Model Context Protocol) server for iMessage that lets AI agents read, search, and send your messages with proper contact resolution.
+An MCP (Model Context Protocol) server for iMessage. It lets AI agents read, search, and send your messages, resolving phone numbers to contact names along the way.
 
-Built in Swift for native macOS integration - single binary, no runtime dependencies.
+Written in Swift. One binary, no runtime dependencies.
 
-## Distribution Status
+## Distribution status
 
 The project now ships a single Swift implementation:
 - GitHub releases
@@ -22,15 +22,15 @@ Everything current lives under `swift/`.
 
 ## Features
 
-- **12 Intent-Aligned Tools** - Work the way you naturally ask questions, not raw database queries
-- **Contact Resolution** - See names instead of phone numbers via macOS Contacts
-- **Smart Image Handling** - Efficient image variants (vision/thumb/full) to avoid token bloat
-- **Session Grouping** - Messages grouped into conversation sessions with gap detection
-- **Attachment Tracking** - Know which images are available locally vs offloaded to iCloud
-- **Native Performance** - Swift with raw SQLite3, Core Image GPU acceleration
-- **Read-Only Safe** - Only reads from chat.db, send requires explicit permission
+- 12 tools shaped around questions people actually ask, not around database tables
+- Phone numbers resolve to names through macOS Contacts
+- Three image variants: vision (1568px), thumb (400px), full (original), so a photo does not have to arrive at full size
+- Messages group into sessions, split on gaps of 4 hours or more
+- Attachment listings say whether each file is on disk or offloaded to iCloud
+- Raw SQLite3 and Core Image GPU acceleration
+- Reads chat.db only. Sending needs Automation permission for Messages.app
 
-## Why This Exists
+## Why this exists
 
 Most iMessage tools expose raw database structures, requiring 3-5 tool calls per user intent. This MCP provides intent-aligned tools:
 
@@ -48,7 +48,7 @@ Most iMessage tools expose raw database structures, requiring 3-5 tool calls per
 → search(query="launch timeline")
 ```
 
-## Common Agent Workflows
+## Common agent workflows
 
 The tools work best when an agent uses them as short workflows instead of isolated one-off calls.
 
@@ -89,7 +89,7 @@ list_attachments(chat_id="chat123", type="image", since="30d")
 get_attachment(attachment_id="att123", variant="vision")
 ```
 
-Use `list_attachments` to discover the message where files were shared first. It still returns exact attachment ids and local-availability state before you fetch a file.
+Use `list_attachments` to find the message where files were shared. It returns exact attachment ids and says whether each file is on disk, so you know before you fetch.
 
 ### Send with exact targeting when it matters
 
@@ -102,14 +102,14 @@ For sensitive sends, prefer resolving the exact chat first and then using `chat_
 
 ## Installation
 
-### Homebrew (Recommended)
+### Homebrew (recommended)
 
 ```bash
 brew tap cyberpapiii/tap
 brew install imessage-max
 ```
 
-### From Source
+### From source
 
 ```bash
 git clone https://github.com/cyberpapiii/imessage-max.git
@@ -123,7 +123,7 @@ For local development, advanced setup, and the signed install workflow, see:
 
 - [swift/README.md](swift/README.md)
 
-## Protocol Support
+## Protocol support
 
 iMessage Max is a dual-era MCP server. Both transports (stdio and HTTP)
 serve both eras concurrently, selected per request:
@@ -144,7 +144,7 @@ completion, subscriptions, tasks, or MRTR flows, on purpose. The official
 conformance suite runs against both eras with the documented baseline in
 `docs/conformance-baseline.yml`.
 
-## Client Icon Metadata
+## Client icon metadata
 
 iMessage Max ships icons for the main MCP protocol surface and the client
 packaging surfaces that use their own metadata:
@@ -165,32 +165,32 @@ The committed PNG source set is under `assets/icons/` at `16x16`, `32x32`,
 
 Required to read `~/Library/Messages/chat.db`:
 
-1. Open **System Settings** → **Privacy & Security** → **Full Disk Access**
-2. Click **+** to add the binary
+1. Open System Settings → Privacy & Security → Full Disk Access
+2. Click + to add the binary
 
-**For Homebrew installs:** The binary is at `/opt/homebrew/Cellar/imessage-max/VERSION/bin/imessage-max` (not the symlink at `/opt/homebrew/bin/`). Find it with:
+For Homebrew installs, the binary is at `/opt/homebrew/Cellar/imessage-max/VERSION/bin/imessage-max` (not the symlink at `/opt/homebrew/bin/`). Find it with:
 ```bash
 # Open the folder containing the actual binary
 open $(dirname $(readlink -f $(which imessage-max)))
 ```
 
-**For source builds:** Add `.build/release/imessage-max` from your clone directory.
+For source builds, add `.build/release/imessage-max` from your clone directory.
 
-> **Tip:** In the file picker, press **⌘+Shift+G** and paste the path to navigate directly.
+> In the file picker, press ⌘+Shift+G and paste the path to go straight there.
 
-### 2. Grant Contacts Access
+### 2. Grant Contacts access
 
-Required for resolving phone numbers to names. The app will request access on first run, or add manually:
+Required to resolve phone numbers to names. The binary asks for access on first run. To add it manually:
 
-**System Settings** → **Privacy & Security** → **Contacts** → add `imessage-max`
+System Settings → Privacy & Security → Contacts → add `imessage-max`
 
-### 3. Configure Your MCP Client
+### 3. Configure your MCP client
 
 Add `imessage-max` to your MCP client's server configuration.
 
 Many MCP clients use a JSON structure like this:
 
-**For Homebrew:**
+For Homebrew:
 ```json
 {
   "mcpServers": {
@@ -201,7 +201,7 @@ Many MCP clients use a JSON structure like this:
 }
 ```
 
-**For source builds:**
+For source builds:
 ```json
 {
   "mcpServers": {
@@ -214,7 +214,7 @@ Many MCP clients use a JSON structure like this:
 
 If your client uses a different config format, point it at the same binary path.
 
-### 4. Reconnect Your MCP Client
+### 4. Reconnect your MCP client
 
 After saving the config, reconnect or restart your MCP client. The server should appear in the available tools, and you can verify the connection with `diagnose`.
 
@@ -327,9 +327,9 @@ Rules:
 - At least one of `text` or `file_paths`
 - If both are provided, files are sent first and text is sent last
 
-## Release Checks
+## Release checks
 
-For a lightweight pre-release routine, use:
+Before a release, work through:
 
 - [docs/validation/2026-04-09-release-checklist.md](docs/validation/2026-04-09-release-checklist.md)
 - [docs/validation/2026-03-13-send-manual-validation.md](docs/validation/2026-03-13-send-manual-validation.md)
@@ -343,7 +343,7 @@ Send result semantics (text sends are verified post-send against chat.db):
 - `status: "uncertain"` means transport accepted the send but the row was not found within the polling window; follow up with `get_messages`
 - `status: "mismatch"` means the message landed in a different chat than intended; do not treat as success
 - `status: "failed_delivery"` means the message row was found with a delivery error recorded; the message did not deliver, and `verified_message_guid` plus the error code are the evidence
-- `status: "partial_failure"` means a multi-payload send dispatched some payloads before a later one failed; `message` lists what was dispatched and what failed — retry only the failed payload, never the whole call
+- `status: "partial_failure"` means a multi-payload send dispatched some payloads before a later one failed; `message` lists what was dispatched and what failed. Retry only the failed payload, never the whole call
 - `status: "sent"` means verification was unavailable (DB unreadable); transport accepted only
 - `status: "pending_confirmation"` means Messages accepted an attachment send, but the file transfer was not confirmed as finished within the polling window
 - `status: "failed"` means the send failed
@@ -408,7 +408,7 @@ Some attachments are stored in iCloud, not on disk. `list_attachments` includes 
 - Contacts permission (for name resolution)
 - Automation permission for Messages.app (send only)
 
-## Advanced Setup
+## Advanced setup
 
 For HTTP mode, local background service setup, development commands, and
 contributor-focused workflow details, see:

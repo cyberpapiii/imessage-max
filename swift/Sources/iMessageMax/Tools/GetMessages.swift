@@ -138,17 +138,17 @@ actor GetMessagesTool {
         server.registerTool(
             name: "get_messages",
             description: """
-                Retrieve messages from a chat with flexible filtering. Either chat_id or participants must be provided.
-                Returns messages with metadata (images return metadata only - use get_attachment for content).
+                Retrieve messages from a chat, filtered by time, sender, content type, or text. Either chat_id or participants must be provided.
+                Returns messages with metadata. Images return metadata only; use get_attachment for the content.
                 Messages are grouped into sessions (4+ hour gaps start new sessions). Best used after you already know which conversation you want to review more closely.
                 Use chat.id/chat_id for follow-up tool calls only. When explaining results to the user, refer to chats by name using chat.name and participant names, not by the chat id.
 
                 Examples:
-                - get_messages(chat_id: "chat123") - get recent messages from chat
-                - get_messages(chat_id: "chat123", since: "2d") - review one chat after a broad recent overview
-                - get_messages(chat_id: "chat123", since: "24h") - messages from last 24 hours
-                - get_messages(chat_id: "chat123", from_person: "me") - only my messages
-                - get_messages(chat_id: "chat123", unanswered: true) - my questions without replies
+                - get_messages(chat_id: "chat123"): recent messages from a chat
+                - get_messages(chat_id: "chat123", since: "2d"): review one chat after a broad recent overview
+                - get_messages(chat_id: "chat123", since: "24h"): messages from the last 24 hours
+                - get_messages(chat_id: "chat123", from_person: "me"): only my messages
+                - get_messages(chat_id: "chat123", unanswered: true): my questions without replies
                 """,
             inputSchema: InputSchema.object(
                 properties: [
@@ -330,7 +330,7 @@ actor GetMessagesTool {
 
                     if attType == "image" && mediaCount < maxMedia,
                        let path = att.filename {
-                        // chat.db paths are data, not trusted input — contain to allowed roots.
+                        // chat.db paths are data, not trusted input. Contain them to allowed roots.
                         // Out-of-root paths degrade to the AttachmentSummary fallthrough below.
                         if let validatedPath = AttachmentPathPolicy.validatedPath(path, allowedRoots: allowedRoots) {
                             if let metadata = processor.getMetadata(at: validatedPath) {

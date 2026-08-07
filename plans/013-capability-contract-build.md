@@ -1,6 +1,6 @@
 # Plan 013: Build the capability contract in `diagnose` per the approved design
 
-> **Executor instructions**: BASE CHECK FIRST — run
+> **Executor instructions**: BASE CHECK FIRST, run
 > `ls plans/013-capability-contract-build.md docs/plans/2026-06-11-capability-contract-design.md`.
 > If missing, your worktree snapshot is stale: run
 > `git checkout -b advisor/013-capability-contract <PLANS_COMMIT>` (SHA in the
@@ -21,22 +21,22 @@
 ## Why this matters
 
 `diagnose` hardcodes all four send-mode capabilities as `true` regardless of
-Automation permission (`Diagnose.swift`, the `capabilities: .init(...)` block)
-— the exact optimistic affordance the v2 requirements forbid (R9). The
+Automation permission (`Diagnose.swift`, the `capabilities: .init(...)` block),
+the exact optimistic affordance the v2 requirements forbid (R9). The
 approved design, `docs/plans/2026-06-11-capability-contract-design.md`, is
-this plan's spec — **read it in full first**: §2.2 (the 15-capability table),
+this plan's spec, **read it in full first**: §2.2 (the 15-capability table),
 §2.3 (Automation probe), §2.4 (derivation rules), §3.2 (exact JSON), §3.4
 (tool description text), §4.1 (slices). This plan implements its slices 1, 2,
 and 4, plus the probe-derived parts of slice 3.
 
 Decisions already made: implement `verified_send` purely from probes per the
 §2.2 table (`supported` when DB accessible, `degraded` when DB readable but
-automation unverified, `permission-gated` when DB inaccessible) — do NOT wait
+automation unverified, `permission-gated` when DB inaccessible), do NOT wait
 for or reference plan 012's send changes.
 
 ## Current state (verify before changing)
 
-- `swift/Sources/iMessageMax/Tools/Diagnose.swift` — `DiagnoseResult` with the
+- `swift/Sources/iMessageMax/Tools/Diagnose.swift`, `DiagnoseResult` with the
   boolean `Capabilities` struct (~lines 21–39), `execute()` (~93–163) ending in
   the hardcoded `capabilities: .init(sendTextToParticipant: true, ...)` block,
   tool description at ~line 70.
@@ -45,7 +45,7 @@ for or reference plan 012's send changes.
 - No Automation probe exists anywhere.
 - Tests that may pin diagnose output: `ResponseContractTests.swift`,
   `OverviewResponseTests.swift`, `ToolRegistryTests` (in
-  `PlaceholderTests.swift` — asserts on tool descriptions). Check all three
+  `PlaceholderTests.swift`, asserts on tool descriptions). Check all three
   BEFORE changing shapes; updating their pinned shapes/descriptions to the new
   design is sanctioned, but only those assertions.
 
@@ -64,11 +64,11 @@ for or reference plan 012's send changes.
 - `swift/Sources/iMessageMax/Tools/Diagnose.swift`
 - `swift/Tests/iMessageMaxTests/CapabilityContractTests.swift` (create)
 - `ResponseContractTests.swift` / `OverviewResponseTests.swift` /
-  `PlaceholderTests.swift` — ONLY assertions that pin the old capabilities
+  `PlaceholderTests.swift`. ONLY assertions that pin the old capabilities
   shape or the old diagnose description
 
 **Out of scope** (do NOT touch): `Send.swift`, `SendVerifier.swift` (plan 012
-owns the send path — your worktree may or may not contain it; either way leave
+owns the send path, your worktree may or may not contain it; either way leave
 it alone), `SendResolution.swift`, `AppleScript.swift`, `Database.swift`,
 `ContactResolver.swift` (call the probes, don't change them), all list tools.
 
@@ -84,12 +84,12 @@ conventional prefixes; no push, no PR.
 Create `Utilities/AutomationPermission.swift` implementing
 `checkAutomationPermission()` exactly per the design §2.3 code sketch
 (`AEDeterminePermissionToAutomateTarget` against `com.apple.MobileSMS`,
-no-prompt). Import note: the function lives in ApplicationServices/AE — find
+no-prompt). Import note: the function lives in ApplicationServices/AE, find
 the working import (`import AppKit` usually suffices on macOS targets). Make
 the probe injectable for tests: define
 `typealias AutomationProbe = () -> (ok: Bool, status: String)` (or a small
-protocol) so `Diagnose` can take it as a dependency defaulting to the real one
-— CI runners report `not_determined`, so tests must inject.
+protocol) so `Diagnose` can take it as a dependency defaulting to the real one.
+CI runners report `not_determined`, so tests must inject.
 
 **Verify**: `swift build` → exit 0.
 
@@ -97,7 +97,7 @@ protocol) so `Diagnose` can take it as a dependency defaulting to the real one
 
 Replace the boolean `Capabilities` struct with the design's value type
 (`state` + optional `note`/`fix`/`detail`) and derive all 15 §2.2 keys in
-`execute()` per the §2.4 derivation rules — including `verified_send` from
+`execute()` per the §2.4 derivation rules, including `verified_send` from
 `Database.checkAccess()` + the automation probe as stated above. Follow the
 §3.2 JSON example exactly for key names and shape (snake_case, token-efficient,
 backward-compatible health fields preserved per §3.3).
@@ -144,11 +144,11 @@ description assertions.
 ## STOP conditions
 
 - `AEDeterminePermissionToAutomateTarget` does not compile on this toolchain
-  after reasonable import attempts — report the exact errors; do not switch to
+  after reasonable import attempts, report the exact errors; do not switch to
   a private API or a prompting check.
 - A failing test outside the sanctioned pinned assertions.
 - The §3.2 JSON conflicts with what `DiagnoseResult`'s existing Encodable
-  machinery can express without restructuring beyond `Capabilities` — report
+  machinery can express without restructuring beyond `Capabilities`, report
   the conflict rather than redesigning the response wholesale.
 
 ## Maintenance notes
@@ -156,4 +156,4 @@ description assertions.
 - When plan 012 lands, no change here is required (verified_send is
   probe-derived); a later slice may enrich it with live verification stats.
 - New capabilities (e.g. a future rich backend) get a row in §2.2 first, then
-  a key here — keep doc and code in sync.
+  a key here, keep doc and code in sync.

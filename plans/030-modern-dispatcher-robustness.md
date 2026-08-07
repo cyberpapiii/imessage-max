@@ -1,10 +1,10 @@
-# Plan 030: Modern dispatcher robustness — id-preserving fallbacks, sanitized era log, cached catalog
+# Plan 030: Modern dispatcher robustness, id-preserving fallbacks, sanitized era log, cached catalog
 
 > **Executor instructions**: Follow this plan step by step. Run every
 > verification command and confirm the expected result before moving to the
 > next step. If anything in the "STOP conditions" section occurs, stop and
-> report — do not improvise. When done, update the status row for this plan
-> in `plans/README.md` — unless a reviewer dispatched you and told you they
+> report, do not improvise. When done, update the status row for this plan
+> in `plans/README.md`, unless a reviewer dispatched you and told you they
 > maintain the index.
 >
 > **Drift check (run first)**: `git diff --stat e3d14da..HEAD -- swift/Sources/iMessageMax/Server/ModernProtocol.swift swift/Sources/iMessageMax/Server/ServerExtensions.swift swift/Tests/iMessageMaxTests/ModernDispatcherTests.swift`
@@ -26,14 +26,14 @@
 Three defects in the modern (MCP 2026-07-28) dispatcher:
 
 1. **Encode failures silently corrupt responses.** `serialize` falls back to
-   a hardcoded `id:null` error envelope — a client correlating by request id
+   a hardcoded `id:null` error envelope, a client correlating by request id
    waits forever on what looks like someone else's error. `contentJSON`
    returns `[]` on encode failure, turning a *successful* tool call into an
    empty-content success. `toolsJSON` returns `[]`, presenting an empty
    catalog as valid. All three lose the failure without a log line.
 2. **The era log line trusts client input.** `logEra` interpolates
    client-supplied `clientInfo.name`/`version` into a structured stderr line
-   with no length bound and no control-character stripping — a client can
+   with no length bound and no control-character stripping, a client can
    inject `\n` to forge log lines or dump megabytes into the service log.
    (The legacy lane's equivalent header-interpolation issue is fixed by plan
    020; this is the modern lane's copy.)
@@ -81,7 +81,7 @@ Serialization + fallback (`:290-324`):
 ```
 
 Encode helpers that swallow failures (`:248-269`): `iconsJSON()` (nil on
-failure — acceptable, icons are optional), `toolsJSON()` (`[]` on failure),
+failure, acceptable, icons are optional), `toolsJSON()` (`[]` on failure),
 `contentJSON(_:)` (`[]` on failure).
 
 The era log (`:330-341`):
@@ -105,7 +105,7 @@ Note `version` here is also client-supplied but is only reachable after the
 `ModernProtocolVersion.supported.contains(...)` guard (`:126`), so it is
 already constrained to `"2026-07-28"`; only `client` needs sanitizing.
 `method` reaches the log for any supported-version request, including
-unknown methods — clamp it too.
+unknown methods, clamp it too.
 
 Catalog builders (`:185-191`, `:256-262`):
 
@@ -131,7 +131,7 @@ The registry (`swift/Sources/iMessageMax/Server/ServerExtensions.swift:117-160`)
 (`:127`), `getTools()` (`:143`), `getHandler(for:)` (`:149`),
 `resetForTesting()` (`:155`).
 
-Tests: `swift/Tests/iMessageMaxTests/ModernDispatcherTests.swift` — resets
+Tests: `swift/Tests/iMessageMaxTests/ModernDispatcherTests.swift`, resets
 the registry in setUp/tearDown (`:10-18`), `registerFakeTool` helper
 (`:236`), and existing assertions on discover/tools-list/call shapes that
 must all stay green.
@@ -155,10 +155,10 @@ must all stay green.
 - `plans/README.md` (status row only)
 
 **Out of scope** (do NOT touch, even though they look related):
-- `ServerExtensions.swift:239` legacy `Error:` wrapper — legacy lane.
-- HTTP header validation / `errorResponse` in HTTPTransport — plan 020.
-- The stdio pump — plan 028.
-- `callTool`'s unknown-tool `-32602` choice — spec-conformant enough; leave.
+- `ServerExtensions.swift:239` legacy `Error:` wrapper, legacy lane.
+- HTTP header validation / `errorResponse` in HTTPTransport, plan 020.
+- The stdio pump, plan 028.
+- `callTool`'s unknown-tool `-32602` choice, spec-conformant enough; leave.
 - Changing the catalog cache *hints* (ttlMs/cacheScope values).
 
 ## Git workflow
@@ -200,7 +200,7 @@ Replace `serialize` with a variant that keeps correlation and logs:
 ```
 
 Add the same one-line stderr log to the `guard ... else` failure branches of
-`toolsJSON()` and `contentJSON(_:)` (keep their `[]` returns — shape safety —
+`toolsJSON()` and `contentJSON(_:)` (keep their `[]` returns, shape safety,
 but never silently). `iconsJSON()` stays as-is (nil is a legitimate
 "no icons" answer).
 
@@ -250,7 +250,7 @@ server-constrained; leave them.
    sections.)
 
 2. In `ModernDispatcher`, cache the encoded catalog keyed by that version.
-   `ModernDispatcher` is an enum with static state — guard the cache with
+   `ModernDispatcher` is an enum with static state, guard the cache with
    its own `NSLock` (match the registry's locking idiom):
 
 ```swift
@@ -281,13 +281,13 @@ server-constrained; leave them.
 ```
 
    Do NOT cache an empty-on-failure result (the code above naturally
-   doesn't — failures return before the cache write). `serverInfoJSON()` is
-   three static strings — make it a `private static let` computed once.
+   doesn't, failures return before the cache write). `serverInfoJSON()` is
+   three static strings, make it a `private static let` computed once.
    `iconsJSON()` similarly never changes at runtime: compute once into a
    `private static let` via an immediately-invoked closure.
 
    **Concurrency note**: `[[String: Any]]` crossing the static cache is why
-   the lock idiom (not an actor) is used — it matches how
+   the lock idiom (not an actor) is used, it matches how
    `ToolHandlerRegistry` already handles the same problem. If strict
    concurrency checking rejects the static `var`, wrap cache + lock in a
    small `final class CatalogCache: @unchecked Sendable` mirroring the
@@ -302,21 +302,21 @@ isolated).
 
 Add to `ModernDispatcherTests.swift`:
 
-1. `testCatalogCacheInvalidatesOnRegistryChange` — register tool A;
+1. `testCatalogCacheInvalidatesOnRegistryChange`, register tool A;
    `tools/list` → 1 tool; register tool B; `tools/list` → 2 tools in
    registration order. (Proves version bumping; without it the second list
    would serve the stale single-tool cache.)
-2. `testCatalogCacheServesConsistentResultAcrossCalls` — two consecutive
+2. `testCatalogCacheServesConsistentResultAcrossCalls`, two consecutive
    `tools/list` calls return byte-identical `tools` arrays (decode both,
    compare names + order).
-3. `testLogFieldSanitization` — make `sanitizedLogField` internal (not
+3. `testLogFieldSanitization`, make `sanitizedLogField` internal (not
    private) and assert directly: control chars stripped
    (`"evil\nname"` → `"evilname"`), 300-char input clamped to 64.
-4. `testSerializeFallbackPreservesScalarId` — only if `serialize` can be
+4. `testSerializeFallbackPreservesScalarId`, only if `serialize` can be
    reached with an unencodable object through a seam (it cannot today
    without contriving; if so, make `serialize` internal and test it
-   directly with `["id": 7, "x": Date()]` — `JSONSerialization` rejects
-   `Date` — asserting the fallback body contains `"id":7`).
+   directly with `["id": 7, "x": Date()]`, `JSONSerialization` rejects
+   `Date`, asserting the fallback body contains `"id":7`).
 
 **Verify**: `cd swift && swift test --filter ModernDispatcherTests` → all
 pass, ≥3 net-new tests.
@@ -349,11 +349,11 @@ Stop and report back (do not improvise) if:
 - Excerpts don't match live code (drift).
 - Strict-concurrency errors on the static cache can't be resolved with the
   `@unchecked Sendable` cache-class pattern already used by
-  `ToolHandlerRegistry` — report rather than inventing a new concurrency
+  `ToolHandlerRegistry`, report rather than inventing a new concurrency
   design.
-- Any existing dispatcher/HTTP-modern test needs its *assertions* changed —
+- Any existing dispatcher/HTTP-modern test needs its *assertions* changed,
   response shapes must be byte-compatible; only additions are expected.
-- You're tempted to also memoize per-response `completeResult()` `_meta` —
+- You're tempted to also memoize per-response `completeResult()` `_meta`,
   that's included via the `serverInfoJSON` static let; anything further is
   out of scope.
 
@@ -361,9 +361,9 @@ Stop and report back (do not improvise) if:
 
 - The catalog cache's correctness rests on ONE invariant: **every mutation
   of registry tool state bumps `version` under the lock**. Any future
-  `unregister`/`replace` method must do the same — check for this in review
+  `unregister`/`replace` method must do the same, check for this in review
   of registry changes.
 - `sanitizedLogField` is the reusable primitive if other log lines later
   interpolate client input (grep for `era=` writers).
 - If tool schemas ever become dynamic (per-session capabilities), the cache
-  must key on that too — revisit before building such a feature.
+  must key on that too, revisit before building such a feature.

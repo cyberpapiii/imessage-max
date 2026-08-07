@@ -3,8 +3,8 @@
 > **Executor instructions**: Follow this plan step by step. Run every
 > verification command and confirm the expected result before moving to the
 > next step. If anything in the "STOP conditions" section occurs, stop and
-> report — do not improvise. When done, update the status row for this plan
-> in `plans/README.md` — unless a reviewer dispatched you and told you they
+> report, do not improvise. When done, update the status row for this plan
+> in `plans/README.md`, unless a reviewer dispatched you and told you they
 > maintain the index.
 >
 > **Drift check (run first)**: `git diff --stat 57a2ff3..HEAD -- README.md AGENTS.md swift/README.md`
@@ -23,7 +23,7 @@
 
 ## Why this matters
 
-AGENTS.md is declared the repo's source of truth (CLAUDE.md defers to it), and coding agents read it before every task — stale facts there propagate into wrong agent behavior. Three confirmed inaccuracies: the documented MCP SDK version is two minor versions behind the resolved one, the README headline undercounts the tools, and the swift/README stdio example pins an MCP protocol version the project has moved past (the repo recently completed a "2025-11-25 modernization").
+AGENTS.md is declared the repo's source of truth (CLAUDE.md defers to it), and coding agents read it before every task, stale facts there propagate into wrong agent behavior. Three confirmed inaccuracies: the documented MCP SDK version is two minor versions behind the resolved one, the README headline undercounts the tools, and the swift/README stdio example pins an MCP protocol version the project has moved past (the repo recently completed a "2025-11-25 modernization").
 
 ## Current state
 
@@ -52,8 +52,8 @@ Confirmed inaccuracies (verify each string still exists before editing):
 | Purpose | Command | Expected on success |
 |---------|---------|---------------------|
 | Tool count ground truth | `grep -c 'register(on:' swift/Sources/iMessageMax/Server/ToolRegistry.swift` | 12 |
-| Resolved SDK version | `grep -A2 'swift-sdk' swift/Package.resolved \| grep version` | "0.12.1" (or newer — use what you see) |
-| Stale-string sweep | `grep -rn '0\.11\.0\|2024-11-05\|11 Intent' README.md AGENTS.md swift/README.md docs/ mcpb/ 2>/dev/null` | no matches when done (except inside docs/plans/ and docs/brainstorms/ history files — leave dated historical docs alone) |
+| Resolved SDK version | `grep -A2 'swift-sdk' swift/Package.resolved \| grep version` | "0.12.1" (or newer, use what you see) |
+| Stale-string sweep | `grep -rn '0\.11\.0\|2024-11-05\|11 Intent' README.md AGENTS.md swift/README.md docs/ mcpb/ 2>/dev/null` | no matches when done (except inside docs/plans/ and docs/brainstorms/ history files, leave dated historical docs alone) |
 
 ## Scope
 
@@ -63,8 +63,8 @@ Confirmed inaccuracies (verify each string still exists before editing):
 - `plans/README.md` (status row)
 
 **Out of scope** (do NOT touch):
-- `docs/plans/`, `docs/brainstorms/`, `docs/maintainers/`, `docs/ideation/` — dated historical documents; stale facts in them are records, not bugs.
-- `CLAUDE.md` — it's just a pointer to AGENTS.md, already correct.
+- `docs/plans/`, `docs/brainstorms/`, `docs/maintainers/`, `docs/ideation/`, dated historical documents; stale facts in them are records, not bugs.
+- `CLAUDE.md`, it's just a pointer to AGENTS.md, already correct.
 - Any restructuring, rewording, or "while I'm here" doc improvements.
 
 ## Git workflow
@@ -105,7 +105,7 @@ Run the stale-string sweep from the commands table over `README.md AGENTS.md swi
 
 ## Test plan
 
-Docs only — no test changes. Run `cd swift && swift test` once anyway to prove the working tree is untouched functionally.
+Docs only, no test changes. Run `cd swift && swift test` once anyway to prove the working tree is untouched functionally.
 
 ## Done criteria
 
@@ -118,10 +118,10 @@ Docs only — no test changes. Run `cd swift && swift test` once anyway to prove
 
 Stop and report back (do not improvise) if:
 
-- Any of the three strings is already fixed (someone beat you to it — re-verify the rest, fix what remains, and note it).
-- The tool-count ground-truth command does not return 12 (the tool surface changed; recount and use reality, and flag that AGENTS.md's "Twelve Core Tools" section needs the same update — updating that section's table rows is in scope in that case).
+- Any of the three strings is already fixed (someone beat you to it, re-verify the rest, fix what remains, and note it).
+- The tool-count ground-truth command does not return 12 (the tool surface changed; recount and use reality, and flag that AGENTS.md's "Twelve Core Tools" section needs the same update, updating that section's table rows is in scope in that case).
 
 ## Maintenance notes
 
-- AGENTS.md now points at Package.swift for the SDK version instead of duplicating it — keep it that way; duplicate version strings were the root cause here.
+- AGENTS.md now points at Package.swift for the SDK version instead of duplicating it, keep it that way; duplicate version strings were the root cause here.
 - The "N Intent-Aligned Tools" headline will drift again when a 13th tool lands; whoever adds a tool should grep for `Intent-Aligned Tools`.

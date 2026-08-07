@@ -24,9 +24,9 @@ enum ClientErrorMessages {
     }
 
     /// Client-safe rendering of an error that may embed internal filesystem
-    /// paths — staged-attachment directories, tool binaries, temp files.
+    /// paths: staged-attachment directories, tool binaries, temp files.
     /// Unlike `sanitized`, this never passes the underlying description
-    /// through: the detail goes to stderr for the operator and the client
+    /// through. The detail goes to stderr for the operator and the client
     /// gets a fixed string plus the caller-supplied context.
     ///
     /// Use this at `catch` sites whose errors come from FileManager, Process,

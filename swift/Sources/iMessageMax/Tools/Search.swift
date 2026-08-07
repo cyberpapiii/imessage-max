@@ -193,13 +193,13 @@ enum SearchTool {
         server.registerTool(
             name: "search",
             description: """
-                Full-text search across messages with advanced filtering. Best when you know the topic or phrase you want to find, but not which conversation it appeared in.
+                Full-text search across messages. Best when you know the topic or phrase you want to find, but not which conversation it appeared in.
                 Search results include chat ids for follow-up tool calls and chat names for user-facing summaries. When explaining results to the user, refer to chats by name, not by id.
 
                 Search features:
                 - Multi-word: "costa rica trip" matches ANY word by default
                 - match_all: true requires ALL words to be present
-                - fuzzy: true handles typos (costarcia → costa rica)
+                - fuzzy: true handles typos ("costarcia" finds "costa rica")
 
                 Time filters (since/before):
                 - Relative: "24h", "7d", "2w", "3m"
@@ -207,12 +207,12 @@ enum SearchTool {
                 - ISO: "2024-01-15T10:30:00Z"
 
                 Examples:
-                - search(query: "launch timeline") - find any of these words
-                - search(query: "launch timeline", match_all: true) - must have both words
-                - search(query: "volcno", fuzzy: true) - finds "volcano" despite typo
-                - search(from_person: "me", since: "last monday") - my messages since Monday
-                - search(has: "link", in_chat: "chat123") - links in one specific chat after narrowing down
-                - search(unanswered: true) - questions I sent without replies
+                - search(query: "launch timeline"): matches any of these words
+                - search(query: "launch timeline", match_all: true): must have both words
+                - search(query: "volcno", fuzzy: true): finds "volcano" despite the typo
+                - search(from_person: "me", since: "last monday"): my messages since Monday
+                - search(has: "link", in_chat: "chat123"): links in one chat, after narrowing down
+                - search(unanswered: true): questions I sent that got no reply
                 """,
             inputSchema: inputSchema,
             outputSchema: OutputSchema.object,

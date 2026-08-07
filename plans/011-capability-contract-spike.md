@@ -1,8 +1,8 @@
-# Plan 011: Design spike — capability contract from `diagnose` (v2 R6–R9)
+# Plan 011: Design spike, capability contract from `diagnose` (v2 R6–R9)
 
-> **Executor instructions**: This is a DESIGN SPIKE — the deliverable is a
+> **Executor instructions**: This is a DESIGN SPIKE, the deliverable is a
 > design document; production code must NOT change. Follow the steps, honor
-> STOP conditions. Your reviewer maintains `plans/README.md` — do not edit it.
+> STOP conditions. Your reviewer maintains `plans/README.md`, do not edit it.
 > Report format: STATUS / STEPS / STOPPED BECAUSE (if stopped) /
 > FILES CHANGED / NOTES.
 >
@@ -12,7 +12,7 @@
 ## Status
 
 - **Priority**: P2
-- **Effort**: M (timeboxed — finish all sections at good-enough depth)
+- **Effort**: M (timeboxed, finish all sections at good-enough depth)
 - **Risk**: LOW (doc only)
 - **Depends on**: none
 - **Category**: direction
@@ -21,7 +21,7 @@
 ## Why this matters
 
 The v2 requirements (`docs/brainstorms/2026-05-17-imessage-max-v2-trustworthy-core-requirements.md`,
-"Capability contract", R6–R9 — read the whole file) commit to evolving
+"Capability contract", R6–R9, read the whole file) commit to evolving
 `diagnose` from a health check into an **agent-readable capability contract**:
 per-capability states (supported / unsupported / degraded / permission-gated /
 risky-private / experimental / unavailable / unverified) covering send modes,
@@ -29,12 +29,12 @@ attachment handling, reply/tapback/edit/unsend availability, freshness,
 permissions, and any rich backend state. The strategy doc (`STRATEGY.md`,
 "Trustworthy Core" track) makes this a pillar: agents must not attempt
 unavailable or risky actions silently (key flow F2). Today nothing in the
-codebase expresses capability states — `diagnose` reports configuration health
+codebase expresses capability states, `diagnose` reports configuration health
 only. This spike produces the design that a build plan can execute.
 
 ## Current state (verify by reading, cite file:line in the doc)
 
-- `swift/Sources/iMessageMax/Tools/Diagnose.swift` — current health check:
+- `swift/Sources/iMessageMax/Tools/Diagnose.swift`, current health check:
   read it end to end; inventory exactly what it reports today (database access,
   Contacts authorization, Automation/send readiness, version, etc.).
 - Permission probes that exist and could feed capability states:
@@ -42,10 +42,10 @@ only. This spike produces the design that a build plan can execute.
   `ContactResolver.authorizationStatus()` (`Contacts/ContactResolver.swift:21`),
   whatever Automation/send checks `Diagnose.swift` performs.
 - Related, already designed: `docs/plans/2026-06-11-send-verification-design.md`
-  (proof states for sends — the capability contract must be consistent with it;
+  (proof states for sends, the capability contract must be consistent with it;
   e.g. a `verified_send` capability whose state depends on chat.db readability).
 - Existing per-feature reality worth encoding: reply threading is rejected by
-  `send` (`reply_to` rejection — see `SendToolExecuteTests`/`PlaceholderTests`),
+  `send` (`reply_to` rejection, see `SendToolExecuteTests`/`PlaceholderTests`),
   tapbacks/edit/unsend are read-side only, attachments can be iCloud-offloaded
   (`get_attachment` returns `attachment_offloaded`).
 - MCP surface conventions: tools return token-efficient JSON
@@ -88,7 +88,7 @@ verified sends, attachments incl. offloaded handling, reply threading,
 tapbacks, edit/unsend, live/freshness, permissions), and for EACH capability:
 its possible states, the probe that determines the state (existing function or
 "needs new probe"), and the honest default per R9 (prefer limitation over
-optimistic affordance — e.g. reply threading = `unsupported`, not `planned`).
+optimistic affordance, e.g. reply threading = `unsupported`, not `planned`).
 
 ### Step 3: Design the contract surface
 

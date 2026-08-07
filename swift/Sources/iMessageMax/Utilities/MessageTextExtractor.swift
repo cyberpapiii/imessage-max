@@ -19,7 +19,7 @@ enum MessageTextExtractor {
     /// reads length byte (0x81 = 2-byte, 0x82 = 3-byte, < 0x80 = literal
     /// single byte). Any other byte (0x80-0x83, 0x84+) is an unrecognized
     /// length marker and returns nil rather than misreading it as a literal
-    /// length — garbage extraction is worse than nil here, since
+    /// length. Garbage extraction is worse than nil here, since
     /// SendVerifier.textMatches matches send-verification text against it.
     /// Then reads UTF-8 text of the parsed length.
     static func extractFromTypedstream(_ data: Data) -> String? {
@@ -56,8 +56,8 @@ enum MessageTextExtractor {
             dataStart = idx + 4
         } else if lengthByte >= 0x80 {
             // Unknown typedstream length marker (e.g. 0x83+). Misreading it
-            // as a literal length extracts garbage — and garbage is worse
-            // than nil here: SendVerifier matches on this text. Refuse.
+            // as a literal length extracts garbage, and garbage is worse
+            // than nil here because SendVerifier matches on this text. Refuse.
             return nil
         } else {
             // Single byte literal length (< 0x80)

@@ -1,4 +1,4 @@
-# iMessage Max — Build, Sign & Install
+# iMessage Max: build, sign, install
 #
 # Usage:
 #   make install       Build, sign, restart service, verify health
@@ -25,13 +25,13 @@ VERIFY_ATTEMPTS := 45
 # "ambiguous" when the login keychain holds more than one cert with that common
 # name, which is a state setup-signing itself used to create. A hash is unique
 # by construction, and find-identity lists only certs that have a usable
-# private key — so this both disambiguates and filters out orphaned certs.
+# private key, so this both disambiguates and filters out orphaned certs.
 # Evaluated lazily (`=`, not `:=`) so that a target running later in the same
 # make invocation (e.g. `make setup-signing install`) sees an identity created
 # by an earlier target instead of the parse-time snapshot.
 #
 # NOTE: lazy still means "expanded when the recipe is expanded", which is just
-# BEFORE that recipe's shell runs — not during it. A recipe that creates the
+# BEFORE that recipe's shell runs, not during it. A recipe that creates the
 # identity itself cannot observe it through this variable; it must re-query at
 # shell runtime. See the tail of setup-signing.
 SIGN_HASH = $(shell security find-identity -v -p codesigning 2>/dev/null | \
@@ -54,13 +54,13 @@ sign: build ## Build and sign with persistent identity
 	@HASH="$(SIGN_HASH)"; \
 	if [ -n "$$HASH" ]; then \
 		if codesign --force --sign "$$HASH" $(BINARY); then \
-			echo "✓ Signed with '$(CERT_CN)' ($$HASH) — FDA persists across rebuilds"; \
+			echo "✓ Signed with '$(CERT_CN)' ($$HASH). FDA persists across rebuilds"; \
 		else \
-			echo "✗ Found identity '$(CERT_CN)' ($$HASH) but signing failed — see the error above"; \
+			echo "✗ Found identity '$(CERT_CN)' ($$HASH) but signing failed. See the error above"; \
 			exit 1; \
 		fi; \
 	else \
-		echo "⚠ No signing identity '$(CERT_CN)' — using ad-hoc (FDA needs re-granting each build)"; \
+		echo "⚠ No signing identity '$(CERT_CN)'. Using ad-hoc, so FDA needs re-granting each build"; \
 		echo "  Run 'make setup-signing' once to fix this permanently"; \
 		codesign --force --sign - $(BINARY); \
 	fi
@@ -84,7 +84,7 @@ verify: ## Verify server is healthy
 		if [ -n "$$RESULT" ]; then \
 			SERVER_VERSION=$$(echo "$$RESULT" | python3 -c "import sys,json; print(json.load(sys.stdin)['result']['serverInfo']['version'])"); \
 			if [ "$$SERVER_VERSION" = "$$BINARY_VERSION" ]; then \
-				echo "$$RESULT" | python3 -c "import sys,json; r=json.load(sys.stdin)['result']; print(f'✓ Legacy lane — {r[\"serverInfo\"][\"name\"]} v{r[\"serverInfo\"][\"version\"]} healthy on port $(PORT)')"; \
+				echo "$$RESULT" | python3 -c "import sys,json; r=json.load(sys.stdin)['result']; print(f'✓ Legacy lane: {r[\"serverInfo\"][\"name\"]} v{r[\"serverInfo\"][\"version\"]} healthy on port $(PORT)')"; \
 				MODERN=$$(curl -sf http://127.0.0.1:$(PORT) -X POST \
 					-H "Content-Type: application/json" \
 					-H "Accept: application/json, text/event-stream" \
@@ -107,7 +107,7 @@ verify: ## Verify server is healthy
 install: sign restart verify ## Build, sign, restart, verify (the full workflow)
 	@open -R $(BINARY)
 	@echo ""
-	@echo "Done! Finder opened to the binary — drag it into Full Disk Access if needed."
+	@echo "Done. Finder opened to the binary; drag it into Full Disk Access if needed."
 	@echo "If MCP Router lost connection, reconnect with /mcp"
 
 status: ## Show service status and version
@@ -125,7 +125,7 @@ status: ## Show service status and version
 		-H "Content-Type: application/json" \
 		-H "Accept: application/json, text/event-stream" \
 		-d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"status","version":"1.0"}}}' 2>/dev/null \
-		| python3 -c "import sys,json; r=json.load(sys.stdin)['result']; print(f'✓ Responding — v{r[\"serverInfo\"][\"version\"]}')" 2>/dev/null \
+		| python3 -c "import sys,json; r=json.load(sys.stdin)['result']; print(f'✓ Responding, v{r[\"serverInfo\"][\"version\"]}')" 2>/dev/null \
 		|| echo "✗ Not responding"
 
 logs: ## Tail the stderr log
@@ -142,7 +142,7 @@ clean: ## Remove debug artifacts and old logs
 
 # setup-signing runs as a SINGLE shell program (one `\`-continued line) so that
 # the private key lives in a `mktemp -d` directory removed by an EXIT trap on
-# every path — success, failure, or interrupt. Splitting it back into separate
+# every path: success, failure, or interrupt. Splitting it back into separate
 # `@` lines would give each line its own shell, which is what previously let the
 # early "already works" exit fall through into regenerating the cert.
 #
@@ -159,7 +159,7 @@ clean: ## Remove debug artifacts and old logs
 #     `find-identity -v`, and an untrusted self-signed cert is reported
 #     CSSMERR_TP_NOT_TRUSTED and excluded from `-v`. If the trust dialog is
 #     cancelled, SIGN_HASH stays empty, the guard above will not fire, and a
-#     re-run imports another cert — the original cumulative bug. If that shows
+#     re-run imports another cert, the original cumulative bug. If that shows
 #     up, prefer fixing trust over dropping `-v`: without `-v` the hash could
 #     point at a cert that has no usable private key.
 setup-signing: ## Create persistent code signing identity (one-time)
@@ -199,11 +199,11 @@ setup-signing: ## Create persistent code signing identity (one-time)
 		grep -F '"$(CERT_CN)"' | head -1 | awk '{print $$2}'); \
 	if [ -n "$$NEW_HASH" ]; then \
 		echo "✓ Signing identity '$(CERT_CN)' created and working ($$NEW_HASH)"; \
-		echo "  Grant FDA one more time in System Settings — it will persist across rebuilds."; \
+		echo "  Grant FDA one more time in System Settings. It will persist across rebuilds."; \
 	else \
 		echo "⚠ Certificate imported but no usable signing identity was found."; \
 		echo "  This usually means the private key did not import. Check with:"; \
 		echo "    security find-identity -v -p codesigning"; \
-		echo "  If '$(CERT_CN)' is absent there, the import failed — re-run this target."; \
+		echo "  If '$(CERT_CN)' is absent there, the import failed. Re-run this target."; \
 		echo "  If it IS listed, signing should now work; report this as a bug."; \
 	fi

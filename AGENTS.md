@@ -2,17 +2,17 @@
 
 This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
 
-## Project Overview
+## Project overview
 
-**iMessage Max** is an MCP (Model Context Protocol) server for iMessage designed specifically for AI assistant consumption.
+iMessage Max is an MCP (Model Context Protocol) server for iMessage, built for AI assistants to call.
 
-The core goal is to reduce tool calls per user intent from 3-5 down to 1-2 by providing intent-aligned tools rather than exposing raw database structures.
+The goal is to cut tool calls per user intent from 3-5 down to 1-2. Tools are shaped around what someone wants to know, not around the database tables.
 
-## Current Implementation
+## Current implementation
 
-The project is implemented in **Swift** (located in `/swift/`) for native macOS integration. The old Python implementation has been retired and removed.
+The project is written in Swift and lives in `/swift/`. The old Python implementation is gone.
 
-### Build, Install & Run
+### Build, install, run
 
 After making code changes, build and deploy with:
 
@@ -21,20 +21,20 @@ cd swift
 make install    # builds, signs, restarts launchd service, verifies health
 ```
 
-This is the standard workflow — always use `make install` after code changes. It handles everything including code signing (so Full Disk Access persists across rebuilds).
+Always run `make install` after code changes. It signs the binary, which is what keeps Full Disk Access from being revoked on every rebuild.
 
 Other Makefile targets:
-- `make test` — run the full test suite
-- `make status` — check process, version, signature, health
-- `make logs` — tail stderr log
-- `make clean` — remove debug artifacts and clear logs
-- `make setup-signing` — one-time setup for persistent code signing identity
+- `make test` runs the full test suite
+- `make status` checks process, version, signature, health
+- `make logs` tails the stderr log
+- `make clean` removes debug artifacts and clears logs
+- `make setup-signing` is one-time setup for a persistent code signing identity
 
 The server runs as a launchd service (`local.imessage-max`) on port 8080, configured at `~/Library/LaunchAgents/local.imessage-max.plist`. It auto-starts on login and auto-restarts on crash.
 
 Connected via MCP Router as `remote-streamable` at `http://127.0.0.1:8080`. After restarting the service, MCP Router clients may need to reconnect (e.g. `/mcp` in Codex).
 
-### Manual Build & Run (without Makefile)
+### Manual build and run (without Makefile)
 
 ```bash
 cd swift
@@ -47,7 +47,7 @@ swift build -c release
 ./.build/release/imessage-max --http --port 8080
 ```
 
-### Running the Test Suite
+### Running the test suite
 
 ```bash
 cd swift
@@ -60,7 +60,7 @@ make test                               # same as `swift test`
 `--filter LaunchdSafetyTests` runs just that class and
 `--filter testNoTaskSleepInServiceSources` runs the single case.
 
-### Test via MCP Protocol
+### Test via MCP protocol
 
 ```bash
 # stdio mode
@@ -84,15 +84,15 @@ curl -X POST http://localhost:8080 \
 ## Architecture
 
 ### Swift Stack
-- **Language:** Swift 6.1
-- **MCP SDK:** modelcontextprotocol/swift-sdk (version pinned in `swift/Package.swift` / `swift/Package.resolved`)
-- **HTTP Server:** Hummingbird 2.x (for `--http` mode)
-- **Database:** Raw SQLite3 C API for `~/Library/Messages/chat.db`
-- **Contacts:** CNContactStore (native macOS)
-- **Images:** Core Image for GPU-accelerated resizing
-- **Send:** AppleScript/JXA backend for Messages.app
+- Language: Swift 6.1
+- MCP SDK: modelcontextprotocol/swift-sdk (version pinned in `swift/Package.swift` / `swift/Package.resolved`)
+- HTTP server: Hummingbird 2.x (for `--http` mode)
+- Database: raw SQLite3 C API for `~/Library/Messages/chat.db`
+- Contacts: CNContactStore
+- Images: Core Image for GPU-accelerated resizing
+- Send: AppleScript/JXA backend for Messages.app
 
-### Directory Structure
+### Directory structure
 
 ```
 swift/
@@ -116,18 +116,18 @@ swift/
 └── Package.swift
 ```
 
-### Protocol Support (Dual-Era)
+### Protocol support (dual-era)
 
 The server serves two MCP protocol eras concurrently on both transports
 (stdio and HTTP), selected per request:
 
-- **Modern era (MCP 2026-07-28, stateless).** `ModernDispatcher`
+- Modern era (MCP 2026-07-28, stateless). `ModernDispatcher`
   (`ModernProtocol.swift`) answers requests that carry the reserved
   `_meta` key `io.modelcontextprotocol/protocolVersion`, plus
   `server/discover`, the modern probe method. No initialize, no sessions.
   Implemented at the repo level because no Swift SDK release targets
   2026-07-28 yet; the pinned swift-sdk still drives the legacy lane only.
-- **Legacy era (dated revisions through 2025-11-25, session-based).**
+- Legacy era (dated revisions through 2025-11-25, session-based).
   `initialize` and all session traffic pass to the SDK `Server` unchanged.
   This lane is load-bearing: plug (HTTP, `protocol = "legacy"`), the mcpb
   stdio bundle, and Codex all use it. Do not remove it without verified
@@ -164,7 +164,7 @@ Rollback: the modern lane is additive. Reverting
 in `HTTPTransport.handlePost` / `MCPServer.start` restores the previous
 legacy-only behavior byte-for-byte.
 
-### HTTP Transport Architecture
+### HTTP transport architecture
 
 The HTTP mode implements MCP Streamable HTTP transport (legacy sessions
 per spec 2025-03-26+, modern stateless per 2026-07-28):
@@ -188,17 +188,17 @@ per spec 2025-03-26+, modern stateless per 2026-07-28):
 └─────────────────────────────────────────────────────────┘
 ```
 
-## Database Schema (iMessage chat.db)
+## Database schema (iMessage chat.db)
 
-- `chat` - conversation metadata (ROWID, guid, display_name)
-- `message` - individual messages (text, attributedBody, date, is_from_me)
-- `handle` - phone numbers/emails
-- `attachment` - media files (filename, mime_type, total_bytes)
-- `chat_handle_join` - links chats to handles
-- `chat_message_join` - links messages to chats
-- `message_attachment_join` - links messages to attachments
+- `chat` holds conversation metadata (ROWID, guid, display_name)
+- `message` holds individual messages (text, attributedBody, date, is_from_me)
+- `handle` holds phone numbers and emails
+- `attachment` holds media files (filename, mime_type, total_bytes)
+- `chat_handle_join` links chats to handles
+- `chat_message_join` links messages to chats
+- `message_attachment_join` links messages to attachments
 
-### Apple Epoch Time
+### Apple epoch time
 
 iMessage uses nanoseconds since 2001-01-01:
 ```swift
@@ -214,7 +214,7 @@ Message text is often stored in `attributedBody` (binary typedstream format) ins
 3. Read length byte (0x81 = 2-byte length, 0x82 = 3-byte length, else single byte)
 4. Read UTF-8 text of that length
 
-## Twelve Core Tools
+## Twelve core tools
 
 | Tool | Purpose |
 |------|---------|
@@ -231,7 +231,7 @@ Message text is often stored in `attributedBody` (binary typedstream format) ins
 | `get_attachment` | Get image content with variant options (vision/thumb/full) |
 | `diagnose` | Troubleshoot configuration and permissions |
 
-## Critical Implementation Details
+## Critical implementation details
 
 ### No Task.sleep in the service runtime
 
@@ -246,10 +246,10 @@ reintroduce.
 
 The `send` tool is agent-native (plan 017):
 
-- Exact destination → send immediately, then verify via chat.db →
-  `confirmed` / `uncertain` / `mismatch` / `sent`.
-- Ambiguous destination → status `ambiguous`, no send. Invalid input →
-  status `failed`, no send.
+- An exact destination sends immediately, then verifies against chat.db.
+  Result is `confirmed`, `uncertain`, `mismatch`, or `sent`.
+- An ambiguous destination returns status `ambiguous` and sends nothing.
+  Invalid input returns status `failed` and sends nothing.
 - The `confirm` parameter is deprecated and inert: accepted for
   compatibility, ignored.
 - File transfers keep the bounded Messages.app observation states
@@ -262,7 +262,7 @@ and a send tool must return synchronously. Do not reintroduce either without
 operator sign-off and proof of a working elicitation round trip for the
 current session.
 
-### Image Handling
+### Image handling
 
 Images are returned using MCP's native image content type (not base64 in JSON text) to avoid token bloat. Use the `.plainText`/`.plainImage` helpers defined in `Server/ServerExtensions.swift` (annotations-free wrappers over the SDK's content cases):
 ```swift
@@ -272,11 +272,11 @@ return [
 ]
 ```
 
-### Attachment Availability
+### Attachment availability
 
-Attachments can be offloaded to iCloud. `list_attachments` includes nested attachment summaries with `available: true/false` for each file. When `get_attachment` encounters an offloaded file, it returns a helpful error message.
+Attachments can be offloaded to iCloud. `list_attachments` includes nested attachment summaries with `available: true/false` for each file. When `get_attachment` hits an offloaded file, the error says so and tells the caller to retry.
 
-### Reaction Type Mapping
+### Reaction type mapping
 
 | `associated_message_type` | Reaction |
 |---------------------------|----------|
@@ -288,7 +288,7 @@ Attachments can be offloaded to iCloud. `list_attachments` includes nested attac
 | 2005 | Questioned ❓ |
 | 3000-3005 | Removal of above |
 
-### Token-Efficient Response Design
+### Token-efficient response design
 
 - Deduplicate participants (define once, reference by short key)
 - Use ISO timestamps for messages, relative for summaries
@@ -296,23 +296,23 @@ Attachments can be offloaded to iCloud. `list_attachments` includes nested attac
 - Reactions as compact strings: `["❤️ andrew", "😂 nick"]`
 - Omit obvious fields (no `is_group: false` on 2-person chats)
 
-## Required macOS Permissions
+## Required macOS permissions
 
-- **Full Disk Access** - for ~/Library/Messages/chat.db
-- **Contacts** - for AddressBook resolution
-- **Automation** - for Messages.app (send functionality only)
+- Full Disk Access, for ~/Library/Messages/chat.db
+- Contacts, for AddressBook resolution
+- Automation, for Messages.app (sending only)
 
-## Maintainer Notes
+## Maintainer notes
 
 For current tradeoffs and "why we did it this way" context, see:
 
 - `docs/maintainers/2026-04-09-maintainer-notes.md`
 
-### Knowledge Store
+### Knowledge store
 
-- `docs/solutions/` — documented solved problems and durable
-  design lessons with searchable YAML frontmatter. Search here
-  before re-investigating an error or re-litigating a design
-  decision (e.g. the send confirmation gate).
-- `CONCEPTS.md` — shared domain vocabulary (send statuses,
-  verified send, capability contract).
+- `docs/solutions/` holds solved problems and design lessons with
+  searchable YAML frontmatter. Search here before re-investigating an
+  error or re-litigating a design decision, such as the send
+  confirmation gate.
+- `CONCEPTS.md` holds shared domain vocabulary: send statuses, verified
+  send, the capability contract.

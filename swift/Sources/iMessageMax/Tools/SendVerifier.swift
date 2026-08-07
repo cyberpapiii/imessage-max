@@ -9,7 +9,7 @@ enum VerificationResult: Equatable {
     case confirmed(guid: String, dateNs: Int64)
     /// Row found in a different chat (routing mismatch). Includes the message guid.
     case mismatch(actualChatId: Int64, guid: String)
-    /// Row found in the intended chat, but with error ≠ 0 — the delivery failed.
+    /// Row found in the intended chat, but with error ≠ 0. The delivery failed.
     case failedDelivery(guid: String, errorCode: Int)
     /// Polling window exhausted; no matching row found.
     case notFound
@@ -21,7 +21,7 @@ enum VerificationResult: Equatable {
 ///
 /// Design: §2.2 primary query (chatId-scoped) + §2.2 fallback handle-scan when primary
 /// finds nothing and a handle is available. §3 finding 3: rows with error ≠ 0 must not
-/// confirm — they classify as `.failedDelivery` when they match in the intended chat
+/// confirm. They classify as `.failedDelivery` when they match in the intended chat
 /// (failed iMessage sends write error=22 rows immediately). Text comparison uses
 /// MessageTextExtractor to handle attributedBody-only rows (§3 finding 2). Multiple
 /// matches take the earliest (§2.3).

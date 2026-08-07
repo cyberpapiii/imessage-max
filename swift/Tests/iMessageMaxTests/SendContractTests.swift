@@ -24,8 +24,8 @@ final class SendContractTests: XCTestCase {
     // MARK: - Agent-native send contract (plan 017)
 
     /// A group-chat send targeted by exact chat_id with NO confirm flag sends
-    /// immediately — no gate, no pending state, no interactive wait — and is
-    /// verified post-send to `confirmed`.
+    /// immediately, with no gate, no pending state and no interactive wait,
+    /// and is verified post-send to `confirmed`.
     func testGroupChatSendWithoutConfirmSendsImmediately() async throws {
         let fixture = try makeSendContractFixture()
         let stub = StubScriptRunner()
@@ -50,7 +50,7 @@ final class SendContractTests: XCTestCase {
         let contents = try await tool.execute(args: [
             "chat_id": .string("chat2"),
             "text": .string("Hello group"),
-            // confirm omitted — sends must not gate on it.
+            // confirm omitted. Sends must not gate on it.
         ])
         let elapsed = ContinuousClock().now - start
 

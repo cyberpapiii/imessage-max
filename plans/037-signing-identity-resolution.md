@@ -1,10 +1,10 @@
-# Plan 037: Resolve the signing identity by hash, not by name — make setup-signing idempotent
+# Plan 037: Resolve the signing identity by hash, not by name, make setup-signing idempotent
 
 > **Executor instructions**: Follow this plan step by step. Run every
 > verification command and confirm the expected result before moving to the
 > next step. If anything in the "STOP conditions" section occurs, stop and
-> report — do not improvise. When done, update the status row for this plan
-> in `plans/README.md` — unless a reviewer dispatched you and told you they
+> report, do not improvise. When done, update the status row for this plan
+> in `plans/README.md`, unless a reviewer dispatched you and told you they
 > maintain the index.
 >
 > **Drift check (run first)**: `git diff --stat 58850fb..HEAD -- swift/Makefile`
@@ -25,7 +25,7 @@
 - **Depends on**: none
 - **Category**: DX / tooling
 - **Planned at**: commit `58850fb`, 2026-08-07
-- **Found**: during the 2026-08-07 deploy, not by audit — `make setup-signing`
+- **Found**: during the 2026-08-07 deploy, not by audit, `make setup-signing`
   failed on a real machine and the failure mode turned out to be self-inflicted
   and cumulative.
 
@@ -38,8 +38,8 @@ identity fixes that permanently.
 
 The target is **not idempotent**, and its failure mode is cumulative. Each run
 that cannot sign imports *another* certificate with the same common name. Once
-two exist, `codesign --sign "iMessage Max Dev"` can never succeed again — it
-fails with `ambiguous` — so every subsequent run adds another one. The tool
+two exist, `codesign --sign "iMessage Max Dev"` can never succeed again, it
+fails with `ambiguous`, so every subsequent run adds another one. The tool
 that exists to make signing permanent progressively destroys its own ability
 to sign.
 
@@ -57,7 +57,7 @@ given.
 
 ## Current state (verified against the live Makefile at `58850fb`)
 
-**Variables** — `swift/Makefile:17-21`:
+**Variables**, `swift/Makefile:17-21`:
 
 ```makefile
 BINARY       := .build/release/imessage-max
@@ -70,7 +70,7 @@ CERT_CN      := iMessage Max Dev
 certificate by **common name**, which is exactly the thing that stops being
 unique.
 
-**The `sign` target** — `swift/Makefile:37-51`:
+**The `sign` target**, `swift/Makefile:37-51`:
 
 ```makefile
 sign: build ## Build and sign with persistent identity
@@ -93,7 +93,7 @@ sign: build ## Build and sign with persistent identity
 Note the `2>/dev/null` on the first branch: the `ambiguous` error that explains
 the whole failure is discarded, so the operator never sees it.
 
-**The `setup-signing` guard** — `swift/Makefile:144-147`:
+**The `setup-signing` guard**, `swift/Makefile:144-147`:
 
 ```makefile
 	@if codesign --force --sign "$(IDENTITY)" --generate-entitlement-der /dev/null 2>/dev/null; then \
@@ -103,11 +103,11 @@ the whole failure is discarded, so the operator never sees it.
 ```
 
 This is the idempotency guard, and it is the bug. It asks "can I sign by
-name?" — which is false whenever duplicates exist — and then falls through to
+name?", which is false whenever duplicates exist, and then falls through to
 import yet another certificate. The guard is defeated by the very condition it
 should detect.
 
-**The misleading tail** — `swift/Makefile:176-184`:
+**The misleading tail**, `swift/Makefile:176-184`:
 
 ```makefile
 	if codesign --force --sign "$(IDENTITY)" $(BINARY) 2>/dev/null; then \
@@ -145,7 +145,7 @@ instead of fatal.
 
 - **Do NOT run `security delete-certificate` or `security delete-identity`
   against the operator's `login.keychain-db`.** Cleaning up duplicates is out
-  of scope for this plan. The fix must make duplicates *harmless*, not absent —
+  of scope for this plan. The fix must make duplicates *harmless*, not absent,
   a fix that requires cleanup first is not a fix, because the next machine will
   hit the same state.
 - **Do NOT run `make setup-signing` against the real login keychain as a test.**
@@ -156,7 +156,7 @@ instead of fatal.
   manual GUI re-grant. Sign a throwaway copy in a temp directory instead.
 - A `security` command may raise a GUI password dialog that blocks
   indefinitely with no output. If a command produces no output for more than
-  ~60 seconds, assume it is blocked on a dialog, STOP, and report — do not
+  ~60 seconds, assume it is blocked on a dialog, STOP, and report, do not
   retry it in a loop.
 
 ## Commands you will need
@@ -179,13 +179,13 @@ code, so that number must be unchanged at the end.
 - `plans/README.md` (status row only)
 
 **Out of scope** (do NOT touch):
-- Any file under `swift/Sources/` or `swift/Tests/` — this plan adds no Swift
+- Any file under `swift/Sources/` or `swift/Tests/`, this plan adds no Swift
   code and changes no behavior of the server.
-- `AGENTS.md`, `README.md`, `swift/README.md` — the operator-facing signing
+- `AGENTS.md`, `README.md`, `swift/README.md`, the operator-facing signing
   instructions do not change. The workflow is still
   `make setup-signing` once, then `make install`.
 - The operator's keychain contents (see "Keychain safety").
-- `.github/workflows/build.yml` — CI does not sign.
+- `.github/workflows/build.yml`. CI does not sign.
 
 ## Git workflow
 
@@ -224,7 +224,7 @@ Step 3 would never fire.
 **Verify**: `cd swift && make -n sign` still prints a recipe and exits 0. Then
 confirm the variable resolves on a machine that has an identity:
 `cd swift && make -s print-sign-hash` after temporarily adding
-`print-sign-hash: ; @echo "$(SIGN_HASH)"` — remove that helper target before
+`print-sign-hash: ; @echo "$(SIGN_HASH)"`, remove that helper target before
 committing. Expect a 40-character hex string, or empty if no identity exists.
 Both are valid outcomes; you are checking that it does not error.
 
@@ -262,7 +262,7 @@ Three deliberate changes beyond the hash:
   against `security find-identity` output without knowing the internals.
 
 **Verify**: `cd swift && make -n sign` prints the new recipe and exits 0. Do
-**not** run `make sign` for real yet — see "Keychain safety".
+**not** run `make sign` for real yet, see "Keychain safety".
 
 ### Step 3: Fix the `setup-signing` guard and its tail
 
@@ -304,7 +304,7 @@ Confirm the misleading string is gone:
 
 ### Step 4: Prove idempotency against a scratch keychain
 
-This is the step that demonstrates the fix. **Use a scratch keychain — never
+This is the step that demonstrates the fix. **Use a scratch keychain, never
 the login keychain.**
 
 ```sh
@@ -350,11 +350,11 @@ the fix addresses the real failure and not a guess about it.
 This plan changes no Swift code, so the suite is a regression gate only.
 
 **Verify**: `cd swift && swift test` → exit 0, 0 failures, **233 tests**. If the
-count differs from 233, STOP — something outside this plan's scope changed.
+count differs from 233, STOP, something outside this plan's scope changed.
 
 ## Test plan
 
-No new Swift tests — there is no Swift code here. Step 4 is the behavioral
+No new Swift tests, there is no Swift code here. Step 4 is the behavioral
 test, and it is the meaningful one: it reproduces the exact failure against a
 disposable keychain and shows the new selection method surviving it.
 
@@ -384,18 +384,18 @@ Machine-checkable. ALL must hold:
 Stop and report back (do not improvise) if:
 
 - **Any `security` command produces no output for ~60 seconds.** It is blocked
-  on a GUI password dialog. Do not retry in a loop — report it, because on a
+  on a GUI password dialog. Do not retry in a loop, report it, because on a
   headless or automated run this will hang forever and that fact belongs in the
   report.
 - `security find-identity -v -p codesigning` returns nothing at all on this
   machine. Step 4 still works (it creates its own identity in the scratch
-  keychain), but Step 1's verification cannot be completed — say so rather than
+  keychain), but Step 1's verification cannot be completed, say so rather than
   inventing a result.
 - You find yourself wanting to delete a certificate from the login keychain to
   make something pass. That is the out-of-scope action this plan exists to
   avoid needing. Report what you saw instead.
 - The `awk '{print $$2}'` field index does not match this machine's
-  `find-identity` output format. Do not hardcode a different index blindly —
+  `find-identity` output format. Do not hardcode a different index blindly,
   paste the raw output in your report and propose a parse that fits it.
 - The suite is not 233 tests before you start. The Makefile is not the cause;
   something else drifted. Report and stop.
@@ -404,18 +404,18 @@ Stop and report back (do not improvise) if:
 
 - **The root cause is a class, not an instance**: selecting a keychain item by
   a human-readable name that the tool itself can create more of. If any future
-  target needs a certificate, select it by hash through `SIGN_HASH` — do not
+  target needs a certificate, select it by hash through `SIGN_HASH`, do not
   add another `--sign "$(CERT_CN)"`.
 - `IDENTITY` and `CERT_CN` are currently the same string, and after this plan
   `IDENTITY` has no remaining callers. It is left in place deliberately rather
   than deleted, because operators may reference it in local scripts. A future
-  cleanup could remove it — check `grep -rn IDENTITY swift/Makefile` first.
+  cleanup could remove it, check `grep -rn IDENTITY swift/Makefile` first.
 - The operator's login keychain still holds duplicate `iMessage Max Dev`
-  certificates from before this fix. **They are now harmless** —
+  certificates from before this fix. **They are now harmless**,
   `find-identity` returns only the one with a private key. Cleaning them up is
   optional cosmetic work, deliberately not part of this plan, and requires
   interactive confirmation because deleting the wrong one costs an FDA
   re-grant.
 - Watch in review: anyone reintroducing `2>/dev/null` on a `codesign` call.
-  That redirect is why this bug was undiagnosable for as long as it existed —
+  That redirect is why this bug was undiagnosable for as long as it existed,
   the error message named the cause precisely and was being thrown away.

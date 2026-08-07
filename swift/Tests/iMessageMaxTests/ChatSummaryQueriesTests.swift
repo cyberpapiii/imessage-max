@@ -55,7 +55,7 @@ final class ChatSummaryQueriesTests: XCTestCase {
 
         try fixture.insertHandle(rowId: 1, handle: "+15550000001")  // Alice
 
-        // Chat A and Chat B — each with the same pattern.
+        // Chat A and Chat B, each with the same pattern.
         for chatId in [1, 2] {
             try fixture.insertChat(rowId: chatId, guid: "chat-\(chatId)-guid")
             try fixture.joinChatHandle(chatId: chatId, handleId: 1)
@@ -85,7 +85,7 @@ final class ChatSummaryQueriesTests: XCTestCase {
         )
         try fixture.joinChatMessage(chatId: 1, messageId: 102)
 
-        // Reaction — even newer but must not be picked.
+        // Reaction. Even newer, but it must not be picked.
         try fixture.insertMessage(
             rowId: 103,
             guid: "c1-reaction",
@@ -151,7 +151,7 @@ final class ChatSummaryQueriesTests: XCTestCase {
     // MARK: - Empty guard
 
     func testEmptyChatIdsReturnsEmpty() async throws {
-        // No fixture needed — the guard path short-circuits before any DB call.
+        // No fixture needed. The guard path short-circuits before any DB call.
         let fixture = try ToolTestDatabase(name: "csq-empty")
         let resolver = makeSeededResolver()
 
@@ -232,7 +232,7 @@ final class ChatSummaryQueriesTests: XCTestCase {
         let base = Int64(Date().timeIntervalSinceReferenceDate * 1_000_000_000) - 3_600_000_000_000
         let sec: Int64 = 1_000_000_000
 
-        // Oldest: unread inbound — the one the filter must select.
+        // Oldest: unread inbound, the one the filter must select.
         try fixture.insertMessage(
             rowId: 1,
             guid: "unread-inbound",

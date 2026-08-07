@@ -3,8 +3,8 @@
 > **Executor instructions**: Follow this plan step by step. Run every
 > verification command and confirm the expected result before moving to the
 > next step. If anything in the "STOP conditions" section occurs, stop and
-> report — do not improvise. When done, update the status row for this plan
-> in `plans/README.md` — unless a reviewer dispatched you and told you they
+> report, do not improvise. When done, update the status row for this plan
+> in `plans/README.md`, unless a reviewer dispatched you and told you they
 > maintain the index.
 >
 > **Drift check (run first)**: `git diff --stat 57a2ff3..HEAD -- swift/Sources/iMessageMax/Database/Database.swift swift/Tests/iMessageMaxTests/`
@@ -23,12 +23,12 @@
 
 ## Why this matters
 
-`Database.query()` is the single read path for every MCP tool in this server (it reads the user's iMessage database, `~/Library/Messages/chat.db`). Today, if SQLite returns an error partway through stepping a result set (lock timeout, corruption, I/O error), the loop simply exits and the partial result array is returned as if it were complete — an AI agent consuming the response has no way to know messages are missing. Two smaller issues live in the same file: the `PRAGMA query_only = ON` safety setting is executed without checking it succeeded (and leaks the error-message allocation on failure), and the parameter binder silently binds `NULL` for any Swift type it doesn't recognize, which would turn a future caller bug into silently-wrong query results instead of a loud failure.
+`Database.query()` is the single read path for every MCP tool in this server (it reads the user's iMessage database, `~/Library/Messages/chat.db`). Today, if SQLite returns an error partway through stepping a result set (lock timeout, corruption, I/O error), the loop simply exits and the partial result array is returned as if it were complete, an AI agent consuming the response has no way to know messages are missing. Two smaller issues live in the same file: the `PRAGMA query_only = ON` safety setting is executed without checking it succeeded (and leaks the error-message allocation on failure), and the parameter binder silently binds `NULL` for any Swift type it doesn't recognize, which would turn a future caller bug into silently-wrong query results instead of a loud failure.
 
 ## Current state
 
-- `swift/Sources/iMessageMax/Database/Database.swift` — the only file to modify. It is a `final class Database: @unchecked Sendable` that opens a short-lived read-only SQLite connection per query.
-- `swift/Sources/iMessageMax/Database/Errors.swift` — defines `DatabaseError` with cases `notFound(String)`, `permissionDenied(String)`, `queryFailed(String)`, `invalidData(String)`. Reuse these; do not add new error types.
+- `swift/Sources/iMessageMax/Database/Database.swift`, the only file to modify. It is a `final class Database: @unchecked Sendable` that opens a short-lived read-only SQLite connection per query.
+- `swift/Sources/iMessageMax/Database/Errors.swift`, defines `DatabaseError` with cases `notFound(String)`, `permissionDenied(String)`, `queryFailed(String)`, `invalidData(String)`. Reuse these; do not add new error types.
 
 The silent step loop (`Database.swift:54-70`):
 
@@ -89,7 +89,7 @@ The silent default bind (`Database.swift:125-144`, inside `prepare`):
         }
 ```
 
-Conventions: errors are thrown as `DatabaseError` with the SQLite message via `String(cString: sqlite3_errmsg(conn))` — see the existing `execute()` at `Database.swift:72-83` for the pattern. Match it.
+Conventions: errors are thrown as `DatabaseError` with the SQLite message via `String(cString: sqlite3_errmsg(conn))`, see the existing `execute()` at `Database.swift:72-83` for the pattern. Match it.
 
 Note: the connection is opened with `SQLITE_OPEN_READONLY`, so the PRAGMA is defense-in-depth, not the primary write guard. Don't "fix" this by removing the read-only open flag.
 
@@ -109,8 +109,8 @@ Note: the connection is opened with `SQLITE_OPEN_READONLY`, so the PRAGMA is def
 - `plans/README.md` (status row)
 
 **Out of scope** (do NOT touch):
-- `swift/Sources/iMessageMax/Database/Errors.swift` — existing cases suffice.
-- `swift/Sources/iMessageMax/Database/QueryBuilder.swift`, `SQLiteRow.swift` — unrelated.
+- `swift/Sources/iMessageMax/Database/Errors.swift`, existing cases suffice.
+- `swift/Sources/iMessageMax/Database/QueryBuilder.swift`, `SQLiteRow.swift`, unrelated.
 - Any tool file. If a tool fails to compile after your change, that is a STOP condition, not an invitation to edit tools.
 
 ## Git workflow
@@ -168,7 +168,7 @@ In `openReadOnly()`, replace the unchecked `sqlite3_exec` call:
         }
 ```
 
-Note the `sqlite3_close(db)` before throwing — the caller's `defer` has not been armed yet because `openReadOnly()` hasn't returned.
+Note the `sqlite3_close(db)` before throwing, the caller's `defer` has not been armed yet because `openReadOnly()` hasn't returned.
 
 **Verify**: `cd swift && swift build` → exit 0.
 
@@ -188,7 +188,7 @@ Replace the `default:` case in `prepare()` and add `Bool` support. The statement
                 )
 ```
 
-(Keep the existing Int/Int64/String/Double/Data cases unchanged. Place the `Bool` case BEFORE the `Int` case — on some Swift/ObjC bridging paths a `Bool` can match `as Int`, so order matters; with `Bool` first the behavior is deterministic.)
+(Keep the existing Int/Int64/String/Double/Data cases unchanged. Place the `Bool` case BEFORE the `Int` case, on some Swift/ObjC bridging paths a `Bool` can match `as Int`, so order matters; with `Bool` first the behavior is deterministic.)
 
 **Verify**: `cd swift && swift build` → exit 0, and `cd swift && swift test` → all existing tests still pass.
 
@@ -196,10 +196,10 @@ Replace the `default:` case in `prepare()` and add `Bool` support. The statement
 
 Create `swift/Tests/iMessageMaxTests/DatabaseErrorHandlingTests.swift`, modeled structurally on the existing test support (`swift/Tests/iMessageMaxTests/ToolTestSupport.swift` provides `ToolTestDatabase`, a temp-file SQLite fixture with the chat.db schema; get a `Database` with `fixture.database()`):
 
-- `testQueryReturnsRowsOnHappyPath` — insert a handle via `fixture.insertHandle(rowId: 1, handle: "+15550000001")`, query `SELECT id FROM handle`, assert 1 row.
-- `testUnsupportedParamTypeThrows` — call `db.query("SELECT 1 WHERE 1 = ?", params: [["array", "is", "unsupported"]]) { _ in 0 }` and assert it throws `DatabaseError.invalidData` (use `XCTAssertThrowsError` and pattern-match the error).
-- `testBoolParamBindsAsInteger` — `db.query("SELECT 1 WHERE ? = 1", params: [true]) { _ in 0 }` returns 1 row; `params: [false]` returns 0 rows.
-- `testQueryAgainstMissingDatabaseThrowsNotFound` — `Database(path: "/nonexistent/nope.sqlite")`, assert `query` throws `DatabaseError.notFound`.
+- `testQueryReturnsRowsOnHappyPath`, insert a handle via `fixture.insertHandle(rowId: 1, handle: "+15550000001")`, query `SELECT id FROM handle`, assert 1 row.
+- `testUnsupportedParamTypeThrows`, call `db.query("SELECT 1 WHERE 1 = ?", params: [["array", "is", "unsupported"]]) { _ in 0 }` and assert it throws `DatabaseError.invalidData` (use `XCTAssertThrowsError` and pattern-match the error).
+- `testBoolParamBindsAsInteger`, `db.query("SELECT 1 WHERE ? = 1", params: [true]) { _ in 0 }` returns 1 row; `params: [false]` returns 0 rows.
+- `testQueryAgainstMissingDatabaseThrowsNotFound`, `Database(path: "/nonexistent/nope.sqlite")`, assert `query` throws `DatabaseError.notFound`.
 
 (A mid-step SQLITE_ERROR is impractical to trigger deterministically in a unit test; Step 1 is covered by code review plus the happy-path regression. Do not contrive a corruption test.)
 
@@ -207,7 +207,7 @@ Create `swift/Tests/iMessageMaxTests/DatabaseErrorHandlingTests.swift`, modeled 
 
 ## Test plan
 
-Covered in Step 4. Full-suite regression: `cd swift && swift test` → all pass (the strict binder must not break any existing tool test — if one fails, Step 0 missed a call site: STOP and report it).
+Covered in Step 4. Full-suite regression: `cd swift && swift test` → all pass (the strict binder must not break any existing tool test, if one fails, then Step 0 missed a call site: STOP and report it).
 
 ## Done criteria
 
@@ -228,6 +228,6 @@ Stop and report back (do not improvise) if:
 
 ## Maintenance notes
 
-- Any future param type (e.g. `Date`) must be added as an explicit case — the binder now throws on unknowns by design.
+- Any future param type (e.g. `Date`) must be added as an explicit case, the binder now throws on unknowns by design.
 - Reviewer should scrutinize: the `Bool`-before-`Int` case ordering, and that both early-throw paths (`prepare` default case, PRAGMA failure) clean up their SQLite resources before throwing.
 - Deferred: reusing one connection per tool call instead of per query (see plan 003's maintenance notes).

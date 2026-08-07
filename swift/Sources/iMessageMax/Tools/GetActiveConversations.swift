@@ -96,7 +96,7 @@ enum GetActiveConversations {
 
         server.registerTool(
             name: "get_active_conversations",
-            description: "Find conversations with recent bidirectional activity. Returns chat ids for follow-up tool calls and chat names for user-facing summaries. When explaining results to the user, refer to chats by name, not by id. Helpful for surfacing threads that may deserve attention first, but not a complete recent overview across all chats.",
+            description: "Find conversations with recent bidirectional activity. Returns chat ids for follow-up tool calls and chat names for user-facing summaries. When explaining results to the user, refer to chats by name, not by id. Use it to find threads that deserve attention first. It is not a complete recent overview across all chats; use list_chats for that.",
             inputSchema: inputSchema,
             outputSchema: OutputSchema.object,
             annotations: Tool.Annotations(

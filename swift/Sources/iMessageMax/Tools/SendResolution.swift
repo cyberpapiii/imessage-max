@@ -174,8 +174,8 @@ actor SendResolver {
     private func resolveContactName(_ name: String) async -> SendResolution.Result {
         // Search the resolver first: a seeded/test cache needs no Contacts
         // access, and on live machines the cache is what initialize()
-        // populated anyway. Authorization only matters when nothing matched —
-        // it distinguishes "you can't search" from "no such contact".
+        // populated anyway. Authorization only matters when nothing matched.
+        // It distinguishes "you can't search" from "no such contact".
         let matches = await resolver.searchByName(name)
         if matches.isEmpty {
             let (authorized, _) = ContactResolver.authorizationStatus()
@@ -231,7 +231,7 @@ actor SendResolver {
         // The participant count must be computed over the WHOLE chat, not just the
         // rows surviving `WHERE h.id = ?`. A `GROUP BY ... HAVING COUNT(...) = 1`
         // after the handle filter counts only the filtered handle's rows, so every
-        // chat containing the handle (including groups) passes — the correlated
+        // chat containing the handle (including groups) passes. The correlated
         // subquery below counts all participants of each candidate chat instead.
         let oneOnOneChats: [Int64] = try db.query(
             """

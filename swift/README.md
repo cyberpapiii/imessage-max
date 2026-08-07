@@ -1,6 +1,6 @@
 # iMessage Max
 
-Native macOS MCP server for iMessage, built in Swift for optimal performance.
+MCP server for iMessage, written in Swift and run natively on macOS.
 
 This is the source of truth for the current project and its active
 install/update workflow.
@@ -12,7 +12,7 @@ swift build -c release
 # Binary: .build/release/imessage-max
 ```
 
-## Dev Install Workflow
+## Dev install workflow
 
 Use the `Makefile` for normal development updates:
 
@@ -21,11 +21,11 @@ make setup-signing   # one-time: create persistent signing identity
 make install         # build, sign, restart launchd service, verify health
 ```
 
-This workflow exists to avoid the usual macOS development pain:
+Why it exists:
 - the release binary path stays stable
-- the binary is signed with a persistent local identity
-- Full Disk Access can persist across rebuilds
-- the launchd-managed HTTP service is restarted automatically
+- the binary is signed with a persistent local identity, so Full Disk Access
+  survives rebuilds
+- the launchd-managed HTTP service restarts automatically
 
 Useful targets:
 
@@ -46,7 +46,7 @@ default HTTP port is `8080`.
 
 ## Architecture
 
-### Core Components
+### Core components
 
 ```
 Sources/iMessageMax/
@@ -117,38 +117,40 @@ Sources/iMessageMax/
 
 ### Dependencies
 
-- [MCP Swift SDK](https://github.com/modelcontextprotocol/swift-sdk) - Protocol implementation
-- [Swift Argument Parser](https://github.com/apple/swift-argument-parser) - CLI interface
-- [Hummingbird](https://github.com/hummingbird-project/hummingbird) - HTTP server (for `--http` mode)
+- [MCP Swift SDK](https://github.com/modelcontextprotocol/swift-sdk) for the protocol
+- [Swift Argument Parser](https://github.com/apple/swift-argument-parser) for the CLI
+- [Hummingbird](https://github.com/hummingbird-project/hummingbird) for the HTTP server in `--http` mode
 
-### Key Design Decisions
+### Key design decisions
 
-1. **Raw SQLite3** - Direct C API calls for maximum performance
-2. **Core Image** - GPU-accelerated image resizing for attachment variants
-3. **CNContactStore** - Native contact resolution through the macOS Contacts framework
-4. **Typedstream Parsing** - Proper extraction of text from iMessage's `attributedBody` format
-5. **MCP Image Content** - Images returned as proper MCP image type, not base64 in JSON
+1. Raw SQLite3, called through the C API, with no ORM in between
+2. Core Image for GPU-accelerated image resizing across attachment variants
+3. CNContactStore for contact resolution through the macOS Contacts framework
+4. A typedstream parser, because most message text lives in `attributedBody`
+   rather than the `text` column
+5. Images returned as the MCP image content type, not base64 inside JSON
 
 ## Usage
 
-### stdio Mode (Default)
+### stdio mode (default)
 
 ```bash
 ./imessage-max
 ```
 
-### HTTP Mode
+### HTTP mode
 
 Implements MCP Streamable HTTP transport. Legacy sessions (specs through
 2025-11-25) and the stateless 2026-07-28 era share one endpoint, with:
 
-- **Per-session Server instances** - Each client gets isolated state, enabling clean reconnection
-- **Session management** - 1-hour timeout with automatic cleanup
-- **SSE streaming** - Server-Sent Events for server→client messages
-- **Origin validation** - DNS rebinding protection (localhost only by default)
-- **Structured output** - JSON-shaped tools return both legacy text content and MCP `structuredContent`
-- **Icon metadata** - Latest-protocol initialize responses include PNG
-  `serverInfo.icons`; tools include compact PNG icon metadata.
+- Per-session Server instances, so each client gets isolated state and can
+  reconnect cleanly
+- Sessions time out after 1 hour and are cleaned up automatically
+- Server-Sent Events carry server-to-client messages
+- Origin validation blocks DNS rebinding; localhost only by default
+- JSON-shaped tools return both legacy text content and MCP `structuredContent`
+- Latest-protocol initialize responses include PNG `serverInfo.icons`, and tools
+  carry compact PNG icon metadata
 
 ```bash
 ./imessage-max --http --port 8080
@@ -171,7 +173,7 @@ curl -X POST http://localhost:8080 \
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
 ```
 
-### CLI Options
+### CLI options
 
 ```
 USAGE: imessage-max [--http] [--host <host>] [--port <port>] [--version]
@@ -203,31 +205,28 @@ attachments, and live MCP checks, use:
 - `../docs/validation/2026-04-09-release-checklist.md`
 - `Tests/iMessageMaxTests/SendManualValidation.md`
 
-## Recommended Tool Workflows
+## Recommended tool workflows
 
-The server is most effective when tools are combined in short, intent-shaped flows:
+Tools work best combined into short flows shaped around one question:
 
 Use `chat_id` values such as `chat123` as internal handles for follow-up tool calls and exact sends. In user-facing summaries, refer to conversations by returned chat names, group names, or participant-derived labels.
 
 - Find a conversation, then read it:
-  `find_chat(participants=["Contact A"])` → `get_messages(chat_id="chat123", since="24h")`
+  `find_chat(participants=["Contact A"])`, then `get_messages(chat_id="chat123", since="24h")`
 - Inspect a known thread before opening message history:
-  `get_chat_details(chat_id="chat123")` → `get_messages(chat_id="chat123", since="24h")`
+  `get_chat_details(chat_id="chat123")`, then `get_messages(chat_id="chat123", since="24h")`
 - Search broadly, then zoom in:
-  `search(query="launch timeline")` → `get_context(message_id="msg_123", before=5, after=10)`
+  `search(query="launch timeline")`, then `get_context(message_id="msg_123", before=5, after=10)`
 - Discover attachments before fetching them:
-  `list_attachments(chat_id="chat123", type="image")` → `get_attachment(attachment_id="att123", variant="vision")`
+  `list_attachments(chat_id="chat123", type="image")`, then `get_attachment(attachment_id="att123", variant="vision")`
 - Resolve an exact target before sending:
-  `find_chat(participants=["Contact A", "Contact B"])` → `send(chat_id="chat456", text="Please use the latest draft")`
+  `find_chat(participants=["Contact A", "Contact B"])`, then `send(chat_id="chat456", text="Please use the latest draft")`
 
 ## Performance
 
-The current implementation is optimized for native macOS use:
-
-- **Fast startup** from a single compiled binary
-- **Low runtime overhead** without an interpreter layer
-- **GPU-accelerated image processing** via Core Image
-- **Self-contained distribution** for local installs and Homebrew
+- One compiled binary, no interpreter to start
+- Image resizing runs on the GPU through Core Image
+- Ships self-contained for local installs and Homebrew
 
 ## License
 

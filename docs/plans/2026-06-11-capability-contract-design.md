@@ -1,9 +1,9 @@
 # Capability Contract Design Spike
 
-> **Type:** Design spike — no production code changes.
+> **Type:** Design spike, no production code changes.
 > **Plan reference:** Plan 011, written at commit `de0641d`, 2026-06-11.
 > **Drift check result:** `git diff --stat 90c65e1..HEAD --
-> swift/Sources/iMessageMax/Tools/Diagnose.swift` — empty; no drift.
+> swift/Sources/iMessageMax/Tools/Diagnose.swift`, empty; no drift.
 
 ---
 
@@ -55,8 +55,8 @@
 
 The `execute()` function (`Diagnose.swift:93–163`) runs two live probes:
 
-1. **Full Disk Access** — `Database.checkAccess()` (`Database.swift:21`): attempts to open `chat.db` read-only via `sqlite3_open_v2(..., SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, ...)`. Returns `(ok: Bool, status: String)`.
-2. **Contacts authorization** — `ContactResolver.authorizationStatus()` (`ContactResolver.swift:21`): calls `CNContactStore.authorizationStatus(for: .contacts)`. If authorized, also calls `resolver.initialize()` and records `handleCount`.
+1. **Full Disk Access**, `Database.checkAccess()` (`Database.swift:21`): attempts to open `chat.db` read-only via `sqlite3_open_v2(..., SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, ...)`. Returns `(ok: Bool, status: String)`.
+2. **Contacts authorization**, `ContactResolver.authorizationStatus()` (`ContactResolver.swift:21`): calls `CNContactStore.authorizationStatus(for: .contacts)`. If authorized, also calls `resolver.initialize()` and records `handleCount`.
 
 No other probes run. In particular:
 
@@ -108,7 +108,7 @@ Each row includes: the proposed JSON key, the R8 category it satisfies, possible
 | `send_text_group` | send modes | `supported` / `permission-gated` / `unverified` | same automation probe | `unverified` |
 | `send_file_dm` | send modes | `supported` / `permission-gated` / `unverified` | same automation probe | `unverified` |
 | `send_file_group` | send modes | `risky-private` / `permission-gated` / `unverified` | same automation probe; always risky per R4 | `risky-private` once probe confirms automation granted |
-| `verified_send` | send verification | `supported` / `degraded` / `permission-gated` | `Database.checkAccess()` — DB readable required for re-read proof; `error = 0` check required (failed rows write immediately with `error = 22`; see send-verification design §3) | `supported` when DB accessible; `degraded` when DB readable but automation unverified |
+| `verified_send` | send verification | `supported` / `degraded` / `permission-gated` | `Database.checkAccess()`. DB readable required for re-read proof; `error = 0` check required (failed rows write immediately with `error = 22`; see send-verification design §3) | `supported` when DB accessible; `degraded` when DB readable but automation unverified |
 | `attachments_read` | attachment handling | `supported` / `permission-gated` | `Database.checkAccess()` | `supported` when DB accessible |
 | `attachments_offloaded` | attachment handling | `supported` | (no probe; attempted at call time per `GetAttachment.swift:188–200`) | `supported` with caveat note: offloaded files trigger async iCloud download; caller must retry |
 | `reply_threading` | reply availability | `unsupported` | hardcoded: `Send.swift:207` returns `.error("reply_to is not yet implemented")` | `unsupported` |
@@ -213,7 +213,7 @@ strings. Agents consuming the old boolean shape get a compile-time (schema) or r
 Token efficiency: each capability entry is `{ "state": "X" }` plus optional `"note"` and
 `"fix"` keys. Short keys per AGENTS.md §188 "Token-Efficient Response Design".
 
-### 3.2 Proposed JSON response (full example — healthy install)
+### 3.2 Proposed JSON response (full example, healthy install)
 
 ```json
 {
@@ -299,7 +299,7 @@ Token efficiency: each capability entry is `{ "state": "X" }` plus optional `"no
 }
 ```
 
-**Unverified example (no automation probe implemented yet — current default):**
+**Unverified example (no automation probe implemented yet, current default):**
 
 Until the automation probe (§2.3) is implemented, all four send modes and
 `perm_automation` show `unverified`:
@@ -332,12 +332,12 @@ confirmed to parse the capability block. This is an open question (see §4.3).
 > **Use `diagnose` before attempting any send, attachment, or live-inbox operation.** Check
 > `capabilities.<key>.state` for each feature you plan to use. `"supported"` means the
 > feature is available and probed on this install. `"unsupported"` means the feature does
-> not exist — do not attempt it or expose it to the user as an option. `"permission-gated"`
+> not exist, do not attempt it or expose it to the user as an option. `"permission-gated"`
 > means a macOS permission must be granted before the feature can work; surface the `fix`
 > field to the user. `"risky-private"` means the feature requires explicit confirmation
 > (pass `confirm: true`). `"unverified"` means the capability state cannot be determined
 > at diagnose time; treat it as potentially available but proceed cautiously. `"unavailable"`
-> means no implementation exists in the current backend — do not attempt and do not mention
+> means no implementation exists in the current backend, do not attempt and do not mention
 > to the user as a near-term option. The `database.accessible` field governs whether all
 > read tools (`get_messages`, `list_chats`, `search`, etc.) will work. A `"needs_setup"`
 > top-level `status` means at least one required permission is missing; resolve it before
@@ -403,7 +403,7 @@ For long-running agent sessions, the maintainer should decide whether to add a
    needed for one release, or is a clean cut acceptable given the known client base?
 
 2. **`initialize` metadata.** The MCP `initialize` response (`MCPServer.swift:10–16`) uses
-   `Version.serverCapabilities` — an MCP-level capability advertisement, not the
+   `Version.serverCapabilities`, an MCP-level capability advertisement, not the
    iMessage-Max capability contract. Should a summary of key capability states (e.g.,
    `perm_full_disk` and `perm_automation`) appear in `initialize` server info, so agents
    can skip a `diagnose` call on first connect? This adds coupling between server init and
@@ -411,7 +411,7 @@ For long-running agent sessions, the maintainer should decide whether to add a
 
 3. **`experimental` state for future rich backends.** The brainstorm's A4 actor (future
    rich backend maintainer) would use `experimental` to gate opt-in paths. How should an
-   experimental backend register its capability entries — static constants, environment
+   experimental backend register its capability entries, static constants, environment
    variables, or a capability registry? This design does not specify the registration
    mechanism; it should be defined before any A4 work begins.
 

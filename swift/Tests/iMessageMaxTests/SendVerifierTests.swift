@@ -2,7 +2,7 @@
 import XCTest
 @testable import iMessageMax
 
-// Tests for SendVerifier — the pure chat.db re-read layer that backs the
+// Tests for SendVerifier, the pure chat.db re-read layer that backs the
 // verified-sends proof vocabulary. All tests use maxAttempts: 1 for speed
 // unless explicitly testing multi-attempt behaviour.
 
@@ -100,7 +100,7 @@ final class SendVerifierTests: XCTestCase {
     // 4. Row exists but is older than the look-behind window (> 2s before sendTime) → notFound.
     func testOldRowOutsideWindowIsIgnored() async throws {
         let fixture = try makeFixture()
-        // Insert a row 5 seconds before "now" — outside the 2s skew window.
+        // Insert a row 5 seconds before "now", outside the 2s skew window.
         let oldDate = AppleTime.fromDate(Date().addingTimeInterval(-5))
 
         try fixture.insertMessage(

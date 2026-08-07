@@ -9,8 +9,8 @@ the record.
 Each executor: read the plan fully before starting, honor its STOP
 conditions, and update your row when done.
 
-Verification baseline for all plans: `cd swift && swift build && swift test`
-— **174/174 tests pass at `e3d14da`** (also what CI runs). Deploying to the
+Verification baseline for all plans: `cd swift && swift build && swift test`,
+**174/174 tests pass at `e3d14da`** (also what CI runs). Deploying to the
 local launchd service (`make install`) is an operator action, not an
 executor step.
 
@@ -28,25 +28,25 @@ Ordered by recommended land sequence, not plan number.
 
 | Plan | Title | Priority | Effort | Depends on | Status |
 |------|-------|----------|--------|------------|--------|
-| 019 | Purge the three remaining Task.sleep sites from the service runtime (+ LaunchdSafetyTests guard) | P0 | S | — | DONE 2026-08-07, merged to `main` (`8a2f4cd`, branch `advisor/019-launchd-safe-timers-round-2`; 175/0 re-verified) |
-| 031 | Typedstream extractor: characterization tests, reject unknown length markers, slice-safe indexing | P2 | S | — | DONE 2026-08-07, merged to `main` (`d753e9b` tests + `86ea1cd` fix, on the media-chain branch; 192/0 re-verified; test-before-fix split verified by commit stat) |
-| 021 | Report failed deliveries as `failed_delivery` instead of `uncertain` | P1 | M | — | DONE 2026-08-07, merged to `main` (`b4750c7`, branch `advisor/021-failed-delivery-send-status`; 177/0 re-verified by reviewer) |
-| 023 | Client error hygiene round 2 — stop leaking paths and raw stderr | P1 | M | 021 (ordering) | DONE 2026-08-07, merged to `main` (`e43752d`, stacked on the send-chain branch; 181/0 re-verified) |
+| 019 | Purge the three remaining Task.sleep sites from the service runtime (+ LaunchdSafetyTests guard) | P0 | S | none | DONE 2026-08-07, merged to `main` (`8a2f4cd`, branch `advisor/019-launchd-safe-timers-round-2`; 175/0 re-verified) |
+| 031 | Typedstream extractor: characterization tests, reject unknown length markers, slice-safe indexing | P2 | S | none | DONE 2026-08-07, merged to `main` (`d753e9b` tests + `86ea1cd` fix, on the media-chain branch; 192/0 re-verified; test-before-fix split verified by commit stat) |
+| 021 | Report failed deliveries as `failed_delivery` instead of `uncertain` | P1 | M | none | DONE 2026-08-07, merged to `main` (`b4750c7`, branch `advisor/021-failed-delivery-send-status`; 177/0 re-verified by reviewer) |
+| 023 | Client error hygiene round 2, stop leaking paths and raw stderr | P1 | M | 021 (ordering) | DONE 2026-08-07, merged to `main` (`e43752d`, stacked on the send-chain branch; 181/0 re-verified) |
 | 024 | Delete staged outgoing-file copies at terminal transfer states | P1 | S | 023 (ordering) | DONE 2026-08-07, merged to `main` (`3da05d4`, stacked on the send-chain branch; 183/0 re-verified) |
 | 025 | Move blocking send work off the Swift concurrency pool + fix pipe-drain deadlock | P1 | M | 021, 024 | DONE 2026-08-07, merged to `main` (on the send-chain branch; 183/0 re-verified; pipe-drain order confirmed by reading `execute()`) |
 | 026 | Report partial multi-payload send failures truthfully | P1 | S | 021, 025 | DONE 2026-08-07, merged to `main` (`482cd6e`, branch `advisor/021-026-send-truth-chain`; 186/0 re-verified; 023's sanitizer confirmed still applied on the new path) |
-| 022 | Route get_messages media paths through AttachmentPathPolicy | P1 | S | — | DONE 2026-08-07, merged to `main` (`01904ec`, branch `advisor/022-get-messages-path-containment`; 176/0 re-verified by reviewer) |
-| 020 | Harden HTTPTransport request correlation and error responses | P1 | M | — | DONE 2026-08-07, merged to `main` (`500a899`, on the transport-chain branch; 188/0 re-verified; injection test mutation-tested by the executor) |
-| 027 | Complete the era-routing test matrix + align stdio initialize routing with HTTP | P2 | S | — (before 028) | DONE 2026-08-07, merged to `main` (`84979d9`; 180/0 re-verified by reviewer) |
+| 022 | Route get_messages media paths through AttachmentPathPolicy | P1 | S | none | DONE 2026-08-07, merged to `main` (`01904ec`, branch `advisor/022-get-messages-path-containment`; 176/0 re-verified by reviewer) |
+| 020 | Harden HTTPTransport request correlation and error responses | P1 | M | none | DONE 2026-08-07, merged to `main` (`500a899`, on the transport-chain branch; 188/0 re-verified; injection test mutation-tested by the executor) |
+| 027 | Complete the era-routing test matrix + align stdio initialize routing with HTTP | P2 | S | none (before 028) | DONE 2026-08-07, merged to `main` (`84979d9`; 180/0 re-verified by reviewer) |
 | 028 | Unblock the stdio pump (concurrent modern handling) + surface swallowed write errors | P2 | S | 027 | DONE 2026-08-07, merged to `main` (`652e206`, branch `advisor/027-028-stdio-transport`; 182/0 re-verified, stdio filter run 3× for flakiness) |
 | 029 | Session + SSE lifecycle hardening (createSession result, stored SSE stream, injectable limits) | P2 | M | 019 | DONE 2026-08-07, merged to `main` (`7f668be`, on the transport-chain branch; 180/0 re-verified; both new SessionManager tests mutation-tested by the executor) |
-| 030 | ModernDispatcher robustness (serialize fallback id, sanitized logging, catalog memoization) | P2 | M | — | DONE 2026-08-07, merged to `main` (`dff3e23`, on the transport-chain branch; 192/0 re-verified; catalog-invalidation test mutation-tested by the executor) |
-| 033 | Name-based send resolution: consult cache before Contacts gate + tests | P2 | S | — | DONE 2026-08-07, merged to `main` (`a6795c0`, branch `advisor/022-031-media-chain`; 195/0 re-verified; failure strings confirmed byte-identical against `e3d14da`) |
+| 030 | ModernDispatcher robustness (serialize fallback id, sanitized logging, catalog memoization) | P2 | M | none | DONE 2026-08-07, merged to `main` (`dff3e23`, on the transport-chain branch; 192/0 re-verified; catalog-invalidation test mutation-tested by the executor) |
+| 033 | Name-based send resolution: consult cache before Contacts gate + tests | P2 | S | none | DONE 2026-08-07, merged to `main` (`a6795c0`, branch `advisor/022-031-media-chain`; 195/0 re-verified; failure strings confirmed byte-identical against `e3d14da`) |
 | 032 | Delete dead model/enrichment code; split PlaceholderTests.swift into per-class files | P2 | S | all of 021/023/025/026 (merged first) | DONE 2026-08-07, merged to `main` (`beeae6f` + `4eb4b51`; 233/0 re-verified; all 32 test methods confirmed present after the split by name-level set diff, not just count) |
 | 034 | Image pipeline performance (shared CIContext, ImageIO downsampling, full-variant byte cap) | P3 | M | 022 | DONE 2026-08-07, merged to `main` (`60f354d`, stacked on the media-chain branch; 179/0 re-verified) |
-| 035 | Sync release metadata + docs with reality (Formula, macOS floor, content API, tree) | P3 | S | — (tree reflects 032 if landed) | DONE 2026-08-07, merged to `main` (`f14fd95`, branch `advisor/035-release-and-docs-sync`; 174/0 re-verified by reviewer) |
-| 036 | DX hardening (make test, dual-era verify probe, mktemp signing, CI parallel, dispatchInterval dedup) | P3 | S-M | — | DONE 2026-08-07, merged to `main` (`9e6a62d`, on the transport-chain branch; 192/0 re-verified; shipped probe differs from the plan's broken sketch — see follow-ups) |
-| 037 | Resolve the signing identity by hash so duplicate certs cannot break `make sign` | P2 | S | — | DONE 2026-08-07, merged to `main` (`76fc529`; 233/0 re-verified; hash-vs-name evidence gathered against the real duplicate state, not the plan's scratch-keychain script — see follow-ups) |
+| 035 | Sync release metadata + docs with reality (Formula, macOS floor, content API, tree) | P3 | S | none (tree reflects 032 if landed) | DONE 2026-08-07, merged to `main` (`f14fd95`, branch `advisor/035-release-and-docs-sync`; 174/0 re-verified by reviewer) |
+| 036 | DX hardening (make test, dual-era verify probe, mktemp signing, CI parallel, dispatchInterval dedup) | P3 | S-M | none | DONE 2026-08-07, merged to `main` (`9e6a62d`, on the transport-chain branch; 192/0 re-verified; shipped probe differs from the plan's broken sketch, see follow-ups) |
+| 037 | Resolve the signing identity by hash so duplicate certs cannot break `make sign` | P2 | S | none | DONE 2026-08-07, merged to `main` (`76fc529`; 233/0 re-verified; hash-vs-name evidence gathered against the real duplicate state, not the plan's scratch-keychain script, see follow-ups) |
 
 ### Follow-up plans from this round's deferrals (written, not yet executed)
 
@@ -54,16 +54,16 @@ Written after the round merged, from the "Follow-ups surfaced during
 execution" list below. Both are planned against commit `0ff6b8f` with a
 233-test baseline. Independent of each other; either can land first.
 
-Both plans have been corrected in place for defects their executors reported
-— see "Defects in plans 038/039 as written" below. The files on disk are the
+Both plans have been corrected in place for defects their executors reported,
+see "Defects in plans 038/039 as written" below. The files on disk are the
 fixed versions.
 
 | Plan | Title | Priority | Effort | Depends on | Status |
 |------|-------|----------|--------|------------|--------|
-| 038 | SSE GET endpoint coverage — the four `handleGet` guards + the 503 capacity wire response | P2 | S | — | DONE 2026-08-07, merged to `main` (`fd19db1`, branch `advisor/038-sse-get-coverage`; 238/0 on its own branch, 240/0 merged; the happy-path test independently mutation-tested by the reviewer, and the executor mutation-tested all four of its assertions) |
-| 039 | Manual-validation refresh for the full send vocabulary + AppleScript error hygiene round 3 | P3 | S | — | DONE 2026-08-07, merged to `main` (`4a25d8b`, branch `advisor/039-validation-and-hygiene`; 235/0 re-verified by reviewer; both new tests mutation-tested — replacing the fixed guidance with `error.localizedDescription` fails 6 assertions across both methods) |
+| 038 | SSE GET endpoint coverage, the four `handleGet` guards + the 503 capacity wire response | P2 | S | none | DONE 2026-08-07, merged to `main` (`fd19db1`, branch `advisor/038-sse-get-coverage`; 238/0 on its own branch, 240/0 merged; the happy-path test independently mutation-tested by the reviewer, and the executor mutation-tested all four of its assertions) |
+| 039 | Manual-validation refresh for the full send vocabulary + AppleScript error hygiene round 3 | P3 | S | none | DONE 2026-08-07, merged to `main` (`4a25d8b`, branch `advisor/039-validation-and-hygiene`; 235/0 re-verified by reviewer; both new tests mutation-tested, replacing the fixed guidance with `error.localizedDescription` fails 6 assertions across both methods) |
 
-**Merged 2026-08-07 — `main` now at 240 tests, 0 failures.** 233 baseline + 5
+**Merged 2026-08-07, `main` now at 240 tests, 0 failures.** 233 baseline + 5
 from 038 + 2 from 039 = exactly 240. 038's branch reported 238 because it was
 cut before 039 landed; the arithmetic closing exactly is the evidence that
 neither branch's tests were lost or double-counted.
@@ -71,7 +71,7 @@ neither branch's tests were lost or double-counted.
 #### The SSE happy path needed a different client, not a different endpoint
 
 038's plan flagged one test as genuinely uncertain: asserting a 200 on a
-streaming endpoint through `HummingbirdTesting`. It hung — permanently, not
+streaming endpoint through `HummingbirdTesting`. It hung, permanently, not
 slowly. `RouterTestFramework.swift:122` runs
 `try await response.body.write(responseWriter)` to completion *before*
 constructing the `TestResponse`, and `handleGet`'s body pumps SSE keep-alives
@@ -85,7 +85,7 @@ saying not to route it back through `executeRequest`.
 
 Worth generalizing: **a streaming endpoint being untestable by a
 body-collecting client is a property of the client, not a defect in the
-endpoint.** The first executor's instinct — quarantine the test and escalate —
+endpoint.** The first executor's instinct, quarantine the test and escalate,
 was correct given its instructions, and the plan's STOP condition is what made
 that the safe move rather than a silent timeout hack.
 
@@ -95,7 +95,7 @@ Reported by their executors, confirmed by the reviewer, and fixed in the plan
 files. Recorded because the failure modes recur:
 
 - **039 done criterion 6 was off by one.** It called for thirteen headings.
-  The doc starts with 11; Step 2 adds 2 and Step 3 adds 1 — that is 14. The
+  The doc starts with 11; Step 2 adds 2 and Step 3 adds 1, that is 14. The
   plan author bumped the count for Step 2's additions and forgot Step 3's.
   The executor shipped the correct 14 and flagged the arithmetic rather than
   dropping a check to hit the stated number. **Same class of error as plan
@@ -118,23 +118,23 @@ files. Recorded because the failure modes recur:
   prescribes a `///   - maxSessions:` doc line; criterion 4 then demanded
   `grep -n maxSessions` return "exactly two hits." Following the step makes
   the criterion impossible. The executor kept the documentation and let the
-  criterion fail rather than delete a doc comment to satisfy a grep — the
+  criterion fail rather than delete a doc comment to satisfy a grep, the
   right call.
 - **038 done criterion 3 shaped the code instead of checking it.** It pinned
   the literal `method: HTTPRequest.Method.get`. Writing a `Request` head
   naturally gives `method: .get`, which dropped the count to 3, so the
-  executor spelled `.get` the long way purely to keep the grep happy — and
+  executor spelled `.get` the long way purely to keep the grep happy, and
   disclosed it rather than letting it be found later. Now matches either
   spelling. **A criterion a correct implementation can fail is a broken
   criterion.**
 - **039 done criterion 2 used `swift test 2>&1 | tail -3`**, which shows the
   swift-testing trailer (`Test run with 0 tests in 0 suites passed`), not the
-  XCTest count — this package runs both harnesses. Use
+  XCTest count, this package runs both harnesses. Use
   `grep -E 'Executed [0-9]+ tests' | tail -1`. Every prior plan in this index
   carries the same `tail -3` habit; it happened to work only because the
   reviewer read more of the output than the criterion asked for.
 
-Status values: TODO | IN PROGRESS | DONE (date, commit, one-line evidence —
+Status values: TODO | IN PROGRESS | DONE (date, commit, one-line evidence,
 merged to main) | BLOCKED (one-line reason) | REJECTED (one-line rationale)
 
 The per-plan test count in each row is the count **on that plan's own branch**,
@@ -142,9 +142,9 @@ verified by the reviewer at the time. Those numbers differ from each other and
 from the merged total because each branch carried only its own new tests. The
 merged figure is the one that matters:
 
-> **Merged 2026-08-07 to local `main`, now at `4eb4b51` — 233 tests, 0
+> **Merged 2026-08-07 to local `main`, now at `4eb4b51`, 233 tests, 0
 > failures, build clean.** The five chains merged to `6a55d6a` (174 baseline +
-> 18 transport + 8 stdio + 12 send + 21 media = exactly 233 — the arithmetic
+> 18 transport + 8 stdio + 12 send + 21 media = exactly 233, the arithmetic
 > being exact is the evidence that no branch's tests were lost or
 > double-counted). Plan 032 then landed on top; it is a pure restructuring, so
 > the count is unchanged at 233 by design.
@@ -165,7 +165,7 @@ merged figure is the one that matters:
 ### How the merge actually went (2026-08-07)
 
 Merged in this order, each chain taken whole (the commits within a chain are
-genuinely dependent — they were executed serially in one worktree so later
+genuinely dependent, they were executed serially in one worktree so later
 plans could see earlier plans' code, so cherry-picking a single commit out of
 one would not have worked):
 
@@ -186,7 +186,7 @@ the reasoning errors are reusable:
   baseline." That is exactly backwards: *identical* baseline content on every
   other branch means there is nothing to conflict against. Only one side
   changed the file, so git took it. **A file only conflicts when two branches
-  change it differently — not when one changes it and others leave it alone.**
+  change it differently, not when one changes it and others leave it alone.**
 - Predicted a `PlaceholderTests.swift` conflict between the send and media
   chains. Both do edit it, but both only *append* methods, in different regions
   of the file. The ort strategy merged them without help. **"Both branches
@@ -195,7 +195,7 @@ the reasoning errors are reusable:
 
 Still true, and load-bearing for the future:
 
-- Branch names carry only the first plan's slug — a naming artifact of the
+- Branch names carry only the first plan's slug, a naming artifact of the
   chaining, not a claim about contents. Each chain also has a second branch
   name pointing at the same commit (executors created descriptive aliases):
   `advisor/021-026-send-truth-chain` = `advisor/021-failed-delivery-send-status`
@@ -205,19 +205,19 @@ Still true, and load-bearing for the future:
 - `swift/Tests/iMessageMaxTests/LaunchdSafetyTests.swift` (plan 019) now
   applies repo-wide: any future branch that reintroduces `Task.sleep` in
   `swift/Sources/` fails it. Before the merge it lived only on the transport
-  branch, so filtering for it elsewhere showed "0 tests" — absence, not a pass.
+  branch, so filtering for it elsewhere showed "0 tests", absence, not a pass.
 - Plan 035 regenerated `swift/README.md`'s architecture tree from the live
   filesystem. Plan 032 deletes files that tree lists, so 032 (landing after)
   owes one more regeneration pass.
 - Plan 035's Homebrew formula carries a deliberate placeholder sha256 with a
   `TODO(release)` comment, because no v1.3.0 release asset exists yet. The
   formula will refuse to install until a real asset is published and its
-  sha256 substituted in. That is intentional — a formula that fails loudly
+  sha256 substituted in. That is intentional, a formula that fails loudly
   beats one that silently installs a three-versions-old binary.
 
 ### Dependency notes (current round)
 
-- **Send-truth chain — land in order 021 → 023 → 024 → 025 → 026.** All five
+- **Send-truth chain, land in order 021 → 023 → 024 → 025 → 026.** All five
   edit `Send.swift`/`AppleScript.swift`/`SendToolExecuteTests.swift`; the
   later plans' excerpts assume the earlier ones' edits. 025 explicitly
   re-verifies that 023's stderr clamp and 024's `removeStagedDirectory`
@@ -229,7 +229,7 @@ Still true, and load-bearing for the future:
 - **022 before 034**: both rewrite the same lines in `GetMessages.swift`'s
   media loop (022 adds path validation; 034 hoists the processor).
 - **032 sequencing**: it moves test classes that 021/023/025/026 add tests
-  to — land it strictly before or strictly after that whole chain (prefer
+  to, land it strictly before or strictly after that whole chain (prefer
   after). 033 and 035 reference file locations that 032 changes; both plans
   carry both-locations instructions, so either order works.
 - 020, 030, 031, 033, 036 are independent of everything else.
@@ -241,18 +241,18 @@ Raised by executors while implementing this round; recorded so they aren't lost:
 - **`swift/Tests/iMessageMaxTests/SendManualValidation.md` has no rows for the
   new send behaviors.** Plans 021 and 024 both changed operator-observable
   send behavior (`failed_delivery` status; staged-copy deletion at terminal
-  transfer states) and both correctly declined to edit that file — it was
+  transfer states) and both correctly declined to edit that file, it was
   outside their in-scope lists. Two deferrals now. The manual-validation doc
   needs a pass after this round merges and deploys; a small follow-up plan is
   the right vehicle.
-  **Now planned as 039** — which found it was three deferrals, not two: plan
+  **Now planned as 039**, which found it was three deferrals, not two: plan
   026's `partial_failure` is missing from the doc as well, and the section
   numbering has drifted out of document order (1-6, 9-11, 7-8).
 - **Two HTTP-transport paths are compile-checked but never executed by a
   test**, surfaced by plan 029's executor rather than papered over: the
   `.startFailed` → HTTP 500 mapping has no test (inducing a `Server.start`
   failure would need a seam that 029 put out of scope), and the SSE **GET**
-  endpoint has no end-to-end coverage at all — before or after 029. Only POST
+  endpoint has no end-to-end coverage at all, before or after 029. Only POST
   tests set the `text/event-stream` Accept header. Worth knowing when
   reviewing the streaming path.
   **The GET gap is now planned as 038**, confirmed still open at `0ff6b8f`
@@ -269,7 +269,7 @@ Raised by executors while implementing this round; recorded so they aren't lost:
   9), and plan 025's `Task.sleep` criterion presupposed plan 019's cleanup,
   which lives on a different branch and is not reachable from the send chain.
   Lesson for future rounds: **done criteria must not assume another plan's
-  branch has landed** — chains are branch-isolated by construction.
+  branch has landed**, chains are branch-isolated by construction.
 - **Plan 026's "Current state" section is factually wrong** in two details,
   caught by its executor against the live code rather than trusted: the enum
   case is `case file(path: String)` (not `case file(String)`), and
@@ -291,11 +291,11 @@ Raised by executors while implementing this round; recorded so they aren't lost:
 - **The reviewer's own dispatch briefing was wrong once, and the executor
   caught it.** Plan 032's briefing asserted its worktree would branch from the
   merged `main` at `6a55d6a`; it was actually pinned at `e3d14da`. The executor
-  did not trust the claim — it checked `git merge-base --is-ancestor`, confirmed
+  did not trust the claim, it checked `git merge-base --is-ancestor`, confirmed
   a pure fast-forward with no divergent commits, and brought the worktree
   forward before touching anything. Had it trusted the briefing, it would have
   split a `PlaceholderTests.swift` missing 222 lines of merged content. **A
-  worktree's base is a fact to verify, not a parameter to accept** — the same
+  worktree's base is a fact to verify, not a parameter to accept**, the same
   discipline the plans' own drift checks apply to code, one layer up.
 - **Plan 032's Step 2 "reuse the existing helper" instruction was conditioned
   on a state that did not hold.** `SendToolExecuteTests.swift` does have an
@@ -308,13 +308,13 @@ Raised by executors while implementing this round; recorded so they aren't lost:
   silently picking one rule over the other. Correct call: **an instruction
   predicated on "if an equivalent exists" does not fire on a same-named
   non-equivalent.**
-- **Plan 037 shipped four defects — the worst rate of any plan this round, and
+- **Plan 037 shipped four defects, the worst rate of any plan this round, and
   all four were caught.** Recorded in full because the first one is a genuine
   Make semantics trap:
   1. **The Step 3 tail could never have worked.** It read `$(SIGN_HASH)` inside
      `setup-signing`'s recipe. Make expands a recipe *before* its shell runs,
      and `setup-signing` is one backslash-continued logical line, so the
-     variable resolves to its pre-import value — empty — no matter what the
+     variable resolves to its pre-import value, empty, no matter what the
      recipe subsequently creates. Every successful first-time setup would have
      printed the *failure* message. Fixed with a shell-time re-query
      (`NEW_HASH=$$(security find-identity …)`). The guard at the top of the
@@ -324,33 +324,33 @@ Raised by executors while implementing this round; recorded so they aren't lost:
   2. **The stated rationale for `=` over `:=` was wrong**, though the
      conclusion was right. It matters across *targets* in one invocation
      (`make setup-signing install`), not within a single recipe.
-  3. **`grep -c 'sign "$(IDENTITY)"'` was vacuous** — BSD grep's BRE does not
+  3. **`grep -c 'sign "$(IDENTITY)"'` was vacuous**. BSD grep's BRE does not
      match the literal `$(`, so it returned 0 against the unfixed Makefile too.
      Discriminating form is `grep -cF`: 4 before, 0 after (reviewer-confirmed
      both).
-  4. **`security list-keychains | grep -c imx-plan037-test` was vacuous** —
+  4. **`security list-keychains | grep -c imx-plan037-test` was vacuous**,
      `security create-keychain` never adds to the search list, so it reads 0
      even with the scratch keychain fully present. Test for the file instead.
 - **Plan 037's Step 4 script does not reproduce the bug it was written to
   reproduce**, for three separately-observed reasons: importing the *same*
   cert twice dedupes (the real pathology needs two *distinct* certs sharing a
-  CN, which is what `setup-signing` produced — fresh key each run);
+  CN, which is what `setup-signing` produced, fresh key each run);
   `codesign --keychain <scratch>` does not scope identity lookup, so the
   ambiguity still resolved against `login.keychain-db`; and fresh self-signed
   certs are `CSSMERR_TP_NOT_TRUSTED`, so `find-identity -v` reports
   `0 valid identities found` in the scratch keychain. The executor tested
-  against the real duplicate state with a `/tmp` copy of the binary instead —
+  against the real duplicate state with a `/tmp` copy of the binary instead,
   strictly better, since it exercises the state that caused the incident, and
   still non-destructive.
 - **Residual risk flagged in the Makefile itself, not just here**: `SIGN_HASH`
   reads `find-identity -v`, which excludes untrusted certs. If the
   `add-trusted-cert` password dialog is cancelled, `SIGN_HASH` stays empty, the
-  new guard does not fire, and a re-run imports another cert — the original
+  new guard does not fire, and a re-run imports another cert, the original
   cumulative bug through a narrower door. Fix trust rather than dropping `-v`;
   without `-v` the hash could point at a cert with no usable private key.
-- **Pattern across this round: three plans shipped defective artifacts** — a
+- **Pattern across this round: three plans shipped defective artifacts**, a
   vacuous grep (020), stale prose about a data structure (026), and a broken
-  shell probe (036) — and in every case the executor caught it by running the
+  shell probe (036), and in every case the executor caught it by running the
   thing against reality instead of trusting the plan. The common root cause is
   the same: **any command or code excerpt a plan asserts as "working" must
   have been executed, not transcribed.** Worth a standing rule for the next
@@ -379,24 +379,24 @@ Raised by executors while implementing this round; recorded so they aren't lost:
   `fallbackEnvelopeId(for:)` helper instead. Do not read that catch block as
   exercised code.
 - **`make setup-signing` had a latent bug that plan 036 fixed as a side
-  effect** — operator-visible, so flagging it. Make gives each recipe line
+  effect**, operator-visible, so flagging it. Make gives each recipe line
   its own shell, so the old early `exit 0` on "identity already works" did
   *not* stop the recipe; it regenerated the certificate anyway. Joining the
   recipe into one shell program makes that early exit real. Related: the
   joined recipe is `@`-prefixed, so `openssl`/`security` command lines are no
   longer echoed (guidance output is unchanged). Neither could be verified
-  without keychain access — worth an operator eyeball on the next signing run.
+  without keychain access, worth an operator eyeball on the next signing run.
 - **`AppleScript.swift`'s transfer-wait catch still returns
   `error.localizedDescription`.** Plan 023 deliberately scoped itself to
   `Tools/` and listed AppleScript's own launch-failure text as out of scope
-  (owned by 024/025). This is not a database-path leak — `sanitized()` would
-  pass it through unchanged anyway — so it is low-severity, but it is the one
+  (owned by 024/025). This is not a database-path leak, `sanitized()` would
+  pass it through unchanged anyway, so it is low-severity, but it is the one
   remaining raw-error surface in the send path.
   **Now planned as 039**, which found **four** such sites at `0ff6b8f`, not
   one (`AppleScript.swift:221, 246, 378, 572`), and that two of them are worse
   than recorded here: 221 and 246 catch `prepareTrackedOutgoingFile`, whose
   `FileManager` errors embed the staging path
-  `/Users/<username>/Pictures/imessage-max-staging/<uuid>/…` — the same class
+  `/Users/<username>/Pictures/imessage-max-staging/<uuid>/…`, the same class
   of leak 023 fixed for database paths. The note above is right that
   `sanitized()` is the wrong tool: it only maps `DatabaseError` and passes
   everything else through verbatim. 039 adds a second helper
@@ -422,7 +422,7 @@ branches, neither merged.
 
 There is no branch 032 could have been stacked on that produces a correct
 result. Run it on baseline and the split loses both chains' additions. Stack
-it on the send chain and it still misses the media chain's — and it would
+it on the send chain and it still misses the media chain's, and it would
 delete, on one branch, a file the other branch is still editing, converting
 an ordinary append/append conflict into a delete/modify one. The plan's own
 ordering constraint says it must land strictly after all of 021/023/025/026,
@@ -430,7 +430,7 @@ and "after" means after they are *merged*, not after they exist somewhere.
 
 **Unblocking condition**: merge the send and media chains to `main`, then
 re-run 032 against the merged tree. Everything the plan specifies stays
-valid — only its starting point was unavailable.
+valid, only its starting point was unavailable.
 
 ## Release v1.4.0 (2026-08-07)
 
@@ -438,13 +438,13 @@ Tagged at `da91fbc`, published at
 <https://github.com/cyberpapiii/imessage-max/releases/tag/v1.4.0>.
 
 **Why 1.4.0 and not 1.3.0.** `Version.swift` had said `1.3.0` since the
-dual-era MCP work, but no v1.3.0 tag or release ever existed — the latest
+dual-era MCP work, but no v1.3.0 tag or release ever existed, the latest
 published release was v1.2.1. Shipping 21 additional plans under a number the
 tree had already been carrying would have been misleading, so the version
 moved forward. Minor, not major: the new send statuses (`failed_delivery`,
 `partial_failure`) are additive and nothing in the tool surface broke.
 
-The version lives in **four** places, all bumped together — miss one and they
+The version lives in **four** places, all bumped together, miss one and they
 drift silently:
 
 - `swift/Sources/iMessageMax/Server/Version.swift`
@@ -462,7 +462,7 @@ local file.
 
 **The published asset is ad-hoc signed, deliberately.** The local binary is
 signed with the `iMessage Max Dev` identity, which is what makes Full Disk
-Access persist across rebuilds (plan 037) — but that identity is self-signed
+Access persist across rebuilds (plan 037), but that identity is self-signed
 and exists only in this machine's keychain, so a downloaded binary carrying it
 would present an untrusted authority anywhere else. The release tarball is
 built from a separate copy re-signed with `codesign --sign -`. **Anyone
@@ -473,7 +473,7 @@ signed by an authority the installing machine has never heard of.
 (`F9E455A3BB848F2623DA215A224E7F826B09C4BC`), the service restarted, and both
 lanes reported healthy at v1.4.0. Most importantly, `diagnose` came back with
 `perm_full_disk: supported` and `database.accessible: true` **without any GUI
-re-grant** — the first re-sign since 037 landed, and the empirical proof that
+re-grant**, the first re-sign since 037 landed, and the empirical proof that
 the fix works. Every prior deploy revoked FDA and required re-granting it by
 hand.
 
@@ -483,7 +483,7 @@ Recorded so future audits don't re-litigate:
 
 - **DB connection pooling / per-tool `Database()` instances** (PERF): real
   but unmeasured; every tool opens read-only SQLite connections that are
-  cheap on local disk. Measure before building a pool — no plan until
+  cheap on local disk. Measure before building a pool, no plan until
   latency is demonstrated.
 - **`send` `file_paths` containment** (SECURITY): `validateFilePath` checks
   existence/readability but not location, so an agent can send any readable
@@ -492,7 +492,7 @@ Recorded so future audits don't re-litigate:
   policy here is a product decision (allowlist? size cap? prompt?), not a
   bug fix. Operator to decide; revisit as a direction item.
 - **MCP swift-sdk migration off the hand-rolled modern lane** (DEPS): no SDK
-  release supports MCP 2026-07-28 yet — there is nothing to migrate to.
+  release supports MCP 2026-07-28 yet, there is nothing to migrate to.
   Plan 027's matrix is the acceptance suite when that day comes.
 - **Sidecar FTS index for search** (DIRECTION): stays rejected (see the
   2026-06-11 rationale below); still no reported search-latency pain.
@@ -518,7 +518,7 @@ conflicts). Post-merge gate at the time: 121/121 → grown to 174/174 by 018.
 | Plan | Title | Status |
 |------|-------|--------|
 | 001 | Database.swift error handling | DONE (2026-06-11, `e69a152`) |
-| 002 | Characterization tests for list tools + send seam | DONE (2026-06-11, `c333e1f`+`30c4f39`; ambiguous-recipient test substituted — Contacts auth gated name resolution in CI, now properly fixed by plan 033) |
+| 002 | Characterization tests for list tools + send seam | DONE (2026-06-11, `c333e1f`+`30c4f39`; ambiguous-recipient test substituted, Contacts auth gated name resolution in CI, now properly fixed by plan 033) |
 | 003 | Shared batched chat-summary queries | DONE (2026-06-11, `cb2aa59`..`467a54a`) |
 | 004 | Attachment path containment | DONE (2026-06-11, `0347bc3`) |
 | 005 | Non-loopback host binding opt-in | DONE (2026-06-11, `a0f9ebc`) |
@@ -530,9 +530,9 @@ conflicts). Post-merge gate at the time: 121/121 → grown to 174/174 by 018.
 | 011 | Design spike: capability contract | DONE (2026-06-11, `693e078`) |
 | 012 | Build verified sends (proof states) | DONE (2026-06-11, `a47ad1f`..`f9d0536`; review caught the group-as-DM `findDirectChatForHandle` bug) |
 | 013 | Capability contract in diagnose | DONE (2026-06-11, `973ceba`..`5cfb24b`) |
-| 014 | Bound the send-confirmation elicitation wait | DONE (2026-06-11, `5699d84`; its Task.sleep timer crashed launchd — fixed by 015; elicitation removed entirely by 017) |
+| 014 | Bound the send-confirmation elicitation wait | DONE (2026-06-11, `5699d84`; its Task.sleep timer crashed launchd, fixed by 015; elicitation removed entirely by 017) |
 | 015 | Eliminate Task.sleep from send path | DONE (2026-06-11, `efe1c27`, deployed, live acceptance PASS) |
-| 016 | Narrow confirmation gate | REJECTED (superseded by 017 — the elicitation wait itself was the broken path, both removed together) |
+| 016 | Narrow confirmation gate | REJECTED (superseded by 017, the elicitation wait itself was the broken path, both removed together) |
 | 017 | Agent-native send contract (no gate, no elicitation) | DONE (2026-06-11, `74855c4`/merge `834d10c`, deployed, live acceptance PASS) |
 | 018 | Dual-era MCP: 2026-07-28 stateless lane | DONE (shipped 2026-08-07, `1554116`, v1.3.0; docs pass `e3d14da`) |
 
@@ -544,7 +544,7 @@ stack: pre-014 it hung until the client's 300s transport timeout; 014's
 bounded wait used a Task.sleep timer that crashed the launchd service
 (reproduced live, exit status 6, fixed by 015); post-015 it degraded to
 `pending_confirmation` after ~25s. Plan 017 resolved the direction question
-by **removing the elicitation wait entirely** — sends verify passively
+by **removing the elicitation wait entirely**, sends verify passively
 against chat.db (bounded polling, no client interaction), and AGENTS.md now
 codifies "no confirmation gates, no elicitation" as a design rule. The
 send-truth plans of the current round (021, 025, 026) extend that passive

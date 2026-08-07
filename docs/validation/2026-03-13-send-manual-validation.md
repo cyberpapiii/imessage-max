@@ -1,8 +1,8 @@
 # Send Manual Validation
 
-This document records the intended manual validation flow for the public send
-surface in `iMessage Max`. The goal is to validate the supported core feature
-set without relying on private APIs or UI scripting.
+This document records the manual validation flow for the public send tools in
+`iMessage Max`. It covers the supported feature set without relying on private
+APIs or UI scripting.
 
 ## Preconditions
 
@@ -13,7 +13,7 @@ set without relying on private APIs or UI scripting.
 
 ## Scenarios
 
-### 1. Participant Text Send
+### 1. Participant text send
 
 Call:
 
@@ -31,7 +31,7 @@ Expected:
 - Message lands in the expected 1:1 thread
 - `delivered_to` contains the resolved participant display name
 
-### 2. Exact DM Chat Text Send
+### 2. Exact DM chat text send
 
 Call:
 
@@ -51,7 +51,7 @@ Expected:
 - No confirmation step occurs; the deprecated `confirm` parameter is
   not required and is ignored if passed
 
-### 3. Exact Group Chat Text Send
+### 3. Exact group chat text send
 
 Call:
 
@@ -70,7 +70,7 @@ Expected:
 - No participant fallback to a 1:1 conversation
 - No confirmation step occurs
 
-### 4. Participant File Send
+### 4. Participant file send
 
 Call:
 
@@ -86,7 +86,7 @@ Expected:
 - MCP returns either `status: "sent"` or `status: "pending_confirmation"`
 - Attachment lands in the expected 1:1 thread
 
-### 5. Exact Group Chat File Send
+### 5. Exact group chat file send
 
 Call:
 
@@ -102,7 +102,7 @@ Expected:
 - MCP returns either `status: "sent"` or `status: "pending_confirmation"`
 - Attachment lands in the exact existing group thread
 
-### 6. File Then Text Ordering
+### 6. File then text ordering
 
 Call:
 
@@ -123,7 +123,7 @@ Expected:
 - Attachment is sent before the text bubble
 - Thread target remains exact
 
-### 7. Missing File
+### 7. Missing file
 
 Call:
 
@@ -140,7 +140,7 @@ Expected:
 - Error clearly indicates file validation failure
 - No Messages send attempt occurs
 
-### 8. Unsupported Reply
+### 8. Unsupported reply
 
 Call:
 
@@ -165,7 +165,7 @@ Expected:
   transport-only fallback). See "Send contract (no confirmation gate)"
   in `AGENTS.md`. If a text send returns `uncertain`, follow up with
   `get_messages` instead of retrying.
-- Conversation presentation is intentionally first-person:
+- Conversation presentation is first-person on purpose:
   - chat labels show the other people in the thread
   - `me` appears in message history for outbound messages
   - the current visible participant list does not include self

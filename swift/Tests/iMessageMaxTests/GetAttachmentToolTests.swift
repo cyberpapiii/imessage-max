@@ -34,8 +34,8 @@ final class GetAttachmentToolTests: XCTestCase {
         let processor = ImageProcessor()
         let result = try XCTUnwrap(processor.process(at: noisyURL.path, variant: .full))
 
-        // Falling back to .vision means neither dimension can exceed its 1568px cap —
-        // the unbounded full path would otherwise report the original 6000x4000.
+        // Falling back to .vision means neither dimension can exceed its 1568px cap.
+        // The unbounded full path would otherwise report the original 6000x4000.
         XCTAssertLessThanOrEqual(result.width, 1568, "Oversized full variant should fall back to vision-sized dimensions")
         XCTAssertLessThanOrEqual(result.height, 1568, "Oversized full variant should fall back to vision-sized dimensions")
         XCTAssertLessThanOrEqual(result.data.count, 8 * 1024 * 1024, "Fallback output should be well under the full-variant cap")
@@ -202,7 +202,7 @@ private func makeTestImage(width: Int, height: Int, filename: String) throws -> 
 
 /// High-entropy (random-pixel) image. Unlike a solid fill, noise resists JPEG
 /// compression, letting a modest pixel count still produce a multi-megabyte
-/// encoded file — used to exercise the full-variant size cap.
+/// encoded file. Used to exercise the full-variant size cap.
 private func makeNoiseImage(width: Int, height: Int, filename: String) throws -> URL {
     let url = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
     let colorSpace = CGColorSpaceCreateDeviceRGB()

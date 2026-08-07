@@ -91,7 +91,7 @@ final class SSEChannel: @unchecked Sendable {
     ///
     /// Single-consumer: built once at init and consumed exactly once. It used
     /// to be a computed property, so every access spawned a fresh merging task
-    /// group over the same single-consumer base stream — a second reader would
+    /// group over the same single-consumer base stream. A second reader would
     /// silently steal events and leak a task group per access.
     let stream: AsyncStream<String>
 
@@ -116,7 +116,7 @@ final class SSEChannel: @unchecked Sendable {
 
                     // Keep-alive task. AsyncTimeout.sleep is launchd-safe but
                     // non-cancellable, so cancellation lands at the next
-                    // interval boundary — the accepted plan-019 trade.
+                    // interval boundary. That is the accepted plan-019 trade.
                     group.addTask {
                         while !Task.isCancelled {
                             await AsyncTimeout.sleep(keepAliveInterval)

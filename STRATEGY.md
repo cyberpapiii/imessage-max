@@ -7,55 +7,55 @@ last_updated: 2026-05-18
 
 ## Target problem
 
-AI assistants are still missing the user's real personal communication context. For Apple users, much of that context lives in iMessage, but Messages has no clean, trustworthy local interface for agents to understand open loops, reason about conversations, and safely take action.
+AI assistants do not have access to the user's personal communication. For Apple users, much of that lives in iMessage, and Messages offers no local interface an agent can use to track open loops, reason about conversations, or act safely.
 
 ## Our approach
 
-iMessage Max wins by being the cleanest local foundation for agent access to Messages: local-first, high-fidelity, ergonomic, and trustworthy by default. It should let agents reason about iMessage the way a human user does: conversations, people, open loops, shared context, and safe actions, not raw database structure or brittle automation details.
+Be the local foundation for agent access to Messages. Everything stays on the Mac, and the read side keeps the detail Messages actually carries instead of flattening it to plain text. Agents should reason about iMessage the way a person does, in terms of conversations, people, open loops, and shared context, rather than in terms of database tables or AppleScript quirks.
 
 ## Who it's for
 
-**Primary:** AI-forward knowledge workers and life hackers - They're hiring iMessage Max to let their local agents understand, navigate, and manage iMessage with the same practical context they have as humans.
+Primary: knowledge workers who already run local agents. They want their agent to read and manage iMessage with the same context they have.
 
 ## Key metrics
 
-- **Successful delegated message workflows** - Rate of real user intents completed end-to-end, such as catch up, find context, draft reply, send safely, or inspect shared media.
-- **Tool-call reduction per intent** - Average MCP calls needed for common workflows compared with the current 3-5 call baseline.
-- **Verified send rate** - Percentage of sends that return a confirmed proof state instead of uncertain, failed, or mismatch.
-- **Human correction rate** - How often the user has to correct the agent about the person, conversation, context, or action.
-- **Time-to-context** - How long it takes an agent to answer "what's going on with X?" from Messages.
+- Successful delegated workflows: rate of real user intents completed end to end. Catch up, find context, draft a reply, send safely, inspect shared media.
+- Tool calls per intent: average MCP calls for common workflows, against the 3-5 call baseline.
+- Verified send rate: percentage of sends returning `confirmed` rather than `uncertain`, `failed`, or `mismatch`.
+- Human correction rate: how often the user has to correct the agent about the person, conversation, context, or action.
+- Time to context: how long an agent takes to answer "what's going on with X?" from Messages.
 
 ## Tracks
 
-### Trustworthy Core
+### Trustworthy core
 
 Verified sends, exact targeting, capability contracts, degraded states, safe confirmation, and local runtime reliability.
 
-_Why it serves the approach:_ Trust is the foundation; if agents cannot tell what happened or what is supported, more capability only creates more risk.
+_Why it serves the approach:_ if an agent cannot tell what happened or what is supported, more capability only adds risk.
 
-### Human-Level Conversation Model
+### Human-level conversation model
 
 Conversation identity, people, open loops, relationship/context cues, shared media, and agent-friendly summaries.
 
-_Why it serves the approach:_ Agents need to navigate Messages the way humans do: by people, conversations, context, and obligations.
+_Why it serves the approach:_ agents need to navigate Messages by people, conversations, context, and obligations, the way a person does.
 
-### High-Fidelity Message Understanding
+### High-fidelity message understanding
 
 Richer read-side understanding of reactions, replies, edits/unsends, attachments, media, unavailable content, and iMessage semantics.
 
-_Why it serves the approach:_ High fidelity matters when it helps agents reason accurately instead of flattening Messages into plain text.
+_Why it serves the approach:_ detail matters when it lets an agent reason accurately instead of flattening Messages into plain text.
 
-### Agent-Native MCP Surface
+### Agent-native tool set
 
-Intent-aligned tools, resources, structured outputs, fewer tool calls, better diagnostics, and clean client ergonomics.
+Intent-aligned tools, structured outputs, fewer tool calls, better diagnostics.
 
-_Why it serves the approach:_ The product is not a database browser; it is a clean local substrate for agents.
+_Why it serves the approach:_ this is not a database browser. It is a local base agents build on.
 
-### Local Runtime Reliability
+### Local runtime reliability
 
 Launchd health, permissions, install flow, logging, service status, reconnect behavior, and Mac-native resilience.
 
-_Why it serves the approach:_ The local Mac is the runtime, so reliability of the local service is part of the product, not background maintenance.
+_Why it serves the approach:_ the Mac is the runtime, so the local service staying up is part of the product, not background maintenance.
 
 ## Not working on
 
@@ -63,6 +63,6 @@ _Why it serves the approach:_ The local Mac is the runtime, so reliability of th
 
 ## Marketing
 
-**One-liner:** The cleanest local iMessage MCP foundation for agents to understand and safely act in Messages.
+One-liner: local iMessage access for agents, with verified sends.
 
-**Key message:** Give agents the same practical iMessage context a human has, without handing Messages to the cloud. iMessage Max provides local, high-fidelity, permissioned access to Messages for AI agents.
+Key message: give an agent the same iMessage context you have, without handing Messages to the cloud. Everything runs on your Mac, behind the permissions you already grant.

@@ -3,8 +3,8 @@
 > **Executor instructions**: Follow this plan step by step. Run every
 > verification command and confirm the expected result before moving to the
 > next step. If anything in the "STOP conditions" section occurs, stop and
-> report — do not improvise. When done, update the status row for this plan
-> in `plans/README.md` — unless a reviewer dispatched you and told you they
+> report, do not improvise. When done, update the status row for this plan
+> in `plans/README.md`, unless a reviewer dispatched you and told you they
 > maintain the index.
 >
 > **Drift check (run first)**:
@@ -26,28 +26,28 @@
 
 Two pieces of deferred debt, both small, both from the same round of work.
 
-**Part A — the manual-validation doc is three plans behind.**
+**Part A, the manual-validation doc is three plans behind.**
 `swift/Tests/iMessageMaxTests/SendManualValidation.md` is the human checklist
 run against a real iMessage account before trusting a send change. Its
 vocabulary section is still titled "Verified-Send Proof Vocabulary (Plan
 012)" and covers only `confirmed` / `uncertain` / `mismatch`. Since then:
 
-- Plan 021 added `failed_delivery` — chat.db recorded a delivery error; the
+- Plan 021 added `failed_delivery`, chat.db recorded a delivery error; the
   message was **not** delivered. This is the single most consequential status
   in the vocabulary (an agent that misreads it tells the user a message was
   sent when it wasn't) and it has no manual check.
-- Plan 026 added `partial_failure` — some payloads dispatched before a later
+- Plan 026 added `partial_failure`, some payloads dispatched before a later
   one failed, with explicit "do not blind-retry" guidance. No manual check.
 - Plan 024 added staged-file cleanup: outgoing attachments are copied into
   `~/Pictures/imessage-max-staging/<uuid>/` and the directory is removed
   after the transfer completes. Nothing in the checklist verifies staging
   actually gets cleaned up, so a leak would go unnoticed indefinitely.
 
-The section numbering has also drifted out of order — sections appear as
+The section numbering has also drifted out of order, sections appear as
 1, 2, 3, 4, 5, 6, 9, 10, 11, 7, 8 down the page, because plan 012's additions
 were numbered 9-11 and inserted above the pre-existing 7-8.
 
-**Part B — four residual raw-error leaks in AppleScript.swift.**
+**Part B, four residual raw-error leaks in AppleScript.swift.**
 Plan 006 and plan 023 routed client-facing error strings through
 `ClientErrorMessages.sanitized`, which keeps filesystem paths in the server
 log and out of client responses. Four sites in `AppleScript.swift` were never
@@ -63,7 +63,7 @@ $ cd swift && grep -n "localizedDescription" Sources/iMessageMax/Utilities/Apple
 ```
 
 Lines 221 and 246 catch failures from `prepareTrackedOutgoingFile`, whose
-`FileManager.createDirectory` / `copyItem` errors embed the staging path —
+`FileManager.createDirectory` / `copyItem` errors embed the staging path,
 `/Users/<username>/Pictures/imessage-max-staging/<uuid>/...`. That is the same
 class of leak plan 023 fixed for database paths: an internal absolute path,
 containing the operator's username, handed to whatever client called `send`.
@@ -105,7 +105,7 @@ enum ClientErrorMessages {
 **Read that last sentence of the doc comment carefully: "All other errors
 pass through unchanged."** The four `AppleScript.swift` sites throw
 `CocoaError`/`NSError`, not `DatabaseError`. Swapping them to
-`ClientErrorMessages.sanitized(error)` would change **nothing** — the path
+`ClientErrorMessages.sanitized(error)` would change **nothing**, the path
 would still leak. That is why this plan adds a second helper rather than
 reusing `sanitized`.
 
@@ -146,7 +146,7 @@ the process runner:
 ```
 
 Note the `catch let error as SendError { return .failure(error) }` clauses
-above three of the four. Those are already client-safe — `SendError` carries
+above three of the four. Those are already client-safe, `SendError` carries
 authored messages. **Do not touch them.** Only the bare `catch` arms change.
 
 ### Staging paths (`swift/Sources/iMessageMax/Utilities/AppleScript.swift:281-291, 397-412`)
@@ -189,14 +189,14 @@ verifies by hand.
 ```
 
 Use these as the source of truth for what the doc's "Expected" bullets say.
-Do not paraphrase the guidance loosely — the whole point of `failed_delivery`
+Do not paraphrase the guidance loosely, the whole point of `failed_delivery`
 is that an agent must not report success.
 
 ## Steps
 
-### Part A — the manual-validation doc
+### Part A, the manual-validation doc
 
-#### Step 1 — Renumber the existing sections into document order
+#### Step 1, Renumber the existing sections into document order
 
 In `swift/Tests/iMessageMaxTests/SendManualValidation.md`, the headings
 currently read, top to bottom:
@@ -217,7 +217,7 @@ currently read, top to bottom:
 
 Renumber so the numbers ascend down the page: the three vocabulary checks
 become 7, 8, 9 and the two attachment spot checks become 10, 11. Change the
-numbers only — leave every heading's title text and every body paragraph
+numbers only, leave every heading's title text and every body paragraph
 exactly as written.
 
 Then grep the whole repo for cross-references to the old numbers and update
@@ -237,7 +237,7 @@ cd swift && grep -n '^### ' Tests/iMessageMaxTests/SendManualValidation.md
 
 Expected: eleven headings, numbered 1 through 11 in ascending order.
 
-#### Step 2 — Retitle the vocabulary section and add the two missing statuses
+#### Step 2, Retitle the vocabulary section and add the two missing statuses
 
 Change the section heading
 
@@ -258,28 +258,28 @@ can return, from `swift/Sources/iMessageMax/Tools/Send.swift`:
 `sent`, `pending_confirmation`, `ambiguous`, `failed`.
 
 Then append two new checks at the end of that section (they become 10 and 11,
-pushing the attachment spot checks to 12 and 13 — re-apply Step 1's ascending
+pushing the attachment spot checks to 12 and 13, re-apply Step 1's ascending
 rule after inserting):
 
-**`### N. Failed delivery — chat.db records a delivery error`**
+**`### N. Failed delivery, chat.db records a delivery error`**
 
 How to provoke it: send to a handle that Messages.app will accept but cannot
-deliver to — the reliable case is an iMessage-only send to a number with no
+deliver to, the reliable case is an iMessage-only send to a number with no
 iMessage registration while SMS fallback is unavailable. Messages.app shows
 the red "Not Delivered" badge and chat.db writes a non-zero `error` on the row.
 
 Expected bullets:
 
 - `status` is `failed_delivery`
-- `verified_message_guid` is a non-empty string — the row **was** found
+- `verified_message_guid` is a non-empty string, the row **was** found
 - `message` states the message was NOT delivered and names the error code
 - The agent must not report this as a successful send
 - Messages.app shows the send as not delivered
 
-**`### N+1. Partial failure — multi-payload send fails partway`**
+**`### N+1. Partial failure, multi-payload send fails partway`**
 
 How to provoke it: call `send` with both `text` and `file_paths`, where the
-text will dispatch fine and the attachment will not — for example a
+text will dispatch fine and the attachment will not, for example a
 a `file_paths` entry pointing at a file that exists at validation time but is
 unreadable when the transfer starts, or an oversized file the transfer
 rejects.
@@ -291,10 +291,10 @@ Expected bullets:
   which failed
 - `message` says explicitly not to resend the already-dispatched payload
 - The text is visible in the conversation; the attachment is not
-- Re-running the same call blind would duplicate the text — confirm the
+- Re-running the same call blind would duplicate the text, confirm the
   response makes that obvious
 
-#### Step 3 — Add the staging-cleanup check
+#### Step 3. Add the staging-cleanup check
 
 Append a new check to the **Attachment Spot Checks** section:
 
@@ -302,7 +302,7 @@ Append a new check to the **Attachment Spot Checks** section:
 
 Steps to write into the doc:
 
-1. Before the send: `ls ~/Pictures/imessage-max-staging/ 2>/dev/null` — note
+1. Before the send: `ls ~/Pictures/imessage-max-staging/ 2>/dev/null`, note
    what is there (an empty or missing directory is the normal state).
 2. Send an attachment to a 1:1 contact and wait for the response.
 3. After the response: `ls ~/Pictures/imessage-max-staging/` again.
@@ -312,7 +312,7 @@ Expected bullets:
 - During the send, a UUID-named subdirectory exists containing a copy of the
   file under its original name
 - After the send completes, that subdirectory is gone
-- No accumulation across repeated sends — the directory count does not grow
+- No accumulation across repeated sends, the directory count does not grow
 - The original source file is untouched (the staging copy is a copy, never
   a move)
 
@@ -337,13 +337,13 @@ cd swift && grep -c 'Plan 012' Tests/iMessageMaxTests/SendManualValidation.md
 
 Expected: `0`.
 
-Leave the `## Real-machine validation run — 2026-06-11` section at the bottom
-untouched — it is a historical record of a run that happened, not a checklist.
+Leave the `## Real-machine validation run, 2026-06-11` section at the bottom
+untouched, it is a historical record of a run that happened, not a checklist.
 Do **not** mark the new checks as passed; nobody has run them.
 
-### Part B — error hygiene
+### Part B, error hygiene
 
-#### Step 4 — Add an internal-error helper to `ClientErrorMessages`
+#### Step 4. Add an internal-error helper to `ClientErrorMessages`
 
 Append to `swift/Sources/iMessageMax/Utilities/ClientErrorMessages.swift`,
 inside the existing `enum ClientErrorMessages`:
@@ -366,7 +366,7 @@ inside the existing `enum ClientErrorMessages`:
     }
 ```
 
-Do not modify `sanitized` — 19 call sites depend on its current behavior.
+Do not modify `sanitized`, 19 call sites depend on its current behavior.
 
 **Verify**:
 
@@ -374,7 +374,7 @@ Do not modify `sanitized` — 19 call sites depend on its current behavior.
 cd swift && swift build 2>&1 | tail -5
 ```
 
-#### Step 5 — Convert the four call sites
+#### Step 5, Convert the four call sites
 
 Re-run the grep first and work from its live line numbers:
 
@@ -417,19 +417,19 @@ cd swift && grep -c "ClientErrorMessages.internalDetail" Sources/iMessageMax/Uti
 
 Expected: `4`.
 
-#### Step 6 — Add tests for the new helper
+#### Step 6. Add tests for the new helper
 
 Add to the existing suite
 `swift/Tests/iMessageMaxTests/ClientErrorSanitizationTests.swift` (which
 already covers `sanitized`; follow its structure and naming). Two tests:
 
-1. `testInternalDetailNeverEchoesTheUnderlyingDescription` — build an
+1. `testInternalDetailNeverEchoesTheUnderlyingDescription`, build an
    `NSError` whose `localizedDescription` contains a distinctive fake path
    such as `/Users/testuser/Pictures/imessage-max-staging/abc/photo.jpg`,
    pass it through `internalDetail(_:context:)`, and assert the returned
    string does **not** contain `imessage-max-staging`, does not contain
    `/Users/`, and does contain the context string.
-2. `testInternalDetailReturnsStableGuidance` — assert the returned string
+2. `testInternalDetailReturnsStableGuidance`, assert the returned string
    ends with `failed. Check the server log for details.` so the wording is
    pinned against accidental drift.
 
@@ -441,7 +441,7 @@ cd swift && swift test --filter ClientErrorSanitizationTests 2>&1 | tail -10
 
 Expected: all pass, count 2 higher than before.
 
-### Step 7 — Full suite
+### Step 7, Full suite
 
 ```bash
 cd swift && swift build && swift test 2>&1 | tail -20
@@ -453,33 +453,33 @@ the plan's arithmetic to match.
 
 ## Done criteria
 
-1. `cd swift && swift build` — exits 0, no new warnings.
-2. `cd swift && swift test 2>&1 | grep -E 'Executed [0-9]+ tests' | tail -1` — `Executed 235 tests, with 0 failures`. (`tail -3` shows the swift-testing trailer, not the XCTest count — this package runs both.)
-3. `cd swift && grep -c "localizedDescription" Sources/iMessageMax/Utilities/AppleScript.swift` — `0`.
-4. `cd swift && grep -c "ClientErrorMessages.internalDetail" Sources/iMessageMax/Utilities/AppleScript.swift` — `4`.
-5. `cd swift && grep -c "Plan 012" Tests/iMessageMaxTests/SendManualValidation.md` — `0`.
-6. `cd swift && grep -n '^### ' Tests/iMessageMaxTests/SendManualValidation.md` — fourteen headings, numbered 1-14 ascending with no gaps or repeats.
-7. `cd swift && grep -c "failed_delivery" Tests/iMessageMaxTests/SendManualValidation.md` — at least `1`.
-8. `cd swift && grep -c "partial_failure" Tests/iMessageMaxTests/SendManualValidation.md` — at least `1`.
-9. `cd swift && grep -c "imessage-max-staging" Tests/iMessageMaxTests/SendManualValidation.md` — at least `1`.
-10. `git diff --stat` — exactly four files (see "Files in scope").
+1. `cd swift && swift build`, exits 0, no new warnings.
+2. `cd swift && swift test 2>&1 | grep -E 'Executed [0-9]+ tests' | tail -1`, `Executed 235 tests, with 0 failures`. (`tail -3` shows the swift-testing trailer, not the XCTest count, this package runs both.)
+3. `cd swift && grep -c "localizedDescription" Sources/iMessageMax/Utilities/AppleScript.swift`, `0`.
+4. `cd swift && grep -c "ClientErrorMessages.internalDetail" Sources/iMessageMax/Utilities/AppleScript.swift`, `4`.
+5. `cd swift && grep -c "Plan 012" Tests/iMessageMaxTests/SendManualValidation.md`, `0`.
+6. `cd swift && grep -n '^### ' Tests/iMessageMaxTests/SendManualValidation.md`, fourteen headings, numbered 1-14 ascending with no gaps or repeats.
+7. `cd swift && grep -c "failed_delivery" Tests/iMessageMaxTests/SendManualValidation.md`, at least `1`.
+8. `cd swift && grep -c "partial_failure" Tests/iMessageMaxTests/SendManualValidation.md`, at least `1`.
+9. `cd swift && grep -c "imessage-max-staging" Tests/iMessageMaxTests/SendManualValidation.md`, at least `1`.
+10. `git diff --stat`, exactly four files (see "Files in scope").
 
 ## Files in scope
 
 - `swift/Tests/iMessageMaxTests/SendManualValidation.md`
-- `swift/Sources/iMessageMax/Utilities/ClientErrorMessages.swift` — the new helper only
-- `swift/Sources/iMessageMax/Utilities/AppleScript.swift` — the four bare `catch` arms only
-- `swift/Tests/iMessageMaxTests/ClientErrorSanitizationTests.swift` — two new tests
+- `swift/Sources/iMessageMax/Utilities/ClientErrorMessages.swift`, the new helper only
+- `swift/Sources/iMessageMax/Utilities/AppleScript.swift`, the four bare `catch` arms only
+- `swift/Tests/iMessageMaxTests/ClientErrorSanitizationTests.swift`, two new tests
 
 ## Files explicitly out of scope
 
-- `swift/Sources/iMessageMax/Tools/Send.swift` — the status vocabulary is
+- `swift/Sources/iMessageMax/Tools/Send.swift`, the status vocabulary is
   correct as shipped; this plan documents it, it does not change it.
 - Every existing `ClientErrorMessages.sanitized` call site (19 of them across
-  `Sources/iMessageMax/Tools/`). Do not "upgrade" them to `internalDetail` —
+  `Sources/iMessageMax/Tools/`). Do not "upgrade" them to `internalDetail`,
   they handle `DatabaseError` and need its guidance strings.
 - `sanitized` itself.
-- The `## Real-machine validation run — 2026-06-11` section of the doc.
+- The `## Real-machine validation run, 2026-06-11` section of the doc.
 - `swift/Tests/iMessageMaxTests/AppleScriptRunnerValidationTests.swift`.
 
 ## Test plan
@@ -487,7 +487,7 @@ the plan's arithmetic to match.
 Two new unit tests in
 `swift/Tests/iMessageMaxTests/ClientErrorSanitizationTests.swift`, following
 the structure of the tests already in that file. What they must actually
-assert — a test that only checks the return value is non-empty does not
+assert, a test that only checks the return value is non-empty does not
 satisfy this plan:
 
 | Test | Asserts |
@@ -495,7 +495,7 @@ satisfy this plan:
 | `testInternalDetailNeverEchoesTheUnderlyingDescription` | result excludes `imessage-max-staging`, excludes `/Users/`, includes the context string |
 | `testInternalDetailReturnsStableGuidance` | result ends with `failed. Check the server log for details.` |
 
-Part A has no automated test — it is a human checklist. Its verification is
+Part A has no automated test, it is a human checklist. Its verification is
 the grep-based done criteria 5-9, which confirm the content exists; whether
 the checks pass on real hardware is for the operator to run.
 
@@ -503,7 +503,7 @@ the checks pass on real hardware is for the operator to run.
 
 - Any existing test fails. Part B only changes the *text* of error strings on
   four failure paths; if a test asserts on one of those strings, report which
-  and stop — the reviewer decides whether the test or the message is wrong.
+  and stop, the reviewer decides whether the test or the message is wrong.
 - The `localizedDescription` grep in Step 4 returns a count other than 4, or
   returns lines whose surrounding code does not match the excerpts above.
 - Any of the four sites turns out to be reachable on a success path rather
@@ -526,5 +526,5 @@ For Part B, the durable rule is the split between the two helpers:
 the client needs; `internalDetail` for FileManager/Process/AppleScript errors
 where the client needs nothing but the operator needs the log line. A new
 `catch` arm in `AppleScript.swift` that reaches for `error.localizedDescription`
-directly should not pass review — done criterion 3 pins that count at zero,
+directly should not pass review, done criterion 3 pins that count at zero,
 so it will also show up as a regression if anyone re-runs it.

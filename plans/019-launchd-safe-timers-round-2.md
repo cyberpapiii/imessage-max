@@ -3,8 +3,8 @@
 > **Executor instructions**: Follow this plan step by step. Run every
 > verification command and confirm the expected result before moving to the
 > next step. If anything in the "STOP conditions" section occurs, stop and
-> report — do not improvise. When done, update the status row for this plan
-> in `plans/README.md` — unless a reviewer dispatched you and told you they
+> report, do not improvise. When done, update the status row for this plan
+> in `plans/README.md`, unless a reviewer dispatched you and told you they
 > maintain the index.
 >
 > **Drift check (run first)**: `git diff --stat e3d14da..HEAD -- swift/Sources/iMessageMax/Server/SessionManager.swift swift/Sources/iMessageMax/Server/SSEConnection.swift swift/Sources/iMessageMax/Tools/GetAttachment.swift swift/Sources/iMessageMax/Utilities/AsyncTimeout.swift`
@@ -28,7 +28,7 @@ abort intermittently inside the launchd-run service** (`swift_task_dealloc` /
 "freed pointer was not the last allocation"). It crashed production on
 2026-06-11 (see `AGENTS.md` "No Task.sleep in the service runtime" and plan
 `plans/015-launchd-safe-timers.md`). Plan 015 removed `Task.sleep` from the
-send path, but three sites survived — two of which are *permanently armed* in
+send path, but three sites survived, two of which are *permanently armed* in
 the HTTP service: the session-cleanup loop wakes every 5 minutes for the
 process lifetime, and every live SSE connection wakes every 30 seconds. Any
 one of those wakeups can abort the whole launchd service, killing every
@@ -39,13 +39,13 @@ exists and is used by `SendVerifier.swift:67`.
 
 Files and their roles:
 
-- `swift/Sources/iMessageMax/Server/SessionManager.swift` — per-session Server
+- `swift/Sources/iMessageMax/Server/SessionManager.swift`, per-session Server
   instances for the legacy HTTP lane; contains the 5-minute cleanup loop.
-- `swift/Sources/iMessageMax/Server/SSEConnection.swift` — SSE channel/manager;
+- `swift/Sources/iMessageMax/Server/SSEConnection.swift`. SSE channel/manager;
   contains the 30-second keep-alive loop.
-- `swift/Sources/iMessageMax/Tools/GetAttachment.swift` — attachment tool;
+- `swift/Sources/iMessageMax/Tools/GetAttachment.swift`, attachment tool;
   contains a 500ms polling loop waiting for an iCloud download.
-- `swift/Sources/iMessageMax/Utilities/AsyncTimeout.swift` — the sanctioned
+- `swift/Sources/iMessageMax/Utilities/AsyncTimeout.swift`, the sanctioned
   Dispatch-backed sleep. Do not modify it; just call it.
 
 The three offending sites (verbatim, as of `e3d14da`):
@@ -125,13 +125,13 @@ interval. That is acceptable and is the same trade plan 015 made.
 - `plans/README.md` (status row only)
 
 **Out of scope** (do NOT touch, even though they look related):
-- `swift/Sources/iMessageMax/Utilities/AsyncTimeout.swift` — the replacement
+- `swift/Sources/iMessageMax/Utilities/AsyncTimeout.swift`, the replacement
   primitive; it is correct as-is.
-- `swift/Sources/iMessageMax/Server/HTTPTransport.swift` — its Dispatch-timer
+- `swift/Sources/iMessageMax/Server/HTTPTransport.swift`, its Dispatch-timer
   pattern is the known-good exemplar; other plans own its changes.
 - Any restructuring of `SSEChannel.stream` (its computed-property design has a
   separate plan, 029). Only replace the sleep call here.
-- `Thread.sleep` / semaphore usage in `AppleScript.swift` — separate plan (024).
+- `Thread.sleep` / semaphore usage in `AppleScript.swift`, separate plan (024).
 
 ## Git workflow
 
@@ -171,7 +171,7 @@ to
                             await AsyncTimeout.sleep(.seconds(30))
 ```
 
-Keep the `if Task.isCancelled { break }` line that follows — it is now the
+Keep the `if Task.isCancelled { break }` line that follows, it is now the
 only cancellation exit for this loop and must stay.
 
 **Verify**: `cd swift && swift build` → exit 0.
@@ -227,7 +227,7 @@ final class LaunchdSafetyTests: XCTestCase {
 }
 ```
 
-Adjust the directory math if the path resolution fails — the invariant is
+Adjust the directory math if the path resolution fails, the invariant is
 "scan every `.swift` file under `swift/Sources/`", however you get there.
 
 **Verify**: `cd swift && swift test --filter LaunchdSafetyTests` → 1 test, 0 failures.
@@ -238,7 +238,7 @@ Adjust the directory math if the path resolution fails — the invariant is
 
 ## Test plan
 
-- New: `LaunchdSafetyTests.testNoTaskSleepInServiceSources` (step 4) — the
+- New: `LaunchdSafetyTests.testNoTaskSleepInServiceSources` (step 4), the
   regression tripwire that keeps this class of bug out permanently.
 - Existing suites exercising the changed code paths must stay green:
   `HTTPTransportIntegrationTests`, `HTTPTransportTests` (SSE formatting),
@@ -265,7 +265,7 @@ Stop and report back (do not improvise) if:
   `swift/Sources/iMessageMax/Utilities/AsyncTimeout.swift` or has a different
   signature than `static func sleep(_ duration: Duration) async`.
 - The tripwire test finds `Task.sleep(` call sites *other than* the three in
-  this plan — that means new ones appeared since planning; report them.
+  this plan, that means new ones appeared since planning; report them.
 - Any existing test fails after the swaps.
 
 ## Maintenance notes
@@ -273,6 +273,6 @@ Stop and report back (do not improvise) if:
 - Deploying is an operator action: `cd swift && make install` after merge.
 - The tripwire test makes the AGENTS.md rule self-enforcing. If a future
   legitimate use of `Task.sleep` ever appears (e.g. in a non-service CLI
-  path), the test must be consciously amended — that friction is the point.
+  path), the test must be consciously amended, that friction is the point.
 - Plan 029 restructures `SSEChannel.stream`; it must keep using
   `AsyncTimeout.sleep` for the keep-alive.

@@ -3,8 +3,8 @@
 > **Executor instructions**: Follow this plan step by step. Run every
 > verification command and confirm the expected result before moving to the
 > next step. If anything in the "STOP conditions" section occurs, stop and
-> report — do not improvise. When done, update the status row for this plan
-> in `plans/README.md` — unless a reviewer dispatched you and told you they
+> report, do not improvise. When done, update the status row for this plan
+> in `plans/README.md`, unless a reviewer dispatched you and told you they
 > maintain the index.
 >
 > **Drift check (run first)**: `git diff --stat e3d14da..HEAD -- swift/Sources/iMessageMax/Utilities/AppleScript.swift swift/Tests/iMessageMaxTests/PlaceholderTests.swift`
@@ -16,7 +16,7 @@
 
 - **Priority**: P1
 - **Effort**: S
-- **Risk**: MED (deleting too early can break an in-flight Messages transfer — the terminal-state rules below are the whole point)
+- **Risk**: MED (deleting too early can break an in-flight Messages transfer, the terminal-state rules below are the whole point)
 - **Depends on**: none. **Ordering**: plan 023 makes two one-line edits in
   this file (land 023 first); plan 025 makes the send path async (land this
   before 025 so 025 carries the cleanup calls through its restructuring).
@@ -28,10 +28,10 @@
 Every outgoing file send copies the user's file into a staging area under
 `~/Pictures/imessage-max-staging/<UUID>/<name>` so Messages.app can read it
 and so transfers can be tracked by name. Nothing deletes that copy when the
-transfer finishes — cleanup happens only via a 48-hour age sweep that runs
+transfer finishes, cleanup happens only via a 48-hour age sweep that runs
 *at the start of the next file send*. Consequences: every photo/document
 sent through the tool sits in a duplicate plaintext copy for two days
-minimum — indefinitely if no further file sends occur (the sweep never runs
+minimum, indefinitely if no further file sends occur (the sweep never runs
 again). That's silent retention of user content beyond its purpose, in a
 location (`~/Pictures`) that other apps commonly index and back up. The fix:
 delete each per-send staging directory as soon as its transfer reaches a
@@ -55,7 +55,7 @@ The staged-file struct (`:87-91`):
 ```
 
 The two send entry points, identical shape (`:189-208` participant,
-`:211-231` chat) — chat version:
+`:211-231` chat), chat version:
 
 ```swift
     static func sendFileToChat(guid: String, filePath: String) -> Result<Void, SendError> {
@@ -81,7 +81,7 @@ The two send entry points, identical shape (`:189-208` participant,
     }
 ```
 
-Staging (`:233-258`) — note the sweep call at the top and the
+Staging (`:233-258`), note the sweep call at the top and the
 per-send UUID directory:
 
 ```swift
@@ -97,7 +97,7 @@ per-send UUID directory:
         ...
 ```
 
-The completion wait (`:320-361`), abridged — terminal vs non-terminal
+The completion wait (`:320-361`), abridged, terminal vs non-terminal
 outcomes:
 
 ```swift
@@ -129,7 +129,7 @@ outcomes:
     }
 ```
 
-The staging root and the 48h sweep (`:363-388`) — keep both:
+The staging root and the 48h sweep (`:363-388`), keep both:
 
 ```swift
     private static func stagingRootDirectory() -> URL {
@@ -139,7 +139,7 @@ The staging root and the 48h sweep (`:363-388`) — keep both:
     }
 ```
 
-Existing test exemplar —
+Existing test exemplar,
 `swift/Tests/iMessageMaxTests/PlaceholderTests.swift:162-184`
 (`testPrepareTrackedOutgoingFileStagesInPicturesDirectoryWithOriginalName`,
 in `class AppleScriptRunnerValidationTests`): stages a temp file through the
@@ -162,10 +162,10 @@ real staging root with a `defer` cleanup and an injected
 - `plans/README.md` (status row only)
 
 **Out of scope** (do NOT touch, even though they look related):
-- `Thread.sleep` / semaphore / async structure of this file — plan 025.
-- Error-message contents (`.failed` clamping etc.) — plan 023.
+- `Thread.sleep` / semaphore / async structure of this file, plan 025.
+- Error-message contents (`.failed` clamping etc.), plan 023.
 - The AppleScript script bodies (`sendFileToChatScript` etc.).
-- `stagingRootDirectory()` location or the 48h sweep window — both stay.
+- `stagingRootDirectory()` location or the 48h sweep window, both stay.
 
 ## Git workflow
 
@@ -201,15 +201,15 @@ In `AppleScriptRunner`, near the staging helpers (`:363`), add:
 
 ### Step 2: Call it at every safe point
 
-Deletion decision table — implement exactly this:
+Deletion decision table, implement exactly this:
 
 | Outcome | Where | Delete staged copy? |
 |---|---|---|
-| Handoff to Messages failed (`run` returned failure) | both senders | YES — Messages never got the path |
+| Handoff to Messages failed (`run` returned failure) | both senders | YES, Messages never got the path |
 | `.finished` observed | `waitForTransferCompletion` | YES |
 | `.failed` observed | `waitForTransferCompletion` | YES |
-| Status query threw / timeout / `.pending` / `.unknown` at deadline | `waitForTransferCompletion` | **NO** — transfer may still be reading the file; 48h sweep is the backstop |
-| Staging itself threw | both senders | nothing staged to delete (copy either failed or dir creation failed — a partial dir is swept later; do not add cleanup here) |
+| Status query threw / timeout / `.pending` / `.unknown` at deadline | `waitForTransferCompletion` | **NO**, transfer may still be reading the file; 48h sweep is the backstop |
+| Staging itself threw | both senders | nothing staged to delete (copy either failed or dir creation failed, a partial dir is swept later; do not add cleanup here) |
 
 Concretely:
 
@@ -250,12 +250,12 @@ Add to `AppleScriptRunnerValidationTests` in `PlaceholderTests.swift`,
 following the `:162-184` staging pattern (temp source file, injected status
 closure, `defer` cleanup as a safety net):
 
-1. `testRemoveStagedDirectoryDeletesOnlyItsOwnDirectory` — stage a file via
+1. `testRemoveStagedDirectoryDeletesOnlyItsOwnDirectory`, stage a file via
    `prepareTrackedOutgoingFile`, assert the staged file exists, call
    `AppleScriptRunner.removeStagedDirectory(for: prepared)`, assert the
    staged file and its UUID directory are gone **and** the staging root
    still exists.
-2. `testRemoveStagedDirectoryRefusesPathsOutsideStagingRoot` — build a
+2. `testRemoveStagedDirectoryRefusesPathsOutsideStagingRoot`, build a
    `PreparedOutgoingFile` by hand whose `fileURL` points at a file in a
    fresh temp directory *outside* the staging root; call
    `removeStagedDirectory`; assert the file still exists (the guard
@@ -290,10 +290,10 @@ Machine-checkable. ALL must hold:
 
 Stop and report back (do not improvise) if:
 
-- Excerpts don't match live code (drift) — especially if plan 025 landed
+- Excerpts don't match live code (drift), especially if plan 025 landed
   first and the functions are now async/restructured.
 - You are tempted to delete on `.pending`/`.unknown`/timeout "to be
-  thorough" — that breaks in-flight transfers; the asymmetry is deliberate.
+  thorough", that breaks in-flight transfers; the asymmetry is deliberate.
 - The staging root or `PreparedOutgoingFile` shape differs from the excerpts.
 
 ## Maintenance notes
@@ -303,7 +303,7 @@ Stop and report back (do not improvise) if:
   `ls ~/Pictures/imessage-max-staging/` no longer contains that send's UUID
   directory. Add a row to
   `swift/Tests/iMessageMaxTests/SendManualValidation.md`.
-- Plan 025 (async send path) restructures these functions — it must carry
+- Plan 025 (async send path) restructures these functions, it must carry
   the four removal calls and the decision table forward unchanged; call this
   out in its review.
 - If transfer tracking ever gains a post-timeout reconciliation (checking a

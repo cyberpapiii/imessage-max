@@ -1,6 +1,6 @@
 # Plan 015: Eliminate Task.sleep from the send path (launchd task-allocator crash)
 
-> **Executor instructions**: BASE CHECK FIRST — run
+> **Executor instructions**: BASE CHECK FIRST, run
 > `ls plans/015-launchd-safe-timers.md`. If missing:
 > `git checkout -b advisor/015-launchd-safe-timers <PLANS_COMMIT>` (SHA in
 > dispatch message) and re-check; otherwise
@@ -27,9 +27,9 @@ The repo documents a runtime pathology at `HTTPTransport.swift:513-515`:
 > service, sleeping unstructured Swift tasks have repeatedly aborted in
 > swift_task_dealloc when they wake around the timeout boundary.
 
-Plans 012/014 introduced two NEW `Task.sleep` call sites on the send path —
+Plans 012/014 introduced two NEW `Task.sleep` call sites on the send path,
 `AsyncTimeout.withTimeout` (races elicitation against `Task.sleep`) and
-`SendVerifier.verify` (poll interval) — without honoring that note. The first
+`SendVerifier.verify` (poll interval), without honoring that note. The first
 time the no-confirm send path ran inside the launchd service, the process
 aborted with the same allocator-family crash (`freed pointer was not the last
 allocation`, observed 2026-06-11 in `~/Library/Logs/imessage-max.stderr.log`),
@@ -39,22 +39,22 @@ missed again.
 
 ## Current state
 
-- `swift/Sources/iMessageMax/Utilities/AsyncTimeout.swift` — `withTimeout`
+- `swift/Sources/iMessageMax/Utilities/AsyncTimeout.swift`, `withTimeout`
   implemented as a `withTaskGroup` race where one child does
   `try? await Task.sleep(for: timeout)`. MUST lose the sleeping task.
-- `swift/Sources/iMessageMax/Tools/SendVerifier.swift:67` —
+- `swift/Sources/iMessageMax/Tools/SendVerifier.swift:67`,
   `try await Task.sleep(for: pollInterval)` between poll attempts.
 - The proven pattern to mirror: `HTTPTransport.storePendingRequest`
-  (`HTTPTransport.swift:503-534`) — `DispatchWorkItem` +
+  (`HTTPTransport.swift:503-534`), `DispatchWorkItem` +
   `DispatchQueue.global(qos: .utility).asyncAfter`, and
   `HTTPTransport.dispatchInterval(for:)` (lines 544-554) converting `Duration`
   → `DispatchTimeInterval` (copy that conversion; do not import HTTPTransport
   into Utilities).
 - Pre-existing `Task.sleep` sites in `SessionManager.swift:231`,
-  `SSEConnection.swift:109`, `GetAttachment.swift:370` are OUT of scope —
+  `SSEConnection.swift:109`, `GetAttachment.swift:370` are OUT of scope,
   they predate today, have run on launchd for weeks, and touching them risks
   regressions this plan cannot validate.
-- `swift/Sources/iMessageMax/Tools/Send.swift` — `confirmationTimeout`
+- `swift/Sources/iMessageMax/Tools/Send.swift`, `confirmationTimeout`
   default `.seconds(60)`.
 - Tests: `ElicitationTimeoutTests.swift` (4 tests) pin `withTimeout` behavior;
   `SendVerifierTests.swift` has one multi-attempt polling test.
@@ -73,7 +73,7 @@ missed again.
   Dispatch-based `sleep`)
 - `swift/Sources/iMessageMax/Tools/SendVerifier.swift` (swap the poll sleep)
 - `swift/Sources/iMessageMax/Tools/Send.swift` (ONLY the `confirmationTimeout`
-  default: `.seconds(60)` → `.seconds(25)` — snappier degradation for
+  default: `.seconds(60)` → `.seconds(25)`, snappier degradation for
   swallowed prompts, still ample for a real human dialog, far under the 300s
   transport timeout)
 - `swift/Tests/iMessageMaxTests/ElicitationTimeoutTests.swift` (extend)
@@ -143,7 +143,7 @@ Implementation requirements for `withTimeout`:
 
 `SendVerifier.swift:67`: replace `try await Task.sleep(for: pollInterval)`
 with `await AsyncTimeout.sleep(pollInterval)` (the throws in the signature doc
-comment should be updated — Database errors only now). Update the doc comment
+comment should be updated, Database errors only now). Update the doc comment
 at line 49.
 
 **Verify**: `cd swift && swift build` → exit 0;
@@ -160,9 +160,9 @@ at line 49.
 Extend `ElicitationTimeoutTests.swift`:
 - The existing 4 tests must pass UNCHANGED against the new implementation
   (they pin behavior, not mechanism).
-- Add `testDispatchSleepCompletes` — `AsyncTimeout.sleep(.milliseconds(50))`
+- Add `testDispatchSleepCompletes`, `AsyncTimeout.sleep(.milliseconds(50))`
   returns; elapsed ≥ 40ms and < 2s.
-- Add `testTimeoutCancelsOperationTask` — operation that loops
+- Add `testTimeoutCancelsOperationTask`, operation that loops
   `while !Task.isCancelled { await AsyncTimeout.sleep(.milliseconds(10)) }`
   then sets an atomic flag/expectation on exit; call withTimeout(50ms);
   assert nil returned AND the flag flips within ~1s (proves cancellation
@@ -195,21 +195,21 @@ for tool code, or the `DispatchWorkItem` pattern in
 - [ ] `grep -rn "Task.sleep" swift/Sources/iMessageMax/Utilities/AsyncTimeout.swift swift/Sources/iMessageMax/Tools/` → zero matches
 - [ ] Only in-scope files changed
 
-(The decisive validation — no crash on a live no-confirm send through the
-launchd service — is performed by the reviewer post-deploy; tests cannot
+(The decisive validation, no crash on a live no-confirm send through the
+launchd service, is performed by the reviewer post-deploy; tests cannot
 reproduce the launchd runtime.)
 
 ## STOP conditions
 
 - The once-only lock pattern fights Swift 6 concurrency checking in a way
   that needs `@unchecked Sendable` on anything OTHER than the small private
-  guard class — report rather than sprinkle unchecked conformances.
+  guard class, report rather than sprinkle unchecked conformances.
 - Any existing test fails.
 
 ## Maintenance notes
 
 - If the pre-existing sleeps (`SessionManager`, `SSEConnection`,
   `GetAttachment`) ever correlate with a crash, migrate them to
-  `AsyncTimeout.sleep` — they were deliberately left alone here.
+  `AsyncTimeout.sleep`, they were deliberately left alone here.
 - Reviewer post-deploy gate: live no-confirm `send` via the launchd service
   must return `pending_confirmation` in ~25s with a STABLE service PID.

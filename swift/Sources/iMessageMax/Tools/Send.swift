@@ -127,7 +127,7 @@ struct SendResponse: Encodable {
         )
     }
 
-    /// Row found in the intended chat with error ≠ 0 — delivery failed (verified).
+    /// Row found in the intended chat with error ≠ 0. Delivery failed (verified).
     static func failedDelivery(guid: String, errorCode: Int, deliveredTo: [String], chat: ChatReference?) -> SendResponse {
         SendResponse(
             status: "failed_delivery",
@@ -257,12 +257,12 @@ actor SendTool {
                 chat_id is an exact tool-call target; when talking to the user, refer to the destination by the returned chat.name or recipient names.
 
                 Proof vocabulary for text sends (status field):
-                  confirmed — row found in chat.db with error=0; include verified_message_guid as evidence.
-                  uncertain — transport accepted but row not found within polling window; follow up with get_messages.
-                  mismatch  — row found in a different chat than intended; alert the user, do not treat as success.
-                  failed_delivery — row found with a delivery error recorded; the message was NOT delivered.
-                  partial_failure — some payloads were dispatched before a later one failed; the message lists which. Never blind-retry the whole call.
-                  sent      — verification unavailable (DB unreadable); transport accepted only.
+                  confirmed: row found in chat.db with error=0. Include verified_message_guid as evidence.
+                  uncertain: transport accepted but no row appeared within the polling window. Follow up with get_messages.
+                  mismatch: row found in a different chat than intended. Alert the user, do not treat as success.
+                  failed_delivery: row found with a delivery error recorded. The message was NOT delivered.
+                  partial_failure: some payloads were dispatched before a later one failed. The message lists which. Never blind-retry the whole call.
+                  sent: verification unavailable (DB unreadable). Transport accepted only.
                 Sends execute immediately when the destination is exact. Ambiguous destinations return status 'ambiguous' without sending. Invalid input returns status 'failed' without sending. File transfers may return 'pending_confirmation' while Messages.app completes the transfer.
                 """,
             inputSchema: InputSchema.object(
@@ -275,7 +275,7 @@ actor SendTool {
                         items: .string(description: "Absolute or ~/expanded local file path")
                     ),
                     "reply_to": .string(description: "Message ID to reply to (not yet implemented)"),
-                    "confirm": .boolean(description: "Deprecated; accepted for compatibility and ignored. Sends do not require confirmation — destination ambiguity is refused with status 'ambiguous', and results are verified post-send."),
+                    "confirm": .boolean(description: "Deprecated; accepted for compatibility and ignored. Sends do not require confirmation. An ambiguous destination is refused with status 'ambiguous', and the tool verifies results after sending."),
                 ]
             ),
             outputSchema: OutputSchema.object,
@@ -358,12 +358,12 @@ actor SendTool {
         }
 
         // Sends are authorized by the user's request to the agent and by
-        // harness-level tool approval; the server does not gate exact sends —
-        // ambiguity and validation failures refuse above, and post-send
+        // harness-level tool approval. The server does not gate exact sends.
+        // Ambiguity and validation failures refuse above, and post-send
         // verification reports the truth below. Interactive confirmation (MCP
         // elicitation) was removed 2026-06-11 after it proved unable to
-        // round-trip through real agent stacks — see plans/README.md
-        // "Elicitation channel findings"; do not reintroduce without
+        // round-trip through real agent stacks. See "Elicitation channel
+        // findings" in plans/README.md. Do not reintroduce without
         // session-level proof of a working channel.
 
         // Capture send time before dispatch (design §5.2 option 1).
@@ -405,7 +405,7 @@ actor SendTool {
         }
 
         /// Client-facing description of a payload, for the partial-failure breakdown.
-        /// Files are named by filename only — never the full path (plan 023).
+        /// Files are named by filename only, never the full path (plan 023).
         func describePayload(_ payload: SendPayload) -> String {
             switch payload {
             case .text: return "text message"
@@ -459,7 +459,7 @@ actor SendTool {
         }
 
         guard let lastText = textBodies.last else {
-            // File-only send — verification does not apply; status unchanged.
+            // File-only send. Verification does not apply, so status is unchanged.
             return .success(deliveredTo: resolved.deliveredTo, chat: resolved.chat)
         }
 

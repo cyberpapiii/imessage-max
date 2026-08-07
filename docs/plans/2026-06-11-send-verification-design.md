@@ -1,6 +1,6 @@
 # Send Verification Design Spike
 
-> **Type:** Design spike — no production code changes.
+> **Type:** Design spike, no production code changes.
 > **Plan reference:** Plan 009, written at commit `57a2ff3`, 2026-06-11.
 > **Drift check result:** No drift on `Send.swift`, `SendResolution.swift`, or
 > `AppleScript.swift` since the plan was authored.
@@ -15,7 +15,7 @@ All four paths converge at `Send.swift:246–265` after resolution and
 confirmation. The send target comes from `SendResolution.ResolvedTarget.target`
 which is either `.participant(handle:chatId:)` or `.chat(guid:chatId:)`.
 
-**Path A — Text → Participant** (`Send.swift:251–253`)
+**Path A, Text → Participant** (`Send.swift:251–253`)
 
 1. `SendResolver.resolve(chatId:to:)` returns `.participant(handle:String, chatId:Int?)`.
    `handle` is the raw iMessage address (phone number or email in `handle.id`).
@@ -36,7 +36,7 @@ which is either `.participant(handle:chatId:)` or `.chat(guid:chatId:)`.
    `SendResponse.success(deliveredTo:chat:)` is returned with `status: "sent"`
    (`Send.swift:287`, `Send.swift:41–52`).
 
-**Path B — Text → Chat** (`Send.swift:258–260`)
+**Path B, Text → Chat** (`Send.swift:258–260`)
 
 Same as Path A except:
 - Resolution produced `.chat(guid:String, chatId:Int)`. The `guid` is the
@@ -48,7 +48,7 @@ Same as Path A except:
   chat id chatGuid`. The chat GUID is the stable Messages identifier; this
   route guarantees the correct thread is targeted.
 
-**Path C — File → Participant** (`Send.swift:252–255`)
+**Path C, File → Participant** (`Send.swift:252–255`)
 
 1. Resolution same as Path A. `chatId` may be `nil`.
 2. `AppleScriptRunner.sendFileToParticipant(handle:filePath:)` is called
@@ -75,7 +75,7 @@ Same as Path A except:
    `Send.swift:267–276` and produce `SendResponse.pending(...)` with
    `status: "pending_confirmation"`.
 
-**Path D — File → Chat** (`Send.swift:260–263`)
+**Path D, File → Chat** (`Send.swift:260–263`)
 
 Same as Path C except the handoff AppleScript targets `chat id chatGuid`
 (`AppleScript.swift:117–127`). The transfer-observation loop is identical.
@@ -96,7 +96,7 @@ Specifically it does NOT prove:
 
 The `send` verb in the Messages AppleScript dictionary returns a `message`
 object per Apple's AppleScript spec. However, the production `run()` method
-(`AppleScript.swift:377–425`) **discards stdout entirely** — only `stderr`
+(`AppleScript.swift:377–425`) **discards stdout entirely**, only `stderr`
 is examined. Therefore even if Messages.app returns a message guid, it is
 lost. (See Section 2.4 for the JXA-returns-id investigation.)
 
@@ -105,10 +105,10 @@ lost. (See Section 2.4 for the JXA-returns-id investigation.)
 The file-transfer observation (`waitForTransferCompletion`) begins after the
 handoff AppleScript returns successfully and ends when either `finished`,
 `failed`, or the 15-second timeout is reached. The states are:
-- `finished` — Messages accepted and queued the transfer locally.
-- `failed` — Messages rejected the transfer.
-- `pending` — Transfer is in-progress but not yet confirmed.
-- `unknown` — No transfer record found under the tracking name.
+- `finished`, Messages accepted and queued the transfer locally.
+- `failed`, Messages rejected the transfer.
+- `pending`: transfer is in-progress but not yet confirmed.
+- `unknown`. No transfer record found under the tracking name.
 
 This machine observes the **local Messages.app transfer queue**, not chat.db.
 A `finished` transfer still does not prove the message row exists in the
@@ -126,7 +126,7 @@ intended conversation in chat.db.
   direct chat ROWID was found; `nil` if no prior chat exists in DB.
 
 `deliveredTo` is the display names of resolved participants, set from
-`resolved.deliveredTo` at resolution time — not from a post-send DB read.
+`resolved.deliveredTo` at resolution time, not from a post-send DB read.
 
 ---
 
@@ -257,15 +257,15 @@ reliability across macOS versions is not confirmed.
 
 > **MEASURED 2026-06-11 (macOS 25.5.0): the dictionary lies at runtime.**
 > Running the production send script with `set sendResult to send messageText
-> to targetBuddy` raises *"The variable sendResult is not defined"* — the
+> to targetBuddy` raises *"The variable sendResult is not defined"*, the
 > `send` verb returns **nothing** despite its declared `→ message` signature.
 > Guid-based matching via the send return value is **not available**; the
 > chat.db re-read (Section 2.2) is the only verification path. This closes
-> the open question — do not spend build time on stdout capture.
+> the open question, do not spend build time on stdout capture.
 
 **Current status in code: the return value is unconditionally discarded.**
 The production `run()` method (`AppleScript.swift:377–425`) captures stdout
-but never reads it — `stdoutPipe.fileHandleForReading.readDataToEndOfFile()`
+but never reads it, `stdoutPipe.fileHandleForReading.readDataToEndOfFile()`
 is called but the result is only decoded to check that the process produced
 some output. The `ScriptExecutionResult.stdout` field exists but is never
 examined for the message guid.
@@ -329,9 +329,9 @@ it returns `transferPending` or `transferStatusUnknown`, the state is
 
 ## 3. Chat.db write latency measurement
 
-**MEASURED 2026-06-11** — 3 timed probes, self-sends to `robdezendorf@gmail.com`
+**MEASURED 2026-06-11**, 3 timed probes, self-sends to `robdezendorf@gmail.com`
 via the production AppleScript path, polled read-only at 100ms intervals using
-a ROWID watermark (text matching is impossible — see finding 2):
+a ROWID watermark (text matching is impossible, see finding 2):
 
 | Probe | AppleScript accept | Row visible after accept | Total send→visible |
 |-------|-------------------:|-------------------------:|-------------------:|
@@ -345,10 +345,10 @@ a ROWID watermark (text matching is impossible — see finding 2):
    first poll). The conservative 30s polling window in Section 2.3 is far too
    generous for the row-existence check: 5 polls × 200ms (1s budget) suffices
    for text sends, with `uncertain` after ~3s. (Delivery-status fields update
-   later and asynchronously — see finding 3.)
+   later and asynchronously, see finding 3.)
 2. **attributedBody storage confirmed in practice**: every probe row landed
    with `text = NULL` and the content only in `attributedBody` (~200 bytes).
-   SQL text-equality matching is not merely risky — it matched 0 of 7 probe
+   SQL text-equality matching is not merely risky, it matched 0 of 7 probe
    rows. Extraction via `MessageTextExtractor` (or hex/blob matching) is
    mandatory, exactly as Section 2.2 specifies.
 3. **A row in chat.db is NOT proof of sending.** All probe sends failed at the
@@ -359,7 +359,7 @@ a ROWID watermark (text matching is impossible — see finding 2):
    row existence would have "confirmed" seven failed sends.
 4. **Caveat:** latency was measured on failed-send rows (the row write happens
    at send time on the same path), and self-sends via the `participant` route
-   fail outright (`error = 22`) — the production verification loop should be
+   fail outright (`error = 22`), the production verification loop should be
    validated against a real conversation during the build slice.
 
 The original experiment script is retained below for re-runs on other
@@ -480,7 +480,7 @@ behavior with an honest proof vocabulary aligned to R1–R3.
   extracted text matches the sent text (or whose `cache_has_attachments = 1`
   matches a file send), within the polling window, **and the row has
   `error = 0`** (measured 2026-06-11: failed sends write rows immediately with
-  `error = 22` / `is_sent = 0` — row existence alone must never confirm).
+  `error = 22` / `is_sent = 0`, row existence alone must never confirm).
 - *Response fields:*
   ```json
   {
@@ -536,7 +536,7 @@ behavior with an honest proof vocabulary aligned to R1–R3.
 **`pending`** (file transfers only in synchronous mode)
 
 - *Trigger:* `waitForTransferCompletion` returns `.failure(.transferPending)`
-  or `.failure(.transferStatusUnknown)` — the file transfer is in-flight but
+  or `.failure(.transferStatusUnknown)`, the file transfer is in-flight but
   timed out (15 seconds). No change from today's `"pending_confirmation"`.
 - *Response fields:* Same as today's `pending` constructor (`Send.swift:54–65`).
   Optionally add `"message"` guidance to re-check with `get_messages`.
@@ -712,7 +712,7 @@ The maintainer should decide before Slice 2 begins.
 - **JXA `send` return value under macOS Sequoia/Tahoe.** Whether Messages
   returns the message guid reliably is unconfirmed without a live test send.
 - **`is_sent` flag timing.** Whether `m.is_sent = 1` is set on the initial
-  write or only after delivery confirmation — relevant to whether we can
+  write or only after delivery confirmation, relevant to whether we can
   filter on it during verification.
 - **Behavior for SMS-fallback sends.** When an iMessage fails to deliver and
   falls back to SMS, the chat.db row appears with `service = "SMS"`. The

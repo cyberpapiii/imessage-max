@@ -3,8 +3,8 @@
 > **Executor instructions**: Follow this plan step by step. Run every
 > verification command and confirm the expected result before moving to the
 > next step. If anything in the "STOP conditions" section occurs, stop and
-> report — do not improvise. When done, update the status row for this plan
-> in `plans/README.md` — unless a reviewer dispatched you and told you they
+> report, do not improvise. When done, update the status row for this plan
+> in `plans/README.md`, unless a reviewer dispatched you and told you they
 > maintain the index.
 >
 > **Drift check (run first)**: `git diff --stat e3d14da..HEAD -- swift/Sources/iMessageMax/Tools/SendVerifier.swift swift/Sources/iMessageMax/Tools/Send.swift swift/Tests/iMessageMaxTests/SendVerifierTests.swift swift/Tests/iMessageMaxTests/SendToolExecuteTests.swift`
@@ -17,7 +17,7 @@
 - **Priority**: P1
 - **Effort**: M
 - **Risk**: MED (client-visible status vocabulary change)
-- **Depends on**: none (plan 023 touches `Send.swift` error strings — land this first if both are selected)
+- **Depends on**: none (plan 023 touches `Send.swift` error strings, land this first if both are selected)
 - **Category**: bug
 - **Planned at**: commit `e3d14da`, 2026-08-07
 
@@ -30,8 +30,8 @@ row is invisible, verification exhausts its polling window, and the tool
 returns `status: "uncertain"` with the message "The message was probably
 sent... Use get_messages to confirm." That is factually wrong for a hard
 failure: the agent (and user) is told to follow up on a send the database
-already knows failed. This is the highest-stakes path in the server — the
-only write operation — and two existing tests currently lock in the wrong
+already knows failed. This is the highest-stakes path in the server, the
+only write operation, and two existing tests currently lock in the wrong
 answer. STRATEGY.md names "verified send rate" a key metric; false
 `uncertain` results are exactly what this plan removes. The prior audit
 recorded this as a known refinement (plans/README.md "Direction findings");
@@ -41,14 +41,14 @@ this plan implements it.
 
 Files and roles:
 
-- `swift/Sources/iMessageMax/Tools/SendVerifier.swift` — post-send chat.db
+- `swift/Sources/iMessageMax/Tools/SendVerifier.swift`, post-send chat.db
   polling verifier. The result enum, the two scans, and the polling loop.
-- `swift/Sources/iMessageMax/Tools/Send.swift` — the send tool. Maps
+- `swift/Sources/iMessageMax/Tools/Send.swift`, the send tool. Maps
   `VerificationResult` → `SendResponse` statuses; holds the tool description
   ("proof vocabulary") and the response constructors.
-- `swift/Tests/iMessageMaxTests/SendVerifierTests.swift` — verifier unit
+- `swift/Tests/iMessageMaxTests/SendVerifierTests.swift`, verifier unit
   tests against a fixture DB; test 2 asserts today's wrong behavior.
-- `swift/Tests/iMessageMaxTests/SendToolExecuteTests.swift` — end-to-end tool
+- `swift/Tests/iMessageMaxTests/SendToolExecuteTests.swift`, end-to-end tool
   tests with `StubScriptRunner`; `testFailedRowDoesNotConfirm` asserts
   `"uncertain"` for an error=22 row.
 - Docs that state the status vocabulary and must move in lockstep:
@@ -69,7 +69,7 @@ enum VerificationResult: Equatable {
 }
 ```
 
-The polling loop (`SendVerifier.swift:65-97`) — scans return
+The polling loop (`SendVerifier.swift:65-97`), scans return
 `VerificationResult?`, non-nil short-circuits:
 
 ```swift
@@ -103,7 +103,7 @@ The polling loop (`SendVerifier.swift:65-97`) — scans return
         return .notFound
 ```
 
-The primary query (`SendVerifier.swift:114-127`) — note `AND m.error = 0`
+The primary query (`SendVerifier.swift:114-127`), note `AND m.error = 0`
 and no `LIMIT`; the fallback query (`:160-176`) has the same filter. The
 primary match loop (`:137-142`):
 
@@ -116,7 +116,7 @@ primary match loop (`:137-142`):
         return nil
 ```
 
-The fallback match loop (`:187-200`) — mismatch when the matching row's chat
+The fallback match loop (`:187-200`), mismatch when the matching row's chat
 differs from intended:
 
 ```swift
@@ -162,18 +162,18 @@ The error-throw rule (`Send.swift:270-272`):
 The proof vocabulary in the tool description (`Send.swift:220-225`) lists
 `confirmed / uncertain / mismatch / sent`.
 
-Response constructors live in `Send.swift:70-181` — model the new one on
+Response constructors live in `Send.swift:70-181`, model the new one on
 `static func mismatch(...)` (`:113-128`), which sets a `message`, and on
 `confirmed` (`:73-88`), which carries `verifiedMessageGuid`/`verifiedAt`.
 
 Tests asserting today's behavior:
 
-- `SendVerifierTests.swift:62-82` `testErrorRowDoesNotConfirm` — inserts an
+- `SendVerifierTests.swift:62-82` `testErrorRowDoesNotConfirm`, inserts an
   error=22 row, asserts `result == .notFound`.
-- `SendToolExecuteTests.swift:274-301` `testFailedRowDoesNotConfirm` —
+- `SendToolExecuteTests.swift:274-301` `testFailedRowDoesNotConfirm`,
   end-to-end, asserts `json["status"] == "uncertain"`.
 
-Fixture API (already supports error rows): `fixture.insertMessage(rowId:guid:text:date:isFromMe:error:isSent:)` — see `SendVerifierTests.swift:66-69`.
+Fixture API (already supports error rows): `fixture.insertMessage(rowId:guid:text:date:isFromMe:error:isSent:)`, see `SendVerifierTests.swift:66-69`.
 
 ## Commands you will need
 
@@ -197,12 +197,12 @@ Fixture API (already supports error rows): `fixture.insertMessage(rowId:guid:tex
 - `plans/README.md` (status row only)
 
 **Out of scope** (do NOT touch, even though they look related):
-- `swift/Sources/iMessageMax/Tools/SendResolution.swift` — resolution is
+- `swift/Sources/iMessageMax/Tools/SendResolution.swift`, resolution is
   upstream of verification; plan 033 owns its changes.
-- `swift/Sources/iMessageMax/Utilities/AppleScript.swift` — transport layer;
+- `swift/Sources/iMessageMax/Utilities/AppleScript.swift`, transport layer;
   plans 024/025 own it.
-- The `pending_confirmation` file-transfer states — unchanged by design.
-- `swift/Sources/iMessageMax/Utilities/MessageTextExtractor.swift` — plan 031.
+- The `pending_confirmation` file-transfer states, unchanged by design.
+- `swift/Sources/iMessageMax/Utilities/MessageTextExtractor.swift`, plan 031.
 
 ## Git workflow
 
@@ -223,7 +223,7 @@ Add a case to the enum (`SendVerifier.swift:7-14`):
 
 Update the doc comment block at `:18-26` to describe the new classification
 (replace the sentence "rows with error ≠ 0 must not confirm" with "rows with
-error ≠ 0 must not confirm — they classify as `.failedDelivery` when they
+error ≠ 0 must not confirm, they classify as `.failedDelivery` when they
 match in the intended chat").
 
 **Verify**: `cd swift && swift build` → compiler errors only at the
@@ -242,7 +242,7 @@ Add `let error: Int64` to both `MessageRow` and `FallbackRow`, bound from
 `row.int(4)` (primary) / `row.int(5)` (fallback).
 
 Rewrite the primary match loop (`:137-142`) with **confirmed-first**
-precedence — a clean matching row anywhere in the window wins over a failed
+precedence, a clean matching row anywhere in the window wins over a failed
 one (covers Messages' own immediate-retry behavior):
 
 ```swift
@@ -374,7 +374,7 @@ the polling window closes:
                 )
 ```
 
-3. Make the tool surface it as an error result — extend `:270-272`:
+3. Make the tool surface it as an error result, extend `:270-272`:
 
 ```swift
         if response.status == "failed" || response.status == "ambiguous"
@@ -402,7 +402,7 @@ the polling window closes:
    same file, decode the thrown error's content, and assert
    `json["status"] == "failed_delivery"` and
    `json["verified_message_guid"] as? String == "msg-guid-error-row"`
-   (check the actual JSON key casing against a `confirmed` response — the
+   (check the actual JSON key casing against a `confirmed` response, the
    encoder converts to snake_case; mirror whatever
    `testConfirmedSend...` in this file asserts for `verifiedMessageGuid`).
 3. New `SendVerifierTests` cases (model on the existing fixture setup at `:40-58`):
@@ -421,13 +421,13 @@ the polling window closes:
 
 ### Step 6: Vocabulary lockstep
 
-One edit each — add `failed_delivery` alongside the existing statuses:
+One edit each, add `failed_delivery` alongside the existing statuses:
 
 - `CONCEPTS.md` "Send statuses" section (after **mismatch**):
   `- **failed_delivery**: Verification found the sent message recorded with a delivery error; the message did not deliver. Treated as a failure, with the message id and error code as evidence.`
 - `README.md:341-348` status list: add the equivalent bullet.
 - `using-imessage-max/SKILL.md:63`: extend the status sentence with
-  `` `failed_delivery` means chat.db recorded a delivery error — the message did not send; tell the user and consider the destination unreachable ``.
+  `` `failed_delivery` means chat.db recorded a delivery error, the message did not send; tell the user and consider the destination unreachable ``.
 - `using-imessage-max/references/workflows.md:77`: add `failed_delivery` to
   the parenthesized status list.
 
@@ -459,14 +459,14 @@ Machine-checkable. ALL must hold:
 Stop and report back (do not improvise) if:
 
 - The excerpts above don't match the live code (drift).
-- The fixture's `insertMessage` does not accept an `error:` parameter — the
+- The fixture's `insertMessage` does not accept an `error:` parameter, the
   test schema has drifted; report rather than modifying `ToolTestDatabase`.
 - Existing `SendContractTests` fail in a way that isn't the deliberate
-  vocabulary addition (they may assert the closed set of statuses — if so,
+  vocabulary addition (they may assert the closed set of statuses, if so,
   adding `failed_delivery` to their expected set is in scope; anything more
   is not).
 - You find yourself wanting to change `mismatch` precedence or the polling
-  window constants — out of scope, report instead.
+  window constants, out of scope, report instead.
 
 ## Maintenance notes
 
@@ -477,7 +477,7 @@ Stop and report back (do not improvise) if:
 - Error code 22 is the *measured* failure code; the plan deliberately
   classifies **any** nonzero error as `failed_delivery` and reports the code
   verbatim, so unknown codes degrade gracefully.
-- Plan 026 (partial multi-payload sends) builds on this status vocabulary —
+- Plan 026 (partial multi-payload sends) builds on this status vocabulary,
   land 021 first.
 - Reviewer should scrutinize: precedence rules (clean row beats failed row;
   cross-chat failed rows invisible) and that `uncertain` still results when

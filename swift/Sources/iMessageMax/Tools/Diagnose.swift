@@ -75,13 +75,13 @@ enum DiagnoseTool {
                 Use diagnose before attempting any send, attachment, or live-inbox operation. \
                 Check capabilities.<key>.state for each feature you plan to use. \
                 "supported" means the feature is available and probed on this install. \
-                "unsupported" means the feature does not exist — do not attempt it or expose \
-                it to the user as an option. "permission-gated" means a macOS permission must \
-                be granted before the feature can work; surface the fix field to the user. \
-                "unverified" means the capability state cannot be determined at diagnose time; \
-                treat it as potentially available but proceed cautiously. "unavailable" means no \
-                implementation exists in the current backend — do not attempt and do not mention \
-                to the user as a near-term option. The database.accessible field governs whether \
+                "unsupported" means the feature does not exist. Do not attempt it or offer \
+                it to the user. "permission-gated" means a macOS permission must \
+                be granted before the feature can work; show the fix field to the user. \
+                "unverified" means diagnose could not determine the state. The feature may \
+                work; try it, but do not promise the user it will. "unavailable" means the \
+                current backend has no implementation. Do not attempt it and do not tell the \
+                user it is coming. The database.accessible field governs whether \
                 all read tools (get_messages, list_chats, search, etc.) will work. A "needs_setup" \
                 top-level status means at least one required permission is missing; resolve it \
                 before proceeding. Use chat.name in user-facing summaries and chat ids only in \

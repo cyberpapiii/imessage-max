@@ -9,11 +9,11 @@ description: Use when working with the iMessage Max MCP server to review recent 
 
 Use this skill to choose the right iMessage Max tool sequence for the user's intent.
 
-The main rule is simple: start broad when completeness matters, then narrow. Do not let unread-only or activity-only views stand in for the full recent conversation landscape unless the user explicitly asks for that narrower slice.
+Start broad when completeness matters, then narrow. Unread-only and activity-only views miss things. Do not let either stand in for a full recent overview unless the user asked for that narrower slice.
 
 When reporting results back to the user, use human chat names and participant names. Treat `chat_id` values such as `chat123` as internal handles for follow-up tool calls and exact sends; do not refer to conversations as "Chat 123" in user-facing prose when `chat.name`, `name`, or participant labels are available.
 
-## Workflow Guide
+## Workflow guide
 
 ### Broad catch-up or daily sweep
 
@@ -60,10 +60,16 @@ Use this when the user wants to reply, send an update, or share a file.
 - Prefer `chat_id` when the exact thread matters.
 - Use `to` only when starting from a person is acceptable.
 - If there is any ambiguity about the destination, resolve the chat first with `find_chat`.
-- Sends execute immediately when the destination is exact; there is no confirmation step and the deprecated `confirm` parameter is ignored. Check the returned `status`: `confirmed` is verified delivery, `uncertain` means follow up with `get_messages`, `mismatch` means it landed in the wrong chat — tell the user. `failed_delivery` means chat.db recorded a delivery error — the message did not send; tell the user and consider the destination unreachable. `partial_failure` means a send with several payloads got some out before a later one failed — read the message, and resend only the failed payload. `pending_confirmation` appears only for file attachments whose transfer hasn't finished; it is not a request to retry.
+- An exact destination sends immediately. There is no confirmation step, and the deprecated `confirm` parameter is ignored. Read the returned `status`:
+  - `confirmed`: verified delivery.
+  - `uncertain`: follow up with `get_messages`.
+  - `mismatch`: it landed in the wrong chat. Tell the user.
+  - `failed_delivery`: chat.db recorded a delivery error. The message did not send. Tell the user and treat the destination as unreachable.
+  - `partial_failure`: a send with several payloads got some out before a later one failed. Read the message and resend only the failed payload.
+  - `pending_confirmation`: a file transfer has not finished yet. This is not a request to retry.
 - In your response to the user, name the destination using the returned `chat.name` or participant labels, not the `chat_id`.
 
-## Tool Selection
+## Tool selection
 
 Use the right tool for the user's actual question:
 
@@ -82,7 +88,7 @@ Use the right tool for the user's actual question:
 
 For a compact decision matrix and example requests, read `references/workflows.md`.
 
-## Common Mistakes
+## Common mistakes
 
 - Starting broad catch-up with `get_unread` alone.
 - Starting broad catch-up with `get_active_conversations` alone.
@@ -91,7 +97,7 @@ For a compact decision matrix and example requests, read `references/workflows.m
 - Using `to` for a sensitive send when the exact thread matters more than the person match.
 - Saying "Chat 123" to the user instead of the returned chat name or participant-derived label.
 
-## Quick Prompt Pattern
+## Quick prompt pattern
 
 When the user asks for a catch-up, think:
 

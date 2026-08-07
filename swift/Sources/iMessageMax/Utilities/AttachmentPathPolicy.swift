@@ -1,7 +1,7 @@
 import Foundation
 
 /// Validates that attachment paths from chat.db stay inside allowed roots.
-/// chat.db content is data, not trusted input — a tampered row must not
+/// chat.db content is data, not trusted input. A tampered row must not
 /// turn get_attachment into an arbitrary file read.
 enum AttachmentPathPolicy {
     static let defaultRoots: [String] = [

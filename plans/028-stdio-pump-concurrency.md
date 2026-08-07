@@ -3,12 +3,12 @@
 > **Executor instructions**: Follow this plan step by step. Run every
 > verification command and confirm the expected result before moving to the
 > next step. If anything in the "STOP conditions" section occurs, stop and
-> report — do not improvise. When done, update the status row for this plan
-> in `plans/README.md` — unless a reviewer dispatched you and told you they
+> report, do not improvise. When done, update the status row for this plan
+> in `plans/README.md`, unless a reviewer dispatched you and told you they
 > maintain the index.
 >
 > **Drift check (run first)**: `git diff --stat e3d14da..HEAD -- swift/Sources/iMessageMax/Server/DualEraStdioTransport.swift swift/Tests/iMessageMaxTests/DualEraStdioTransportTests.swift`
-> Plan 027 lands first and adds an `initialize` guard to the pump — that is
+> Plan 027 lands first and adds an `initialize` guard to the pump, that is
 > expected drift; preserve it. Any OTHER structural difference from the
 > excerpts is a STOP condition.
 
@@ -26,18 +26,18 @@
 
 The dual-era stdio adapter routes every inbound message through one pump
 loop. Modern-era messages are dispatched **inline**: the loop `await`s
-`ModernDispatcher.handle(...)` — which for `tools/call` runs the actual tool
-— before reading the next message. A modern `send` call can legitimately
+`ModernDispatcher.handle(...)`, which for `tools/call` runs the actual tool,
+before reading the next message. A modern `send` call can legitimately
 take ~45 seconds (osascript + transfer polling); during that time nothing
 else is read from stdin, so legacy session traffic and further modern
 requests all head-of-line block behind it. The legacy lane doesn't have this
 problem (messages are yielded downstream and handled elsewhere); the modern
-lane should not either — it is stateless by design, so requests are safe to
+lane should not either, it is stateless by design, so requests are safe to
 handle concurrently.
 
 Second defect, same function: responses are written with
 `try? await base.send(responseData)`. If writing to stdout fails (closed
-pipe, full buffer on a dying client), the error — and the response — vanish
+pipe, full buffer on a dying client), the error, and the response, vanish
 silently: the client hangs waiting for a reply the server believes it sent.
 A failed stdout write on a stdio transport is not recoverable noise; it
 should at minimum be visible in the log.
@@ -46,7 +46,7 @@ should at minimum be visible in the log.
 
 `swift/Sources/iMessageMax/Server/DualEraStdioTransport.swift` (71 lines,
 `actor DualEraStdioTransport: Transport`). The pump as of `e3d14da`
-(`:33-56`) — after plan 027 the `if let json` condition also excludes
+(`:33-56`), after plan 027 the `if let json` condition also excludes
 `initialize`; keep that:
 
 ```swift
@@ -86,13 +86,13 @@ Deployment target: `Package.swift` declares `.macOS(.v14)`, so
 `withDiscardingTaskGroup` (macOS 14 API) is available.
 
 Stderr-logging precedent in this repo:
-`FileHandle.standardError.write(Data("...".utf8))` — see
+`FileHandle.standardError.write(Data("...".utf8))`, see
 `Server/MCPServer.swift:46`.
 
 Tests: `swift/Tests/iMessageMaxTests/DualEraStdioTransportTests.swift` with
 the `FakeBaseTransport` actor double (`feed(_:)`, `sentCount()`,
 `waitForFirstSend()`), plus the era-matrix tests plan 027 added. Plan 019's
-`LaunchdSafetyTests` forbids `Task.sleep(` in Sources — the design below
+`LaunchdSafetyTests` forbids `Task.sleep(` in Sources, the design below
 introduces none.
 
 ## Commands you will need
@@ -111,12 +111,12 @@ introduces none.
 - `plans/README.md` (status row only)
 
 **Out of scope** (do NOT touch, even though they look related):
-- `ModernDispatcher` internals — plan 030.
+- `ModernDispatcher` internals, plan 030.
 - The HTTP transport's modern path (it already handles requests
   per-HTTP-request, no head-of-line issue).
-- Era-selection rules — locked by plan 027's tests; behavior must be
+- Era-selection rules, locked by plan 027's tests; behavior must be
   identical, only *when* modern work runs changes.
-- The legacy passthrough ordering — legacy messages MUST stay strictly
+- The legacy passthrough ordering, legacy messages MUST stay strictly
   ordered (the SDK session protocol depends on it).
 
 ## Git workflow
@@ -170,7 +170,7 @@ the loop keeps reading. Target shape (adapt to 027's guard):
 Notes for the executor:
 
 - `withDiscardingTaskGroup` keeps running children after the loop ends and
-  waits for them before returning — in-flight modern requests complete even
+  waits for them before returning, in-flight modern requests complete even
   if stdin closes first. Cancelling `pumpTask` (in `disconnect`) cancels the
   group and its children; that is the intended shutdown path.
 - Interleaved responses on stdout are safe: each `base.send` writes one
@@ -187,12 +187,12 @@ Notes for the executor:
 
 Add to `DualEraStdioTransportTests.swift`:
 
-`testSlowModernCallDoesNotBlockSubsequentMessages` —
+`testSlowModernCallDoesNotBlockSubsequentMessages`,
 
 1. Register (via the fake-tool mechanism from 027's tests /
    `ModernDispatcherTests`) a `slow_tool` whose handler awaits a signal
    before returning: use an `AsyncStream`/continuation or an actor-based
-   gate — NOT `Task.sleep` timing guesses:
+   gate. NOT `Task.sleep` timing guesses:
 
 ```swift
         let gate = AsyncStream<Void>.makeStream()
@@ -214,7 +214,7 @@ Add to `DualEraStdioTransportTests.swift`:
 Also add `testWriteFailureIsSwallowedButLogged` only if `FakeBaseTransport`
 can be made to throw from `send` in ≤10 lines (add a `var failNextSend`
 flag); assert the pump survives (a subsequent modern discover still gets
-answered). The stderr line itself isn't assertable in-process — the
+answered). The stderr line itself isn't assertable in-process, the
 surviving-pump behavior is the testable part.
 
 **Verify**: `cd swift && swift test --filter DualEraStdioTransportTests` →
@@ -246,19 +246,19 @@ Machine-checkable. ALL must hold:
 
 Stop and report back (do not improvise) if:
 
-- Plan 027 has not landed (no initialize guard, no matrix tests) — land
+- Plan 027 has not landed (no initialize guard, no matrix tests), land
   order matters; report.
 - `withDiscardingTaskGroup` is unavailable at the deployment target the
-  package actually builds with — report; fall back is a plain
+  package actually builds with, report; fall back is a plain
   `withTaskGroup` + manual draining, but confirm before diverging.
-- The concurrency test is flaky (ordering assumptions fail intermittently) —
+- The concurrency test is flaky (ordering assumptions fail intermittently),
   do not paper over with sleeps; report the interleaving you observed.
-- You need to modify any 027 test to keep it green — behavior drifted;
+- You need to modify any 027 test to keep it green, behavior drifted;
   report.
 
 ## Maintenance notes
 
-- Invariant: **the pump loop never awaits request handling** — it only
+- Invariant: **the pump loop never awaits request handling**, it only
   parses, routes, yields, and spawns. Anything slow belongs in a child task.
 - Legacy ordering remains strict FIFO through `continuation.yield`; modern
   responses may interleave on stdout by design. If a future modern feature

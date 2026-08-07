@@ -3,8 +3,8 @@
 > **Executor instructions**: Follow this plan step by step. Run every
 > verification command and confirm the expected result before moving to the
 > next step. If anything in the "STOP conditions" section occurs, stop and
-> report — do not improvise. When done, update the status row for this plan
-> in `plans/README.md` — unless a reviewer dispatched you and told you they
+> report, do not improvise. When done, update the status row for this plan
+> in `plans/README.md`, unless a reviewer dispatched you and told you they
 > maintain the index.
 >
 > **Drift check (run first)**: `git diff --stat 57a2ff3..HEAD -- swift/Sources/iMessageMax/Tools/GetAttachment.swift swift/Sources/iMessageMax/Tools/ListAttachments.swift swift/Tests/iMessageMaxTests/`
@@ -27,7 +27,7 @@
 
 ## Current state
 
-- `swift/Sources/iMessageMax/Tools/GetAttachment.swift` — the read path. Lines 166-179:
+- `swift/Sources/iMessageMax/Tools/GetAttachment.swift`, the read path. Lines 166-179:
 
 ```swift
             guard let filename = attachment.filename else {
@@ -46,8 +46,8 @@
             if !FileManager.default.fileExists(atPath: expandedPath) {
 ```
 
-  The error-result convention in this file is `.error(type:message:details:)` — match it.
-- `swift/Sources/iMessageMax/Tools/ListAttachments.swift` — line 421 expands paths from the same column to compute availability:
+  The error-result convention in this file is `.error(type:message:details:)`, match it.
+- `swift/Sources/iMessageMax/Tools/ListAttachments.swift`, line 421 expands paths from the same column to compute availability:
 
 ```swift
             let expandedPath = path.map { ($0 as NSString).expandingTildeInPath }
@@ -72,12 +72,12 @@
 - `swift/Sources/iMessageMax/Tools/ListAttachments.swift`
 - `swift/Sources/iMessageMax/Utilities/AttachmentPathPolicy.swift` (create)
 - `swift/Tests/iMessageMaxTests/AttachmentPathContainmentTests.swift` (create)
-- `swift/Tests/iMessageMaxTests/PlaceholderTests.swift` — ONLY if `GetAttachmentToolTests` needs to pass an explicit allowed root through the tool entry point; change nothing else in that file.
+- `swift/Tests/iMessageMaxTests/PlaceholderTests.swift`. ONLY if `GetAttachmentToolTests` needs to pass an explicit allowed root through the tool entry point; change nothing else in that file.
 - `plans/README.md` (status row)
 
 **Out of scope** (do NOT touch):
-- `Send.swift` / send-side file staging — sending a user-specified local file is intentional behavior (the user/agent names the file explicitly); do not add containment there.
-- `Enrichment/` processors — they receive already-validated paths.
+- `Send.swift` / send-side file staging, sending a user-specified local file is intentional behavior (the user/agent names the file explicitly); do not add containment there.
+- `Enrichment/` processors, they receive already-validated paths.
 - `Database.swift`.
 
 ## Git workflow
@@ -124,13 +124,13 @@ enum AttachmentPathPolicy {
 }
 ```
 
-Notes that matter: the `+ "/"` suffix prevents `/Users/x/Library/MessagesEvil` matching root `/Users/x/Library/Messages`; `resolvingSymlinksInPath()` defeats symlink escapes for paths that exist (for nonexistent paths it is a no-op, which is fine — the read will fail anyway). On macOS, `/tmp` and `temporaryDirectory` resolve through `/private/...`; canonicalizing BOTH sides (path and root) keeps test roots working.
+Notes that matter: the `+ "/"` suffix prevents `/Users/x/Library/MessagesEvil` matching root `/Users/x/Library/Messages`; `resolvingSymlinksInPath()` defeats symlink escapes for paths that exist (for nonexistent paths it is a no-op, which is fine, the read will fail anyway). On macOS, `/tmp` and `temporaryDirectory` resolve through `/private/...`; canonicalizing BOTH sides (path and root) keeps test roots working.
 
 **Verify**: `cd swift && swift build` → exit 0.
 
 ### Step 2: Enforce in GetAttachment
 
-Find how `GetAttachment`'s execute entry point receives configuration (read `GetAttachment.swift` top-to-bottom first — registration is `GetAttachment.register(on: server, db: db)`). Add an `allowedRoots: [String] = AttachmentPathPolicy.defaultRoots` parameter to the execute function (threaded from `register` with the default), then replace lines 174-176:
+Find how `GetAttachment`'s execute entry point receives configuration (read `GetAttachment.swift` top-to-bottom first, registration is `GetAttachment.register(on: server, db: db)`). Add an `allowedRoots: [String] = AttachmentPathPolicy.defaultRoots` parameter to the execute function (threaded from `register` with the default), then replace lines 174-176:
 
 ```swift
             // Expand ~ in path and contain to allowed roots
@@ -146,7 +146,7 @@ Find how `GetAttachment`'s execute entry point receives configuration (read `Get
 
 Do not echo the offending path in the message (it's attacker-influenced data going back to a client).
 
-**Verify**: `cd swift && swift build` → exit 0. `cd swift && swift test --filter GetAttachmentToolTests` — these will now FAIL (fixture paths are in tmp). Proceed to Step 3.
+**Verify**: `cd swift && swift build` → exit 0. `cd swift && swift test --filter GetAttachmentToolTests`, these will now FAIL (fixture paths are in tmp). Proceed to Step 3.
 
 ### Step 3: Thread the test root through existing tests
 
@@ -156,7 +156,7 @@ Update `GetAttachmentToolTests` in `PlaceholderTests.swift` to pass `allowedRoot
 
 ### Step 4: Enforce availability in ListAttachments
 
-At `ListAttachments.swift:421`, route through the policy the same way (thread `allowedRoots` from its entry point with the default). A path outside the roots should be treated exactly like a missing file (i.e. whatever the code does today when `fileExists` is false — typically `available: false`), NOT an error: list output must stay total.
+At `ListAttachments.swift:421`, route through the policy the same way (thread `allowedRoots` from its entry point with the default). A path outside the roots should be treated exactly like a missing file (i.e. whatever the code does today when `fileExists` is false, typically `available: false`), NOT an error: list output must stay total.
 
 **Verify**: `cd swift && swift build` → exit 0; `cd swift && swift test` → all pass.
 
@@ -164,12 +164,12 @@ At `ListAttachments.swift:421`, route through the policy the same way (thread `a
 
 `swift/Tests/iMessageMaxTests/AttachmentPathContainmentTests.swift`:
 
-1. `testPathInsideRootValidates` — temp-dir root, file inside → non-nil canonical path.
-2. `testPathOutsideRootRejected` — root A, file in sibling dir B → nil.
-3. `testPrefixCousinDirectoryRejected` — root `<tmp>/Messages`, path `<tmp>/MessagesEvil/f.txt` → nil.
-4. `testDotDotEscapeRejected` — path `<root>/sub/../../outside.txt` → nil (standardization collapses it).
-5. `testSymlinkEscapeRejected` — create real symlink inside root pointing outside; validated path must be nil. (Use `FileManager.createSymbolicLink`; skip with `XCTSkip` if sandboxing prevents it.)
-6. `testGetAttachmentRejectsOutOfRootPath` — end-to-end: fixture DB row whose filename points outside the allowed root; execute `get_attachment`; assert error type `attachment_path_invalid` and that the message does NOT contain the path.
+1. `testPathInsideRootValidates`, temp-dir root, file inside → non-nil canonical path.
+2. `testPathOutsideRootRejected`, root A, file in sibling dir B → nil.
+3. `testPrefixCousinDirectoryRejected`, root `<tmp>/Messages`, path `<tmp>/MessagesEvil/f.txt` → nil.
+4. `testDotDotEscapeRejected`, path `<root>/sub/../../outside.txt` → nil (standardization collapses it).
+5. `testSymlinkEscapeRejected`, create real symlink inside root pointing outside; validated path must be nil. (Use `FileManager.createSymbolicLink`; skip with `XCTSkip` if sandboxing prevents it.)
+6. `testGetAttachmentRejectsOutOfRootPath`, end-to-end: fixture DB row whose filename points outside the allowed root; execute `get_attachment`; assert error type `attachment_path_invalid` and that the message does NOT contain the path.
 
 Model the end-to-end test on `GetAttachmentToolTests` (`PlaceholderTests.swift:314-383`).
 
@@ -192,8 +192,8 @@ Covered in Steps 3 and 5. Full regression: `cd swift && swift test` → all pass
 
 Stop and report back (do not improvise) if:
 
-- `GetAttachment`'s execute entry point cannot accept an extra parameter without changing the MCP-facing tool schema (the allowlist must be server-side config, never a client-supplied argument — if the only way to thread it is via the tool's input schema, STOP).
-- Real-world attachment paths turn out to live outside `~/Library/Messages` (e.g. you find evidence in code/docs of paths under `~/Library/SMS` or similar) — report so the default roots can be decided deliberately.
+- `GetAttachment`'s execute entry point cannot accept an extra parameter without changing the MCP-facing tool schema (the allowlist must be server-side config, never a client-supplied argument, if the only way to thread it is via the tool's input schema, STOP).
+- Real-world attachment paths turn out to live outside `~/Library/Messages` (e.g. you find evidence in code/docs of paths under `~/Library/SMS` or similar), report so the default roots can be decided deliberately.
 - Existing tests besides `GetAttachmentToolTests` fail after Step 2.
 
 ## Maintenance notes

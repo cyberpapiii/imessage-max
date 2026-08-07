@@ -1,10 +1,10 @@
-# Plan 023: Client error hygiene round 2 — stop leaking paths and raw stderr
+# Plan 023: Client error hygiene round 2, stop leaking paths and raw stderr
 
 > **Executor instructions**: Follow this plan step by step. Run every
 > verification command and confirm the expected result before moving to the
 > next step. If anything in the "STOP conditions" section occurs, stop and
-> report — do not improvise. When done, update the status row for this plan
-> in `plans/README.md` — unless a reviewer dispatched you and told you they
+> report, do not improvise. When done, update the status row for this plan
+> in `plans/README.md`, unless a reviewer dispatched you and told you they
 > maintain the index.
 >
 > **Drift check (run first)**: `git diff --stat e3d14da..HEAD -- swift/Sources/iMessageMax/Database/Errors.swift swift/Sources/iMessageMax/Utilities/AppleScript.swift swift/Sources/iMessageMax/Utilities/ClientErrorMessages.swift swift/Sources/iMessageMax/Tools/GetAttachment.swift`
@@ -44,7 +44,7 @@ into them should be treated as published:
    (`.fileNotFound(arguments.last ?? "")` reports the private staging path,
    not the file the caller asked to send).
 4. **`get_attachment` returns the absolute attachment path** in the
-   `details` of the iCloud-offload error, leaking the home directory —
+   `details` of the iCloud-offload error, leaking the home directory,
    inconsistent with its own siblings, which pass `details: nil`.
 
 ## Current state
@@ -61,7 +61,7 @@ enum ClientErrorMessages {
 }
 ```
 
-### Leak 1 — DatabaseError paths
+### Leak 1, DatabaseError paths
 
 `swift/Sources/iMessageMax/Database/Errors.swift` (entire file):
 
@@ -88,7 +88,7 @@ enum DatabaseError: LocalizedError {
 ```
 
 The forwarding sites (all pass `error.localizedDescription` into a
-client-visible error payload). Full list as of `e3d14da` — confirm with
+client-visible error payload). Full list as of `e3d14da`, confirm with
 `grep -rn "localizedDescription" swift/Sources --include="*.swift"`:
 
 - `Tools/GetMessages.swift:198`
@@ -104,13 +104,13 @@ client-visible error payload). Full list as of `e3d14da` — confirm with
 - `Tools/SendResolution.swift:89`, `:142`, `:170`, `:197` (wrapped as
   `"Database error: \(...)"`)
 - `Tools/Send.swift:357` and `:359` (these forward `SendError`, which is
-  deliberately client-facing — see Step 2's routing rule)
-- `Tools/Diagnose.swift:154` — **leave as-is** (see Scope)
-- `Server/ModernProtocol.swift:225`, `Server/ServerExtensions.swift:239` —
+  deliberately client-facing, see Step 2's routing rule)
+- `Tools/Diagnose.swift:154`, **leave as-is** (see Scope)
+- `Server/ModernProtocol.swift:225`, `Server/ServerExtensions.swift:239`,
   generic `"Error: \(...)"` wrappers around tool errors; **leave as-is**
   (tool-level sanitization below is what feeds them)
 
-### Leak 2 + 3 — send stderr and staged path
+### Leak 2 + 3, send stderr and staged path
 
 `swift/Sources/iMessageMax/Utilities/AppleScript.swift`. The stderr
 interpretation block (`:420-451`):
@@ -142,10 +142,10 @@ and `.failed(message)` as `"Send failed: \(message)"`.
 
 There are also four catch sites converting thrown errors to
 `.failed(error.localizedDescription)` at `AppleScript.swift:199`, `:221`,
-`:348`, `:500` — these are process-launch failures (our own error text, no
+`:348`, `:500`, these are process-launch failures (our own error text, no
 untrusted stderr); leave them.
 
-### Leak 4 — attachment offload path
+### Leak 4, attachment offload path
 
 `swift/Sources/iMessageMax/Tools/GetAttachment.swift:189-196`:
 
@@ -160,13 +160,13 @@ untrusted stderr); leave them.
                     }
 ```
 
-(Sibling error returns in the same function all use `details: nil` — see
+(Sibling error returns in the same function all use `details: nil`, see
 `:168-183`, `:198-203`.)
 
 ### Logging precedent
 
 Stderr logging in this repo is
-`FileHandle.standardError.write(Data("...".utf8))` — see `MCPServer.swift:46`
+`FileHandle.standardError.write(Data("...".utf8))`, see `MCPServer.swift:46`
 and `HTTPTransport.swift:259` for the shape.
 
 ## Commands you will need
@@ -189,12 +189,12 @@ and `HTTPTransport.swift:259` for the shape.
 - `plans/README.md` (status row only)
 
 **Out of scope** (do NOT touch, even though they look related):
-- `Tools/Diagnose.swift:154` — diagnose is the *designated* diagnostic
+- `Tools/Diagnose.swift:154`, diagnose is the *designated* diagnostic
   surface; its whole purpose is detail. Deliberately unchanged.
-- `Server/ModernProtocol.swift:225` / `Server/ServerExtensions.swift:239` —
+- `Server/ModernProtocol.swift:225` / `Server/ServerExtensions.swift:239`,
   generic wrappers; plan 030 owns ModernProtocol changes.
 - `AppleScript.swift:199/:221/:348/:500` (our own launch-failure text) and
-  all of its process/staging structure — plans 024/025 own that.
+  all of its process/staging structure, plans 024/025 own that.
 - `SendError.errorDescription` texts other than what Step 3 specifies.
 - Log files/logging infrastructure beyond the one helper call.
 
@@ -238,7 +238,7 @@ enum ClientErrorMessages {
 }
 ```
 
-Do not change `Errors.swift`'s descriptions — they are the log-side detail.
+Do not change `Errors.swift`'s descriptions, they are the log-side detail.
 
 **Verify**: `cd swift && swift build` → exit 0.
 
@@ -253,7 +253,7 @@ no information beyond what the sanitized constants say).
 
 `Send.swift:357/:359` forward `SendError`, whose descriptions are
 deliberately client-facing; `sanitized` passes non-DatabaseError through
-unchanged, so routing them through it is also correct — do so for uniformity
+unchanged, so routing them through it is also correct, do so for uniformity
 **only if** plan 021 has already landed (avoiding conflict churn); otherwise
 leave those two lines alone and note it in the commit message.
 
@@ -272,7 +272,7 @@ In `AppleScript.swift`:
                     ))
 ```
 
-   The description then reads "Could not read file at 'IMG_0231.heic'." —
+   The description then reads "Could not read file at 'IMG_0231.heic'.",
    the filename identifies the problem file without exposing the private
    staging directory.
 
@@ -286,7 +286,7 @@ In `AppleScript.swift`:
 ```
 
    (Guard the empty-stderr case: `stderr.split` on an empty string yields an
-   empty array — use `stderr.split(...).first ?? ""`.)
+   empty array, use `stderr.split(...).first ?? ""`.)
 
 **Verify**: `cd swift && swift build` → exit 0.
 
@@ -315,7 +315,7 @@ For the AppleScript stderr clamp, check
 `swift/Tests/iMessageMaxTests/PlaceholderTests.swift` class
 `AppleScriptRunnerValidationTests` (starts `:107`) for how runner behavior
 is tested; if the stderr-interpretation branch isn't reachable without a
-real process run, unit-test the clamp logic only if it was extracted —
+real process run, unit-test the clamp logic only if it was extracted,
 otherwise rely on the sanitizer tests and note it.
 
 Then run the full suite; fix any existing test that asserted on the old
@@ -328,7 +328,7 @@ value** (never by weakening the production change).
 
 Step 5. Exemplar for message-assertion style:
 `AttachmentPathContainmentTests.swift:126-132` (asserts an error message does
-NOT contain a path — reuse that idiom).
+NOT contain a path, reuse that idiom).
 
 ## Done criteria
 
@@ -345,18 +345,18 @@ Machine-checkable. ALL must hold:
 
 Stop and report back (do not improvise) if:
 
-- Excerpts don't match live code (drift), or the Leak-1 site list has grown —
+- Excerpts don't match live code (drift), or the Leak-1 site list has grown,
   new sites are in scope, but report the delta.
 - Any test failure whose fix would require changing `SendError` semantics or
   `Diagnose` output.
-- You are tempted to add a logging framework or change how the server logs —
+- You are tempted to add a logging framework or change how the server logs,
   the single `FileHandle.standardError.write` in the sanitizer is the whole
   logging footprint of this plan.
 
 ## Maintenance notes
 
 - Review invariant: **anything interpolated into a client-visible error is
-  published** — new tools must route catch-alls through
+  published**, new tools must route catch-alls through
   `ClientErrorMessages.sanitized` and never embed absolute paths.
 - Plans 024/025 restructure `AppleScript.swift`; they must preserve the
   clamped-stderr and lastPathComponent behaviors added here (their plans say

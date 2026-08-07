@@ -109,7 +109,7 @@ final class AppleScriptRunnerValidationTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: stagedDirectory.path),
             "The per-send UUID directory must be deleted too, not just the file")
         XCTAssertTrue(FileManager.default.fileExists(atPath: stagingRoot.path),
-            "The shared staging root must survive — only this send's directory is removed")
+            "The shared staging root must survive. Only this send's directory is removed")
         XCTAssertTrue(FileManager.default.fileExists(atPath: sourceURL.path),
             "The user's original file must never be touched")
     }

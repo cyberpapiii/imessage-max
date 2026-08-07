@@ -277,7 +277,7 @@ final class DualEraStdioTransportTests: XCTestCase {
         XCTAssertEqual(forwarded, legacy)
 
         // At the moment the legacy message arrived, the slow call must
-        // still be parked on the gate — no response written yet.
+        // still be parked on the gate, with no response written yet.
         let sentCountWhileParked = await base.sentCount()
         XCTAssertEqual(sentCountWhileParked, 0, "the slow tool call must still be in flight")
 
@@ -412,7 +412,7 @@ private actor FakeBaseTransport: Transport {
         shouldFailNextSend = true
     }
 
-    /// Total `send(_:)` calls, whether they succeeded or failed — lets tests
+    /// Total `send(_:)` calls, whether they succeeded or failed. Lets tests
     /// deterministically wait for a failing write to happen before feeding
     /// the next message.
     func sendAttemptCount() -> Int {

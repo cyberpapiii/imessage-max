@@ -145,7 +145,7 @@ Expected:
 - `chat.id` matches the known DM chat ID
 - Message appears in the conversation on the device
 
-### 8. Uncertain — send to address with no prior chat.db row
+### 8. Uncertain: send to address with no prior chat.db row
 
 Call send to a valid handle where Messages.app accepts the command but the DB
 polling window expires (for example, a brand-new iMessage address with no
@@ -159,7 +159,7 @@ Expected:
 - No `verified_message_guid` or `verified_at` in the response
 - The text appears in Messages.app even though status is uncertain
 
-### 9. Mismatch — message lands in a different chat
+### 9. Mismatch: message lands in a different chat
 
 This requires a contrived scenario where the AppleScript `send` routes the
 message to a different thread than the one resolved by `to`. This is most
@@ -175,7 +175,7 @@ Expected:
 - `message` contains routing-mismatch language
 - Agent should NOT treat this as a successful send
 
-### 10. Failed delivery — chat.db records a delivery error
+### 10. Failed delivery: chat.db records a delivery error
 
 Send to a handle that Messages.app will accept but cannot deliver to. The
 reliable case is an iMessage-only send to a number with no iMessage
@@ -185,12 +185,12 @@ registration while SMS fallback is unavailable. Messages.app shows the red
 Expected:
 
 - `status` is `failed_delivery`
-- `verified_message_guid` is a non-empty string — the row **was** found
+- `verified_message_guid` is a non-empty string, so the row was found
 - `message` states the message was NOT delivered and names the error code
 - The agent must not report this as a successful send
 - Messages.app shows the send as not delivered
 
-### 11. Partial failure — multi-payload send fails partway
+### 11. Partial failure: multi-payload send fails partway
 
 Call `send` with both `text` and `file_paths`, where the text will dispatch
 fine and the attachment will not. For example, point `file_paths` at a file
@@ -204,7 +204,7 @@ Expected:
   which failed
 - `message` says explicitly not to resend the already-dispatched payload
 - The text is visible in the conversation; the attachment is not
-- Re-running the same call blind would duplicate the text — confirm the
+- Re-running the same call blind would duplicate the text. Confirm the
   response makes that obvious
 
 ## Attachment Spot Checks
@@ -248,31 +248,31 @@ Expected:
 - During the send, a UUID-named subdirectory exists containing a copy of the
   file under its original name
 - After the send completes, that subdirectory is gone
-- No accumulation across repeated sends — the directory count does not grow
+- No accumulation across repeated sends. The directory count does not grow
 - The original source file is untouched (the staging copy is a copy, never a
   move)
 
 ---
 
-## Real-machine validation run — 2026-06-11
+## Real-machine validation run, 2026-06-11
 
 Performed against the production binary (commit `2f7f1f5`) over stdio MCP,
 sending to the operator's own handle (`robdezendorf@gmail.com`, self-DM
-chat ROWID 3813 — created by earlier latency probes).
+chat ROWID 3813, created by earlier latency probes).
 
 | Check | Result |
 |-------|--------|
-| Resolution picks the true 1:1 DM (post `findDirectChatForHandle` fix) | PASS — `chat3813` resolved as intended chat |
-| Full production send path (resolve → AppleScript → verify) | PASS — end-to-end through `tools/call send` |
+| Resolution picks the true 1:1 DM (post `findDirectChatForHandle` fix) | PASS. `chat3813` resolved as intended chat |
+| Full production send path (resolve, AppleScript, verify) | PASS, end to end through `tools/call send` |
 | Verifier polls real chat.db | PASS |
-| Failed delivery is NOT confirmed | PASS — iMessage refused self-delivery (row written with `error=22`, `is_sent=0`); verifier's `error = 0` gate excluded it; response was honest `uncertain` with `get_messages` guidance |
-| `confirmed` happy path on a real delivery | PASS (same day, follow-up diagnostics) — two real deliveries confirmed end-to-end: chat-route send to the self-DM (`chat3813`) and participant-route send to the operator's phone alias; both rows landed with `error=0`, `is_sent=1` and the verifier returned `confirmed` with the exact `verified_message_guid` |
+| Failed delivery is NOT confirmed | PASS. iMessage refused self-delivery, writing a row with `error=22`, `is_sent=0`. The verifier's `error = 0` gate excluded it and the response was an honest `uncertain` with `get_messages` guidance |
+| `confirmed` happy path on a real delivery | PASS (same day, follow-up diagnostics). Two real deliveries confirmed end to end: a chat-route send to the self-DM (`chat3813`) and a participant-route send to the operator's phone alias. Both rows landed with `error=0`, `is_sent=1`, and the verifier returned `confirmed` with the exact `verified_message_guid` |
 
 **Refined failure characterization (follow-up diagnostics, same day):** the
-earlier `error=22` failures are specific to ONE combination — the AppleScript
+earlier `error=22` failures are specific to ONE combination: the AppleScript
 *participant/buddy route* targeting the *same alias the account sends from*
-(email→same email). The chat route to the same conversation succeeds, and the
-participant route to a different self-alias (email→own phone number) succeeds.
+(email to that same email). The chat route to the same conversation succeeds, and the
+participant route to a different self-alias (email to own phone number) succeeds.
 Sends to other recipients were never affected (29k+ historical successful
 sends from this alias). Practical note: a participant-route send to a handle
 equal to the account's own sending alias will yield `uncertain` (error row

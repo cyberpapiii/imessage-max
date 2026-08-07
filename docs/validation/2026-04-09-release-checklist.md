@@ -1,10 +1,10 @@
-# Release Checklist
+# Release checklist
 
 Use this checklist before shipping a new build, publishing a release, or updating the Homebrew package.
 
-This is intentionally lightweight. It is meant to catch the practical things that are easiest to miss in a local macOS MCP project: permissions, stale services, broken send flows, attachment handling, and live protocol behavior.
+It is short on purpose. It catches what is easiest to miss in a local macOS MCP project: permissions, stale services, broken send flows, attachment handling, and live protocol behavior.
 
-## 1. Local Build And Test
+## 1. Local build and test
 
 From `swift/`:
 
@@ -21,7 +21,7 @@ Expected:
 - `make install` restarts the service successfully
 - `make status` shows the expected version, signature, and healthy server
 
-## 2. Live MCP Sanity Check
+## 2. Live MCP sanity check
 
 Confirm a fresh HTTP session works against the running service:
 
@@ -54,7 +54,7 @@ curl -X POST http://127.0.0.1:8080 \
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
 ```
 
-## 3. Permission Check
+## 3. Permission check
 
 Before shipping or testing on a fresh machine, confirm:
 
@@ -64,7 +64,7 @@ Before shipping or testing on a fresh machine, confirm:
 
 If the binary path changed, re-check Full Disk Access against the real binary path, not just a symlink.
 
-## 4. Read-Path Spot Checks
+## 4. Read-path spot checks
 
 Run a few quick real-world checks against your own data:
 
@@ -80,7 +80,7 @@ Expected:
 - message retrieval still groups sessions and returns cursors
 - no empty or obviously malformed responses from known-good chats
 
-## 5. Attachment Spot Checks
+## 5. Attachment spot checks
 
 Pick one known local image attachment and one known offloaded attachment if available.
 
@@ -95,7 +95,7 @@ Expected:
 - the offloaded attachment path returns a clear error instead of a broken response
 - metadata and image sizing still look reasonable
 
-## 6. Send Flow Spot Checks
+## 6. Send-flow spot checks
 
 Use the detailed checklist in:
 
@@ -110,28 +110,28 @@ Minimum release-level send checks:
 - missing-file failure
 - unsupported `reply_to` failure
 
-Only do a deeper send polish pass if these checks show real friction.
+Go deeper on send only if these checks turn something up.
 
-## 7. Docs And Tool Count Check
+## 7. Docs and tool-count check
 
 Before shipping, confirm the public docs still match the running server:
 
-- tool count is 11 everywhere
+- tool count is 12 everywhere
 - no references to the retired Python implementation as if it were active
 - usage examples still match current argument names and behavior
 
 Quick search:
 
 ```bash
-rg -n "12 tools|Update.swift|python implementation|cursor" README.md swift/README.md AGENTS.md docs
+rg -n "11 tools|Update.swift|python implementation|cursor" README.md swift/README.md AGENTS.md docs
 ```
 
-## 8. Final Release Questions
+## 8. Final release questions
 
 Before calling it done, answer:
 
 - Does the installed service match the build I just made?
-- Do the read tools still feel trustworthy on real data?
+- Do the read tools return correct results on real data?
 - Does send still work on a real thread, not just in tests?
 - Do the docs describe the product that is actually running today?
 

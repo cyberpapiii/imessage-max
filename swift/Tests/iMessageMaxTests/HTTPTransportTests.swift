@@ -176,7 +176,7 @@ final class SSEChannelTests: XCTestCase {
         // old computed property would also report nothing on a second pass
         // here, because it rebuilt its merger over an already-finished base
         // stream. What this pins is the consume-exactly-once semantics that
-        // callers may now rely on — once exhausted, `stream` stays exhausted
+        // callers may now rely on. Once exhausted, `stream` stays exhausted
         // and never replays or restarts a keep-alive loop.
         let channel = SSEChannel(keepAliveInterval: .milliseconds(50))
 

@@ -9,6 +9,6 @@ source of truth for:
 - build and install workflow
 - testing commands
 - architecture notes
-- active tool surface
+- the tools it exposes
 
 If this file and `AGENTS.md` ever differ, follow `AGENTS.md`.

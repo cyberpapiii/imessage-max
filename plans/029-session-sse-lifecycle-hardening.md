@@ -1,15 +1,15 @@
-# Plan 029: Session/SSE lifecycle hardening — honest createSession errors, single-consumption SSE stream, injectable TTL
+# Plan 029: Session/SSE lifecycle hardening, honest createSession errors, single-consumption SSE stream, injectable TTL
 
 > **Executor instructions**: Follow this plan step by step. Run every
 > verification command and confirm the expected result before moving to the
 > next step. If anything in the "STOP conditions" section occurs, stop and
-> report — do not improvise. When done, update the status row for this plan
-> in `plans/README.md` — unless a reviewer dispatched you and told you they
+> report, do not improvise. When done, update the status row for this plan
+> in `plans/README.md`, unless a reviewer dispatched you and told you they
 > maintain the index.
 >
 > **Drift check (run first)**: `git diff --stat e3d14da..HEAD -- swift/Sources/iMessageMax/Server/SessionManager.swift swift/Sources/iMessageMax/Server/SSEConnection.swift swift/Sources/iMessageMax/Server/HTTPTransport.swift`
 > Plan 019 lands first and swaps the two `Task.sleep` calls in these files
-> for `AsyncTimeout.sleep` — expected drift; preserve it. Any other
+> for `AsyncTimeout.sleep`, expected drift; preserve it. Any other
 > structural mismatch with the excerpts is a STOP condition.
 
 ## Status
@@ -29,7 +29,7 @@ Three lifecycle defects in the legacy HTTP session lane:
 1. **Start failures masquerade as capacity limits.** `createSession` returns
    `nil` both when the 100-session cap is hit AND when the per-session SDK
    `Server.start` throws. The caller can only answer 503 "Too many active
-   sessions. Try again later." — so an internal startup failure (a bug, a
+   sessions. Try again later.", so an internal startup failure (a bug, a
    bad transport state) tells every client to retry against a server that
    will never succeed, and the real error is swallowed without a log line.
 2. **`SSEChannel.stream` is a computed property that spawns tasks per
@@ -38,10 +38,10 @@ Three lifecycle defects in the legacy HTTP session lane:
    stream. A second access silently competes for events (AsyncStream is
    single-consumer: whichever iterator polls first steals the event) and
    leaks a task group per access. It works today only because exactly one
-   call site accesses it exactly once — nothing enforces or documents that.
+   call site accesses it exactly once, nothing enforces or documents that.
 3. **Session TTL is untestable.** `sessionTimeout` (3600s) and `maxSessions`
-   (100) are hardcoded `let`s, so expiry-cleanup behavior — the code plan
-   019 keeps alive every 5 minutes forever — has zero test coverage.
+   (100) are hardcoded `let`s, so expiry-cleanup behavior, the code plan
+   019 keeps alive every 5 minutes forever, has zero test coverage.
 
 ## Current state
 
@@ -147,11 +147,11 @@ final class SSEChannel: @unchecked Sendable {
 ```
 
 `SSEConnectionManager` (same file, `:139-221`) is an actor with
-register/unregister/broadcast/terminateSession — sound as-is; only its
+register/unregister/broadcast/terminateSession, sound as-is; only its
 `register` creates `SSEChannel()`.
 
 Existing tests: `swift/Tests/iMessageMaxTests/HTTPTransportTests.swift` has
-`SSEEventTests` and `SSEConnectionManagerTests` (register/unregister/counts) —
+`SSEEventTests` and `SSEConnectionManagerTests` (register/unregister/counts),
 extend these, don't duplicate. `HTTPTransportIntegrationTests.swift:1-90`
 shows the Hummingbird `app.test` pattern for endpoint-level tests.
 
@@ -175,9 +175,9 @@ shows the Hummingbird `app.test` pattern for endpoint-level tests.
 - `plans/README.md` (status row only)
 
 **Out of scope** (do NOT touch, even though they look related):
-- The pending-request/timeout machinery in HTTPTransport — plan 020.
-- `AsyncTimeout` and the 019 sleep swaps — preserve verbatim.
-- SSE resumption (`lastEventId` is stored but unused) — a feature, not this fix.
+- The pending-request/timeout machinery in HTTPTransport, plan 020.
+- `AsyncTimeout` and the 019 sleep swaps, preserve verbatim.
+- SSE resumption (`lastEventId` is stored but unused), a feature, not this fix.
 - The SDK `Server`/`SessionTransportAdapter` interaction beyond the error split.
 
 ## Git workflow
@@ -204,7 +204,7 @@ enum SessionCreationResult {
 }
 ```
 
-(Adjust namespacing to however `MCPSessionState` is declared — it is a
+(Adjust namespacing to however `MCPSessionState` is declared, it is a
 nested class of the actor; if nesting fights the compiler, declare the enum
 inside the actor.)
 
@@ -296,7 +296,7 @@ Key differences from today: one merger per channel (not per access);
 `onTermination` cancels the merger when the HTTP response body iterator is
 dropped (client disconnect), so the keep-alive loop doesn't spin until its
 next tick against a dead stream. Note `AsyncTimeout.sleep` is
-non-cancellable — cancellation takes effect at the next interval boundary;
+non-cancellable, cancellation takes effect at the next interval boundary;
 that is the accepted 019 trade.
 
 The `keepAliveInterval` parameter (default 30s) is the test seam; production
@@ -333,29 +333,29 @@ the defaults).
 
 1. **SSEChannel unit tests** (add a class near `SSEConnectionManagerTests`
    in `HTTPTransportTests.swift`):
-   - `testEventsFlowAndCloseFinishes` — send two events, close; iterate
+   - `testEventsFlowAndCloseFinishes`, send two events, close; iterate
      `channel.stream`, assert both arrive then the stream ends.
-   - `testKeepAlivesInterleave` — `SSEChannel(keepAliveInterval: .milliseconds(20))`,
+   - `testKeepAlivesInterleave`, `SSEChannel(keepAliveInterval: .milliseconds(20))`,
      send nothing; iterate and assert the first item is
      `SSEEvent.keepAlive()` (bounded: take 1 item, don't loop forever).
-   - `testStreamPropertyIsStable` — `channel.stream` accessed twice returns
+   - `testStreamPropertyIsStable`, `channel.stream` accessed twice returns
      the same instance semantics: send one event, read it from a single
      iterator; assert a second `channel.stream` access doesn't compile-break
-     or steal (with a stored `let` this is trivially true — the test
+     or steal (with a stored `let` this is trivially true, the test
      documents the contract).
 2. **SessionManager tests** (new class in `HTTPTransportTests.swift`):
-   - `testCreateSessionAtCapacityReturnsAtCapacity` —
+   - `testCreateSessionAtCapacityReturnsAtCapacity`,
      `SessionManager(database: Database(), resolver: ContactResolver(seedCache: [:]), maxSessions: 1)`
      (copy constructor args from `HTTPTransportIntegrationTests.swift:1-90`);
      create one session (assert `.created`), then a second (assert
      `.atCapacity`).
-   - `testExpiredSessionIsCleanedUp` — `sessionTimeout: 0.01`; create a
+   - `testExpiredSessionIsCleanedUp`, `sessionTimeout: 0.01`; create a
      session, wait ~50ms (`try await Task.sleep` is fine in *tests*; the 019
      tripwire only scans Sources/), call `cleanupExpiredSessions()`, assert
      `routeMessage(sessionId:data:)` now returns false.
 3. **Endpoint test** (in `HTTPTransportIntegrationTests.swift`): initialize
    flow already covered; add `testInitializeStartFailureReturns500` ONLY if
-   a failure can be induced through existing seams (it likely cannot —
+   a failure can be induced through existing seams (it likely cannot,
    `Server.start` won't fail with a healthy adapter). If not cleanly
    inducible, skip it and note in the commit message; the enum split is
    covered by the SessionManager unit tests plus the compile-checked caller
@@ -389,24 +389,24 @@ Machine-checkable. ALL must hold:
 
 Stop and report back (do not improvise) if:
 
-- Plan 019 hasn't landed (keep-alive still uses `Task.sleep`) — order matters.
+- Plan 019 hasn't landed (keep-alive still uses `Task.sleep`), order matters.
 - The `stream` restructure breaks SSE delivery in
   `HTTPTransportIntegrationTests` or the GET-endpoint path (`handleGet`,
   `HTTPTransport.swift:467`) in a way that needs `handleGet` changes beyond
-  mechanical renames — report before touching response streaming.
+  mechanical renames, report before touching response streaming.
 - `MCPSessionState` nesting makes the result enum awkward enough that you
-  want to restructure the state class — don't; report.
-- Flaky timing in the new tests — prefer raising the wait bound once; if
+  want to restructure the state class, don't; report.
+- Flaky timing in the new tests, prefer raising the wait bound once; if
   still flaky, report rather than adding retries.
 
 ## Maintenance notes
 
 - Contract: **`SSEChannel.stream` is consumed exactly once per channel**;
   the stored-`let` + onTermination design enforces the cost even if a second
-  consumer appears (it would just see nothing — same AsyncStream semantics —
+  consumer appears (it would just see nothing, same AsyncStream semantics,
   but no longer leaks task groups).
 - The `keepAliveInterval` and `sessionTimeout`/`maxSessions` seams exist for
   tests; production always uses defaults. Flag any production call site that
   starts passing custom values in review.
 - SSE resumption via `lastEventId` remains unimplemented; if built later, it
-  changes this channel design (buffering) — revisit then.
+  changes this channel design (buffering), revisit then.

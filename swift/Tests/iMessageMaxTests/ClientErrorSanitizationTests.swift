@@ -2,7 +2,7 @@
 import XCTest
 @testable import iMessageMax
 
-// Tests for ClientErrorMessages.sanitized — the seam that keeps filesystem
+// Tests for ClientErrorMessages.sanitized, the seam that keeps filesystem
 // paths out of client-visible error payloads (plan 023). DatabaseError carries
 // paths in its description for the log side; clients get fixed guidance strings.
 // Assertion idiom borrowed from AttachmentPathContainmentTests:126-132.
@@ -25,7 +25,7 @@ final class ClientErrorSanitizationTests: XCTestCase {
     }
 
     // 2. notFound maps to databaseNotFound; queryFailed/invalidData map to
-    //    internalError — and none of them echo their payload.
+    //    internalError, and none of them echo their payload.
     func testOtherDatabaseErrorsMapToFixedStrings() {
         let notFound = ClientErrorMessages.sanitized(DatabaseError.notFound(samplePath))
         XCTAssertEqual(notFound, ClientErrorMessages.databaseNotFound)
@@ -52,7 +52,7 @@ final class ClientErrorSanitizationTests: XCTestCase {
         XCTAssertEqual(sanitized, "Send operation timed out. Messages.app may be unresponsive.")
     }
 
-    // 4. The underlying DatabaseError still carries the path — the detail is
+    // 4. The underlying DatabaseError still carries the path. The detail is
     //    preserved for the stderr log, only withheld from the client payload.
     func testDatabaseErrorDescriptionStillCarriesDetailForLogging() {
         XCTAssertTrue(
@@ -61,7 +61,7 @@ final class ClientErrorSanitizationTests: XCTestCase {
     }
 
     // 5. internalDetail never echoes the underlying description. Unlike
-    //    sanitized, it drops non-DatabaseError detail too — that is the whole
+    //    sanitized, it drops non-DatabaseError detail too. That is the whole
     //    point at FileManager/Process catch sites, where the description
     //    embeds the staging path and the operator's username (plan 039).
     func testInternalDetailNeverEchoesTheUnderlyingDescription() {

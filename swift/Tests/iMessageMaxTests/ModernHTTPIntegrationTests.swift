@@ -281,7 +281,7 @@ final class ModernHTTPIntegrationTests: XCTestCase {
 
     /// Regression: an `initialize` request whose BODY carries the modern
     /// per-request `_meta` protocolVersion key must still be routed to the
-    /// legacy SDK handshake, not the modern dispatcher — `initialize` always
+    /// legacy SDK handshake, not the modern dispatcher. `initialize` always
     /// selects the legacy lane regardless of what `_meta` it carries.
     func testInitializeWithModernMetaInBodyStaysLegacy() async throws {
         let app = await makeModernTestTransport().makeApplicationForTesting()

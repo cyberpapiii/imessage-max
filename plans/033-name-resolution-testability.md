@@ -3,8 +3,8 @@
 > **Executor instructions**: Follow this plan step by step. Run every
 > verification command and confirm the expected result before moving to the
 > next step. If anything in the "STOP conditions" section occurs, stop and
-> report — do not improvise. When done, update the status row for this plan
-> in `plans/README.md` — unless a reviewer dispatched you and told you they
+> report, do not improvise. When done, update the status row for this plan
+> in `plans/README.md`, unless a reviewer dispatched you and told you they
 > maintain the index.
 >
 > **Drift check (run first)**: `git diff --stat e3d14da..HEAD -- swift/Sources/iMessageMax/Tools/SendResolution.swift swift/Sources/iMessageMax/Contacts/ContactResolver.swift`
@@ -22,7 +22,7 @@
   `SendResolverTests` class and its `makeResolverTestDatabase()` helper live
   in `swift/Tests/iMessageMaxTests/PlaceholderTests.swift:395-477`; after
   plan 032 lands they live in `swift/Tests/iMessageMaxTests/SendResolverTests.swift`.
-  Same class and helper either way — add the new tests wherever the class
+  Same class and helper either way, add the new tests wherever the class
   currently lives.
 - **Category**: tests + testability refactor
 - **Planned at**: commit `e3d14da`, 2026-08-07
@@ -31,12 +31,12 @@
 
 Sending by contact name (`send to: "Nick"`) is one of the three resolution
 paths (chat_id / phone-or-email / name), and it is the only one with **zero
-test coverage** — including the ambiguity path (multiple contacts match,
+test coverage**, including the ambiguity path (multiple contacts match,
 sorted by recency), which is the trickiest logic in the resolver.
 
 It's untested because it's untestable as written: `resolveContactName` checks
 the **live machine's** `CNContactStore` authorization status *before*
-consulting the `ContactResolver` — even when the resolver was constructed
+consulting the `ContactResolver`, even when the resolver was constructed
 with `init(seedCache:)` and needs no Contacts access at all. On CI or any
 unauthorized machine, every name-resolution test dies at the gate with
 "Cannot search by name without contacts access" no matter what the seeded
@@ -50,7 +50,7 @@ failure message).
 
 ## Current state
 
-`swift/Sources/iMessageMax/Contacts/ContactResolver.swift:14-17` — the
+`swift/Sources/iMessageMax/Contacts/ContactResolver.swift:14-17`, the
 test-seeding initializer (no Contacts framework touched):
 
 ```swift
@@ -71,7 +71,7 @@ test-seeding initializer (no Contacts framework touched):
     }
 ```
 
-`swift/Sources/iMessageMax/Tools/SendResolution.swift:174-225` — the gate
+`swift/Sources/iMessageMax/Tools/SendResolution.swift:174-225`, the gate
 runs before the cache is ever consulted:
 
 ```swift
@@ -123,12 +123,12 @@ and a `switch` over `SendResolution.Result`.
 - `plans/README.md` (status row only)
 
 **Out of scope** (do NOT touch, even though they look related):
-- `ContactResolver.swift` — no changes needed; the seeded initializer
+- `ContactResolver.swift`, no changes needed; the seeded initializer
   already does its job once the gate stops preempting it.
 - The candidate sort order, `getLastContactTime`, `RecipientCandidate`
-  shape, or any failure-message wording — lock behavior, don't change it.
+  shape, or any failure-message wording, lock behavior, don't change it.
 - `findDirectChatForHandle` and its participant-count subquery.
-- `Send.swift` / the send execution path — plans 021/025/026 own it.
+- `Send.swift` / the send execution path, plans 021/025/026 own it.
 
 ## Git workflow
 
@@ -166,7 +166,7 @@ Behavior notes (intentional, record in the commit message):
   uninitialized resolver's cache is empty there.
 - Only edge that changes: a resolver that *has* cache entries on a machine
   that has since lost authorization will now still resolve from cache. That
-  is correct — the cache is data already obtained; resolution isn't a new
+  is correct, the cache is data already obtained; resolution isn't a new
   Contacts access.
 
 **Verify**: `cd swift && swift build` → exit 0; existing tests still pass:
@@ -205,7 +205,7 @@ fixture and `ContactResolver(seedCache:)`:
     }
 ```
 
-2. `testResolveNameMultiMatchReturnsAmbiguousSortedByRecency` — seed BOTH
+2. `testResolveNameMultiMatchReturnsAmbiguousSortedByRecency`, seed BOTH
    fixture handles with names matching one query:
    `["+16317087185": "Nick Jones", "+15104615406": "Andrew Jones"]`, resolve
    `to: "Jones"`. Assert:
@@ -216,9 +216,9 @@ fixture and `ContactResolver(seedCache:)`:
    - `candidates[1].handle == "+15104615406"` and
      `candidates[1].lastContact == "never"` (the
      `formatCompactRelative(nil) ?? "never"` fallback at `:221`);
-   - do NOT assert the exact `lastContact` string of candidates[0] — it's a
+   - do NOT assert the exact `lastContact` string of candidates[0], it's a
      relative-time format that drifts with the clock.
-3. `testResolveNameNoMatchFails` — seed
+3. `testResolveNameNoMatchFails`, seed
    `["+16317087185": "Nick Jones"]`, resolve `to: "Zelda"`. Assert the
    result is `.failure` and the message is one of the two known strings:
 
@@ -234,11 +234,11 @@ fixture and `ContactResolver(seedCache:)`:
 ```
 
    (Which of the two appears depends on the machine's real Contacts
-   authorization — the test must pass on both authorized dev machines and
+   authorization, the test must pass on both authorized dev machines and
    unauthorized CI, so accept either.)
 
 **Verify**: `cd swift && swift test --filter SendResolverTests` → all pass
-(2 existing + 3 new). These MUST pass without any Contacts permission — if
+(2 existing + 3 new). These MUST pass without any Contacts permission, if
 you're on an authorized machine, the test's correctness on unauthorized
 machines rests on Step 1's reorder; re-read the diff to confirm the search
 precedes the gate.
@@ -249,7 +249,7 @@ precedes the gate.
 
 ## Test plan
 
-Step 2 — 3 new tests covering the previously untested third resolution path,
+Step 2, 3 new tests covering the previously untested third resolution path,
 including the ambiguity branch. Exemplar: the existing switch-pattern tests
 at `SendResolverTests` (`PlaceholderTests.swift:396-438` at `e3d14da`).
 
@@ -267,12 +267,12 @@ Machine-checkable. ALL must hold:
 
 Stop and report back (do not improvise) if:
 
-- The ambiguity test's ordering assertion fails — the sort comparator or
+- The ambiguity test's ordering assertion fails, the sort comparator or
   `getLastContactTime` doesn't behave as this plan models it; report the
   actual candidate order, do not reorder the fixture to force green.
-- Any test needs Contacts authorization to pass — the reorder didn't take
+- Any test needs Contacts authorization to pass, the reorder didn't take
   effect or a second gate exists somewhere; report the call path.
-- `ContactResolver` changes seem necessary — they aren't for this scope;
+- `ContactResolver` changes seem necessary, they aren't for this scope;
   report what pushed you there.
 
 ## Maintenance notes
@@ -282,5 +282,5 @@ Stop and report back (do not improvise) if:
   adds an on-demand Contacts fetch to `searchByName`, the authorization gate
   must move inside that fetch, not back in front of the cache.
 - The seeded-cache pathway is now the standard way to test anything
-  involving contact names — no test should ever stub
+  involving contact names, no test should ever stub
   `CNContactStore`.

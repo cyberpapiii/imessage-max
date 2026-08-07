@@ -2,8 +2,8 @@ import Foundation
 
 enum AsyncTimeout {
     /// Dispatch-backed sleep. NEVER sleep Swift tasks inside the launchd service
-    /// (sleeping unstructured tasks abort in swift_task_dealloc at wakeup —
-    /// see HTTPTransport.swift storePendingRequest for the known-good pattern).
+    /// (sleeping unstructured tasks abort in swift_task_dealloc at wakeup.
+    /// See HTTPTransport.swift storePendingRequest for the known-good pattern).
     static func sleep(_ duration: Duration) async {
         await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
             DispatchQueue.global(qos: .utility).asyncAfter(
@@ -21,8 +21,8 @@ enum AsyncTimeout {
     /// It saturates at `Int.max` nanoseconds rather than trapping: `Duration`
     /// spans far more than the ~292 years `Int` nanoseconds can hold, so both the
     /// whole-seconds multiply and the fractional add would otherwise overflow on
-    /// large or adversarial values. Keep the saturation if you change this — a
-    /// trap here would take down the launchd service.
+    /// large or adversarial values. Keep the saturation if you change this.
+    /// A trap here would take down the launchd service.
     static func dispatchInterval(for duration: Duration) -> DispatchTimeInterval {
         let components = duration.components
         let maxWholeSeconds = Int64(Int.max / 1_000_000_000)

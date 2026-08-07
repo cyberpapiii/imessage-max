@@ -1,8 +1,8 @@
 # Plan 017: Agent-native send contract (remove the confirmation gate and elicitation)
 
-> **Executor instructions**: BASE CHECK FIRST — run
+> **Executor instructions**: BASE CHECK FIRST, run
 > `ls plans/017-agent-native-send-contract.md` and confirm this file's title
-> says "remove the confirmation gate" (v2 — if your copy says "narrow the
+> says "remove the confirmation gate" (v2, if your copy says "narrow the
 > gate", your snapshot predates the revision; checkout `<PLANS_COMMIT>` from
 > the dispatch message). Branch `advisor/017-agent-native-send`. Follow
 > exactly; verify every step; in-scope files only; do not edit
@@ -18,14 +18,14 @@
 - **Depends on**: 015 merged (your base contains it)
 - **Supersedes**: plan 016 (parked, never dispatched)
 - **Category**: bug / product / reliability
-- **Planned at**: 2026-06-11 (v2 — gate removed entirely, not narrowed;
+- **Planned at**: 2026-06-11 (v2, gate removed entirely, not narrowed;
   operator decision after the Codex/Claude joint diagnosis)
 
 ## Why this matters
 
 Live debugging on 2026-06-11 ("Elicitation channel findings" in
 `plans/README.md`) established that the interactive MCP elicitation
-confirmation never completed a round trip in the operator's client stack —
+confirmation never completed a round trip in the operator's client stack,
 it hung (pre-014), crashed the launchd service (014), and post-015 burns a
 silent 25 seconds before degrading. The operator's decision goes further than
 removing the popup: the confirmation *gate itself* comes out.
@@ -42,7 +42,7 @@ The reasoning, recorded so it is not re-litigated:
 - **The correct distinction is ambiguous vs risky, and ambiguity is already
   handled.** "Not sure where this goes" → `ambiguous` (refuses, lists
   candidates). Missing file → `failed`. Those stay. "Exact but it's a
-  group/file/long text" is not the server's decision to second-guess — the
+  group/file/long text" is not the server's decision to second-guess, the
   user authorized it in conversation; `delivered_to` plus post-send
   verification report truthfully what happened.
 
@@ -53,7 +53,7 @@ The send contract after this plan:
 2. Ambiguous destination → `ambiguous`, no send. Invalid input → `failed`,
    no send.
 3. File transfers keep the bounded Messages.app observation states
-   (`pending` when a transfer hasn't completed) — that is state observation,
+   (`pending` when a transfer hasn't completed), that is state observation,
    not human confirmation.
 4. `confirm` stays in the input schema as an accepted, **inert** parameter
    (existing callers and harness-cached tool schemas must not break), marked
@@ -79,20 +79,20 @@ All in `swift/Sources/iMessageMax/Tools/Send.swift` unless noted:
   (~line 269) passes it.
 - `confirm` parsed at line 281, threaded to `send` (line 308).
 - `SendResponse.cancelled` (~line 149): only caller is the gate's
-  `.declined` arm — orphaned after this plan.
-- `SendResponse.pending` (~line 132): TWO callers — the gate's
+  `.declined` arm, orphaned after this plan.
+- `SendResponse.pending` (~line 132): TWO callers, the gate's
   `.unavailable` arm (deleted) and the attachment transfer-pending path
-  (line 396, KEEP — out of scope).
+  (line 396, KEEP, out of scope).
 - Input schema `confirm` description (line 257): stale elicitation wording.
 - `swift/Sources/iMessageMax/Utilities/AsyncTimeout.swift`: `sleep` (used by
-  `SendVerifier` — KEEP) and `withTimeout` (only caller is elicitation —
+  `SendVerifier`. KEEP) and `withTimeout` (only caller is elicitation.
   DELETE).
-- `swift/Tests/iMessageMaxTests/ElicitationTimeoutTests.swift`: 6 tests —
+- `swift/Tests/iMessageMaxTests/ElicitationTimeoutTests.swift`: 6 tests,
   4 pin `withTimeout` mechanics (delete), 1 pins `AsyncTimeout.sleep` (keep),
-  1 (`testHangingConfirmationYieldsPendingStatus`) pins the gate (obsolete —
+  1 (`testHangingConfirmationYieldsPendingStatus`) pins the gate (obsolete,
   replace per Step 4).
 - `swift/Tests/iMessageMaxTests/SendToolExecuteTests.swift`: chat-route tests
-  pass `confirm: true` — they must STILL PASS unchanged (the flag is inert,
+  pass `confirm: true`, they must STILL PASS unchanged (the flag is inert,
   not rejected).
 - `AGENTS.md`: check for confirmation-flow description; the "No Task.sleep in
   the service runtime" section stays.
@@ -143,17 +143,17 @@ In `Send.swift` delete:
 - The `server: Server?` parameter from `execute` and the private `send`;
   update the `register` closure to `try await tool.execute(args: args)`.
 
-KEEP: `confirm` parsing at the `execute` layer is deleted too — the
+KEEP: `confirm` parsing at the `execute` layer is deleted too, the
 parameter stays in the SCHEMA (Step 3) but is no longer read. Add a one-line
 comment where it was parsed... no: simplest is delete the parsing entirely;
 the schema entry plus its description is the only remaining trace.
 
 Add a short comment above the send dispatch (where the gate used to be):
 sends are authorized by the user's request to the agent and by harness-level
-tool approval; the server does not gate exact sends — ambiguity and
+tool approval; the server does not gate exact sends, ambiguity and
 validation failures refuse above, and post-send verification reports the
 truth below. Interactive confirmation (MCP elicitation) was removed
-2026-06-11 after it proved unable to round-trip through real agent stacks —
+2026-06-11 after it proved unable to round-trip through real agent stacks,
 see plans/README.md "Elicitation channel findings"; do not reintroduce
 without session-level proof of a working channel.
 
@@ -164,7 +164,7 @@ without session-level proof of a working channel.
 
 In `AsyncTimeout.swift`, delete `withTimeout` (and machinery used only by it,
 e.g. the resume-gate class if `sleep` does not need it). KEEP `sleep` and
-`dispatchInterval(for:)` — `SendVerifier` depends on them; the no-Task.sleep
+`dispatchInterval(for:)`, `SendVerifier` depends on them; the no-Task.sleep
 rule still applies.
 
 **Verify**: `swift build` → exit 0;
@@ -176,7 +176,7 @@ rule still applies.
 
 In `register`:
 - `confirm` schema description → "Deprecated; accepted for compatibility and
-  ignored. Sends do not require confirmation — destination ambiguity is
+  ignored. Sends do not require confirmation, destination ambiguity is
   refused with status 'ambiguous', and results are verified post-send."
 - Tool description body: remove "File sends and failed/cancelled/ambiguous
   states are unchanged" line if `cancelled` was deleted (reword to cover
@@ -190,7 +190,7 @@ In `register`:
 
 ### Step 4: Tests
 
-`ElicitationTimeoutTests.swift` — rename file and class to something like
+`ElicitationTimeoutTests.swift`, rename file and class to something like
 `SendContractTests` (executor's choice, descriptive):
 - DELETE the 4 `withTimeout` mechanics tests.
 - KEEP `testDispatchSleepCompletes` unchanged.
@@ -199,18 +199,18 @@ In `register`:
   handles) targeted by chat_id, NO confirm, stub runner with staged-row
   side-effect → status `confirmed`, stub invoked, elapsed < 2s.
 
-`SendToolExecuteTests.swift` — add:
-1. `testOneToOneChatSendWithoutConfirmSends` — 1:1 DM fixture by chat_id, NO
+`SendToolExecuteTests.swift`, add:
+1. `testOneToOneChatSendWithoutConfirmSends`, 1:1 DM fixture by chat_id, NO
    confirm, stub runner with staged-row side-effect (existing `onSend` hook)
    → `confirmed`, stub invoked exactly once.
-2. `testLongTextSendsWithoutConfirm` — 1:1 target, 501-char text, no confirm
+2. `testLongTextSendsWithoutConfirm`, 1:1 target, 501-char text, no confirm
    → `confirmed`, stub invoked (long text no longer gates).
-3. `testConfirmFlagIsInert` — same send with `confirm: true` AND with
+3. `testConfirmFlagIsInert`, same send with `confirm: true` AND with
    `confirm: false` explicitly → identical `confirmed` outcome both ways.
 4. Existing `confirm: true` tests must pass UNCHANGED.
 
 (Ambiguity refusal already has coverage from plan 002's characterization
-tests — do not duplicate; verify they still pass.)
+tests, do not duplicate; verify they still pass.)
 
 **Verify**: `swift test` → exit 0; report final count vs baseline.
 
@@ -244,17 +244,17 @@ current session."
 ## STOP conditions
 
 - `SendResponse.cancelled` or `SendResponse.pending` turns out to have
-  callers outside the gate and the attachment path — report before deleting
+  callers outside the gate and the attachment path, report before deleting
   anything.
 - `AsyncTimeout.sleep` shares machinery with `withTimeout` that cannot be
-  cleanly separated — report rather than restructure.
+  cleanly separated, report rather than restructure.
 - Any test outside the two named test files fails (except tests that
-  EXPLICITLY pinned gate behavior — list them in the report if found).
+  EXPLICITLY pinned gate behavior, list them in the report if found).
 
 ## Maintenance notes
 
 - Reviewer post-deploy gate (operator action): through plug against the live
-  launchd service — (a) no-confirm 1:1 chat_id send → `confirmed`, stable
+  launchd service, (a) no-confirm 1:1 chat_id send → `confirmed`, stable
   PID; (b) no-confirm GROUP chat send → `confirmed`, stable PID, message
   lands in the right thread; (c) `confirm: true` send → identical behavior.
 - If send gating is ever revisited, the bar is: it must add safety an

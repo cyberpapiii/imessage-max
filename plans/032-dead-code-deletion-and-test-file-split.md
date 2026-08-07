@@ -3,8 +3,8 @@
 > **Executor instructions**: Follow this plan step by step. Run every
 > verification command and confirm the expected result before moving to the
 > next step. If anything in the "STOP conditions" section occurs, stop and
-> report — do not improvise. When done, update the status row for this plan
-> in `plans/README.md` — unless a reviewer dispatched you and told you they
+> report, do not improvise. When done, update the status row for this plan
+> in `plans/README.md`, unless a reviewer dispatched you and told you they
 > maintain the index.
 >
 > **Drift check (run first)**: `git diff --stat e3d14da..HEAD -- swift/Sources/iMessageMax/Models swift/Sources/iMessageMax/Enrichment swift/Tests/iMessageMaxTests/PlaceholderTests.swift`
@@ -20,7 +20,7 @@
 - **Depends on**: none. **Ordering caution**: plans 021/023/025/026 add tests
   to `SendToolExecuteTests.swift` and touch `AppleScriptRunnerValidationTests`
   (currently inside `PlaceholderTests.swift`). Land this plan either BEFORE
-  all of them or AFTER all of them — interleaving invites merge pain. If some
+  all of them or AFTER all of them, interleaving invites merge pain. If some
   have landed and some haven't, prefer AFTER.
 - **Category**: tech debt
 - **Planned at**: commit `e3d14da`, 2026-08-07
@@ -31,7 +31,7 @@ Two unrelated hygiene problems, one small plan:
 
 1. **Dead speculative model code.** Early-scaffold `Codable` structs and two
    whole enrichment processors have zero call sites. They read like the real
-   response shapes (a future contributor — or a code-assist model — will
+   response shapes (a future contributor, or a code-assist model, will
    "helpfully" wire responses through `struct Message`/`struct Chat`, which
    are NOT what the tools actually emit; the real shapes live in
    `ResponsePrimitives.swift` and per-tool response structs). Dead code that
@@ -42,7 +42,7 @@ Two unrelated hygiene problems, one small plan:
    tests live; several other plans keep needing to say "the class inside
    PlaceholderTests.swift".
 
-## Current state — verified dead (zero references outside their own file)
+## Current state, verified dead (zero references outside their own file)
 
 Verification method used (re-run these; they are the ground truth):
 
@@ -64,22 +64,22 @@ grep -rn "PeopleMap" Sources Tests --include="*.swift" | grep -v "Models/Partici
 **Delete entirely:**
 
 - `swift/Sources/iMessageMax/Models/Message.swift` (31 lines: `struct Message`,
-  `struct MediaMetadata` + nested `Dimensions` — all Codable scaffolds, never
+  `struct MediaMetadata` + nested `Dimensions`, all Codable scaffolds, never
   constructed or decoded anywhere)
 - `swift/Sources/iMessageMax/Models/Chat.swift` (19 lines: `struct Chat` +
-  nested `LastMessage` — same)
+  nested `LastMessage`, same)
 - `swift/Sources/iMessageMax/Models/Attachment.swift` (13 lines:
-  `struct AttachmentInfo` — same)
+  `struct AttachmentInfo`, same)
 - `swift/Sources/iMessageMax/Enrichment/AudioProcessor.swift` (40 lines)
 - `swift/Sources/iMessageMax/Enrichment/VideoProcessor.swift` (62 lines)
 
-**Delete one line only** — in `swift/Sources/iMessageMax/Models/Participant.swift`:
+**Delete one line only**, in `swift/Sources/iMessageMax/Models/Participant.swift`:
 
 ```swift
 typealias PeopleMap = [String: Participant]
 ```
 
-(line 12). `struct Participant` itself is **LIVE** — constructed in
+(line 12). `struct Participant` itself is **LIVE**, constructed in
 `Models/ChatIdentity.swift:41` and `Utilities/ChatSummaryQueries.swift:64`,
 used across many tools. Do not touch anything else in that file.
 
@@ -87,10 +87,10 @@ used across many tools. Do not touch anything else in that file.
 GetMessages, GetAttachment, ListAttachments, preview formatters),
 `Models/ChatIdentity.swift`, `Models/Reactions.swift`,
 `Models/ResponsePrimitives.swift`, `Models/SendPayload.swift`,
-`Enrichment/ImageProcessor.swift` (used by GetAttachment and GetMessages —
+`Enrichment/ImageProcessor.swift` (used by GetAttachment and GetMessages,
 also the subject of separate plans; do not modify it here).
 
-## Current state — the test grab-bag
+## Current state, the test grab-bag
 
 `swift/Tests/iMessageMaxTests/PlaceholderTests.swift` (565 lines). Shared
 imports at the top (`:1-7`):
@@ -106,7 +106,7 @@ import UniformTypeIdentifiers
 ```
 
 Classes and file-private helpers, with the exact helper→class usage map
-(verified by grep — each helper is used by exactly one class):
+(verified by grep, each helper is used by exactly one class):
 
 | Lines | Contents | Helpers it uses |
 |-------|----------|-----------------|
@@ -133,7 +133,7 @@ there.
 
 Before any change, record the baseline test count:
 `cd swift && swift test 2>&1 | tail -5` (at plan time: 174 tests). The count
-after this plan must be **identical** — this plan moves and deletes code, it
+after this plan must be **identical**, this plan moves and deletes code, it
 does not add or remove tests.
 
 ## Scope
@@ -151,12 +151,12 @@ does not add or remove tests.
 - `plans/README.md` (status row only)
 
 **Out of scope** (do NOT touch, even though they look related):
-- `ImageProcessor.swift` — live code, owned by the image-pipeline perf plan.
-- Renaming, rewriting, or "improving" any moved test — this is a pure move.
+- `ImageProcessor.swift`, live code, owned by the image-pipeline perf plan.
+- Renaming, rewriting, or "improving" any moved test, this is a pure move.
   Byte-identical class bodies except where a helper's `private` placement
   forces nothing (file-private helpers move with their sole consumer and stay
   `private`).
-- `buildPeopleMap` in `GetMessagesInternals.swift` — it never used the
+- `buildPeopleMap` in `GetMessagesInternals.swift`, it never used the
   typealias; leave it alone.
 - Any other `Models/` file beyond the listed deletions + the one
   `Participant.swift` line.
@@ -173,7 +173,7 @@ does not add or remove tests.
 ### Step 1: Re-verify deadness, then delete
 
 Run every grep in the "verified dead" section. If ANY produces a hit outside
-the defining file (doc comments don't count), STOP — that type is no longer
+the defining file (doc comments don't count), STOP, that type is no longer
 dead; report which.
 
 Then: `git rm` the 5 files, and remove the `typealias PeopleMap` line (and
@@ -192,8 +192,8 @@ For each of the six classes staying independent, create
    block; the compiler will not flag unused imports, so trim by inspection:
    `CoreGraphics`/`ImageIO`/`UniformTypeIdentifiers` are only needed by
    `GetAttachmentToolTests`' `makeTestImage`; `SQLite3` only by files whose
-   helpers call `sqlite3_*` — that is `GetAttachmentToolTests` and
-   `SendResolverTests`; `MCP` wherever `Value`/tool types appear — check per
+   helpers call `sqlite3_*`, that is `GetAttachmentToolTests` and
+   `SendResolverTests`; `MCP` wherever `Value`/tool types appear, check per
    class; `XCTest` + `@testable import iMessageMax` everywhere).
 2. The class body, moved verbatim.
 3. Its file-private helper(s) per the usage map above, moved verbatim,
@@ -202,14 +202,14 @@ For each of the six classes staying independent, create
 For `SendToolExecutionTests`: move the class (`:375-393`) and
 `decodeToolErrorText` (`:557-`) into the existing
 `SendToolExecuteTests.swift`. If that file already has an error-decoding
-helper with a different name, use the existing one and drop the moved helper
-— do not keep two. Keep the class name `SendToolExecutionTests` as-is
+helper with a different name, use the existing one and drop the moved helper,
+do not keep two. Keep the class name `SendToolExecutionTests` as-is
 (renaming/merging classes is out of scope).
 
 Delete `PlaceholderTests.swift` once empty.
 
 **Verify**: `cd swift && swift build` → exit 0. If the build fails on a
-missing symbol, a helper landed in the wrong file — fix placement, don't
+missing symbol, a helper landed in the wrong file, fix placement, don't
 widen access levels.
 
 ### Step 3: Full suite + count check
@@ -219,7 +219,7 @@ test count equals the Step-0 baseline exactly. Commit.
 
 ## Test plan
 
-No new tests — the invariant IS the test plan: identical test count, zero
+No new tests, the invariant IS the test plan: identical test count, zero
 failures, before and after.
 
 ## Done criteria
@@ -229,7 +229,7 @@ Machine-checkable. ALL must hold:
 - [ ] `cd swift && swift test` exits 0; 0 failures; count == baseline
 - [ ] `ls swift/Sources/iMessageMax/Enrichment/` → `ImageProcessor.swift` only
 - [ ] `ls swift/Sources/iMessageMax/Models/` → no `Message.swift`, `Chat.swift`, `Attachment.swift`; the other six files present
-- [ ] `grep -rn "PeopleMap" swift/Sources swift/Tests` → no matches (`buildPeopleMap` doesn't match — the grep is for the bare word; if it hits `buildPeopleMap`, that's fine, exclude it: the typealias itself must be gone from `Participant.swift`)
+- [ ] `grep -rn "PeopleMap" swift/Sources swift/Tests` → no matches (`buildPeopleMap` doesn't match, the grep is for the bare word; if it hits `buildPeopleMap`, that's fine, exclude it: the typealias itself must be gone from `Participant.swift`)
 - [ ] `test ! -f swift/Tests/iMessageMaxTests/PlaceholderTests.swift`
 - [ ] Six new per-class test files exist; `SendToolExecutionTests` lives in `SendToolExecuteTests.swift`
 - [ ] `git status` clean of files outside the in-scope list
@@ -239,14 +239,14 @@ Machine-checkable. ALL must hold:
 
 Stop and report back (do not improvise) if:
 
-- Any deadness grep from Step 1 finds a real (non-comment) reference —
+- Any deadness grep from Step 1 finds a real (non-comment) reference,
   the codebase moved; report the reference, delete nothing.
-- The build breaks after deletion in a file this plan didn't list — the
+- The build breaks after deletion in a file this plan didn't list, the
   reference map was incomplete; report, revert the deletion commit.
-- Test count changes at Step 3 — a test was dropped or duplicated in the
+- Test count changes at Step 3, a test was dropped or duplicated in the
   move; diff class-by-class against `git show HEAD~1:swift/Tests/iMessageMaxTests/PlaceholderTests.swift`.
 - Another advisor plan (021/023/025/026) is mid-flight touching
-  `SendToolExecuteTests.swift` or `AppleScriptRunnerValidationTests` — see
+  `SendToolExecuteTests.swift` or `AppleScriptRunnerValidationTests`, see
   the ordering caution in Status; report and sequence.
 
 ## Maintenance notes
@@ -254,10 +254,10 @@ Stop and report back (do not improvise) if:
 - The corrected audit finding, for the record: `Participant` is live
   (ChatIdentity + ChatSummaryQueries construct it); only the `PeopleMap`
   typealias was dead. Earlier audit notes claiming Participant itself was
-  dead are wrong — do not "finish the job" later by deleting it.
+  dead are wrong, do not "finish the job" later by deleting it.
 - If audio/video enrichment is ever actually wanted (duration/thumbnail for
   media attachments), the deleted processors are trivially recoverable from
-  git history (`git log --diff-filter=D --summary`) — but they were never
+  git history (`git log --diff-filter=D --summary`), but they were never
   wired to the attachment pipeline, so treat them as a starting sketch, not
   a drop-in.
 - Plans 021/023/025/026 reference test classes by their PlaceholderTests

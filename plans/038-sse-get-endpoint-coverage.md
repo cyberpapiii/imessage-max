@@ -1,16 +1,16 @@
-# Plan 038: SSE GET endpoint coverage — the four `handleGet` guards and the 503 capacity wire response
+# Plan 038: SSE GET endpoint coverage, the four `handleGet` guards and the 503 capacity wire response
 
 > **Executor instructions**: Follow this plan step by step. Run every
 > verification command and confirm the expected result before moving to the
 > next step. If anything in the "STOP conditions" section occurs, stop and
-> report — do not improvise. When done, update the status row for this plan
-> in `plans/README.md` — unless a reviewer dispatched you and told you they
+> report, do not improvise. When done, update the status row for this plan
+> in `plans/README.md`, unless a reviewer dispatched you and told you they
 > maintain the index.
 >
 > **Drift check (run first)**:
 > `git diff --stat 0ff6b8f..HEAD -- swift/Sources/iMessageMax/Server/HTTPTransport.swift swift/Sources/iMessageMax/Server/SessionManager.swift`
 > Expected: empty. Any change to `handleGet` or to `SessionManager.init`'s
-> signature is a STOP condition — re-read the current code and report the
+> signature is a STOP condition, re-read the current code and report the
 > mismatch instead of guessing.
 
 ## Status
@@ -41,8 +41,8 @@ $ cd swift && grep -rn '\.get\b\|method: \.get\|"GET"' Tests/iMessageMaxTests/*I
 ```
 
 Every existing HTTP integration test POSTs. Nothing has ever exercised the
-GET path, so all four of its behavioral branches — three rejection guards and
-the streaming happy path — are unverified. A refactor that broke any of them
+GET path, so all four of its behavioral branches, three rejection guards and
+the streaming happy path, are unverified. A refactor that broke any of them
 (wrong status code, dropped `Mcp-Session-Id` echo, missing `text/event-stream`
 content type) would ship green.
 
@@ -52,8 +52,8 @@ closes that gap at the wire.
 
 Second, smaller gap: `SessionManager.createSession` returning `.atCapacity`
 is unit-tested (`Tests/iMessageMaxTests/HTTPTransportTests.swift:212`), but
-the *HTTP mapping* of that result — 503 with the message "Too many active
-sessions. Try again later." — is not, because `HTTPTransport` constructs its
+the *HTTP mapping* of that result, 503 with the message "Too many active
+sessions. Try again later.", is not, because `HTTPTransport` constructs its
 `SessionManager` internally with the hardcoded default cap of 100 and offers
 no way to lower it. One additive init parameter makes that reachable.
 
@@ -142,7 +142,7 @@ So the contract under test is exactly:
 ```
 
 `SessionManager.init` already accepts `maxSessions: Int = 100`
-(`swift/Sources/iMessageMax/Server/SessionManager.swift:73-82`) — plan 029
+(`swift/Sources/iMessageMax/Server/SessionManager.swift:73-82`), plan 029
 added it as an explicitly documented test seam. `HTTPTransport` just doesn't
 forward it.
 
@@ -186,7 +186,7 @@ final class HTTPTransportIntegrationTests: XCTestCase {
 ```
 
 Helpers already present at the bottom of that file (all `private func` in the
-same file — call them directly, do not redefine):
+same file, call them directly, do not redefine):
 
 - `initializePayload(id:protocolVersion:)`
 - `toolsListPayload(id:)`
@@ -194,7 +194,7 @@ same file — call them directly, do not redefine):
 - `byteBuffer(for:)`
 - `decodeJSONString(from:)`
 - `decodeJSON(from:)`
-- `initializeSession(...)` — use this to obtain a live session id
+- `initializeSession(...)`, use this to obtain a live session id
 
 Header-name constants live at `HTTPTransport.swift:920-935`
 (`.mcpSessionId`, `.mcpProtocolVersion`, `.mcpName`). Use `.mcpSessionId`,
@@ -202,23 +202,23 @@ never a raw string literal.
 
 ## Steps
 
-### Step 1 — Add the four `handleGet` tests
+### Step 1. Add the four `handleGet` tests
 
 Add four test methods to `HTTPTransportIntegrationTests`. Build the SSE
 `Accept` header explicitly (`jsonHeaders()` sets JSON accept, which is wrong
-for this endpoint) — construct an `HTTPFields` with
+for this endpoint), construct an `HTTPFields` with
 `[.accept: "text/event-stream"]` plus `[.mcpSessionId: ...]` where needed.
 
-1. `testSSEGetRejectsMissingEventStreamAccept` — GET `/` with
+1. `testSSEGetRejectsMissingEventStreamAccept`. GET `/` with
    `Accept: application/json`. Assert `.notAcceptable` (406) and that the
    decoded body string contains `Invalid Accept header`.
-2. `testSSEGetRejectsMissingSessionHeader` — GET `/` with
+2. `testSSEGetRejectsMissingSessionHeader`. GET `/` with
    `Accept: text/event-stream` and no `Mcp-Session-Id`. Assert `.badRequest`
    (400) and body contains `Missing Mcp-Session-Id header`.
-3. `testSSEGetRejectsUnknownSession` — GET `/` with
+3. `testSSEGetRejectsUnknownSession`. GET `/` with
    `Accept: text/event-stream` and `Mcp-Session-Id: not-a-real-session`.
    Assert `.notFound` (404) and body contains `Invalid or expired session`.
-4. `testSSEGetOpensStreamForLiveSession` — first POST `initialize` (or call
+4. `testSSEGetOpensStreamForLiveSession`, first POST `initialize` (or call
    the existing `initializeSession` helper) to obtain a real session id, then
    GET `/` with `Accept: text/event-stream` and that id. Assert `.ok` (200),
    `head.headerFields[.contentType]` contains `text/event-stream`,
@@ -232,7 +232,7 @@ Each assertion that inspects a body must pass the decoded body string as the
 
 **On test 4 and hanging**: `handleGet` returns a long-lived streaming
 response. If `client.executeRequest` for the GET does not return promptly,
-that is a STOP condition — see STOP conditions below. Do not add sleeps,
+that is a STOP condition, see STOP conditions below. Do not add sleeps,
 retries, or timeouts to work around it.
 
 **Verify**:
@@ -244,7 +244,7 @@ cd swift && swift test --filter HTTPTransportIntegrationTests 2>&1 | tail -20
 Expected: all tests pass, and the executed-test count for that suite is 4
 higher than before your change. Record both numbers.
 
-### Step 2 — Forward `maxSessions` through `HTTPTransport.init`
+### Step 2, Forward `maxSessions` through `HTTPTransport.init`
 
 In `swift/Sources/iMessageMax/Server/HTTPTransport.swift`, add one parameter
 to `init` **at the end of the parameter list, with a default**, so no existing
@@ -274,7 +274,7 @@ and forward it in the body:
         )
 ```
 
-Check `SessionManager.init`'s real parameter list before writing that call —
+Check `SessionManager.init`'s real parameter list before writing that call,
 it has parameters between `resolver` and `maxSessions`. Pass `maxSessions` by
 label and let the others default. If any parameter between them lacks a
 default value, that is a STOP condition.
@@ -289,7 +289,7 @@ cd swift && swift build 2>&1 | tail -5
 
 Expected: builds clean, no new warnings.
 
-### Step 3 — Add the 503 capacity wire test
+### Step 3. Add the 503 capacity wire test
 
 Add `testSecondSessionAtCapacityReturns503` to
 `HTTPTransportIntegrationTests`: construct the transport with
@@ -306,7 +306,7 @@ cd swift && swift test --filter HTTPTransportIntegrationTests 2>&1 | tail -20
 
 Expected: all pass; suite count is now 5 higher than the Step 1 baseline.
 
-### Step 4 — Full suite
+### Step 4, Full suite
 
 ```bash
 cd swift && swift build && swift test 2>&1 | tail -20
@@ -320,33 +320,33 @@ the plan's arithmetic to match.
 
 All must hold, checked by running the command:
 
-1. `cd swift && swift build` — exits 0, no new warnings.
-2. `cd swift && swift test 2>&1 | grep -E 'Executed [0-9]+ tests' | tail -1` — `Executed 238 tests, with 0 failures`. (`tail -3` shows the swift-testing trailer, not the XCTest count — this package runs both harnesses.)
-3. `cd swift && grep -cE 'HTTPRequest\.Method\.get|method: \.get' Tests/iMessageMaxTests/HTTPTransportIntegrationTests.swift` — at
+1. `cd swift && swift build`, exits 0, no new warnings.
+2. `cd swift && swift test 2>&1 | grep -E 'Executed [0-9]+ tests' | tail -1`, `Executed 238 tests, with 0 failures`. (`tail -3` shows the swift-testing trailer, not the XCTest count, this package runs both harnesses.)
+3. `cd swift && grep -cE 'HTTPRequest\.Method\.get|method: \.get' Tests/iMessageMaxTests/HTTPTransportIntegrationTests.swift`, at
    least `4`. Match on either spelling. An earlier draft pinned the single
    literal `method: HTTPRequest.Method.get`, which made the criterion shape
    the code: the executor had to spell `.get` the long way in a `Request`
    head where `.get` was natural, purely to keep a grep count. A criterion
    that a correct implementation can fail is a broken criterion.
-4. `cd swift && grep -n 'maxSessions' Sources/iMessageMax/Server/HTTPTransport.swift` — three hits: the doc-comment line Step 2 prescribes, the init parameter, and the forwarded argument. Only two of those are code. **Do not delete the doc comment to make a grep count smaller** — an earlier draft of this criterion said "exactly two" and contradicted Step 2's own snippet.
-5. `git diff --stat` — touches exactly two files:
+4. `cd swift && grep -n 'maxSessions' Sources/iMessageMax/Server/HTTPTransport.swift`, three hits: the doc-comment line Step 2 prescribes, the init parameter, and the forwarded argument. Only two of those are code. **Do not delete the doc comment to make a grep count smaller**, an earlier draft of this criterion said "exactly two" and contradicted Step 2's own snippet.
+5. `git diff --stat`, touches exactly two files:
    `swift/Sources/iMessageMax/Server/HTTPTransport.swift` and
    `swift/Tests/iMessageMaxTests/HTTPTransportIntegrationTests.swift`.
 
 ## Files in scope
 
-- `swift/Sources/iMessageMax/Server/HTTPTransport.swift` — the `init` parameter and its forwarding **only**.
-- `swift/Tests/iMessageMaxTests/HTTPTransportIntegrationTests.swift` — new tests.
+- `swift/Sources/iMessageMax/Server/HTTPTransport.swift`, the `init` parameter and its forwarding **only**.
+- `swift/Tests/iMessageMaxTests/HTTPTransportIntegrationTests.swift`, new tests.
 
 ## Files explicitly out of scope
 
-- `swift/Sources/iMessageMax/Server/SessionManager.swift` — already has the seam; do not modify.
-- `swift/Sources/iMessageMax/Server/SSEConnection.swift` — plan 029 hardened it; do not restructure.
-- `handleGet`'s body — this plan tests it, it does not change it. If a test
+- `swift/Sources/iMessageMax/Server/SessionManager.swift`, already has the seam; do not modify.
+- `swift/Sources/iMessageMax/Server/SSEConnection.swift`, plan 029 hardened it; do not restructure.
+- `handleGet`'s body, this plan tests it, it does not change it. If a test
   fails because the current behavior differs from the table in "Current
   state", report the discrepancy; do not edit `handleGet` to make the test
   pass.
-- `swift/Tests/iMessageMaxTests/HTTPTransportTests.swift` — the existing
+- `swift/Tests/iMessageMaxTests/HTTPTransportTests.swift`, the existing
   actor-level tests stay as they are.
 
 ## Explicitly not covered, and why
@@ -367,7 +367,7 @@ following `testInitializeCreatesSessionIdAndImmediateToolsList` as the
 structural pattern (build transport → `makeApplicationForTesting()` →
 `app.test(TestingSetup.router) { client in ... }`).
 
-What each must actually assert — a test that only checks a status code and
+What each must actually assert, a test that only checks a status code and
 not the body/headers does not satisfy this plan:
 
 | Test | Asserts |
@@ -383,7 +383,7 @@ not the body/headers does not satisfy this plan:
 Stop and report, do not improvise, if any of these occur:
 
 - ~~The GET request in test 4 does not return.~~ **This fired, and is now
-  resolved — see "How test 4 was actually made to work" below.** Left in the
+  resolved, see "How test 4 was actually made to work" below.** Left in the
   history because the prediction was right and the plan was better for
   carrying it.
 - `SessionManager.init` has a parameter between `resolver` and `maxSessions`
@@ -398,7 +398,7 @@ Stop and report, do not improvise, if any of these occur:
 The four-row contract table in "Current state" is the durable artifact here:
 if `handleGet` grows a fifth guard (origin validation, protocol-version
 enforcement), it needs a fifth row and a fifth test. Watch in review for
-changes to `handleGet` that add or reorder guards without a matching test —
+changes to `handleGet` that add or reorder guards without a matching test,
 guard *order* is behavior, since a request missing both `Accept` and
 `Mcp-Session-Id` must answer 406, not 400.
 
@@ -428,7 +428,7 @@ group.addTask {
 }
 ```
 
-`handleGet` returns a body that pumps the SSE channel — keep-alives included —
+`handleGet` returns a body that pumps the SSE channel, keep-alives included,
 until the connection is unregistered. It never completes, so `executeRequest`
 never returns and `response.head` is unreachable through the client. No
 timeout or retry fixes this; any body-collecting client deadlocks the same
@@ -439,8 +439,8 @@ without touching `response.body`.** The head is fully populated the moment the
 handler returns, and nothing obliges the body writer to run. Two facts make
 this cheap:
 
-- `handleGet` never reads `context` — the only occurrence in its body is the
-  parameter itself — so any instance satisfies the generic.
+- `handleGet` never reads `context`, the only occurrence in its body is the
+  parameter itself, so any instance satisfies the generic.
 - The file already contained the exact construction needed, in
   `testOriginMiddlewareRejectsBadOriginAndHost`:
   `BasicRequestContext(source: ApplicationRequestContextSource(channel: EmbeddedChannel(), logger: Logger(label: #function)))`.
@@ -449,7 +449,7 @@ The `initialize` call still goes through the real client, so the session id
 under assertion is genuine.
 
 This trades wire-level fidelity for reachability on exactly one test, and the
-code carries a comment saying so — including an explicit "do not fix it back."
+code carries a comment saying so, including an explicit "do not fix it back."
 Anyone who routes it through `executeRequest` again will hang the suite.
 
 **Lesson worth keeping**: a streaming endpoint is not testable by a

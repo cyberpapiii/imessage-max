@@ -3,8 +3,8 @@
 > **Executor instructions**: Follow this plan step by step. Run every
 > verification command and confirm the expected result before moving to the
 > next step. If anything in the "STOP conditions" section occurs, stop and
-> report — do not improvise. When done, update the status row for this plan
-> in `plans/README.md` — unless a reviewer dispatched you and told you they
+> report, do not improvise. When done, update the status row for this plan
+> in `plans/README.md`, unless a reviewer dispatched you and told you they
 > maintain the index.
 >
 > **Drift check (run first)**: `git diff --stat 57a2ff3..HEAD -- swift/Sources/iMessageMax/main.swift swift/Sources/iMessageMax/Utilities/ swift/Tests/iMessageMaxTests/`
@@ -23,11 +23,11 @@
 
 ## Why this matters
 
-The HTTP transport exposes every iMessage in the user's database plus the ability to send messages as them, with no authentication — its security model is "loopback only". Today `imessage-max --http --host 0.0.0.0` binds to all interfaces with nothing but a stderr warning that nobody running a launchd service will ever see. One typo'd flag in a plist turns the user's message history into an unauthenticated LAN service. Binding non-loopback should require a second, deliberate flag.
+The HTTP transport exposes every iMessage in the user's database plus the ability to send messages as them, with no authentication, its security model is "loopback only". Today `imessage-max --http --host 0.0.0.0` binds to all interfaces with nothing but a stderr warning that nobody running a launchd service will ever see. One typo'd flag in a plist turns the user's message history into an unauthenticated LAN service. Binding non-loopback should require a second, deliberate flag.
 
 ## Current state
 
-- `swift/Sources/iMessageMax/main.swift` — `@main struct iMessageMax: AsyncParsableCommand` (swift-argument-parser). The host option and the warning-only check:
+- `swift/Sources/iMessageMax/main.swift`, `@main struct iMessageMax: AsyncParsableCommand` (swift-argument-parser). The host option and the warning-only check:
 
 ```swift
     @Option(name: .long, help: "Host for HTTP transport (default: 127.0.0.1 for security)")
@@ -43,7 +43,7 @@ The HTTP transport exposes every iMessage in the user's database plus the abilit
             }
 ```
 
-- The command already uses `@Flag` (see `var http = false` in the same file) — follow that pattern.
+- The command already uses `@Flag` (see `var http = false` in the same file), follow that pattern.
 - swift-argument-parser supports `func validate() throws` on `ParsableCommand`/`AsyncParsableCommand`; throwing `ValidationError("...")` prints the message and exits non-zero before `run()`.
 - Caveat for tests: the type is named `iMessageMax` inside a module also named `iMessageMax`, and `@main` types can be awkward to reference from tests. To keep the logic unit-testable regardless, the decision function lives in a separate file.
 
@@ -63,13 +63,13 @@ The HTTP transport exposes every iMessage in the user's database plus the abilit
 - `swift/Sources/iMessageMax/main.swift`
 - `swift/Sources/iMessageMax/Utilities/HostBindingPolicy.swift` (create)
 - `swift/Tests/iMessageMaxTests/HostBindingPolicyTests.swift` (create)
-- `README.md` and `swift/README.md` — only if they document `--host` (check; add one line about `--allow-external-bind` where `--host` is documented)
+- `README.md` and `swift/README.md`, only if they document `--host` (check; add one line about `--allow-external-bind` where `--host` is documented)
 - `plans/README.md` (status row)
 
 **Out of scope** (do NOT touch):
-- `OriginValidationMiddleware.swift`, `HTTPTransport.swift` — origin validation is a separate layer; leave it.
+- `OriginValidationMiddleware.swift`, `HTTPTransport.swift`, origin validation is a separate layer; leave it.
 - The launchd plist / Makefile.
-- Adding authentication — explicitly deferred (see `plans/README.md` rejected/deferred list).
+- Adding authentication, explicitly deferred (see `plans/README.md` rejected/deferred list).
 
 ## Git workflow
 
@@ -127,7 +127,7 @@ In `main.swift`:
     }
 ```
 
-- Change the existing warning condition from the inline host comparison to `if !HostBindingPolicy.isLoopback(host)` (the warning now only fires when the user has opted in — keep it, it's still useful).
+- Change the existing warning condition from the inline host comparison to `if !HostBindingPolicy.isLoopback(host)` (the warning now only fires when the user has opted in, keep it, it's still useful).
 
 **Verify**: `cd swift && swift build` → exit 0, then both manual checks from the commands table behave as stated.
 
@@ -135,9 +135,9 @@ In `main.swift`:
 
 `swift/Tests/iMessageMaxTests/HostBindingPolicyTests.swift` (plain XCTest, no fixtures needed):
 
-1. `testLoopbackHostsAllowedWithoutFlag` — `127.0.0.1`, `::1`, `localhost`, `LOCALHOST` → nil error.
-2. `testExternalHostRejectedWithoutFlag` — `0.0.0.0`, `192.168.1.10`, `example.com` → non-nil error mentioning `--allow-external-bind`.
-3. `testExternalHostAllowedWithFlag` — same hosts with `allowExternalBind: true` → nil.
+1. `testLoopbackHostsAllowedWithoutFlag`, `127.0.0.1`, `::1`, `localhost`, `LOCALHOST` → nil error.
+2. `testExternalHostRejectedWithoutFlag`, `0.0.0.0`, `192.168.1.10`, `example.com` → non-nil error mentioning `--allow-external-bind`.
+3. `testExternalHostAllowedWithFlag`, same hosts with `allowExternalBind: true` → nil.
 
 **Verify**: `cd swift && swift test --filter HostBindingPolicyTests` → 3 tests pass; `cd swift && swift test` → all pass.
 
@@ -149,7 +149,7 @@ In `main.swift`:
 
 ## Test plan
 
-Covered in Step 3, plus the two manual checks in the commands table (run them — startup behavior is the actual deliverable). Note the manual run does not need Full Disk Access to reach argument validation; validation fails before any database access.
+Covered in Step 3, plus the two manual checks in the commands table (run them, startup behavior is the actual deliverable). Note the manual run does not need Full Disk Access to reach argument validation; validation fails before any database access.
 
 ## Done criteria
 
@@ -164,9 +164,9 @@ Covered in Step 3, plus the two manual checks in the commands table (run them �
 
 Stop and report back (do not improvise) if:
 
-- `validate()` is never called in this AsyncParsableCommand setup (verify with the manual check — if the server starts despite the validation, the ArgumentParser version may handle async commands differently; report rather than hacking around it).
+- `validate()` is never called in this AsyncParsableCommand setup (verify with the manual check, if the server starts despite the validation, the ArgumentParser version may handle async commands differently; report rather than hacking around it).
 - You find an existing consumer that legitimately binds non-loopback (search the repo and `~/Library/LaunchAgents` plist template in `mcpb/` or Makefile for `--host`); flag it before changing behavior.
-- The warning/validation needs to consider IPv4-mapped or CIDR forms — out of scope; exact-string loopback matching is the accepted design.
+- The warning/validation needs to consider IPv4-mapped or CIDR forms, out of scope; exact-string loopback matching is the accepted design.
 
 ## Maintenance notes
 

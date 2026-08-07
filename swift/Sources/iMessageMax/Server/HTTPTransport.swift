@@ -159,8 +159,8 @@ public actor HTTPTransport: Transport {
     /// Blocks until the server terminates, propagating any errors.
     ///
     /// Call this from main.swift after `connect()`. If the Hummingbird server
-    /// crashes or encounters an error, it propagates here — causing the process
-    /// to exit so launchd can restart it.
+    /// crashes or encounters an error, it propagates here, so the process
+    /// exits and launchd can restart it.
     public func waitForTermination() async throws {
         guard let task = serverTask else { return }
         try await task.value
@@ -599,7 +599,7 @@ public actor HTTPTransport: Transport {
         let jsonRpcId = Self.parseJsonRpcId(from: json)
 
         // Check if this matches a pending request. Route through the helper so
-        // the timeout work item is cancelled — removing the entry directly left
+        // the timeout work item is cancelled. Removing the entry directly left
         // an armed 300s timer plus a wakeup Task behind for every served
         // request, which is exactly the stray-wakeup churn this runtime is
         // documented to be sensitive to.
@@ -861,7 +861,7 @@ public actor HTTPTransport: Transport {
     /// Total: never traps, whatever the client sends.
     ///
     /// The previous form forced a Double id through a non-failable Int
-    /// conversion, which trapped on any id outside Int's range —
+    /// conversion, which trapped on any id outside Int's range.
     /// `{"id": 1e300}` on an unauthenticated POST aborted the whole
     /// launchd service.
     ///
@@ -870,7 +870,7 @@ public actor HTTPTransport: Transport {
     /// NSNumbers, so Int must be tested first to keep `1` in the `i:` space.
     nonisolated static func parseJsonRpcId(from json: [String: Any]) -> String {
         guard let id = json["id"] else {
-            return "u:\(UUID().uuidString)"  // No id — generate a unique key
+            return "u:\(UUID().uuidString)"  // No id, so generate a unique key
         }
         if let stringId = id as? String {
             return "s:\(stringId)"
@@ -895,7 +895,7 @@ public actor HTTPTransport: Transport {
     {
         // Serialize rather than interpolate. The old form escaped only `"`,
         // so a client-controlled message containing a backslash or a control
-        // character produced malformed — and injectable — JSON.
+        // character produced malformed, injectable JSON.
         let object: [String: Any] = [
             "jsonrpc": "2.0",
             "error": ["code": code, "message": message],

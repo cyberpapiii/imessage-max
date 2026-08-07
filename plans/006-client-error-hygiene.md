@@ -3,8 +3,8 @@
 > **Executor instructions**: Follow this plan step by step. Run every
 > verification command and confirm the expected result before moving to the
 > next step. If anything in the "STOP conditions" section occurs, stop and
-> report — do not improvise. When done, update the status row for this plan
-> in `plans/README.md` — unless a reviewer dispatched you and told you they
+> report, do not improvise. When done, update the status row for this plan
+> in `plans/README.md`, unless a reviewer dispatched you and told you they
 > maintain the index.
 >
 > **Drift check (run first)**: `git diff --stat 57a2ff3..HEAD -- swift/Sources/iMessageMax/Tools/ swift/Sources/iMessageMax/Server/HTTPTransport.swift swift/Tests/iMessageMaxTests/`
@@ -23,11 +23,11 @@
 
 ## Why this matters
 
-Tool and HTTP error responses interpolate filesystem paths and raw `error.localizedDescription` into client-facing messages. For a localhost-only server this is low severity, but these strings cross a trust boundary (the MCP client, and — if the server is ever network-exposed — arbitrary clients), and they cost nothing to clean up. Errors to clients should be stable, generic identifiers; detail belongs in the server's stderr log. The `diagnose` tool remains the sanctioned place to surface paths and setup detail — that is its job.
+Tool and HTTP error responses interpolate filesystem paths and raw `error.localizedDescription` into client-facing messages. For a localhost-only server this is low severity, but these strings cross a trust boundary (the MCP client, and, if the server is ever network-exposed, arbitrary clients), and they cost nothing to clean up. Errors to clients should be stable, generic identifiers; detail belongs in the server's stderr log. The `diagnose` tool remains the sanctioned place to surface paths and setup detail, that is its job.
 
 ## Current state
 
-- `swift/Sources/iMessageMax/Tools/Search.swift:426-439` — the pattern to fix:
+- `swift/Sources/iMessageMax/Tools/Search.swift:426-439`, the pattern to fix:
 
 ```swift
         } catch let dbError as DatabaseError {
@@ -46,9 +46,9 @@ Tool and HTTP error responses interpolate filesystem paths and raw `error.locali
         }
 ```
 
-- `swift/Sources/iMessageMax/Tools/GetAttachment.swift:255-262` — `"Database not found at \(path)"` via `.error(type:message:details:)`.
-- `swift/Sources/iMessageMax/Tools/ListAttachments.swift:186-196` — same two `\(path)` interpolations.
-- `swift/Sources/iMessageMax/Server/HTTPTransport.swift:295-300` — HTTP-level leak:
+- `swift/Sources/iMessageMax/Tools/GetAttachment.swift:255-262`, `"Database not found at \(path)"` via `.error(type:message:details:)`.
+- `swift/Sources/iMessageMax/Tools/ListAttachments.swift:186-196`, same two `\(path)` interpolations.
+- `swift/Sources/iMessageMax/Server/HTTPTransport.swift:295-300`, HTTP-level leak:
 
 ```swift
             } catch {
@@ -62,8 +62,8 @@ Tool and HTTP error responses interpolate filesystem paths and raw `error.locali
   (`errorResponse(status:message:code:)` is defined at `HTTPTransport.swift:712`.)
 - There may be more sites: find them all with
   `grep -rn 'at \\(path)\|for \\(path)\|localizedDescription' swift/Sources/iMessageMax/Tools/ swift/Sources/iMessageMax/Server/`
-- Logging convention for server-side detail: write to stderr like `main.swift` does — `FileHandle.standardError.write("[iMessage Max] ...".data(using: .utf8)!)`.
-- `swift/Sources/iMessageMax/Tools/Diagnose.swift` — intentionally reports paths/permissions. OUT of scope.
+- Logging convention for server-side detail: write to stderr like `main.swift` does, `FileHandle.standardError.write("[iMessage Max] ...".data(using: .utf8)!)`.
+- `swift/Sources/iMessageMax/Tools/Diagnose.swift`, intentionally reports paths/permissions. OUT of scope.
 - Tests that may assert on error messages: `ResponseContractTests.swift`, `SearchToolTests.swift`, `OverviewResponseTests.swift`, `PlaceholderTests.swift`. Check before and after.
 
 ## Commands you will need
@@ -79,14 +79,14 @@ Tool and HTTP error responses interpolate filesystem paths and raw `error.locali
 **In scope**:
 - `swift/Sources/iMessageMax/Tools/Search.swift`, `GetAttachment.swift`, `ListAttachments.swift`, plus any additional Tools/ sites the grep sweep finds
 - `swift/Sources/iMessageMax/Server/HTTPTransport.swift` (the one catch block at ~295)
-- Existing test files — ONLY assertions that pin the old leaking messages
+- Existing test files. ONLY assertions that pin the old leaking messages
 - `plans/README.md` (status row)
 
 **Out of scope** (do NOT touch):
-- `Diagnose.swift` — paths there are the product.
-- Error `type`/`error` identifier strings (`"database_not_found"`, `"permission_denied"`, ...) — clients may dispatch on them; only the human-readable `message` text changes.
-- `DatabaseError` itself — it keeps carrying paths internally; redaction happens at the response edge.
-- stderr logging content — server-local, allowed to be detailed.
+- `Diagnose.swift`, paths there are the product.
+- Error `type`/`error` identifier strings (`"database_not_found"`, `"permission_denied"`, ...), clients may dispatch on them; only the human-readable `message` text changes.
+- `DatabaseError` itself, it keeps carrying paths internally; redaction happens at the response edge.
+- stderr logging content, server-local, allowed to be detailed.
 
 ## Git workflow
 
@@ -112,7 +112,7 @@ enum ClientErrorMessages {
 
 ### Step 2: Replace tool-level interpolations
 
-At every site found by the sweep grep, replace `"Database not found at \(path)"` → `ClientErrorMessages.databaseNotFound` and `"Permission denied for \(path)"` → `ClientErrorMessages.permissionDenied`. Leave `queryFailed`/`invalidData` messages as is (they carry SQLite error text, not paths — acceptable). Where a generic `catch` returns `error.localizedDescription` inside a *tool* (e.g. `Search.swift:438`), keep it — MCP tool errors going to the agent are part of the contract and aid agent recovery; this plan only removes *path* interpolation at the tool level.
+At every site found by the sweep grep, replace `"Database not found at \(path)"` → `ClientErrorMessages.databaseNotFound` and `"Permission denied for \(path)"` → `ClientErrorMessages.permissionDenied`. Leave `queryFailed`/`invalidData` messages as is (they carry SQLite error text, not paths, acceptable). Where a generic `catch` returns `error.localizedDescription` inside a *tool* (e.g. `Search.swift:438`), keep it. MCP tool errors going to the agent are part of the contract and aid agent recovery; this plan only removes *path* interpolation at the tool level.
 
 **Verify**: `grep -rn 'at \\(path)\|for \\(path)' swift/Sources/iMessageMax/Tools/` → no matches. `cd swift && swift build` → exit 0.
 
@@ -132,19 +132,19 @@ In `HTTPTransport.swift` (~line 295), log the detail to stderr and return the ge
             }
 ```
 
-Check whether `HTTPTransport.swift` already imports Foundation (it will) and whether other `errorResponse(...)` call sites in the same file interpolate error internals — apply the same treatment ONLY where the interpolated value is an internal Swift error; validation messages like "Duplicate in-flight JSON-RPC request id" are intentional protocol feedback, keep them.
+Check whether `HTTPTransport.swift` already imports Foundation (it will) and whether other `errorResponse(...)` call sites in the same file interpolate error internals, apply the same treatment ONLY where the interpolated value is an internal Swift error; validation messages like "Duplicate in-flight JSON-RPC request id" are intentional protocol feedback, keep them.
 
 **Verify**: `cd swift && swift build` → exit 0.
 
 ### Step 4: Reconcile tests
 
-Run the full suite. Any failure should be an assertion pinning an old message string — update those assertions to the new constants. If a failure is anything other than a message-string assertion, STOP.
+Run the full suite. Any failure should be an assertion pinning an old message string, update those assertions to the new constants. If a failure is anything other than a message-string assertion, STOP.
 
 **Verify**: `cd swift && swift test` → all pass.
 
 ## Test plan
 
-No new test files. The contract is enforced by the done-criteria greps plus existing contract tests (updated where they pinned old strings). If `HTTPTransportTests.swift` has a reachable error-path test, extend it with one assertion that the 500 body does not contain `"Failed to process request"`; if no such test exists, skip — do not build new HTTP test scaffolding for this.
+No new test files. The contract is enforced by the done-criteria greps plus existing contract tests (updated where they pinned old strings). If `HTTPTransportTests.swift` has a reachable error-path test, extend it with one assertion that the 500 body does not contain `"Failed to process request"`; if no such test exists, skip, do not build new HTTP test scaffolding for this.
 
 ## Done criteria
 
@@ -160,7 +160,7 @@ No new test files. The contract is enforced by the done-criteria greps plus exis
 Stop and report back (do not improvise) if:
 
 - A test failure in Step 4 is not a message-string assertion.
-- You find client-facing messages embedding *message content or contact data* (worse than paths) — report it as a new finding rather than silently expanding scope.
+- You find client-facing messages embedding *message content or contact data* (worse than paths), report it as a new finding rather than silently expanding scope.
 - The sweep grep turns up more than ~10 sites (the pattern is more widespread than audited; the plan's scope estimate is wrong).
 
 ## Maintenance notes

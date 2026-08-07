@@ -17,11 +17,11 @@ final class UnreadCharacterizationTests: XCTestCase {
     //   msg 12 from Alice, unread "first unread from alice"
     //   msg 13 from Alice, unread "second unread from alice" ← newest unread message
     //   msg 14 from Alice, unread reaction (associated_message_type = 2000),
-    //          NEWER than msg 13 — must be ignored everywhere
+    //          NEWER than msg 13, must be ignored everywhere
     // Chat 2 (DM): Bob only
     //   msg 20 from Bob, unread "bob unread"
     // Chat 3 (DM): Alice only
-    //   msg 30 from Alice, READ — chat must be excluded entirely
+    //   msg 30 from Alice, READ, so the chat must be excluded entirely
 
     private func makeUnreadFixture() throws -> ToolTestDatabase {
         let fixture = try ToolTestDatabase(name: "unread-characterization")
@@ -86,7 +86,7 @@ final class UnreadCharacterizationTests: XCTestCase {
         )
         try fixture.joinChatMessage(chatId: 1, messageId: 13)
 
-        // Unread reaction from Alice — newer than every unread message but
+        // Unread reaction from Alice. Newer than every unread message, but it
         // must never be selected or counted (associated_message_type != 0).
         try fixture.insertMessage(
             rowId: 14,
@@ -113,7 +113,7 @@ final class UnreadCharacterizationTests: XCTestCase {
         )
         try fixture.joinChatMessage(chatId: 2, messageId: 20)
 
-        // Chat 3: only a read message — chat excluded from summary
+        // Chat 3: only a read message, so the chat is excluded from the summary
         try fixture.insertMessage(
             rowId: 30,
             guid: "msg30",
@@ -144,7 +144,7 @@ final class UnreadCharacterizationTests: XCTestCase {
             response.chats.first(where: { $0.chat.id == "chat1" }),
             "Expected chat1 (Alice DM) in unread summary"
         )
-        // Participants resolved from the seeded contact cache — names, not handles.
+        // Participants resolved from the seeded contact cache: names, not handles.
         XCTAssertEqual(aliceChat.chat.name, "Alice Smith", "Unnamed DM takes the resolved participant name")
         XCTAssertEqual(aliceChat.chat.participantsPreview, ["Alice Smith"])
         XCTAssertFalse(

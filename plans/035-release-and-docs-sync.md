@@ -3,8 +3,8 @@
 > **Executor instructions**: Follow this plan step by step. Run every
 > verification command and confirm the expected result before moving to the
 > next step. If anything in the "STOP conditions" section occurs, stop and
-> report — do not improvise. When done, update the status row for this plan
-> in `plans/README.md` — unless a reviewer dispatched you and told you they
+> report, do not improvise. When done, update the status row for this plan
+> in `plans/README.md`, unless a reviewer dispatched you and told you they
 > maintain the index.
 >
 > **Drift check (run first)**: `git diff --stat e3d14da..HEAD -- swift/Formula README.md swift/README.md AGENTS.md swift/Package.swift`
@@ -18,7 +18,7 @@
 - **Effort**: S
 - **Risk**: LOW (docs + metadata; one dependency floor bump)
 - **Depends on**: none. **Ordering note**: plan 032 deletes
-  `AudioProcessor.swift`/`VideoProcessor.swift` and three `Models/` files —
+  `AudioProcessor.swift`/`VideoProcessor.swift` and three `Models/` files,
   if 032 has landed, the architecture tree you write in Step 4 must reflect
   that; if not, reflect the current tree and expect 032 to touch it again.
 - **Category**: docs + release
@@ -29,11 +29,11 @@
 The repo's outward-facing claims disagree with its code in four places. Each
 is small; together they mean a new user following the docs hits a wall:
 
-1. **The Homebrew formula installs v1.0.2** while the code is v1.3.0 — three
+1. **The Homebrew formula installs v1.0.2** while the code is v1.3.0, three
    minor versions (including the entire dual-era MCP lane and the
    verified-send contract) behind what the docs describe.
 2. **Both READMEs claim macOS 13 (Ventura)** but `Package.swift` declares
-   `.macOS(.v14)` — the binary won't run on Ventura, and the formula's
+   `.macOS(.v14)`, the binary won't run on Ventura, and the formula's
    `depends_on macos: :ventura` lets Homebrew try anyway.
 3. **AGENTS.md documents a tool-content API that doesn't exist in this
    codebase** (`.text(...)` / `.image(data:..., metadata: nil)`); the actual
@@ -48,7 +48,7 @@ is small; together they mean a new user following the docs hits a wall:
 `static let current = "1.3.0"`. Platform truth: `swift/Package.swift:6` →
 `platforms: [.macOS(.v14)]`.
 
-**(1) Formula** — `swift/Formula/imessage-max.rb`:
+**(1) Formula**, `swift/Formula/imessage-max.rb`:
 
 ```ruby
   url "https://github.com/cyberpapiii/imessage-max/releases/download/v1.0.2/imessage-max-macos.tar.gz"
@@ -57,10 +57,10 @@ is small; together they mean a new user following the docs hits a wall:
   depends_on macos: :ventura
 ```
 
-**(2) macOS floor** — `README.md:404`: `- macOS 13+ (Ventura or later)`;
+**(2) macOS floor**, `README.md:404`: `- macOS 13+ (Ventura or later)`;
 `swift/README.md:44`: `- macOS 13+ (Ventura)`.
 
-**(3) Content API** — `AGENTS.md:254-257` shows:
+**(3) Content API**, `AGENTS.md:254-257` shows:
 
 ```swift
 return [
@@ -84,17 +84,17 @@ exemplar (`swift/Sources/iMessageMax/Tools/GetAttachment.swift:73-76`):
 `grep -rn "\.plainText\|\.plainImage" swift/Sources` → dozens of hits;
 `grep -rn "\.text(\|\.image(" swift/Sources/iMessageMax/Tools` → none.
 
-**(4) Architecture tree** — `swift/README.md` "### Core Components" block
+**(4) Architecture tree**, `swift/README.md` "### Core Components" block
 lists e.g. `Utilities/` with only 3 files (AppleTime, PhoneUtils, TimeUtils)
 while the live directory has ~20; omits `Models/`, `SendVerifier.swift`,
 `SendResolution.swift`, `GetChatDetails.swift`, `ServerExtensions.swift`,
 `Version.swift`, and more; and still lists `VideoProcessor.swift` /
 `AudioProcessor.swift` (dead code that plan 032 deletes).
 
-**(5) Dependency floor** — `swift/Package.swift:13` pins
+**(5) Dependency floor**, `swift/Package.swift:13` pins
 `hummingbird from: "2.0.0"`; `Package.resolved` has 2.19.0; upstream latest
 is 2.26.x. (The MCP swift-sdk pin `from: "0.12.0"` is already at the latest
-release line — leave it.)
+release line, leave it.)
 
 ## Commands you will need
 
@@ -116,8 +116,8 @@ release line — leave it.)
 - `plans/README.md` (status row only)
 
 **Out of scope** (do NOT touch, even though they look related):
-- `Version.swift` — do not bump the version; this plan syncs docs TO it.
-- Cutting an actual GitHub release / building the tarball — see Step 1's
+- `Version.swift`, do not bump the version; this plan syncs docs TO it.
+- Cutting an actual GitHub release / building the tarball, see Step 1's
   honest-formula rule; publishing is the operator's call.
 - The MCP swift-sdk dependency (already current; migration is a separate
   known-deferred item).
@@ -137,7 +137,7 @@ release line — leave it.)
 Update `swift/Formula/imessage-max.rb`:
 - `url` → `.../releases/download/v1.3.0/imessage-max-macos.tar.gz`
 - `depends_on macos: :sonoma` (matches `.macOS(.v14)`)
-- `sha256` — **you cannot invent this.** If a v1.3.0 release asset exists
+- `sha256`, **you cannot invent this.** If a v1.3.0 release asset exists
   (`gh release view v1.3.0 --json assets` or check the GitHub releases
   page), download it and compute `shasum -a 256`. If NO v1.3.0 asset exists,
   set the sha256 line to a clearly-invalid placeholder with a TODO comment:
@@ -158,7 +158,7 @@ style` if available.
 
 - `README.md:404`: `- macOS 13+ (Ventura or later)` → `- macOS 14+ (Sonoma or later)`
 - `swift/README.md:44`: `- macOS 13+ (Ventura)` → `- macOS 14+ (Sonoma)`
-- Sweep for stragglers: `grep -rn "macOS 13\|Ventura" README.md swift/README.md AGENTS.md docs/` —
+- Sweep for stragglers: `grep -rn "macOS 13\|Ventura" README.md swift/README.md AGENTS.md docs/`,
   fix any that state the *requirement* (leave historical/changelog mentions
   alone).
 
@@ -180,7 +180,7 @@ return [
 Add one sentence noting these are repo helpers defined in
 `Server/ServerExtensions.swift` (annotations-free wrappers over the SDK's
 content cases). Keep the surrounding prose about avoiding base64-in-JSON
-token bloat — it's still accurate.
+token bloat, it's still accurate.
 
 **Verify**: `grep -n "\.text(\|metadata: nil" AGENTS.md` → no matches in the
 Image Handling section.
@@ -200,7 +200,7 @@ Regenerate the "### Core Components" tree from the live filesystem
   say so: e.g. "12 tool files + internals").
 
 **Verify**: every path in the tree exists
-(`for p in <paths>; do test -f "$p" || echo MISSING $p; done` — or eyeball
+(`for p in <paths>; do test -f "$p" || echo MISSING $p; done`, or eyeball
 against `find` output); no path missing from the tree.
 
 ### Step 5: Hummingbird floor
@@ -212,12 +212,12 @@ hummingbird` resolves higher). Then run
 
 **Verify**: `cd swift && swift build && swift test` → exit 0, 0 failures,
 174+ tests (count unchanged from baseline). If the newer Hummingbird breaks
-the build or any test, STOP — pin back to the last green version, report
+the build or any test, STOP, pin back to the last green version, report
 the breakage.
 
 ## Test plan
 
-No new tests — the full suite run in Step 5 is the gate (this plan is docs +
+No new tests, the full suite run in Step 5 is the gate (this plan is docs +
 metadata + one dependency floor).
 
 ## Done criteria
@@ -238,12 +238,12 @@ Machine-checkable. ALL must hold:
 
 Stop and report back (do not improvise) if:
 
-- Hummingbird ≥2.19 introduces a compile error or test failure — report
+- Hummingbird ≥2.19 introduces a compile error or test failure, report
   version + error; do not patch server code to chase the dependency (that's
   a separate migration decision).
-- You are tempted to bump `Version.swift` to "make things consistent" — the
+- You are tempted to bump `Version.swift` to "make things consistent", the
   operator owns version bumps and release cuts; report instead.
-- The GitHub releases page shows assets newer than v1.3.0 — the repo moved;
+- The GitHub releases page shows assets newer than v1.3.0, the repo moved;
   sync the formula to the newest published release and note it.
 
 ## Maintenance notes
@@ -251,7 +251,7 @@ Stop and report back (do not improvise) if:
 - Recurring failure mode this plan fixes: the formula/README/AGENTS drift
   because releases update `Version.swift` but nothing forces the metadata to
   follow. If this recurs, the durable fix is a release checklist (or CI
-  check) that greps the formula and READMEs for the current version — a
+  check) that greps the formula and READMEs for the current version, a
   candidate future plan, deliberately not included here.
 - The architecture tree will rot again; regenerating it from `find` (Step
   4's method) takes two minutes and should be part of any release pass.

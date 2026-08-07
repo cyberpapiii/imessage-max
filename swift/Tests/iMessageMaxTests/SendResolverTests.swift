@@ -94,7 +94,7 @@ final class SendResolverTests: XCTestCase {
             XCTAssertEqual(candidates[1].handle, "+15104615406")
             XCTAssertEqual(candidates[1].lastContact, "never")
             // Deliberately not asserting candidates[0].lastContact's exact
-            // string — it's a relative-time format that drifts with the clock.
+            // string. It's a relative-time format that drifts with the clock.
         }
     }
 
@@ -110,7 +110,7 @@ final class SendResolverTests: XCTestCase {
             return XCTFail("Expected failure for unmatched name")
         }
         // Which of the two appears depends on the machine's real Contacts
-        // authorization — must pass on both authorized dev machines and
+        // authorization. It must pass on both authorized dev machines and
         // unauthorized CI, so accept either.
         XCTAssertTrue(
             message.contains("No contact found matching 'Zelda'")
