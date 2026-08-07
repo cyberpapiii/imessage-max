@@ -197,6 +197,19 @@ If your client uses a different config format, point it at the same binary path.
 
 After saving the config, reconnect or restart your MCP client. The server should appear in the available tools, and you can verify the connection with `diagnose`.
 
+### Rob's Mac: Stable Local URL
+
+On Rob's Mac, the launchd service still listens on `127.0.0.1:8080`, but
+Portless also exposes it at:
+
+```text
+https://imessage-max.localhost
+```
+
+Use the Portless name in local notes, browser checks, and agent-facing context.
+Keep MCP client configs pointed at the supported transport expected by that
+client; do not change the server port just to make a URL look nicer.
+
 ## Tools
 
 ### find_chat
