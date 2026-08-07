@@ -132,4 +132,110 @@ final class AttachmentPathContainmentTests: XCTestCase {
             )
         }
     }
+
+    // MARK: - End-to-end: GetMessages does not probe out-of-root attachment paths
+
+    func testGetMessagesDoesNotProbeOutOfRootPaths() async throws {
+        // Create an allowed root and a separate "outside" directory.
+        let base = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ContainmentGetMessages-\(UUID().uuidString)")
+        let allowedRoot = base.appendingPathComponent("Messages")
+        let outsideDir = base.appendingPathComponent("Outside")
+        try FileManager.default.createDirectory(at: allowedRoot, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: outsideDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: base) }
+
+        // A real file outside the allowed root. Junk bytes are enough: if getMetadata
+        // were ever reached it would fail to decode anyway, so the assertion below is on
+        // the response shape (never probed), not on whether decoding succeeds.
+        let outsideFile = outsideDir.appendingPathComponent("secret.jpg")
+        try Data("not a real image".utf8).write(to: outsideFile)
+
+        let fixtureDB = try ToolTestDatabase(name: "get-messages-containment-e2e")
+        try fixtureDB.insertHandle(rowId: 1, handle: "+15550000001")
+        try fixtureDB.insertChat(rowId: 10, guid: "chat-containment-guid", displayName: "Containment DM")
+        try fixtureDB.joinChatHandle(chatId: 10, handleId: 1)
+        try fixtureDB.insertMessage(rowId: 100, guid: "gm-containment-100", text: "look at this", date: 1_000_000_000_000, isFromMe: false, handleId: 1)
+        try fixtureDB.joinChatMessage(chatId: 10, messageId: 100)
+        try fixtureDB.insertAttachment(
+            rowId: 99,
+            filename: outsideFile.path,
+            mimeType: "image/jpeg",
+            uti: "public.jpeg"
+        )
+        try fixtureDB.joinMessageAttachment(messageId: 100, attachmentId: 99)
+
+        let tool = GetMessagesTool(
+            db: fixtureDB.database(),
+            resolver: makeSeededResolver(),
+            allowedRoots: [allowedRoot.path]
+        )
+
+        let contents = try await tool.execute(args: ["chat_id": .string("chat10")])
+        let rawJSON = try decodeJSONString(from: contents)
+        let response = try decodeJSONDictionary(from: rawJSON)
+
+        let messages = try decodeJSONArray(try XCTUnwrap(response["messages"]))
+        let target = try XCTUnwrap(messages.first(where: { $0["id"] as? String == "msg_100" }))
+
+        // Never enriched into media (which would mean the file was opened/probed).
+        let media = target["media"] as? [[String: Any]]
+        XCTAssertTrue(media == nil || media!.isEmpty, "Out-of-root attachment must not appear under media")
+
+        // Falls through to the plain summary, which only carries the last path component.
+        let attachments = try decodeJSONArray(try XCTUnwrap(target["attachments"]))
+        XCTAssertEqual(attachments.count, 1)
+        XCTAssertEqual(attachments.first?["filename"] as? String, "secret.jpg")
+
+        // The full outside path must never be echoed anywhere in the encoded response.
+        XCTAssertFalse(
+            rawJSON.contains(outsideFile.path),
+            "Encoded response must not contain the attacker-supplied file path"
+        )
+    }
+
+    func testGetMessagesEnrichesInRootImage() async throws {
+        let allowedRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ContainmentGetMessagesInRoot-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: allowedRoot, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: allowedRoot) }
+
+        let imageURL = try makeFixtureImage(name: "in-root.jpg", width: 40, height: 20)
+        let inRootURL = allowedRoot.appendingPathComponent(imageURL.lastPathComponent)
+        try FileManager.default.moveItem(at: imageURL, to: inRootURL)
+        defer { try? FileManager.default.removeItem(at: inRootURL) }
+
+        let fixtureDB = try ToolTestDatabase(name: "get-messages-containment-inroot")
+        try fixtureDB.insertHandle(rowId: 1, handle: "+15550000001")
+        try fixtureDB.insertChat(rowId: 11, guid: "chat-inroot-guid", displayName: "InRoot DM")
+        try fixtureDB.joinChatHandle(chatId: 11, handleId: 1)
+        try fixtureDB.insertMessage(rowId: 101, guid: "gm-inroot-101", text: "here", date: 1_000_000_000_000, isFromMe: false, handleId: 1)
+        try fixtureDB.joinChatMessage(chatId: 11, messageId: 101)
+        try fixtureDB.insertAttachment(
+            rowId: 98,
+            filename: inRootURL.path,
+            mimeType: "image/jpeg",
+            uti: "public.jpeg"
+        )
+        try fixtureDB.joinMessageAttachment(messageId: 101, attachmentId: 98)
+
+        let tool = GetMessagesTool(
+            db: fixtureDB.database(),
+            resolver: makeSeededResolver(),
+            allowedRoots: [allowedRoot.path]
+        )
+
+        let contents = try await tool.execute(args: ["chat_id": .string("chat11")])
+        let response = try decodeJSONDictionary(from: contents)
+
+        let messages = try decodeJSONArray(try XCTUnwrap(response["messages"]))
+        let target = try XCTUnwrap(messages.first(where: { $0["id"] as? String == "msg_101" }))
+
+        let media = try decodeJSONArray(target["media"])
+        XCTAssertEqual(media.count, 1)
+        XCTAssertEqual(media.first?["type"] as? String, "image")
+        let dimensions = try XCTUnwrap(media.first?["dimensions"] as? [String: Any])
+        XCTAssertEqual(dimensions["width"] as? Int, 40)
+        XCTAssertEqual(dimensions["height"] as? Int, 20)
+    }
 }

@@ -361,6 +361,52 @@ final class ToolRegistryTests: XCTestCase {
 }
 
 final class GetAttachmentToolTests: XCTestCase {
+    func testThumbVariantHonorsMaxDimensionAndDoesNotUpscale() throws {
+        let processor = ImageProcessor()
+
+        let largeURL = try makeTestImage(width: 2000, height: 1000, filename: "thumb-large-\(UUID().uuidString).jpg")
+        defer { try? FileManager.default.removeItem(at: largeURL) }
+        let largeResult = try XCTUnwrap(processor.process(at: largeURL.path, variant: .thumb))
+        XCTAssertLessThanOrEqual(largeResult.width, 400)
+        XCTAssertLessThanOrEqual(largeResult.height, 400)
+        XCTAssertEqual(largeResult.width, 400)
+        XCTAssertEqual(largeResult.height, 200)
+
+        let smallURL = try makeTestImage(width: 100, height: 50, filename: "thumb-small-\(UUID().uuidString).jpg")
+        defer { try? FileManager.default.removeItem(at: smallURL) }
+        let smallResult = try XCTUnwrap(processor.process(at: smallURL.path, variant: .thumb))
+        XCTAssertEqual(smallResult.width, 100, "Images smaller than maxDimension must not be upscaled")
+        XCTAssertEqual(smallResult.height, 50, "Images smaller than maxDimension must not be upscaled")
+    }
+
+    func testFullVariantOversizeFallsBackToVisionSize() throws {
+        // Random-pixel noise resists JPEG compression, so a 6000x4000 source
+        // reliably encodes past the 8MB full-variant cap (confirmed empirically
+        // during test development: ~1MB at 3000x2000, well over the cap here).
+        let noisyURL = try makeNoiseImage(width: 6000, height: 4000, filename: "full-oversize-\(UUID().uuidString).jpg")
+        defer { try? FileManager.default.removeItem(at: noisyURL) }
+
+        let processor = ImageProcessor()
+        let result = try XCTUnwrap(processor.process(at: noisyURL.path, variant: .full))
+
+        // Falling back to .vision means neither dimension can exceed its 1568px cap —
+        // the unbounded full path would otherwise report the original 6000x4000.
+        XCTAssertLessThanOrEqual(result.width, 1568, "Oversized full variant should fall back to vision-sized dimensions")
+        XCTAssertLessThanOrEqual(result.height, 1568, "Oversized full variant should fall back to vision-sized dimensions")
+        XCTAssertLessThanOrEqual(result.data.count, 8 * 1024 * 1024, "Fallback output should be well under the full-variant cap")
+    }
+
+    func testProcessedOutputIsJPEG() throws {
+        let imageURL = try makeTestImage(width: 800, height: 600, filename: "jpeg-format-\(UUID().uuidString).jpg")
+        defer { try? FileManager.default.removeItem(at: imageURL) }
+
+        let processor = ImageProcessor()
+        let result = try XCTUnwrap(processor.process(at: imageURL.path, variant: .vision))
+        XCTAssertEqual(result.format, "jpeg")
+        XCTAssertGreaterThanOrEqual(result.data.count, 2)
+        XCTAssertEqual(Array(result.data.prefix(2)), [0xFF, 0xD8], "Output must start with the JPEG magic bytes")
+    }
+
     func testExecuteReturnsResizedImageForVisionVariant() async throws {
         let imageURL = try makeTestImage(width: 2000, height: 1000, filename: "attachment-large.jpg")
         defer { try? FileManager.default.removeItem(at: imageURL) }
@@ -496,6 +542,77 @@ final class SendResolverTests: XCTestCase {
         }
     }
 
+    func testResolveNameSingleMatchReturnsParticipant() async throws {
+        let dbPath = try makeResolverTestDatabase()
+        defer { try? FileManager.default.removeItem(atPath: dbPath) }
+
+        let contacts = ContactResolver(seedCache: ["+16317087185": "Nick Jones"])
+        let resolver = SendResolver(db: Database(path: dbPath), resolver: contacts)
+        let result = await resolver.resolve(chatId: nil, to: "Nick")
+
+        switch result {
+        case .failure(let message):
+            XCTFail("Unexpected failure: \(message)")
+        case .ambiguous:
+            XCTFail("Unexpected ambiguity")
+        case .success(let resolved):
+            guard case .participant(let handle, let chatId) = resolved.target else {
+                return XCTFail("Expected participant target")
+            }
+            XCTAssertEqual(handle, "+16317087185")
+            XCTAssertEqual(chatId, 11)
+            XCTAssertEqual(resolved.deliveredTo, ["Nick Jones"])
+        }
+    }
+
+    func testResolveNameMultiMatchReturnsAmbiguousSortedByRecency() async throws {
+        let dbPath = try makeResolverTestDatabase()
+        defer { try? FileManager.default.removeItem(atPath: dbPath) }
+
+        let contacts = ContactResolver(seedCache: [
+            "+16317087185": "Nick Jones",
+            "+15104615406": "Andrew Jones",
+        ])
+        let resolver = SendResolver(db: Database(path: dbPath), resolver: contacts)
+        let result = await resolver.resolve(chatId: nil, to: "Jones")
+
+        switch result {
+        case .failure(let message):
+            XCTFail("Unexpected failure: \(message)")
+        case .success:
+            XCTFail("Unexpected success")
+        case .ambiguous(let candidates):
+            XCTAssertEqual(candidates.count, 2)
+            // Handle 1 has a message row (date 1000); handle 2 has none.
+            // nil-lastContact sorts last per SendResolution.swift's comparator.
+            XCTAssertEqual(candidates[0].handle, "+16317087185")
+            XCTAssertEqual(candidates[1].handle, "+15104615406")
+            XCTAssertEqual(candidates[1].lastContact, "never")
+            // Deliberately not asserting candidates[0].lastContact's exact
+            // string — it's a relative-time format that drifts with the clock.
+        }
+    }
+
+    func testResolveNameNoMatchFails() async throws {
+        let dbPath = try makeResolverTestDatabase()
+        defer { try? FileManager.default.removeItem(atPath: dbPath) }
+
+        let contacts = ContactResolver(seedCache: ["+16317087185": "Nick Jones"])
+        let resolver = SendResolver(db: Database(path: dbPath), resolver: contacts)
+        let result = await resolver.resolve(chatId: nil, to: "Zelda")
+
+        guard case .failure(let message) = result else {
+            return XCTFail("Expected failure for unmatched name")
+        }
+        // Which of the two appears depends on the machine's real Contacts
+        // authorization — must pass on both authorized dev machines and
+        // unauthorized CI, so accept either.
+        XCTAssertTrue(
+            message.contains("No contact found matching 'Zelda'")
+                || message.contains("Cannot search by name without contacts access"),
+            "Unexpected failure message: \(message)"
+        )
+    }
 }
 
 private func makeResolverTestDatabase() throws -> String {
@@ -606,6 +723,52 @@ private func makeTestImage(width: Int, height: Int, filename: String) throws -> 
     }
 
     CGImageDestinationAddImage(destination, image, nil)
+    guard CGImageDestinationFinalize(destination) else {
+        throw NSError(domain: "TestImage", code: 3)
+    }
+
+    return url
+}
+
+/// High-entropy (random-pixel) image. Unlike a solid fill, noise resists JPEG
+/// compression, letting a modest pixel count still produce a multi-megabyte
+/// encoded file — used to exercise the full-variant size cap.
+private func makeNoiseImage(width: Int, height: Int, filename: String) throws -> URL {
+    let url = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
+    let colorSpace = CGColorSpaceCreateDeviceRGB()
+    let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue
+    let bytesPerRow = width * 4
+    var buffer = [UInt8](repeating: 0, count: bytesPerRow * height)
+    buffer.withUnsafeMutableBytes { ptr in
+        arc4random_buf(ptr.baseAddress, ptr.count)
+    }
+    // Force alpha fully opaque so premultiplication doesn't darken (and thus
+    // compress) the random color channels.
+    for row in 0..<height {
+        for col in 0..<width {
+            buffer[row * bytesPerRow + col * 4 + 3] = 255
+        }
+    }
+
+    guard let context = CGContext(
+        data: &buffer,
+        width: width,
+        height: height,
+        bitsPerComponent: 8,
+        bytesPerRow: bytesPerRow,
+        space: colorSpace,
+        bitmapInfo: bitmapInfo
+    ) else {
+        throw NSError(domain: "TestImage", code: 1)
+    }
+
+    guard let image = context.makeImage(),
+          let destination = CGImageDestinationCreateWithURL(url as CFURL, UTType.jpeg.identifier as CFString, 1, nil) else {
+        throw NSError(domain: "TestImage", code: 2)
+    }
+
+    let options: [CFString: Any] = [kCGImageDestinationLossyCompressionQuality: 1.0]
+    CGImageDestinationAddImage(destination, image, options as CFDictionary)
     guard CGImageDestinationFinalize(destination) else {
         throw NSError(domain: "TestImage", code: 3)
     }

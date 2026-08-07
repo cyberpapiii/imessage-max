@@ -34,14 +34,20 @@ struct ImageMetadata {
 }
 
 struct ImageProcessor {
-    private let context: CIContext
+    // CIContext is expensive to build and thread-safe to share; one per
+    // process, not one per call site.
+    private static let sharedContext = CIContext(options: [
+        .useSoftwareRenderer: false,
+        .highQualityDownsample: true
+    ])
+    private var context: CIContext { Self.sharedContext }
 
-    init() {
-        self.context = CIContext(options: [
-            .useSoftwareRenderer: false,
-            .highQualityDownsample: true
-        ])
-    }
+    /// Ceiling for inline "full" output. MCP content is base64ed into JSON;
+    /// beyond this the payload stops being useful to any client. Oversized
+    /// originals fall back to the vision-sized render.
+    private static let maxFullVariantBytes = 8 * 1024 * 1024
+
+    init() {}
 
     /// Get metadata without full processing (fast path)
     func getMetadata(at path: String) -> ImageMetadata? {
@@ -69,39 +75,45 @@ struct ImageProcessor {
     func process(at path: String, variant: ImageVariant) -> ImageResult? {
         let url = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
 
-        guard let ciImage = CIImage(contentsOf: url) else { return nil }
-
-        var image = ciImage
-        let originalSize = ciImage.extent.size
-
-        // Resize if needed
         if let maxDim = variant.maxDimension {
-            let scale = min(
-                CGFloat(maxDim) / originalSize.width,
-                CGFloat(maxDim) / originalSize.height,
-                1.0
-            )
-
-            if scale < 1.0 {
-                image = ciImage.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
-            }
+            guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+            let options: [CFString: Any] = [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: true,   // honors EXIF orientation
+                kCGImageSourceShouldCacheImmediately: true,
+                kCGImageSourceThumbnailMaxPixelSize: maxDim,
+            ]
+            guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+            let ciImage = CIImage(cgImage: cgImage)
+            guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
+                  let jpegData = context.jpegRepresentation(of: ciImage, colorSpace: colorSpace, options: [:])
+            else { return nil }
+            return ImageResult(data: jpegData, format: "jpeg", width: cgImage.width, height: cgImage.height)
         }
 
-        // Render to JPEG
+        // full variant: original CIImage decode path (unbounded dimensions).
+        guard let ciImage = CIImage(contentsOf: url) else { return nil }
+
+        let originalSize = ciImage.extent.size
+
         guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
               let jpegData = context.jpegRepresentation(
-                  of: image,
+                  of: ciImage,
                   colorSpace: colorSpace,
                   options: [:]
               )
         else { return nil }
 
-        let finalSize = image.extent.size
+        // Oversized originals fall back to the vision-sized render (which never recurses).
+        if jpegData.count > Self.maxFullVariantBytes {
+            return process(at: path, variant: .vision)
+        }
+
         return ImageResult(
             data: jpegData,
             format: "jpeg",
-            width: Int(finalSize.width),
-            height: Int(finalSize.height)
+            width: Int(originalSize.width),
+            height: Int(originalSize.height)
         )
     }
 }

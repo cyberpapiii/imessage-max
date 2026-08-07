@@ -84,7 +84,8 @@ final class GetMessagesToolTests: XCTestCase {
 
     func testReactionsAndAttachmentMediaSummariesAreIncluded() async throws {
         let fixture = try makeGetMessagesFixture()
-        let tool = GetMessagesTool(db: fixture.database(), resolver: makeSeededResolver())
+        // Fixture images live in the temp dir; the tool contains chat.db paths to allowed roots, so the test supplies its own root.
+        let tool = GetMessagesTool(db: fixture.database(), resolver: makeSeededResolver(), allowedRoots: [FileManager.default.temporaryDirectory.path])
 
         let response = try await decodeGetMessagesResponse(
             await tool.execute(args: [
