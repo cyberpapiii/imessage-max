@@ -279,6 +279,38 @@ final class ModernHTTPIntegrationTests: XCTestCase {
         }
     }
 
+    /// Regression: an `initialize` request whose BODY carries the modern
+    /// per-request `_meta` protocolVersion key must still be routed to the
+    /// legacy SDK handshake, not the modern dispatcher — `initialize` always
+    /// selects the legacy lane regardless of what `_meta` it carries.
+    func testInitializeWithModernMetaInBodyStaysLegacy() async throws {
+        let app = await makeModernTestTransport().makeApplicationForTesting()
+        try await app.test(TestingSetup.router) { client in
+            let initialize = try await client.executeRequest(
+                uri: "/",
+                method: HTTPRequest.Method.post,
+                headers: modernLegacyHeaders(),
+                body: modernByteBuffer(
+                    for: #"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"plug-shape","version":"1.0"},"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}"#
+                )
+            )
+
+            let bodyText = try modernDecodeJSONString(from: initialize.body)
+            XCTAssertEqual(initialize.head.status, .ok, bodyText)
+            XCTAssertNotNil(
+                initialize.head.headerFields[.mcpSessionId],
+                "initialize with modern _meta in the body must still create a legacy session"
+            )
+            let json = try modernDecodeJSON(from: initialize.body)
+            XCTAssertNil(json["error"], "initialize with modern _meta must not be a dispatcher error")
+            let result = try XCTUnwrap(json["result"] as? [String: Any])
+            XCTAssertEqual(
+                result["protocolVersion"] as? String, "2025-11-25",
+                "response must be the legacy SDK initialize result, not a modern-lane result"
+            )
+        }
+    }
+
     func testLegacySessionFlowStillWorksAlongsideModernRequests() async throws {
         let app = await makeModernTestTransport().makeApplicationForTesting()
         try await app.test(TestingSetup.router) { client in
