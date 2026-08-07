@@ -12,9 +12,18 @@ enum AsyncTimeout {
         }
     }
 
-    // MARK: - Private
+    // MARK: - Shared helpers
 
-    private static func dispatchInterval(for duration: Duration) -> DispatchTimeInterval {
+    /// Overflow-clamped `Duration` → `DispatchTimeInterval` conversion, shared by
+    /// every Dispatch-deadline site in the service (this file's `sleep` and
+    /// HTTPTransport's request-timeout timer).
+    ///
+    /// It saturates at `Int.max` nanoseconds rather than trapping: `Duration`
+    /// spans far more than the ~292 years `Int` nanoseconds can hold, so both the
+    /// whole-seconds multiply and the fractional add would otherwise overflow on
+    /// large or adversarial values. Keep the saturation if you change this — a
+    /// trap here would take down the launchd service.
+    static func dispatchInterval(for duration: Duration) -> DispatchTimeInterval {
         let components = duration.components
         let maxWholeSeconds = Int64(Int.max / 1_000_000_000)
         let clampedSeconds = max(0, min(components.seconds, maxWholeSeconds))

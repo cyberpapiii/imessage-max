@@ -678,7 +678,7 @@ public actor HTTPTransport: Transport {
             }
         }
         DispatchQueue.global(qos: .utility).asyncAfter(
-            deadline: .now() + Self.dispatchInterval(for: timeout),
+            deadline: .now() + AsyncTimeout.dispatchInterval(for: timeout),
             execute: timeoutWorkItem
         )
 
@@ -696,18 +696,6 @@ public actor HTTPTransport: Transport {
                 throwing: MCPError.serverError(code: -32000, message: "Request timeout")
             )
         }
-    }
-
-    private nonisolated static func dispatchInterval(for duration: Duration) -> DispatchTimeInterval {
-        let components = duration.components
-        let maxWholeSeconds = Int64(Int.max / 1_000_000_000)
-        let clampedSeconds = max(0, min(components.seconds, maxWholeSeconds))
-        let secondNanoseconds = Int(clampedSeconds) * 1_000_000_000
-        let fractionalNanoseconds = max(0, Int(components.attoseconds / 1_000_000_000))
-        let nanoseconds = secondNanoseconds > Int.max - fractionalNanoseconds
-            ? Int.max
-            : secondNanoseconds + fractionalNanoseconds
-        return .nanoseconds(nanoseconds)
     }
 
     /// Removes and returns a pending request

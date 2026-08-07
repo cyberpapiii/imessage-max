@@ -24,6 +24,7 @@ make install    # builds, signs, restarts launchd service, verifies health
 This is the standard workflow — always use `make install` after code changes. It handles everything including code signing (so Full Disk Access persists across rebuilds).
 
 Other Makefile targets:
+- `make test` — run the full test suite
 - `make status` — check process, version, signature, health
 - `make logs` — tail stderr log
 - `make clean` — remove debug artifacts and clear logs
@@ -45,6 +46,19 @@ swift build -c release
 # HTTP mode (for MCP Router, Inspector, etc.)
 ./.build/release/imessage-max --http --port 8080
 ```
+
+### Running the Test Suite
+
+```bash
+cd swift
+swift test                              # full suite
+swift test --filter HTTPTransportTests  # one test class
+make test                               # same as `swift test`
+```
+
+`swift test --filter` takes a substring of the test class or method name, so
+`--filter LaunchdSafetyTests` runs just that class and
+`--filter testNoTaskSleepInServiceSources` runs the single case.
 
 ### Test via MCP Protocol
 

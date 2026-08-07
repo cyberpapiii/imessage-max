@@ -31,8 +31,10 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-swift-build-
 
-      - name: Build
-        run: swift build
+      # Tests are compiled in this step on purpose, so a compile error is
+      # attributed to "Build" rather than "Run tests".
+      - name: Build (including tests)
+        run: swift build --build-tests
 
       - name: Run tests
-        run: swift test
+        run: swift test --skip-build --parallel
