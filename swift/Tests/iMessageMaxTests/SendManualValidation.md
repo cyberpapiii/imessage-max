@@ -123,8 +123,8 @@ Run these against a real iMessage account with Full Disk Access granted. The
 `partial_failure`, `sent`, `pending_confirmation`, `ambiguous`, or `failed`. The
 checks in this section cover the five statuses that report what actually happened
 after Messages.app accepted the send. `sent`, `pending_confirmation`, and
-`failed` are exercised by the Core and Failure Checks above; `ambiguous` has no
-manual check yet.
+`failed` are exercised by the Core and Failure Checks above, and `ambiguous` by
+check 15.
 
 ### 7. Confirmed delivery to a known 1:1 contact
 
@@ -251,6 +251,38 @@ Expected:
 - No accumulation across repeated sends. The directory count does not grow
 - The original source file is untouched (the staging copy is a copy, never a
   move)
+
+## Resolution Checks
+
+### 15. Ambiguous destination is refused before sending
+
+Nothing is sent in this check. The resolver refuses ahead of the send.
+
+Pick a first name that matches more than one entry in Contacts, where each
+entry has a different handle. `to` must be that name, not a phone number or
+email, because only name resolution can be ambiguous.
+
+Call:
+
+```json
+{
+  "to": "Alex",
+  "text": "iMessage Max manual validation: ambiguous destination"
+}
+```
+
+Expected:
+
+- `status` is `ambiguous`
+- `message` is "Multiple contacts match. Please specify using a phone number,
+  email, or chat_id."
+- `candidates` lists every match, each with `name`, `handle`, and
+  `last_contact`
+- Candidates are ordered by most recent contact first. Anyone you have never
+  messaged shows `last_contact` of `never` and sorts last
+- No `chat`, `chat_id`, or `delivered_to` in the response
+- Nothing appears in any Messages conversation. Confirm this on the device
+- Repeating the call with one candidate's `handle` as `to` sends normally
 
 ---
 
