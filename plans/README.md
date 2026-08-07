@@ -432,6 +432,51 @@ and "after" means after they are *merged*, not after they exist somewhere.
 re-run 032 against the merged tree. Everything the plan specifies stays
 valid — only its starting point was unavailable.
 
+## Release v1.4.0 (2026-08-07)
+
+Tagged at `da91fbc`, published at
+<https://github.com/cyberpapiii/imessage-max/releases/tag/v1.4.0>.
+
+**Why 1.4.0 and not 1.3.0.** `Version.swift` had said `1.3.0` since the
+dual-era MCP work, but no v1.3.0 tag or release ever existed — the latest
+published release was v1.2.1. Shipping 21 additional plans under a number the
+tree had already been carrying would have been misleading, so the version
+moved forward. Minor, not major: the new send statuses (`failed_delivery`,
+`partial_failure`) are additive and nothing in the tool surface broke.
+
+The version lives in **four** places, all bumped together — miss one and they
+drift silently:
+
+- `swift/Sources/iMessageMax/Server/Version.swift`
+- `mcpb/manifest.json`
+- `.codex-plugin/plugin.json`
+- `swift/Formula/imessage-max.rb` (the release-asset URL)
+
+`swift/Package.swift` also contains the string `1.3.0`; that is
+swift-argument-parser's minimum version and must not be touched.
+
+**The Formula sha256 is real now**, replacing the zero placeholder:
+`e2b123cbede36315a0762f15bee3a51ded6c3252ad9c2cb5361594acbb2cc333`. Verified
+by downloading the published asset and re-hashing it, not by trusting the
+local file.
+
+**The published asset is ad-hoc signed, deliberately.** The local binary is
+signed with the `iMessage Max Dev` identity, which is what makes Full Disk
+Access persist across rebuilds (plan 037) — but that identity is self-signed
+and exists only in this machine's keychain, so a downloaded binary carrying it
+would present an untrusted authority anywhere else. The release tarball is
+built from a separate copy re-signed with `codesign --sign -`. **Anyone
+rebuilding the asset must repeat that step**, or `brew install` ships a binary
+signed by an authority the installing machine has never heard of.
+
+**Deploy confirmed.** `make sign` used the persistent identity
+(`F9E455A3BB848F2623DA215A224E7F826B09C4BC`), the service restarted, and both
+lanes reported healthy at v1.4.0. Most importantly, `diagnose` came back with
+`perm_full_disk: supported` and `database.accessible: true` **without any GUI
+re-grant** — the first re-sign since 037 landed, and the empirical proof that
+the fix works. Every prior deploy revoked FDA and required re-granting it by
+hand.
+
 ## Deferred / rejected in the 2026-08-07 audit
 
 Recorded so future audits don't re-litigate:
