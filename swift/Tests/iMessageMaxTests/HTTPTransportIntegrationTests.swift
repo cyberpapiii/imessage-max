@@ -516,22 +516,23 @@ final class HTTPTransportIntegrationTests: XCTestCase {
         }
     }
 
-    // QUARANTINED — plan 038 STOP condition hit. Verified by running this
-    // method alone: `swift test --filter
-    // HTTPTransportIntegrationTests/testSSEGetOpensStreamForLiveSession`
-    // never returns. `handleGet` answers with a long-lived streaming body that
-    // pumps `channel.stream` (keep-alives included) until the SSE connection is
-    // unregistered, and `HummingbirdTesting`'s `executeRequest` collects the
-    // whole body before it hands back a response — so the head this test wants
-    // to assert on is never reachable. A `sample` of the stuck process shows
-    // every NIO thread idle in `kevent` and the main thread parked in
-    // `XCTWaiter`, i.e. a permanent suspension, not slowness.
+    // The GET here calls `handleGet` directly rather than going through
+    // `client.executeRequest`, unlike every other test in this file. That is
+    // deliberate — do not "fix" it back, it will hang the whole suite.
     //
-    // Left verbatim and disabled (the `disabled_` prefix keeps XCTest from
-    // collecting it) rather than deleted, weakened, or wrapped in a timeout:
-    // whether to assert the SSE happy path some other way or leave it to manual
-    // validation is a reviewer decision, per plan 038's STOP conditions.
-    func disabled_testSSEGetOpensStreamForLiveSession() async throws {
+    // `handleGet` answers with a long-lived streaming body that pumps the SSE
+    // channel (keep-alives included) until the connection is unregistered, and
+    // `RouterTestFramework` runs `try await response.body.write(responseWriter)`
+    // to completion *before* it constructs the `TestResponse`
+    // (RouterTestFramework.swift:122). So a body that never ends means
+    // `executeRequest` never returns, and the head asserted on below is
+    // unreachable through the client.
+    //
+    // The head, by contrast, is fully populated the moment `handleGet` returns,
+    // and nothing obliges us to invoke the body writer. Calling the handler
+    // directly gets the head without ever starting the stream. `handleGet`
+    // never reads `context`, so any context instance satisfies the generic.
+    func testSSEGetOpensStreamForLiveSession() async throws {
         let transport = HTTPTransport(
             host: "127.0.0.1",
             port: 0,
@@ -547,12 +548,24 @@ final class HTTPTransportIntegrationTests: XCTestCase {
             var headers: HTTPFields = [.accept: "text/event-stream"]
             headers[.mcpSessionId] = sessionId
 
-            let response = try await client.executeRequest(
-                uri: "/",
-                method: HTTPRequest.Method.get,
-                headers: headers,
-                body: nil
+            let request = Request(
+                head: .init(
+                    method: HTTPRequest.Method.get,
+                    scheme: "http",
+                    authority: "localhost",
+                    path: "/",
+                    headerFields: headers
+                ),
+                body: .init(buffer: ByteBuffer())
             )
+            let context = BasicRequestContext(
+                source: ApplicationRequestContextSource(
+                    channel: EmbeddedChannel(),
+                    logger: Logger(label: #function)
+                )
+            )
+
+            let response = try await transport.handleGet(request: request, context: context)
 
             XCTAssertEqual(response.head.status, .ok)
             let contentType = response.head.headerFields[.contentType]
