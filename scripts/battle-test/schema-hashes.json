@@ -1,0 +1,18 @@
+{
+  "algorithm": "sha256",
+  "tools": {
+    "diagnose": "99334726611ccf58a148b0814696bfa6fe08c1b2d027e946beccf5a74331c9aa",
+    "find_chat": "aa685758ac5479bc0b56a24cbf79a4b797689f37740ed5f031526a4d25111389",
+    "get_active_conversations": "24933f552d2b56b66800c42da4d79bdda0c38cdb7e0d67296d57815f492bf519",
+    "get_attachment": "6f643497349f0c59a1a67e6bba890a56b49072dc67068d0f783f4bbd7c74501e",
+    "get_chat_details": "ae3641042f281b8944a7e70517f34cfd7f0bdd88f145f7c0dd9b43e69bbf79f5",
+    "get_context": "9c4a2b199daaa28875f629a7244a307bc34e68af83fa4131e0f11df8396db4cf",
+    "get_messages": "128e827089e086e9ad601a0d1cb48641ba602163600be326f130d76505180cdb",
+    "get_unread": "6a59ccf9918fe22845459200a5447df85b9a2995ae90aaa438419c76554ef6bc",
+    "list_attachments": "bbe75cd5de0e958479b3d08dd48a62d2d532db66624ba4bec5cec59810c99acd",
+    "list_chats": "151ff0f6da8fca89a7c0e334fa1186f4acebd2e9560fd3b968d8e3e928b9dff9",
+    "search": "d90cba191274ded76f66af8a247a43fb8f2faa6a7d372c6dfeb11f3642f932ca",
+    "send": "e656b191afb0dfe9eb4b231f7fd2f7dd8e2a6550a6e54b9b933a338d9d5649c6"
+  },
+  "version": 1
+}
