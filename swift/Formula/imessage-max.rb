@@ -7,7 +7,7 @@ class ImessageMax < Formula
   # ever rebuilt. The tarball must be ad-hoc signed (`codesign --sign -`),
   # not signed with the local "iMessage Max Dev" identity, which no other
   # machine trusts.
-  sha256 "e2b123cbede36315a0762f15bee3a51ded6c3252ad9c2cb5361594acbb2cc333"
+  sha256 "20ac8bead397bf21f778a44ab90161998feb666e6fe755d4f52ecbc52a441d58"
   license "MIT"
 
   depends_on :macos

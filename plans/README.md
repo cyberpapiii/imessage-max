@@ -432,6 +432,39 @@ and "after" means after they are *merged*, not after they exist somewhere.
 re-run 032 against the merged tree. Everything the plan specifies stays
 valid, only its starting point was unavailable.
 
+## Release v1.4.1 (2026-08-07)
+
+Tagged at `6afb9e7`, published at
+<https://github.com/cyberpapiii/imessage-max/releases/tag/v1.4.1>.
+
+Patch release for one fix: the osascript stderr classifier never matched
+AppleScript's typographic apostrophe, so `can't get chat`, `can't get
+participant`, and `doesn't understand` all fell through to the raw-stderr
+branch and clients saw `186:202: execution error: ...` instead of the clean
+message. Plan 023 closed the same class of leak on the file-not-found branch,
+which spells both apostrophe forms, and missed this one. The classifier now
+normalizes the apostrophe once and moved to
+`AppleScriptRunner.classifySendStderr` so it is testable without osascript.
+
+Found by running the four manual send checks that had never been run on real
+hardware. Checks 10, 11, 14 and the new 15 all pass; the run is recorded in
+`swift/Tests/iMessageMaxTests/SendManualValidation.md`.
+
+Same four version files as 1.4.0, same ad-hoc signing rule for the asset.
+Formula sha256 is `20ac8bead397bf21f778a44ab90161998feb666e6fe755d4f52ecbc52a441d58`,
+taken from the published download and matched against the local tarball.
+
+**One correction worth keeping.** An earlier note in the validation doc
+claimed chats with `any;-;` GUIDs cannot be targeted by `chat_id`. That was
+wrong. An `osascript` probe resolves `chat id "any;-;<handle>"` fine, the
+service-qualified `iMessage;-;<handle>` is what fails, and all 2683 chats in
+the local database use the `any;-;` form. The single failure that prompted the
+note was a cold start in Messages.app and did not reproduce.
+
+**FDA survived again.** `make install` re-signed with the persistent identity
+and `diagnose` returned `perm_full_disk: supported` with no GUI re-grant, the
+second such deploy since 037.
+
 ## Release v1.4.0 (2026-08-07)
 
 Tagged at `da91fbc`, published at
