@@ -440,6 +440,178 @@ final class HTTPTransportIntegrationTests: XCTestCase {
         }
         XCTAssertEqual(allowedResponse.head.status, HTTPResponse.Status.ok)
     }
+
+    func testSSEGetRejectsMissingEventStreamAccept() async throws {
+        let transport = HTTPTransport(
+            host: "127.0.0.1",
+            port: 0,
+            database: Database(),
+            resolver: ContactResolver(seedCache: [:]),
+            requestTimeout: .seconds(5)
+        )
+        let app = await transport.makeApplicationForTesting()
+
+        try await app.test(TestingSetup.router) { client in
+            let response = try await client.executeRequest(
+                uri: "/",
+                method: HTTPRequest.Method.get,
+                headers: [.accept: "application/json"],
+                body: nil
+            )
+
+            let body = try decodeJSONString(from: response.body)
+            XCTAssertEqual(response.head.status, .notAcceptable, body)
+            XCTAssertTrue(body.contains("Invalid Accept header"), body)
+        }
+    }
+
+    func testSSEGetRejectsMissingSessionHeader() async throws {
+        let transport = HTTPTransport(
+            host: "127.0.0.1",
+            port: 0,
+            database: Database(),
+            resolver: ContactResolver(seedCache: [:]),
+            requestTimeout: .seconds(5)
+        )
+        let app = await transport.makeApplicationForTesting()
+
+        try await app.test(TestingSetup.router) { client in
+            let response = try await client.executeRequest(
+                uri: "/",
+                method: HTTPRequest.Method.get,
+                headers: [.accept: "text/event-stream"],
+                body: nil
+            )
+
+            let body = try decodeJSONString(from: response.body)
+            XCTAssertEqual(response.head.status, .badRequest, body)
+            XCTAssertTrue(body.contains("Missing Mcp-Session-Id header"), body)
+        }
+    }
+
+    func testSSEGetRejectsUnknownSession() async throws {
+        let transport = HTTPTransport(
+            host: "127.0.0.1",
+            port: 0,
+            database: Database(),
+            resolver: ContactResolver(seedCache: [:]),
+            requestTimeout: .seconds(5)
+        )
+        let app = await transport.makeApplicationForTesting()
+
+        try await app.test(TestingSetup.router) { client in
+            var headers: HTTPFields = [.accept: "text/event-stream"]
+            headers[.mcpSessionId] = "not-a-real-session"
+
+            let response = try await client.executeRequest(
+                uri: "/",
+                method: HTTPRequest.Method.get,
+                headers: headers,
+                body: nil
+            )
+
+            let body = try decodeJSONString(from: response.body)
+            XCTAssertEqual(response.head.status, .notFound, body)
+            XCTAssertTrue(body.contains("Invalid or expired session"), body)
+        }
+    }
+
+    // The GET here calls `handleGet` directly rather than going through
+    // `client.executeRequest`, unlike every other test in this file. That is
+    // deliberate — do not "fix" it back, it will hang the whole suite.
+    //
+    // `handleGet` answers with a long-lived streaming body that pumps the SSE
+    // channel (keep-alives included) until the connection is unregistered, and
+    // `RouterTestFramework` runs `try await response.body.write(responseWriter)`
+    // to completion *before* it constructs the `TestResponse`
+    // (RouterTestFramework.swift:122). So a body that never ends means
+    // `executeRequest` never returns, and the head asserted on below is
+    // unreachable through the client.
+    //
+    // The head, by contrast, is fully populated the moment `handleGet` returns,
+    // and nothing obliges us to invoke the body writer. Calling the handler
+    // directly gets the head without ever starting the stream. `handleGet`
+    // never reads `context`, so any context instance satisfies the generic.
+    func testSSEGetOpensStreamForLiveSession() async throws {
+        let transport = HTTPTransport(
+            host: "127.0.0.1",
+            port: 0,
+            database: Database(),
+            resolver: ContactResolver(seedCache: [:]),
+            requestTimeout: .seconds(5)
+        )
+        let app = await transport.makeApplicationForTesting()
+
+        try await app.test(TestingSetup.router) { client in
+            let sessionId = try await initializeSession(using: client)
+
+            var headers: HTTPFields = [.accept: "text/event-stream"]
+            headers[.mcpSessionId] = sessionId
+
+            let request = Request(
+                head: .init(
+                    method: HTTPRequest.Method.get,
+                    scheme: "http",
+                    authority: "localhost",
+                    path: "/",
+                    headerFields: headers
+                ),
+                body: .init(buffer: ByteBuffer())
+            )
+            let context = BasicRequestContext(
+                source: ApplicationRequestContextSource(
+                    channel: EmbeddedChannel(),
+                    logger: Logger(label: #function)
+                )
+            )
+
+            let response = try await transport.handleGet(request: request, context: context)
+
+            XCTAssertEqual(response.head.status, .ok)
+            let contentType = response.head.headerFields[.contentType]
+            XCTAssertTrue(
+                contentType?.contains("text/event-stream") == true,
+                "unexpected Content-Type: \(contentType ?? "nil")"
+            )
+            XCTAssertEqual(response.head.headerFields[.cacheControl], "no-cache")
+            XCTAssertEqual(response.head.headerFields[.mcpSessionId], sessionId)
+        }
+    }
+
+    func testSecondSessionAtCapacityReturns503() async throws {
+        let transport = HTTPTransport(
+            host: "127.0.0.1",
+            port: 0,
+            database: Database(),
+            resolver: ContactResolver(seedCache: [:]),
+            requestTimeout: .seconds(5),
+            maxSessions: 1
+        )
+        let app = await transport.makeApplicationForTesting()
+
+        try await app.test(TestingSetup.router) { client in
+            let firstResponse = try await client.executeRequest(
+                uri: "/",
+                method: HTTPRequest.Method.post,
+                headers: jsonHeaders(),
+                body: byteBuffer(for: initializePayload(id: 1))
+            )
+            let firstBody = try decodeJSONString(from: firstResponse.body)
+            XCTAssertEqual(firstResponse.head.status, .ok, firstBody)
+            let firstSessionId = try XCTUnwrap(firstResponse.head.headerFields[.mcpSessionId])
+            XCTAssertFalse(firstSessionId.isEmpty)
+
+            let secondResponse = try await client.executeRequest(
+                uri: "/",
+                method: HTTPRequest.Method.post,
+                headers: jsonHeaders(),
+                body: byteBuffer(for: initializePayload(id: 2))
+            )
+            let secondBody = try decodeJSONString(from: secondResponse.body)
+            XCTAssertEqual(secondResponse.head.status, .serviceUnavailable, secondBody)
+            XCTAssertTrue(secondBody.contains("Too many active sessions"), secondBody)
+        }
+    }
 }
 
 private struct TestSlowMethod: MCP.Method {
