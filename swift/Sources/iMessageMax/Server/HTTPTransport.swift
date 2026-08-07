@@ -70,13 +70,16 @@ public actor HTTPTransport: Transport {
     ///   - database: Database instance for tool access
     ///   - resolver: Contact resolver for tool access
     ///   - logger: Optional logger instance for transport events
+    ///   - maxSessions: concurrent-session cap, forwarded to `SessionManager`.
+    ///     Production uses the default; tests lower it to reach the 503 path.
     init(
         host: String = "127.0.0.1",
         port: Int = 8080,
         database: Database,
         resolver: ContactResolver,
         logger: Logger? = nil,
-        requestTimeout: Duration = .seconds(300)
+        requestTimeout: Duration = .seconds(300),
+        maxSessions: Int = 100
     ) {
         self.host = host
         self.port = port
@@ -89,7 +92,11 @@ public actor HTTPTransport: Transport {
                 label: "mcp.transport.http.server",
                 factory: { _ in SwiftLogNoOpLogHandler() }
             )
-        self.sessionManager = SessionManager(database: database, resolver: resolver)
+        self.sessionManager = SessionManager(
+            database: database,
+            resolver: resolver,
+            maxSessions: maxSessions
+        )
     }
 
     /// Establishes the HTTP server connection
