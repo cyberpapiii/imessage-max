@@ -183,6 +183,65 @@ final class AppleScriptRunnerValidationTests: XCTestCase {
         XCTAssertTrue(prepared.fileURL.path.contains("/Pictures/imessage-max-staging/"))
     }
 
+    // Plan 024: staged copies are deleted at terminal transfer states, so a
+    // duplicate of the user's file does not linger in ~/Pictures for 48h.
+    func testRemoveStagedDirectoryDeletesOnlyItsOwnDirectory() throws {
+        let tempDir = FileManager.default.temporaryDirectory
+        let sourceURL = tempDir.appendingPathComponent("imessage-max-cleanup-test.txt")
+        try "hello".write(to: sourceURL, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: sourceURL) }
+
+        let prepared = try AppleScriptRunner.prepareTrackedOutgoingFile(
+            sourcePath: sourceURL.path,
+            existingOutgoingTransferStatuses: { _ in ["finished"] }
+        )
+        // Safety net if the assertions below fail before removal happens.
+        defer { try? FileManager.default.removeItem(at: prepared.fileURL.deletingLastPathComponent()) }
+
+        let stagedDirectory = prepared.fileURL.deletingLastPathComponent()
+        // The UUID directory's parent is the staging root.
+        let stagingRoot = stagedDirectory.deletingLastPathComponent()
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: prepared.fileURL.path),
+            "Precondition: the staged copy exists before removal")
+
+        AppleScriptRunner.removeStagedDirectory(for: prepared)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: prepared.fileURL.path),
+            "The staged copy must be deleted at a terminal transfer state")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: stagedDirectory.path),
+            "The per-send UUID directory must be deleted too, not just the file")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: stagingRoot.path),
+            "The shared staging root must survive — only this send's directory is removed")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: sourceURL.path),
+            "The user's original file must never be touched")
+    }
+
+    // The guard is what makes the helper safe: a PreparedOutgoingFile whose
+    // fileURL somehow points outside the staging root must be refused outright.
+    func testRemoveStagedDirectoryRefusesPathsOutsideStagingRoot() throws {
+        let outsideDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("imessage-max-outside-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: outsideDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: outsideDirectory) }
+
+        let outsideFile = outsideDirectory.appendingPathComponent("precious.txt")
+        try "do not delete".write(to: outsideFile, atomically: true, encoding: .utf8)
+
+        let forged = AppleScriptRunner.PreparedOutgoingFile(
+            fileURL: outsideFile,
+            trackingName: "precious.txt",
+            existingOutgoingTransferCount: 0
+        )
+
+        AppleScriptRunner.removeStagedDirectory(for: forged)
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: outsideFile.path),
+            "The staging-root guard must refuse to delete anything outside the staging root")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: outsideDirectory.path),
+            "The containing directory outside the staging root must survive as well")
+    }
+
     func testTransferObservationFinishedWins() {
         let observation = AppleScriptRunner.interpretTransferStatuses(["waiting", "finished"])
 

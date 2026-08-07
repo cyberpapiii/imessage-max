@@ -204,7 +204,10 @@ enum AppleScriptRunner {
             arguments: [handle, preparedFile.fileURL.path],
             missingTargetError: .recipientNotFound(handle)
         )
-        guard case .success = handoff else { return handoff }
+        guard case .success = handoff else {
+            removeStagedDirectory(for: preparedFile)
+            return handoff
+        }
         return waitForTransferCompletion(preparedFile: preparedFile)
     }
 
@@ -226,7 +229,10 @@ enum AppleScriptRunner {
             arguments: [guid, preparedFile.fileURL.path],
             missingTargetError: .chatNotFound(guid)
         )
-        guard case .success = handoff else { return handoff }
+        guard case .success = handoff else {
+            removeStagedDirectory(for: preparedFile)
+            return handoff
+        }
         return waitForTransferCompletion(preparedFile: preparedFile)
     }
 
@@ -331,8 +337,10 @@ enum AppleScriptRunner {
                 let observation = interpretTransferStatuses(newStatuses)
                 switch observation {
                 case .finished:
+                    removeStagedDirectory(for: preparedFile)
                     return .success(())
                 case .failed:
+                    removeStagedDirectory(for: preparedFile)
                     return .failure(.transferFailed(preparedFile.trackingName))
                 case .pending:
                     sawPending = true
@@ -358,6 +366,20 @@ enum AppleScriptRunner {
             return .failure(.transferStatusUnknown(preparedFile.trackingName))
         }
         return .failure(.transferStatusUnknown(preparedFile.trackingName))
+    }
+
+    /// Removes one per-send staging directory. Safe only at terminal
+    /// transfer states (finished/failed) or before Messages was handed the
+    /// file — never while a transfer may still be reading the copy.
+    /// Guarded to the staging root so a bug can never delete anything else.
+    static func removeStagedDirectory(for preparedFile: PreparedOutgoingFile) {
+        let directory = preparedFile.fileURL.deletingLastPathComponent()
+        let rootPath = stagingRootDirectory().standardizedFileURL.path
+        let directoryPath = directory.standardizedFileURL.path
+        guard directoryPath.hasPrefix(rootPath + "/"), directoryPath != rootPath else {
+            return
+        }
+        try? FileManager.default.removeItem(at: directory)
     }
 
     private static func stagingRootDirectory() -> URL {
