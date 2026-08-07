@@ -155,8 +155,8 @@ final class ModernDispatcherTests: XCTestCase {
         XCTAssertNotNil(result["ttlMs"] as? Int)
 
         let tools = try XCTUnwrap(result["tools"] as? [[String: Any]])
-        // Registration order, not dictionary order — required for
-        // client-side catalog caching.
+        // Registration order, not dictionary order, so clients can cache
+        // the catalog.
         XCTAssertEqual(
             tools.map { $0["name"] as? String },
             ["zeta_tool", "alpha_tool", "mid_tool"]

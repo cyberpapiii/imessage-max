@@ -30,7 +30,7 @@ final class DualEraStdioTransportTests: XCTestCase {
         XCTAssertEqual(result["supportedVersions"] as? [String], ["2026-07-28"])
 
         // Legacy initialize must reach the downstream (SDK) stream, not the
-        // dispatcher — and the discover message must never have been forwarded.
+        // dispatcher, and the discover message must never have been forwarded.
         let legacy = Data(
             #"{"jsonrpc":"2.0","id":2,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"tests","version":"1.0"}}}"#
                 .utf8

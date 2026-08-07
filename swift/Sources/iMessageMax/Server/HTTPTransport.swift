@@ -214,7 +214,7 @@ public actor HTTPTransport: Transport {
         // Era selection (dual-era server, MCP 2026-07-28 backward-compat
         // model): an `initialize` request selects legacy session semantics;
         // modern per-request `_meta` (or `server/discover`) selects the
-        // stateless 2026-07-28 lane. Only the BODY selects the era — real
+        // stateless 2026-07-28 lane. Only the BODY selects the era. Real
         // legacy clients (plug) send Mcp-Method/MCP-Protocol-Version headers
         // on session traffic too, so header presence must not reroute them.
         if !isInitialize, ModernDispatcher.isModernMessage(json) {

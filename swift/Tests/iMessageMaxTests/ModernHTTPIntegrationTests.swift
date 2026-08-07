@@ -244,7 +244,7 @@ final class ModernHTTPIntegrationTests: XCTestCase {
 
     /// Regression: plug (a real legacy client) sends Mcp-Method and
     /// MCP-Protocol-Version headers on legacy session traffic. Header
-    /// presence must NOT reroute a legacy-body request to the modern lane —
+    /// presence must NOT reroute a legacy-body request to the modern lane;
     /// only modern `_meta` in the body (or server/discover) selects the era.
     func testLegacyRequestWithModernHeadersStaysOnLegacyLane() async throws {
         let app = await makeModernTestTransport().makeApplicationForTesting()

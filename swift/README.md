@@ -111,8 +111,8 @@ Sources/iMessageMax/
 
 ### HTTP Mode
 
-Implements MCP Streamable HTTP transport — legacy sessions (specs through
-2025-11-25) and the stateless 2026-07-28 era on the same endpoint — with:
+Implements MCP Streamable HTTP transport. Legacy sessions (specs through
+2025-11-25) and the stateless 2026-07-28 era share one endpoint, with:
 
 - **Per-session Server instances** - Each client gets isolated state, enabling clean reconnection
 - **Session management** - 1-hour timeout with automatic cleanup

@@ -1,8 +1,8 @@
 // Sources/iMessageMax/Server/DualEraStdioTransport.swift
 //
-// Dual-era stdio adapter. Modern (MCP 2026-07-28) messages — the
-// `server/discover` probe and any request carrying per-request `_meta`
-// protocol metadata — are answered directly by ModernDispatcher and never
+// Dual-era stdio adapter. ModernDispatcher directly answers modern
+// (MCP 2026-07-28) messages, meaning the `server/discover` probe and any
+// request carrying per-request `_meta` protocol metadata; they never
 // reach the legacy SDK Server. Everything else (the legacy `initialize`
 // handshake and session traffic) passes through untouched, so existing
 // stdio clients keep their exact wire behavior.

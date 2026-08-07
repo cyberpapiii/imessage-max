@@ -135,14 +135,14 @@ serve both eras concurrently, selected per request:
 
 Modern clients probe with `server/discover` and send the required
 `MCP-Protocol-Version`, `Mcp-Method`, and (for `tools/call`) `Mcp-Name`
-headers over HTTP. Legacy clients keep working unchanged — no client
-migration is required, and legacy support will not be removed while real
-clients depend on it.
+headers over HTTP. Legacy clients keep working unchanged. No client
+migration is required, and legacy support stays as long as real clients
+depend on it.
 
-The server implements the tools surface only. Prompts, resources,
-completion, subscriptions, tasks, and MRTR flows are intentionally not
-implemented; the official conformance suite runs against both eras with
-the documented baseline in `docs/conformance-baseline.yml`.
+The server implements tools only. It has no prompts, resources,
+completion, subscriptions, tasks, or MRTR flows, on purpose. The official
+conformance suite runs against both eras with the documented baseline in
+`docs/conformance-baseline.yml`.
 
 ## Client Icon Metadata
 

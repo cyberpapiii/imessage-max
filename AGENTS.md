@@ -52,13 +52,13 @@ swift build -c release
 # stdio mode
 echo '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' | ./.build/release/imessage-max
 
-# HTTP mode — legacy era (session-based)
+# HTTP mode, legacy era (session-based)
 curl -X POST http://localhost:8080 \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}'
 
-# HTTP mode — modern era (MCP 2026-07-28, stateless)
+# HTTP mode, modern era (MCP 2026-07-28, stateless)
 curl -X POST http://localhost:8080 \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
@@ -107,22 +107,23 @@ swift/
 The server serves two MCP protocol eras concurrently on both transports
 (stdio and HTTP), selected per request:
 
-- **Modern era — MCP 2026-07-28** (stateless): requests carrying the
-  reserved `_meta` key `io.modelcontextprotocol/protocolVersion` (and
-  `server/discover`, the modern probe method) are answered by
-  `ModernDispatcher` (`ModernProtocol.swift`). No initialize, no sessions.
+- **Modern era (MCP 2026-07-28, stateless).** `ModernDispatcher`
+  (`ModernProtocol.swift`) answers requests that carry the reserved
+  `_meta` key `io.modelcontextprotocol/protocolVersion`, plus
+  `server/discover`, the modern probe method. No initialize, no sessions.
   Implemented at the repo level because no Swift SDK release targets
   2026-07-28 yet; the pinned swift-sdk still drives the legacy lane only.
-- **Legacy era — dated revisions through 2025-11-25** (session-based):
+- **Legacy era (dated revisions through 2025-11-25, session-based).**
   `initialize` and all session traffic pass to the SDK `Server` unchanged.
   This lane is load-bearing: plug (HTTP, `protocol = "legacy"`), the mcpb
   stdio bundle, and Codex all use it. Do not remove it without verified
   proof that every real client has migrated.
 
 Era selection is body-driven only. Real legacy clients (plug) send
-`Mcp-Method`/`MCP-Protocol-Version` headers on legacy session traffic, so
-header presence must never route a request to the modern lane
-(regression: `testLegacyRequestWithModernHeadersStaysOnLegacyLane`).
+`Mcp-Method` and `MCP-Protocol-Version` headers on legacy session
+traffic, so header presence must never route a request to the modern
+lane. The regression test for this is
+`testLegacyRequestWithModernHeadersStaysOnLegacyLane`.
 
 Every request logs one era line to stderr
 (`era=modern|legacy transport=... version=... method=...`) with no
