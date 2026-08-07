@@ -325,15 +325,17 @@ unrun check now has a result.
 Cleanup also runs on the failure path: a chat-route send that failed in
 AppleScript staged its directory and removed it anyway.
 
-Two findings came out of the run.
+The first chat-route send of the session failed with AppleScript error -1728,
+`can't get chat id "any;-;<handle>"`. The same call succeeded later in the
+session, and an `osascript` probe resolved that exact chat id without error,
+so this is a cold-start condition in Messages.app rather than a property of
+`any;-;` chats. Every chat in this database carries an `any;-;` GUID and
+chat-route sends work against them. The service-qualified form
+(`iMessage;-;<handle>`) is what AppleScript rejects. If a chat-route send
+fails on the first call after a quiet period, retry before concluding the
+chat is unreachable.
 
-The `any;-;` service chat cannot be targeted by `chat_id`. A chat-route send
-to the operator's own SMS-service self-DM failed with AppleScript error -1728,
-`can't get chat id "any;-;<handle>"`. The participant route to the same
-conversation worked and landed in the same chat. Worth knowing before using
-`chat_id` on a chat whose GUID starts with `any;-;`.
-
-That failure surfaced a real bug, now fixed. AppleScript writes the
+That failure did surface a real bug, now fixed. AppleScript writes the
 typographic apostrophe in its errors, so `can’t get chat` never matched the
 straight-form `can't get chat` test in the stderr classifier. Every one of
 those errors fell through to the raw-stderr branch, and the client got
