@@ -8,5 +8,3 @@ struct Participant: Codable {
     let inContacts: Bool
 }
 
-/// People map for token-efficient responses
-typealias PeopleMap = [String: Participant]
