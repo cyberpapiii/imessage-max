@@ -1,11 +1,8 @@
-// Tests/iMessageMaxTests/AttachmentPathContainmentTests.swift
 import Foundation
 import XCTest
 @testable import iMessageMax
 
 final class AttachmentPathContainmentTests: XCTestCase {
-
-    // MARK: - AttachmentPathPolicy unit tests
 
     func testPathInsideRootValidates() throws {
         let root = FileManager.default.temporaryDirectory
@@ -87,10 +84,7 @@ final class AttachmentPathContainmentTests: XCTestCase {
         XCTAssertNil(result, "Symlink inside root pointing outside should be rejected after resolution")
     }
 
-    // MARK: - End-to-end: GetAttachment rejects out-of-root paths
-
     func testGetAttachmentRejectsOutOfRootPath() async throws {
-        // Create an allowed root and a separate "outside" directory
         let base = FileManager.default.temporaryDirectory
             .appendingPathComponent("ContainmentE2E-\(UUID().uuidString)")
         let allowedRoot = base.appendingPathComponent("Messages")
@@ -99,7 +93,6 @@ final class AttachmentPathContainmentTests: XCTestCase {
         try FileManager.default.createDirectory(at: outsideDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: base) }
 
-        // Create a real file outside the allowed root
         let outsideFile = outsideDir.appendingPathComponent("secret.jpg")
         try Data("secret".utf8).write(to: outsideFile)
 
@@ -125,7 +118,6 @@ final class AttachmentPathContainmentTests: XCTestCase {
             XCTFail("Expected attachment_path_invalid error for out-of-root path")
         case .error(let type, let message, _):
             XCTAssertEqual(type, "attachment_path_invalid")
-            // The message must NOT echo back the offending path
             XCTAssertFalse(
                 message.contains(outsideFile.path),
                 "Error message must not contain the attacker-supplied file path"
@@ -133,10 +125,7 @@ final class AttachmentPathContainmentTests: XCTestCase {
         }
     }
 
-    // MARK: - End-to-end: GetMessages does not probe out-of-root attachment paths
-
     func testGetMessagesDoesNotProbeOutOfRootPaths() async throws {
-        // Create an allowed root and a separate "outside" directory.
         let base = FileManager.default.temporaryDirectory
             .appendingPathComponent("ContainmentGetMessages-\(UUID().uuidString)")
         let allowedRoot = base.appendingPathComponent("Messages")
@@ -178,7 +167,6 @@ final class AttachmentPathContainmentTests: XCTestCase {
         let messages = try decodeJSONArray(try XCTUnwrap(response["messages"]))
         let target = try XCTUnwrap(messages.first(where: { $0["id"] as? String == "msg_100" }))
 
-        // Never enriched into media (which would mean the file was opened/probed).
         let media = target["media"] as? [[String: Any]]
         XCTAssertTrue(media == nil || media!.isEmpty, "Out-of-root attachment must not appear under media")
 
@@ -187,7 +175,6 @@ final class AttachmentPathContainmentTests: XCTestCase {
         XCTAssertEqual(attachments.count, 1)
         XCTAssertEqual(attachments.first?["filename"] as? String, "secret.jpg")
 
-        // The full outside path must never be echoed anywhere in the encoded response.
         XCTAssertFalse(
             rawJSON.contains(outsideFile.path),
             "Encoded response must not contain the attacker-supplied file path"

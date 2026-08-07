@@ -44,7 +44,7 @@ actor MCPServerWrapper {
         let (dbOk, dbStatus) = Database.checkAccess()
         if !dbOk {
             FileHandle.standardError.write(
-                "[iMessage Max] Database: \(dbStatus)\n".data(using: .utf8)!
+                Data("[iMessage Max] Database: \(dbStatus)\n".utf8)
             )
         }
 

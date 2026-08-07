@@ -376,23 +376,7 @@ actor SendTool {
         // reporting below. Soft transfer outcomes keep sending.
         var sendResults: [Result<Void, SendError>] = []
         payloadLoop: for payload in payloads {
-            let result: Result<Void, SendError>
-            switch resolved.target {
-            case .participant(let handle, _):
-                switch payload {
-                case .text(let body):
-                    result = await runner.sendTextToParticipant(handle: handle, message: body)
-                case .file(let path):
-                    result = await runner.sendFileToParticipant(handle: handle, filePath: path)
-                }
-            case .chat(let guid, _):
-                switch payload {
-                case .text(let body):
-                    result = await runner.sendTextToChat(guid: guid, message: body)
-                case .file(let path):
-                    result = await runner.sendFileToChat(guid: guid, filePath: path)
-                }
-            }
+            let result = await sendOne(target: resolved.target, payload: payload, runner: runner)
             sendResults.append(result)
             if case .failure(let error) = result {
                 switch error {
@@ -502,6 +486,30 @@ actor SendTool {
         } catch {
             // DB unreadable or task cancelled → Option D: transport-only fallback.
             return .success(deliveredTo: resolved.deliveredTo, chat: resolved.chat)
+        }
+    }
+
+    /// Dispatch one payload to a resolved target via the script runner.
+    private func sendOne(
+        target: SendResolution.Target,
+        payload: SendPayload,
+        runner: any ScriptRunning
+    ) async -> Result<Void, SendError> {
+        switch target {
+        case .participant(let handle, _):
+            switch payload {
+            case .text(let body):
+                return await runner.sendTextToParticipant(handle: handle, message: body)
+            case .file(let path):
+                return await runner.sendFileToParticipant(handle: handle, filePath: path)
+            }
+        case .chat(let guid, _):
+            switch payload {
+            case .text(let body):
+                return await runner.sendTextToChat(guid: guid, message: body)
+            case .file(let path):
+                return await runner.sendFileToChat(guid: guid, filePath: path)
+            }
         }
     }
 

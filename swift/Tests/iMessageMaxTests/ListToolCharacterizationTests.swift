@@ -98,7 +98,6 @@ final class ListToolCharacterizationTests: XCTestCase {
             minParticipants: nil,
             maxParticipants: nil,
             sort: "recent",
-            cursor: nil,
             db: fixture.database(),
             resolver: resolver
         )
@@ -111,7 +110,6 @@ final class ListToolCharacterizationTests: XCTestCase {
                 response.chats.first(where: { $0.id == "chat2" }),
                 "Expected chat2 (Trip Crew) in results"
             )
-            // Participants are resolved from the seeded cache - names, not raw handles
             let preview = groupChat.participantsPreview
             XCTAssertTrue(
                 preview.contains("Alice Smith"),
@@ -135,7 +133,6 @@ final class ListToolCharacterizationTests: XCTestCase {
             minParticipants: nil,
             maxParticipants: nil,
             sort: "recent",
-            cursor: nil,
             db: fixture.database(),
             resolver: resolver
         )
@@ -149,13 +146,11 @@ final class ListToolCharacterizationTests: XCTestCase {
                 "Expected chat1 (DM) in results"
             )
             let lastMsg = try XCTUnwrap(dmChat.lastMessage, "Expected last_message on DM chat")
-            // msg11 from Alice should be selected, not the reaction msg12
             XCTAssertEqual(
                 lastMsg.text,
                 "hello from alice",
                 "last_message should be the newest non-reaction, not the reaction"
             )
-            // Sender should be Alice's resolved name (not raw handle)
             XCTAssertEqual(
                 lastMsg.from,
                 "Alice Smith",
@@ -175,7 +170,6 @@ final class ListToolCharacterizationTests: XCTestCase {
             minParticipants: nil,
             maxParticipants: nil,
             sort: "recent",
-            cursor: nil,
             db: fixture.database(),
             resolver: resolver
         )
@@ -184,13 +178,10 @@ final class ListToolCharacterizationTests: XCTestCase {
         case .failure(let error):
             XCTFail("list_chats failed: \(error.message)")
         case .success(let response):
-            // DM: last non-reaction message is from Alice (not from me)
             let dmChat = try XCTUnwrap(response.chats.first(where: { $0.id == "chat1" }))
             XCTAssertEqual(dmChat.awaitingReply, true, "DM should be awaiting_reply when last message is from them")
 
-            // Group: last message is from me
             let groupChat = try XCTUnwrap(response.chats.first(where: { $0.id == "chat2" }))
-            // awaiting_reply should be false (last message is from me)
             XCTAssertNotEqual(groupChat.awaitingReply, true, "Group should not be awaiting_reply when last message is from me")
         }
     }
@@ -206,7 +197,6 @@ final class ListToolCharacterizationTests: XCTestCase {
             minParticipants: nil,
             maxParticipants: nil,
             sort: "recent",
-            cursor: nil,
             db: fixture.database(),
             resolver: resolver
         )
@@ -215,12 +205,10 @@ final class ListToolCharacterizationTests: XCTestCase {
         case .failure(let error):
             XCTFail("list_chats failed: \(error.message)")
         case .success(let response):
-            // Chat 2 (Trip Crew): 3 participants → group = true
             let groupChat = try XCTUnwrap(response.chats.first(where: { $0.id == "chat2" }))
             XCTAssertEqual(groupChat.group, true, "Chat with 3 participants should be flagged as group")
             XCTAssertEqual(groupChat.participantCount, 3, "Trip Crew should report 3 participants")
 
-            // Chat 1 (DM): 1 participant → group = nil (encoded as absent)
             let dmChat = try XCTUnwrap(response.chats.first(where: { $0.id == "chat1" }))
             XCTAssertNil(dmChat.group, "DM should not have group flag set")
         }
@@ -301,7 +289,6 @@ final class ListToolCharacterizationTests: XCTestCase {
             result.conversations.first(where: { $0.id == "chat10" }),
             "Expected chat10 in active conversations"
         )
-        // 3 my-messages, 2 their-messages → exchanges = min(3, 2) = 2
         XCTAssertEqual(convo.activity.exchanges, 2, "exchanges should be min(my_msgs, their_msgs)")
         XCTAssertEqual(convo.activity.myMsgs, 3, "Expected 3 messages from me")
         XCTAssertEqual(convo.activity.theirMsgs, 2, "Expected 2 messages from them")
@@ -324,7 +311,6 @@ final class ListToolCharacterizationTests: XCTestCase {
             result.conversations.first(where: { $0.id == "chat10" }),
             "Expected chat10 in active conversations"
         )
-        // last-from-them (msg 201, now-2s) is newer than last-from-me (msg 102, now-8s)
         XCTAssertTrue(
             convo.awaitingReply,
             "awaiting_reply should be true when last-from-them is more recent than last-from-me"

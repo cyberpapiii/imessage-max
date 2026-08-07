@@ -77,7 +77,7 @@ extension SearchTool {
             .leftJoin("handle h ON m.handle_id = h.ROWID")
             .where("m.associated_message_type = ?", 0)
 
-        if query != nil && !query!.isEmpty {
+        if let query, !query.isEmpty {
             builder.where("(m.text IS NOT NULL OR m.attributedBody IS NOT NULL)")
         }
 
@@ -367,14 +367,18 @@ extension SearchTool {
                 )
             }
 
-            var chat = chatsData[chatId]!
+            guard var chat = chatsData[chatId] else { continue }
             chat.matchCount += 1
 
             if let date = msgDate {
-                if chat.firstMatchDate == nil || date < chat.firstMatchDate! {
+                if let first = chat.firstMatchDate {
+                    if date < first { chat.firstMatchDate = date }
+                } else {
                     chat.firstMatchDate = date
                 }
-                if chat.lastMatchDate == nil || date > chat.lastMatchDate! {
+                if let last = chat.lastMatchDate {
+                    if date > last { chat.lastMatchDate = date }
+                } else {
                     chat.lastMatchDate = date
                 }
             }

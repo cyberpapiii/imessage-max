@@ -36,7 +36,6 @@ final class ModernDispatcherTests: XCTestCase {
                 try json(Data(#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}}"#.utf8))
             )
         )
-        // JSON-RPC responses are never modern-lane messages.
         XCTAssertFalse(
             ModernDispatcher.isModernMessage(
                 try json(Data(#"{"jsonrpc":"2.0","id":1,"result":{}}"#.utf8))
@@ -227,7 +226,6 @@ final class ModernDispatcherTests: XCTestCase {
         XCTAssertEqual(ModernDispatcher.decodeBase64Sentinel("plain"), "plain")
         let encoded = "=?base64?" + Data("héllo".utf8).base64EncodedString() + "?="
         XCTAssertEqual(ModernDispatcher.decodeBase64Sentinel(encoded), "héllo")
-        // Invalid base64 falls back to the literal value.
         XCTAssertEqual(ModernDispatcher.decodeBase64Sentinel("=?base64?!!?="), "=?base64?!!?=")
     }
 
@@ -275,7 +273,6 @@ final class ModernDispatcherTests: XCTestCase {
         let firstTools = try XCTUnwrap(try result(from: firstOutcome)["tools"] as? [[String: Any]])
         let secondTools = try XCTUnwrap(try result(from: secondOutcome)["tools"] as? [[String: Any]])
 
-        // The cached second call must preserve both membership and order.
         XCTAssertEqual(
             firstTools.map { $0["name"] as? String },
             secondTools.map { $0["name"] as? String }
@@ -297,7 +294,6 @@ final class ModernDispatcherTests: XCTestCase {
         let long = String(repeating: "a", count: 300)
         XCTAssertEqual(ModernDispatcher.sanitizedLogField(long).count, 64)
 
-        // Ordinary values pass through untouched.
         XCTAssertEqual(ModernDispatcher.sanitizedLogField("plug/1.2.3"), "plug/1.2.3")
     }
 

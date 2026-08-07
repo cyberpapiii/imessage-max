@@ -259,8 +259,7 @@ public actor HTTPTransport: Transport {
                 responseHeaders[.mcpSessionId] = sessionId
                 logger.info("Created new session with dedicated Server: \(sessionId)")
                 FileHandle.standardError.write(
-                    "[iMessage Max] era=legacy transport=http version=\(requestedProtocolVersion ?? MCPProtocolVersion.latest) method=initialize session=\(sessionId.prefix(8))\n"
-                        .data(using: .utf8)!
+                    Data("[iMessage Max] era=legacy transport=http version=\(requestedProtocolVersion ?? MCPProtocolVersion.latest) method=initialize session=\(sessionId.prefix(8))\n".utf8)
                 )
             case .atCapacity:
                 return errorResponse(
@@ -348,7 +347,7 @@ public actor HTTPTransport: Transport {
                 )
             } catch {
                 FileHandle.standardError.write(
-                    "[iMessage Max] Request handling failed: \(error)\n".data(using: .utf8)!
+                    Data("[iMessage Max] Request handling failed: \(error)\n".utf8)
                 )
                 return errorResponse(
                     status: .internalServerError,

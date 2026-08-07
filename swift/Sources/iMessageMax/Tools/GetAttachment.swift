@@ -312,9 +312,15 @@ struct GetAttachment {
 
         guard let row = rows.first else { return nil }
         let displayName = row.1?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let name: String
+        if let displayName, !displayName.isEmpty {
+            name = displayName
+        } else {
+            name = "chat\(row.0)"
+        }
         return ChatReference(
             id: "chat\(row.0)",
-            name: (displayName?.isEmpty == false) ? displayName! : "chat\(row.0)"
+            name: name
         )
     }
 

@@ -1,4 +1,3 @@
-// Tests/iMessageMaxTests/SendVerifierTests.swift
 import XCTest
 @testable import iMessageMax
 
@@ -8,11 +7,8 @@ import XCTest
 
 final class SendVerifierTests: XCTestCase {
 
-    // MARK: - Fixture
-
     private func makeFixture() throws -> ToolTestDatabase {
         let fixture = try ToolTestDatabase(name: "send-verifier")
-        // Handle 1: Alice
         try fixture.insertHandle(rowId: 1, handle: "+15550000001")
         // Chat 1: DM with Alice (intended chat)
         try fixture.insertChat(rowId: 1, guid: "iMessage;-;alice-guid")
@@ -30,9 +26,6 @@ final class SendVerifierTests: XCTestCase {
     /// Apple-epoch nanoseconds for the current moment, suitable for insertMessage date.
     private func nowNs() -> Int64 { AppleTime.fromDate(Date()) }
 
-    // MARK: - Tests
-
-    // 1. Matching row with error = 0 → confirmed.
     func testConfirmedOnMatchingRowWithNoError() async throws {
         let fixture = try makeFixture()
         let date = nowNs()
@@ -57,7 +50,7 @@ final class SendVerifierTests: XCTestCase {
         XCTAssertEqual(guid, "msg-guid-1")
     }
 
-    // 2. Row with error = 22 (measured failed-send pattern) → failedDelivery, not confirmed.
+    // Row with error = 22 (measured failed-send pattern) → failedDelivery, not confirmed.
     // This is §3 finding 3: failed iMessage sends write rows with error = 22 immediately.
     func testErrorRowClassifiesAsFailedDelivery() async throws {
         let fixture = try makeFixture()
@@ -81,10 +74,8 @@ final class SendVerifierTests: XCTestCase {
             "Row with error=22 must classify as a verified delivery failure, not confirm")
     }
 
-    // 3. No row within the time window → notFound.
     func testNotFoundWhenNoRowInWindow() async throws {
         let fixture = try makeFixture()
-        // No messages inserted.
 
         let verifier = makeVerifier(fixture: fixture)
         let result = try await verifier.verify(
@@ -97,7 +88,7 @@ final class SendVerifierTests: XCTestCase {
         XCTAssertEqual(result, .notFound)
     }
 
-    // 4. Row exists but is older than the look-behind window (> 2s before sendTime) → notFound.
+    // Row older than the look-behind window (> 2s before sendTime) → notFound.
     func testOldRowOutsideWindowIsIgnored() async throws {
         let fixture = try makeFixture()
         // Insert a row 5 seconds before "now", outside the 2s skew window.
@@ -120,12 +111,10 @@ final class SendVerifierTests: XCTestCase {
         XCTAssertEqual(result, .notFound, "Row older than the 2s skew should be outside the window")
     }
 
-    // 5. Row lands in a chat other than the intended one → mismatch.
     func testMismatchWhenRowIsInDifferentChat() async throws {
         let fixture = try makeFixture()
         let date = nowNs()
 
-        // Insert message in chat 2 (not the intended chat 1).
         try fixture.insertMessage(
             rowId: 4, guid: "msg-guid-mismatch", text: "Hello Alice",
             date: date, isFromMe: true, error: 0
@@ -146,7 +135,7 @@ final class SendVerifierTests: XCTestCase {
         XCTAssertEqual(actualChatId, 2, "Mismatch should report chat 2 as the actual destination")
     }
 
-    // 6. Row stored with text = nil (attributedBody-only path, §3 finding 2).
+    // Row stored with text = nil (attributedBody-only path, §3 finding 2).
     // The ToolTestDatabase fixture inserts attributedBody = NULL, so
     // MessageTextExtractor cannot parse real typedstream blobs here. This test
     // verifies the text-column path; the attributedBody extraction path is
@@ -177,9 +166,9 @@ final class SendVerifierTests: XCTestCase {
             "attributedBody-only matching is tested against the live DB")
     }
 
-    // 7. Multi-attempt polling: with a pre-inserted matching row the verifier
-    //    confirms within the first attempt and finishes well before maxAttempts
-    //    × pollInterval elapses. Proves the polling loop structure is sound.
+    // Multi-attempt polling: with a pre-inserted matching row the verifier
+    // confirms within the first attempt and finishes well before maxAttempts
+    // × pollInterval elapses. Proves the polling loop structure is sound.
     func testMultiAttemptPollingFindsExistingRow() async throws {
         let fixture = try makeFixture()
         let date = nowNs()
@@ -212,9 +201,9 @@ final class SendVerifierTests: XCTestCase {
 
     // MARK: - Failed-delivery classification (plan 021)
 
-    // 8. A failed row AND a clean row both match in the intended chat → confirmed.
-    //    Covers Messages' own immediate-retry behaviour: a clean row anywhere in the
-    //    window beats a failed one.
+    // A failed row AND a clean row both match in the intended chat → confirmed.
+    // Covers Messages' own immediate-retry behaviour: a clean row anywhere in the
+    // window beats a failed one.
     func testFailedThenCleanRowConfirms() async throws {
         let fixture = try makeFixture()
         let date = nowNs()
@@ -246,8 +235,8 @@ final class SendVerifierTests: XCTestCase {
             "The clean retry row should be the one reported as confirmed")
     }
 
-    // 9. A failed row in a chat OTHER than the intended one stays invisible → notFound.
-    //    Mismatch fires only on clean rows, exactly as before this change.
+    // A failed row in a chat OTHER than the intended one stays invisible → notFound.
+    // Mismatch fires only on clean rows, exactly as before this change.
     func testFailedRowInDifferentChatIsInvisible() async throws {
         let fixture = try makeFixture()
         let date = nowNs()
@@ -271,7 +260,7 @@ final class SendVerifierTests: XCTestCase {
             "A failed row in a different chat must not surface as mismatch or failedDelivery")
     }
 
-    // 10. Fallback path with no intended chat: a failed matching row → failedDelivery.
+    // Fallback path with no intended chat: a failed matching row → failedDelivery.
     func testFallbackFailedRowWithoutIntendedChat() async throws {
         let fixture = try makeFixture()
         let date = nowNs()

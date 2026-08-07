@@ -1,4 +1,3 @@
-// Tests/iMessageMaxTests/CapabilityContractTests.swift
 import XCTest
 @testable import iMessageMax
 
@@ -7,8 +6,6 @@ import XCTest
 /// All three probes (DB, contacts, automation) are injected so tests are hermetic.
 /// The real automation probe reads live macOS TCC; CI runners return "not_determined".
 final class CapabilityContractTests: XCTestCase {
-
-    // MARK: - Shared probe factories
 
     private static func dbProbe(ok: Bool) -> DatabaseProbe {
         if ok {
@@ -30,8 +27,6 @@ final class CapabilityContractTests: XCTestCase {
     private static let probeAutomationDenied: AutomationProbe = { (false, "denied") }
     private static let probeAutomationNotDetermined: AutomationProbe = { (false, "not_determined") }
 
-    // MARK: - Convenience execute helper
-
     private func run(
         dbOk: Bool = true,
         contactsOk: Bool = true,
@@ -47,12 +42,9 @@ final class CapabilityContractTests: XCTestCase {
         )
     }
 
-    // MARK: - Test 1: All-healthy install
-
     func testAllHealthyCapabilities() async throws {
         let caps = try await run().capabilities
 
-        // Send modes: automation granted → supported
         XCTAssertEqual(caps["send_text_dm"]?.state, "supported")
         XCTAssertNil(caps["send_text_dm"]?.fix)
         XCTAssertEqual(caps["send_text_group"]?.state, "supported")
@@ -66,31 +58,24 @@ final class CapabilityContractTests: XCTestCase {
         XCTAssertEqual(caps["verified_send"]?.state, "supported")
         XCTAssertEqual(caps["verified_send"]?.detail, "db_reread")
 
-        // Attachment handling
         XCTAssertEqual(caps["attachments_read"]?.state, "supported")
         XCTAssertEqual(caps["attachments_offloaded"]?.state, "supported")
 
-        // Hardcoded unsupported features
         XCTAssertEqual(caps["reply_threading"]?.state, "unsupported")
         XCTAssertEqual(caps["tapbacks"]?.state, "unsupported")
         XCTAssertEqual(caps["edit_unsend"]?.state, "unsupported")
 
-        // No-implementation features
         XCTAssertEqual(caps["live_inbox"]?.state, "unavailable")
         XCTAssertEqual(caps["rich_backend"]?.state, "unavailable")
 
-        // Permissions: all probed as supported
         XCTAssertEqual(caps["perm_full_disk"]?.state, "supported")
         XCTAssertEqual(caps["perm_contacts"]?.state, "supported")
         XCTAssertEqual(caps["perm_automation"]?.state, "supported")
     }
 
-    // MARK: - Test 2: Automation denied
-
     func testAutomationDeniedCapabilities() async throws {
         let caps = try await run(automation: CapabilityContractTests.probeAutomationDenied).capabilities
 
-        // Four send modes: permission-gated with fix text
         for key in ["send_text_dm", "send_text_group", "send_file_dm", "send_file_group"] {
             XCTAssertEqual(caps[key]?.state, "permission-gated", "\(key) should be permission-gated")
             XCTAssertNotNil(caps[key]?.fix, "\(key) must include fix text")
@@ -99,13 +84,11 @@ final class CapabilityContractTests: XCTestCase {
         // verified_send: db ok, automation denied → degraded
         XCTAssertEqual(caps["verified_send"]?.state, "degraded")
 
-        // perm_automation: denied → permission-gated with fix
         XCTAssertEqual(caps["perm_automation"]?.state, "permission-gated")
         XCTAssertNotNil(caps["perm_automation"]?.fix)
     }
 
-    // MARK: - Test 3: Automation not_determined → unverified (honest default)
-
+    // Automation not_determined → unverified (honest default)
     func testAutomationNotDeterminedCapabilities() async throws {
         let caps = try await run(automation: CapabilityContractTests.probeAutomationNotDetermined).capabilities
 
@@ -118,8 +101,6 @@ final class CapabilityContractTests: XCTestCase {
         // verified_send: db ok, automation not_determined → degraded
         XCTAssertEqual(caps["verified_send"]?.state, "degraded")
     }
-
-    // MARK: - Test 4: DB inaccessible
 
     func testDBInaccessibleCapabilities() async throws {
         let caps = try await run(dbOk: false).capabilities
@@ -140,8 +121,6 @@ final class CapabilityContractTests: XCTestCase {
         XCTAssertEqual(caps["send_file_group"]?.state, "supported")
     }
 
-    // MARK: - Test 5: JSON contract, all 15 keys present with correct names
-
     func testJSONContractContainsAll15Keys() async throws {
         let result = try await run()
         let json = try FormatUtils.encodeJSON(result)
@@ -159,7 +138,6 @@ final class CapabilityContractTests: XCTestCase {
         ]
         XCTAssertEqual(Set(caps.keys), expectedKeys, "capabilities must contain exactly the 15 §2.2 keys")
 
-        // Spot-check key names and state-object shape
         for key in ["send_text_dm", "verified_send", "perm_automation", "rich_backend"] {
             let entry = try XCTUnwrap(caps[key] as? [String: Any], "\(key) must be a JSON object")
             XCTAssertNotNil(entry["state"], "\(key).state must be present")

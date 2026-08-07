@@ -11,15 +11,15 @@ final class ChatSummaryQueriesTests: XCTestCase {
         let fixture = try ToolTestDatabase(name: "csq-participants")
         let resolver = makeSeededResolver()
 
-        try fixture.insertHandle(rowId: 1, handle: "+15550000001")  // Alice
-        try fixture.insertHandle(rowId: 2, handle: "+15550000002")  // Bob
+        try fixture.insertHandle(rowId: 1, handle: "+15550000001")
+        try fixture.insertHandle(rowId: 2, handle: "+15550000002")
 
         try fixture.insertChat(rowId: 10, guid: "chat-10-guid")
-        try fixture.joinChatHandle(chatId: 10, handleId: 1)          // Alice in chat 10
+        try fixture.joinChatHandle(chatId: 10, handleId: 1)
 
         try fixture.insertChat(rowId: 20, guid: "chat-20-guid")
-        try fixture.joinChatHandle(chatId: 20, handleId: 1)          // Alice in chat 20
-        try fixture.joinChatHandle(chatId: 20, handleId: 2)          // Bob in chat 20
+        try fixture.joinChatHandle(chatId: 20, handleId: 1)
+        try fixture.joinChatHandle(chatId: 20, handleId: 2)
 
         let result = try await ChatSummaryQueries.participantsByChat(
             db: fixture.database(),
@@ -27,13 +27,11 @@ final class ChatSummaryQueriesTests: XCTestCase {
             resolver: resolver
         )
 
-        // Chat 10: only Alice
         let chat10 = try XCTUnwrap(result[10], "Expected participants for chatId 10")
         XCTAssertEqual(chat10.count, 1, "Chat 10 should have exactly 1 participant")
         XCTAssertEqual(chat10.first?.handle, "+15550000001")
         XCTAssertEqual(chat10.first?.name, "Alice Smith", "Resolved name should match seeded cache")
 
-        // Chat 20: Alice and Bob
         let chat20 = try XCTUnwrap(result[20], "Expected participants for chatId 20")
         XCTAssertEqual(chat20.count, 2, "Chat 20 should have exactly 2 participants")
         let handles20 = Set(chat20.map(\.handle))
@@ -53,7 +51,7 @@ final class ChatSummaryQueriesTests: XCTestCase {
         let fixture = try ToolTestDatabase(name: "csq-last-msgs")
         let resolver = makeSeededResolver()
 
-        try fixture.insertHandle(rowId: 1, handle: "+15550000001")  // Alice
+        try fixture.insertHandle(rowId: 1, handle: "+15550000001")
 
         // Chat A and Chat B, each with the same pattern.
         for chatId in [1, 2] {
@@ -135,13 +133,11 @@ final class ChatSummaryQueriesTests: XCTestCase {
             resolver: resolver
         )
 
-        // Chat 1: newest non-reaction is msg 102, from Alice.
         let last1 = try XCTUnwrap(result[1], "Expected last message for chatId 1")
         XCTAssertEqual(last1.info.text, "newest message", "Reaction must not be selected")
         XCTAssertEqual(last1.info.from, "Alice Smith", "Sender resolved from contact cache")
         XCTAssertTrue(last1.awaitingReply, "Not from me → awaitingReply = true")
 
-        // Chat 2: newest non-reaction is msg 202, from me.
         let last2 = try XCTUnwrap(result[2], "Expected last message for chatId 2")
         XCTAssertEqual(last2.info.text, "chat2 newest", "Reaction must not be selected")
         XCTAssertEqual(last2.info.from, "Me")
@@ -151,7 +147,7 @@ final class ChatSummaryQueriesTests: XCTestCase {
     // MARK: - Empty guard
 
     func testEmptyChatIdsReturnsEmpty() async throws {
-        // No fixture needed. The guard path short-circuits before any DB call.
+        // Empty chatIds short-circuits before querying; fixture still needed for Database handle.
         let fixture = try ToolTestDatabase(name: "csq-empty")
         let resolver = makeSeededResolver()
 
@@ -225,7 +221,7 @@ final class ChatSummaryQueriesTests: XCTestCase {
         let fixture = try ToolTestDatabase(name: "csq-unread-inbound")
         let resolver = makeSeededResolver()
 
-        try fixture.insertHandle(rowId: 1, handle: "+15550000001")  // Alice
+        try fixture.insertHandle(rowId: 1, handle: "+15550000001")
         try fixture.insertChat(rowId: 1, guid: "unread-filter-guid")
         try fixture.joinChatHandle(chatId: 1, handleId: 1)
 

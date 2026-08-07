@@ -429,8 +429,7 @@ enum ModernDispatcher {
         // `transport` and `version` are server-constrained (version passes the
         // supported-versions guard before reaching here); `method` is not.
         FileHandle.standardError.write(
-            "[iMessage Max] era=modern transport=\(transport) version=\(version) method=\(sanitizedLogField(method)) client=\(client)\n"
-                .data(using: .utf8)!
+            Data("[iMessage Max] era=modern transport=\(transport) version=\(version) method=\(sanitizedLogField(method)) client=\(client)\n".utf8)
         )
     }
 }

@@ -13,7 +13,6 @@ final class OverviewResponseTests: XCTestCase {
             minParticipants: nil,
             maxParticipants: nil,
             sort: "recent",
-            cursor: nil,
             db: fixture.database(),
             resolver: resolver
         )

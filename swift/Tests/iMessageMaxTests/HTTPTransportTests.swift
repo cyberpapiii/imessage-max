@@ -163,7 +163,6 @@ final class SSEChannelTests: XCTestCase {
     func testKeepAlivesInterleave() async {
         let channel = SSEChannel(keepAliveInterval: .milliseconds(20))
 
-        // Nothing is sent, so the first item to arrive must be a heartbeat.
         // Bounded: take exactly one item instead of looping.
         var iterator = channel.stream.makeAsyncIterator()
         let first = await iterator.next()

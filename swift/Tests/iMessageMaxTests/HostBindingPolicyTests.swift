@@ -3,8 +3,6 @@ import XCTest
 
 final class HostBindingPolicyTests: XCTestCase {
 
-    // MARK: - Loopback hosts allowed without the flag
-
     func testLoopbackHostsAllowedWithoutFlag() {
         let loopbackHosts = ["127.0.0.1", "::1", "localhost", "LOCALHOST"]
         for host in loopbackHosts {
@@ -14,8 +12,6 @@ final class HostBindingPolicyTests: XCTestCase {
             )
         }
     }
-
-    // MARK: - External hosts rejected without the flag
 
     func testExternalHostRejectedWithoutFlag() {
         let externalHosts = ["0.0.0.0", "192.168.1.10", "example.com"]
@@ -28,8 +24,6 @@ final class HostBindingPolicyTests: XCTestCase {
             )
         }
     }
-
-    // MARK: - External hosts allowed with the flag
 
     func testExternalHostAllowedWithFlag() {
         let externalHosts = ["0.0.0.0", "192.168.1.10", "example.com"]

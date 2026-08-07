@@ -20,7 +20,7 @@ final class ResponseContractTests: XCTestCase {
         guard let first = response.chats.first else {
             return XCTFail("Expected chat")
         }
-        let chatJSON = try encodedJSONString(first)
+        let chatJSON = try FormatUtils.encodeJSON(first)
         XCTAssertFalse(chatJSON.contains("\"identity\""))
         XCTAssertFalse(chatJSON.contains("\"participants\""))
         XCTAssertTrue(chatJSON.contains("\"last_message\""))
@@ -41,7 +41,7 @@ final class ResponseContractTests: XCTestCase {
         guard let conversation = result.conversations.first else {
             return XCTFail("Expected conversation")
         }
-        let encoded = try encodedJSONString(conversation)
+        let encoded = try FormatUtils.encodeJSON(conversation)
         XCTAssertFalse(encoded.contains("\"participants\""))
         XCTAssertTrue(encoded.contains("\"participants_preview\""))
         XCTAssertTrue(encoded.contains("\"last_message\""))
@@ -60,7 +60,7 @@ final class ResponseContractTests: XCTestCase {
             return XCTFail("Expected unread chat")
         }
         XCTAssertNotNil(firstChat.lastMessage)
-        XCTAssertFalse(try encodedJSONString(summary).contains("\"people\""))
+        XCTAssertFalse(try FormatUtils.encodeJSON(summary).contains("\"people\""))
 
         let messagesAny = try await tool.execute(params: GetUnread.Parameters(format: .messages))
         guard let messages = messagesAny as? UnreadMessagesResponse else {
@@ -69,8 +69,8 @@ final class ResponseContractTests: XCTestCase {
         guard let firstMessage = messages.messages.first else {
             return XCTFail("Expected unread message")
         }
-        XCTAssertFalse(try encodedJSONString(messages).contains("\"people\""))
-        XCTAssertFalse((try decodeJSONDictionary(from: encodedJSONString(firstMessage)))["chat"] == nil)
+        XCTAssertFalse(try FormatUtils.encodeJSON(messages).contains("\"people\""))
+        XCTAssertFalse((try decodeJSONDictionary(from: FormatUtils.encodeJSON(firstMessage)))["chat"] == nil)
     }
 
     func testListAttachmentsUsesNestedChatAndMessagePreview() async throws {
@@ -86,7 +86,7 @@ final class ResponseContractTests: XCTestCase {
         guard let first = response.messages.first else {
             return XCTFail("Expected shared message row")
         }
-        let encoded = try encodedJSONString(first)
+        let encoded = try FormatUtils.encodeJSON(first)
         XCTAssertTrue(encoded.contains("\"chat\""))
         XCTAssertTrue(encoded.contains("\"shared_summary\""))
         XCTAssertTrue(encoded.contains("\"attachments\""))
@@ -126,7 +126,7 @@ final class ResponseContractTests: XCTestCase {
             return XCTFail("Expected get_context success")
         }
 
-        let encoded = try decodeJSONDictionary(from: try encodedJSONString(response))
+        let encoded = try decodeJSONDictionary(from: try FormatUtils.encodeJSON(response))
         XCTAssertNotNil(encoded["message"])
         XCTAssertNil(encoded["target"])
     }
@@ -181,7 +181,7 @@ final class ResponseContractTests: XCTestCase {
             chat: ChatReference(id: "chat42", name: "Project Group")
         )
 
-        let encoded = try decodeJSONDictionary(from: try encodedJSONString(response))
+        let encoded = try decodeJSONDictionary(from: try FormatUtils.encodeJSON(response))
         XCTAssertNotNil(encoded["chat"])
         XCTAssertNil(encoded["success"])
         XCTAssertNil(encoded["message_id"])
@@ -213,21 +213,16 @@ final class ResponseContractTests: XCTestCase {
             ]
         )
 
-        let encoded = try decodeJSONDictionary(from: try encodedJSONString(sample))
+        let encoded = try decodeJSONDictionary(from: try FormatUtils.encodeJSON(sample))
         XCTAssertNotNil(encoded["database"])
         XCTAssertNotNil(encoded["contacts"])
         XCTAssertNotNil(encoded["capabilities"])
         XCTAssertNil(encoded["database_accessible"])
         XCTAssertNil(encoded["contacts_authorized"])
 
-        // Verify new state-based shape: capabilities is a dict of objects with "state" keys
         let caps = try XCTUnwrap(encoded["capabilities"] as? [String: Any])
         let sendDM = try XCTUnwrap(caps["send_text_dm"] as? [String: Any])
         XCTAssertEqual(sendDM["state"] as? String, "supported")
         XCTAssertEqual(caps.count, 15)
     }
-}
-
-private func encodedJSONString<T: Encodable>(_ value: T) throws -> String {
-    try FormatUtils.encodeJSON(value)
 }

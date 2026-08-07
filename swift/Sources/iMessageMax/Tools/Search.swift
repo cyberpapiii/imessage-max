@@ -102,9 +102,6 @@ struct SearchError: Error, Codable {
 
 /// Implementation of the search tool
 enum SearchTool {
-    // Default unanswered window in hours
-    static let defaultUnansweredHours = 24
-
     // MARK: - Tool Registration
 
     static func register(on server: Server, db: Database, resolver: ContactResolver) {

@@ -80,7 +80,10 @@ actor SendResolver {
                         id: "chat\(numericId)",
                         name: {
                             let trimmed = chat.displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
-                            return (trimmed?.isEmpty == false) ? trimmed! : DisplayNameGenerator.fromNames(participants.map(\.displayName))
+                            if let trimmed, !trimmed.isEmpty {
+                                return trimmed
+                            }
+                            return DisplayNameGenerator.fromNames(participants.map(\.displayName))
                         }()
                     )
                 )
@@ -305,7 +308,12 @@ actor SendResolver {
         }
         guard let row = rows.first else { return nil }
         let displayName = row.1?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let name = (displayName?.isEmpty == false) ? displayName! : "chat\(chatId)"
+        let name: String
+        if let displayName, !displayName.isEmpty {
+            name = displayName
+        } else {
+            name = "chat\(chatId)"
+        }
         return ChatReference(id: "chat\(chatId)", name: name)
     }
 }

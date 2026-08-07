@@ -1,4 +1,3 @@
-// Tests/iMessageMaxTests/MessageTextExtractorTests.swift
 import Foundation
 import XCTest
 @testable import iMessageMax
@@ -14,8 +13,6 @@ final class MessageTextExtractorTests: XCTestCase {
         bytes += payload
         return Data(bytes)
     }
-
-    // MARK: - Step 1: characterization tests (must pass against unmodified extractor)
 
     func testSingleByteLength() {
         let blob = typedstreamBlob(lengthField: [5], payload: Array("hello".utf8))
@@ -78,8 +75,6 @@ final class MessageTextExtractorTests: XCTestCase {
         XCTAssertEqual(MessageTextExtractor.extractFromTypedstream(blob), "hello")
     }
 
-    // MARK: - Step 2: slice-safe indexing
-
     func testSliceInputDoesNotTrap() {
         let validBlob = typedstreamBlob(lengthField: [5], payload: Array("hello".utf8))
         let rebasedResult = MessageTextExtractor.extractFromTypedstream(Data(validBlob))
@@ -93,8 +88,6 @@ final class MessageTextExtractorTests: XCTestCase {
         XCTAssertEqual(sliceResult, rebasedResult)
         XCTAssertEqual(sliceResult, "hello")
     }
-
-    // MARK: - Step 3: reject unknown length markers
 
     func testUnknownMarker0x83ReturnsNil() {
         let blob = typedstreamBlob(

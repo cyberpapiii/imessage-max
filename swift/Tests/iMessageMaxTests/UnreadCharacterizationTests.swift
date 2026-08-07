@@ -144,7 +144,6 @@ final class UnreadCharacterizationTests: XCTestCase {
             response.chats.first(where: { $0.chat.id == "chat1" }),
             "Expected chat1 (Alice DM) in unread summary"
         )
-        // Participants resolved from the seeded contact cache: names, not handles.
         XCTAssertEqual(aliceChat.chat.name, "Alice Smith", "Unnamed DM takes the resolved participant name")
         XCTAssertEqual(aliceChat.chat.participantsPreview, ["Alice Smith"])
         XCTAssertFalse(

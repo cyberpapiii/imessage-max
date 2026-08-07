@@ -130,7 +130,6 @@ enum ListChatsTool {
                 minParticipants: minParticipants,
                 maxParticipants: maxParticipants,
                 sort: sort,
-                cursor: nil,
                 db: db,
                 resolver: resolver
             )
@@ -152,7 +151,6 @@ enum ListChatsTool {
     ///   - minParticipants: Filter to chats with at least N participants
     ///   - maxParticipants: Filter to chats with at most N participants
     ///   - sort: "recent" (default), "alphabetical", or "most_active"
-    ///   - cursor: Pagination cursor (unused, for future use)
     ///   - db: Database instance
     ///   - resolver: ContactResolver for name lookups
     static func execute(
@@ -162,17 +160,13 @@ enum ListChatsTool {
         minParticipants: Int? = nil,
         maxParticipants: Int? = nil,
         sort: String = "recent",
-        cursor: String? = nil,
         db: Database = Database(),
         resolver: ContactResolver
     ) async -> Result<ListChatsResponse, ListChatsError> {
-        // Clamp limit to 1-100
         let clampedLimit = max(1, min(limit, 100))
 
-        // Validate sort
         let sortOrder = ListChatsSort(rawValue: sort) ?? .recent
 
-        // Initialize resolver
         do {
             try await resolver.initialize()
         } catch {
@@ -180,13 +174,11 @@ enum ListChatsTool {
         }
 
         do {
-            // Build base query
             let qb = QueryBuilder()
             qb.select(
                 "c.ROWID as id",
                 "c.guid",
                 "c.display_name",
-                "c.service_name",
                 "COUNT(DISTINCT chj.handle_id) as participant_count",
                 "MAX(m.date) as last_message_date"
             )
@@ -195,14 +187,12 @@ enum ListChatsTool {
             .leftJoin("chat_message_join cmj ON c.ROWID = cmj.chat_id")
             .leftJoin("message m ON cmj.message_id = m.ROWID AND m.associated_message_type = 0")
 
-            // Time filter
             if let since = since, let sinceApple = AppleTime.parse(since) {
                 qb.where("m.date >= ?", sinceApple)
             }
 
             qb.groupBy("c.ROWID")
 
-            // Participant count filters (HAVING clause)
             if let minP = minParticipants {
                 qb.having("participant_count >= ?", minP)
             }
@@ -217,7 +207,6 @@ enum ListChatsTool {
                 }
             }
 
-            // Sort
             switch sortOrder {
             case .recent, .mostActive:
                 qb.orderBy("last_message_date DESC NULLS LAST")
@@ -233,9 +222,8 @@ enum ListChatsTool {
                     id: row.int(0),
                     guid: row.string(1),
                     displayName: row.string(2),
-                    serviceName: row.string(3),
-                    participantCount: Int(row.int(4)),
-                    lastMessageDate: row.optionalInt(5)
+                    participantCount: Int(row.int(3)),
+                    lastMessageDate: row.optionalInt(4)
                 )
             }
 
@@ -252,7 +240,6 @@ enum ListChatsTool {
                 resolver: resolver
             )
 
-            // Build results
             var chats: [ChatInfo] = []
 
             for chatRow in chatRows {
@@ -289,7 +276,6 @@ enum ListChatsTool {
                 chats.append(chatInfo)
             }
 
-            // Get totals
             let totals = try getTotals(db: db)
 
             return .success(ListChatsResponse(
@@ -338,7 +324,6 @@ enum ListChatsTool {
         let id: Int64
         let guid: String?
         let displayName: String?
-        let serviceName: String?
         let participantCount: Int
         let lastMessageDate: Int64?
     }

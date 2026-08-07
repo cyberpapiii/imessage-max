@@ -222,7 +222,13 @@ actor GetMessagesTool {
         let unansweredHours = args["unanswered_hours"]?.intValue ?? defaultUnansweredHours
         let sessionFilter = args["session"]?.stringValue
 
-        guard chatId != nil || (participants != nil && !participants!.isEmpty) else {
+        let hasParticipants: Bool
+        if let participants {
+            hasParticipants = !participants.isEmpty
+        } else {
+            hasParticipants = false
+        }
+        guard chatId != nil || hasParticipants else {
             throw GetMessagesToolError(errorResponse: GetMessagesErrorResponse(
                 error: "validation_error",
                 message: "Either chat_id or participants must be provided",
@@ -394,9 +400,14 @@ actor GetMessagesTool {
         }
 
         let rawDisplayName = chatInfo.displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let displayName = (rawDisplayName?.isEmpty == false) ? rawDisplayName! : DisplayNameGenerator.fromNames(
-            people.filter { $0.key != "me" }.map { $0.value }
-        )
+        let displayName: String
+        if let rawDisplayName, !rawDisplayName.isEmpty {
+            displayName = rawDisplayName
+        } else {
+            displayName = DisplayNameGenerator.fromNames(
+                people.filter { $0.key != "me" }.map { $0.value }
+            )
+        }
 
         let mediaTruncated = mediaCount > maxMedia
 

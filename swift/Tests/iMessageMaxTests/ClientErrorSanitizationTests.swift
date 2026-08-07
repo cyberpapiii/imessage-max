@@ -1,4 +1,3 @@
-// Tests/iMessageMaxTests/ClientErrorSanitizationTests.swift
 import XCTest
 @testable import iMessageMax
 
@@ -11,7 +10,6 @@ final class ClientErrorSanitizationTests: XCTestCase {
 
     private let samplePath = "/Users/x/Library/Messages/chat.db"
 
-    // 1. permissionDenied maps to the fixed guidance string and drops the path.
     func testPermissionDeniedIsSanitizedAndDropsPath() {
         let sanitized = ClientErrorMessages.sanitized(
             DatabaseError.permissionDenied(samplePath)
@@ -24,8 +22,6 @@ final class ClientErrorSanitizationTests: XCTestCase {
             "Sanitized client error must not echo the database path")
     }
 
-    // 2. notFound maps to databaseNotFound; queryFailed/invalidData map to
-    //    internalError, and none of them echo their payload.
     func testOtherDatabaseErrorsMapToFixedStrings() {
         let notFound = ClientErrorMessages.sanitized(DatabaseError.notFound(samplePath))
         XCTAssertEqual(notFound, ClientErrorMessages.databaseNotFound)
@@ -43,8 +39,8 @@ final class ClientErrorSanitizationTests: XCTestCase {
             "Raw invalid-data detail must not reach the client")
     }
 
-    // 3. Non-DatabaseError passes through unchanged: SendError descriptions are
-    //    deliberately client-facing and must survive the sanitizer untouched.
+    // Non-DatabaseError passes through unchanged: SendError descriptions are
+    // deliberately client-facing and must survive the sanitizer untouched.
     func testNonDatabaseErrorPassesThroughUnchanged() {
         let sanitized = ClientErrorMessages.sanitized(SendError.timeout)
 
@@ -52,18 +48,18 @@ final class ClientErrorSanitizationTests: XCTestCase {
         XCTAssertEqual(sanitized, "Send operation timed out. Messages.app may be unresponsive.")
     }
 
-    // 4. The underlying DatabaseError still carries the path. The detail is
-    //    preserved for the stderr log, only withheld from the client payload.
+    // The underlying DatabaseError still carries the path. The detail is
+    // preserved for the stderr log, only withheld from the client payload.
     func testDatabaseErrorDescriptionStillCarriesDetailForLogging() {
         XCTAssertTrue(
             DatabaseError.permissionDenied(samplePath).localizedDescription.contains(samplePath),
             "The log-side description must keep the path; only the client payload is sanitized")
     }
 
-    // 5. internalDetail never echoes the underlying description. Unlike
-    //    sanitized, it drops non-DatabaseError detail too. That is the whole
-    //    point at FileManager/Process catch sites, where the description
-    //    embeds the staging path and the operator's username (plan 039).
+    // internalDetail never echoes the underlying description. Unlike
+    // sanitized, it drops non-DatabaseError detail too. That is the whole
+    // point at FileManager/Process catch sites, where the description
+    // embeds the staging path and the operator's username (plan 039).
     func testInternalDetailNeverEchoesTheUnderlyingDescription() {
         let stagingPath = "/Users/testuser/Pictures/imessage-max-staging/abc/photo.jpg"
         let underlying = NSError(
@@ -86,7 +82,7 @@ final class ClientErrorSanitizationTests: XCTestCase {
             "internalDetail must name the operation that failed")
     }
 
-    // 6. The guidance wording is pinned so it cannot drift accidentally.
+    // The guidance wording is pinned so it cannot drift accidentally.
     func testInternalDetailReturnsStableGuidance() {
         let detail = ClientErrorMessages.internalDetail(
             SendError.timeout, context: "Running AppleScript"
