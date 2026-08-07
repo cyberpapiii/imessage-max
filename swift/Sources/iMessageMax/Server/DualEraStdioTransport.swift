@@ -8,6 +8,14 @@
 // stdio clients keep their exact wire behavior. `initialize` always stays
 // on the legacy lane, no matter what `_meta` it carries, mirroring
 // HTTPTransport's era selection.
+//
+// The modern lane is stateless, so each modern message is dispatched in its
+// own child task: the pump loop itself never awaits request handling, only
+// parses, routes, yields, and spawns. This keeps a slow `tools/call` (e.g. a
+// `send` that polls for ~45s) from blocking legacy session traffic or other
+// modern requests behind it. Legacy messages remain strictly ordered via
+// `continuation.yield`; modern responses may interleave on stdout by design
+// (JSON-RPC ids correlate them).
 import Foundation
 import Logging
 import MCP
@@ -38,22 +46,35 @@ actor DualEraStdioTransport: Transport {
         let base = self.base
         let continuation = self.continuation
         pumpTask = Task {
-            do {
-                for try await data in upstream {
-                    if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                        (json["method"] as? String) != "initialize",
-                        ModernDispatcher.isModernMessage(json) {
-                        let result = await ModernDispatcher.handle(data, transport: "stdio")
-                        if let responseData = result.data {
-                            try? await base.send(responseData)
+            await withDiscardingTaskGroup { group in
+                do {
+                    for try await data in upstream {
+                        if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                            (json["method"] as? String) != "initialize",
+                            ModernDispatcher.isModernMessage(json) {
+                            // Modern lane is stateless: safe to handle
+                            // concurrently. Never block the read loop on a
+                            // tool call.
+                            group.addTask {
+                                let result = await ModernDispatcher.handle(data, transport: "stdio")
+                                if let responseData = result.data {
+                                    do {
+                                        try await base.send(responseData)
+                                    } catch {
+                                        FileHandle.standardError.write(
+                                            Data("[iMessage Max] stdio write failed; response dropped: \(error)\n".utf8)
+                                        )
+                                    }
+                                }
+                            }
+                            continue
                         }
-                        continue
+                        continuation.yield(data)
                     }
-                    continuation.yield(data)
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
                 }
-                continuation.finish()
-            } catch {
-                continuation.finish(throwing: error)
             }
         }
     }

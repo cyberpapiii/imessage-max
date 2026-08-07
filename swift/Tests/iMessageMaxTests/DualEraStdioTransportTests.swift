@@ -240,6 +240,104 @@ final class DualEraStdioTransportTests: XCTestCase {
         await dual.disconnect()
     }
 
+    // MARK: - Concurrency: slow modern calls don't block the pump
+
+    func testSlowModernCallDoesNotBlockSubsequentMessages() async throws {
+        let gate = AsyncStream<Void>.makeStream()
+        registerFakeTool(named: "slow_tool") { _ in
+            var iterator = gate.stream.makeAsyncIterator()
+            _ = await iterator.next()  // parks until the test opens the gate
+            return [.plainText("done")]
+        }
+
+        let base = FakeBaseTransport()
+        let dual = DualEraStdioTransport(base: base)
+        try await dual.connect()
+
+        let downstream = await dual.receive()
+        var iterator = downstream.makeAsyncIterator()
+
+        let slowCall = Data(
+            #"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"slow_tool","arguments":{},"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}"#
+                .utf8
+        )
+        await base.feed(slowCall)
+
+        let legacy = Data(
+            #"{"jsonrpc":"2.0","id":2,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"tests","version":"1.0"}}}"#
+                .utf8
+        )
+        await base.feed(legacy)
+
+        // The legacy message must reach the downstream stream without
+        // waiting for the parked slow_tool call: this is only possible if
+        // the pump loop spawned the modern call into a child task instead
+        // of awaiting it inline.
+        let forwarded = try await iterator.next()
+        XCTAssertEqual(forwarded, legacy)
+
+        // At the moment the legacy message arrived, the slow call must
+        // still be parked on the gate — no response written yet.
+        let sentCountWhileParked = await base.sentCount()
+        XCTAssertEqual(sentCountWhileParked, 0, "the slow tool call must still be in flight")
+
+        // Open the gate; the slow call's response must eventually arrive.
+        gate.continuation.yield(())
+        let responseData = try await base.waitForFirstSend()
+        let response = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: responseData) as? [String: Any]
+        )
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        XCTAssertEqual(result["resultType"] as? String, "complete")
+
+        await dual.disconnect()
+    }
+
+    // MARK: - Write-failure resilience
+
+    func testWriteFailureIsSwallowedButLogged() async throws {
+        let base = FakeBaseTransport()
+        let dual = DualEraStdioTransport(base: base)
+        try await dual.connect()
+
+        await base.failNextSend()
+
+        let discover1 = Data(
+            #"{"jsonrpc":"2.0","id":1,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}"#
+                .utf8
+        )
+        await base.feed(discover1)
+
+        // Wait for the (failing) write attempt before feeding the next
+        // message, so the flag is deterministically consumed by the first
+        // request rather than racing with the second on the actor.
+        for _ in 0..<200 {
+            if await base.sendAttemptCount() >= 1 { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let attempts = await base.sendAttemptCount()
+        XCTAssertEqual(attempts, 1, "the first response must have attempted a write")
+        let sentSoFar = await base.sentCount()
+        XCTAssertEqual(sentSoFar, 0, "a failed write must not be recorded as sent")
+
+        let discover2 = Data(
+            #"{"jsonrpc":"2.0","id":2,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}"#
+                .utf8
+        )
+        await base.feed(discover2)
+
+        // The pump must have survived the failed write: this second modern
+        // request still gets answered normally, proving the failure was
+        // logged and swallowed rather than wedging or crashing the pump.
+        let responseData = try await base.waitForFirstSend()
+        let response = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: responseData) as? [String: Any]
+        )
+        XCTAssertEqual(response["id"] as? Int, 2)
+
+        await dual.disconnect()
+    }
+
     // MARK: - Helpers
 
     private func registerFakeTool(
@@ -263,6 +361,8 @@ private actor FakeBaseTransport: Transport {
     nonisolated let logger: Logger
 
     private var sent: [Data] = []
+    private var shouldFailNextSend = false
+    private var sendAttempts = 0
     private let stream: AsyncThrowingStream<Data, Error>
     private let continuation: AsyncThrowingStream<Data, Error>.Continuation
 
@@ -283,6 +383,14 @@ private actor FakeBaseTransport: Transport {
     }
 
     func send(_ data: Data) async throws {
+        sendAttempts += 1
+        if shouldFailNextSend {
+            shouldFailNextSend = false
+            throw NSError(
+                domain: "FakeBaseTransport", code: 2,
+                userInfo: [NSLocalizedDescriptionKey: "simulated write failure"]
+            )
+        }
         sent.append(data)
     }
 
@@ -296,6 +404,19 @@ private actor FakeBaseTransport: Transport {
 
     func sentCount() -> Int {
         sent.count
+    }
+
+    /// Makes the next `send(_:)` call throw instead of recording, simulating
+    /// a stdout write failure (closed pipe, dying client).
+    func failNextSend() {
+        shouldFailNextSend = true
+    }
+
+    /// Total `send(_:)` calls, whether they succeeded or failed — lets tests
+    /// deterministically wait for a failing write to happen before feeding
+    /// the next message.
+    func sendAttemptCount() -> Int {
+        sendAttempts
     }
 
     /// Polls until the adapter has written at least one message (the pump
