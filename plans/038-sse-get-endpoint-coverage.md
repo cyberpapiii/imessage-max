@@ -312,7 +312,7 @@ Expected: all pass; suite count is now 5 higher than the Step 1 baseline.
 cd swift && swift build && swift test 2>&1 | tail -20
 ```
 
-Expected: `Executed 238 tests, with 0 failures` (233 at `0ff6b8f` + 5 new).
+Expected: `Executed 238 tests, with 0 failures` (233 at `0ff6b8f` + 5 new). Read the count with `| grep -E 'Executed [0-9]+ tests' | tail -1`, not `| tail -3`.
 If the baseline is not 233, report the actual numbers rather than adjusting
 the plan's arithmetic to match.
 
@@ -321,9 +321,14 @@ the plan's arithmetic to match.
 All must hold, checked by running the command:
 
 1. `cd swift && swift build` — exits 0, no new warnings.
-2. `cd swift && swift test 2>&1 | tail -3` — `Executed 238 tests, with 0 failures`.
-3. `cd swift && grep -c 'method: HTTPRequest.Method.get' Tests/iMessageMaxTests/HTTPTransportIntegrationTests.swift` — at least `4`.
-4. `cd swift && grep -n 'maxSessions' Sources/iMessageMax/Server/HTTPTransport.swift` — exactly two hits (the init parameter and the forwarded argument).
+2. `cd swift && swift test 2>&1 | grep -E 'Executed [0-9]+ tests' | tail -1` — `Executed 238 tests, with 0 failures`. (`tail -3` shows the swift-testing trailer, not the XCTest count — this package runs both harnesses.)
+3. `cd swift && grep -cE 'HTTPRequest\.Method\.get|method: \.get' Tests/iMessageMaxTests/HTTPTransportIntegrationTests.swift` — at
+   least `4`. Match on either spelling. An earlier draft pinned the single
+   literal `method: HTTPRequest.Method.get`, which made the criterion shape
+   the code: the executor had to spell `.get` the long way in a `Request`
+   head where `.get` was natural, purely to keep a grep count. A criterion
+   that a correct implementation can fail is a broken criterion.
+4. `cd swift && grep -n 'maxSessions' Sources/iMessageMax/Server/HTTPTransport.swift` — three hits: the doc-comment line Step 2 prescribes, the init parameter, and the forwarded argument. Only two of those are code. **Do not delete the doc comment to make a grep count smaller** — an earlier draft of this criterion said "exactly two" and contradicted Step 2's own snippet.
 5. `git diff --stat` — touches exactly two files:
    `swift/Sources/iMessageMax/Server/HTTPTransport.swift` and
    `swift/Tests/iMessageMaxTests/HTTPTransportIntegrationTests.swift`.
@@ -377,11 +382,10 @@ not the body/headers does not satisfy this plan:
 
 Stop and report, do not improvise, if any of these occur:
 
-- The GET request in test 4 does not return — the streaming response never
-  completes under `HummingbirdTesting`. This is the one genuinely uncertain
-  part of the plan. Report it with the test as written; the fallback (asserting
-  only the three rejection branches and leaving the happy path to manual
-  validation) is a reviewer decision, not yours.
+- ~~The GET request in test 4 does not return.~~ **This fired, and is now
+  resolved — see "How test 4 was actually made to work" below.** Left in the
+  history because the prediction was right and the plan was better for
+  carrying it.
 - `SessionManager.init` has a parameter between `resolver` and `maxSessions`
   that has no default value.
 - Any existing test starts failing. The only production change here is an
@@ -402,3 +406,53 @@ The `maxSessions` passthrough is a test seam with a production default.
 If someone later wires it to a config file or environment variable, the
 default must stay 100 and `testSecondSessionAtCapacityReturns503` must keep
 setting it explicitly rather than relying on ambient config.
+
+## How test 4 was actually made to work
+
+The plan predicted test 4 might hang and told the executor to report rather
+than improvise. It hung. The mechanism, confirmed in Hummingbird's own source
+rather than inferred:
+
+```swift
+// RouterTestFramework.swift:114-125
+group.addTask {
+    let response: Response
+    do {
+        response = try await self.responder.respond(to: request, context: context)
+    } catch { ... }
+    let responseWriter = RouterResponseWriter()
+    try await response.body.write(responseWriter)          // <-- drains to completion
+    return responseWriter.values.withLockedValue { values in
+        TestResponse(head: response.head, body: values.body, ...)  // <-- only then
+    }
+}
+```
+
+`handleGet` returns a body that pumps the SSE channel — keep-alives included —
+until the connection is unregistered. It never completes, so `executeRequest`
+never returns and `response.head` is unreachable through the client. No
+timeout or retry fixes this; any body-collecting client deadlocks the same
+way.
+
+The resolution: **call `handleGet` directly and assert on `response.head`
+without touching `response.body`.** The head is fully populated the moment the
+handler returns, and nothing obliges the body writer to run. Two facts make
+this cheap:
+
+- `handleGet` never reads `context` — the only occurrence in its body is the
+  parameter itself — so any instance satisfies the generic.
+- The file already contained the exact construction needed, in
+  `testOriginMiddlewareRejectsBadOriginAndHost`:
+  `BasicRequestContext(source: ApplicationRequestContextSource(channel: EmbeddedChannel(), logger: Logger(label: #function)))`.
+
+The `initialize` call still goes through the real client, so the session id
+under assertion is genuine.
+
+This trades wire-level fidelity for reachability on exactly one test, and the
+code carries a comment saying so — including an explicit "do not fix it back."
+Anyone who routes it through `executeRequest` again will hang the suite.
+
+**Lesson worth keeping**: a streaming endpoint is not testable by a
+body-collecting client, and that is a property of the *client*, not a defect in
+the endpoint. Reach for the handler directly rather than concluding the code is
+untestable.

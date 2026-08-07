@@ -60,8 +60,34 @@ fixed versions.
 
 | Plan | Title | Priority | Effort | Depends on | Status |
 |------|-------|----------|--------|------------|--------|
-| 038 | SSE GET endpoint coverage — the four `handleGet` guards + the 503 capacity wire response | P2 | S | — | TODO |
+| 038 | SSE GET endpoint coverage — the four `handleGet` guards + the 503 capacity wire response | P2 | S | — | DONE 2026-08-07, merged to `main` (`fd19db1`, branch `advisor/038-sse-get-coverage`; 238/0 on its own branch, 240/0 merged; the happy-path test independently mutation-tested by the reviewer, and the executor mutation-tested all four of its assertions) |
 | 039 | Manual-validation refresh for the full send vocabulary + AppleScript error hygiene round 3 | P3 | S | — | DONE 2026-08-07, merged to `main` (`4a25d8b`, branch `advisor/039-validation-and-hygiene`; 235/0 re-verified by reviewer; both new tests mutation-tested — replacing the fixed guidance with `error.localizedDescription` fails 6 assertions across both methods) |
+
+**Merged 2026-08-07 — `main` now at 240 tests, 0 failures.** 233 baseline + 5
+from 038 + 2 from 039 = exactly 240. 038's branch reported 238 because it was
+cut before 039 landed; the arithmetic closing exactly is the evidence that
+neither branch's tests were lost or double-counted.
+
+#### The SSE happy path needed a different client, not a different endpoint
+
+038's plan flagged one test as genuinely uncertain: asserting a 200 on a
+streaming endpoint through `HummingbirdTesting`. It hung — permanently, not
+slowly. `RouterTestFramework.swift:122` runs
+`try await response.body.write(responseWriter)` to completion *before*
+constructing the `TestResponse`, and `handleGet`'s body pumps SSE keep-alives
+until the connection unregisters. The head is unreachable through any
+body-collecting client.
+
+Resolved by calling `handleGet` directly and asserting on `response.head`
+without invoking the body writer. Full write-up in `plans/038-*.md` under
+"How test 4 was actually made to work". The test carries a code comment
+saying not to route it back through `executeRequest`.
+
+Worth generalizing: **a streaming endpoint being untestable by a
+body-collecting client is a property of the client, not a defect in the
+endpoint.** The first executor's instinct — quarantine the test and escalate —
+was correct given its instructions, and the plan's STOP condition is what made
+that the safe move rather than a silent timeout hack.
 
 #### Defects in plans 038/039 as written
 
@@ -88,6 +114,19 @@ files. Recorded because the failure modes recur:
   **Third vacuous-grep defect across the two rounds** (plan 020's
   double-backslash, plan 037's `grep -c 'sign "$(IDENTITY)"'`). A grep in a
   plan is worth writing only if it has been run.
+- **038 done criterion 4 contradicted its own Step 2.** Step 2's code snippet
+  prescribes a `///   - maxSessions:` doc line; criterion 4 then demanded
+  `grep -n maxSessions` return "exactly two hits." Following the step makes
+  the criterion impossible. The executor kept the documentation and let the
+  criterion fail rather than delete a doc comment to satisfy a grep — the
+  right call.
+- **038 done criterion 3 shaped the code instead of checking it.** It pinned
+  the literal `method: HTTPRequest.Method.get`. Writing a `Request` head
+  naturally gives `method: .get`, which dropped the count to 3, so the
+  executor spelled `.get` the long way purely to keep the grep happy — and
+  disclosed it rather than letting it be found later. Now matches either
+  spelling. **A criterion a correct implementation can fail is a broken
+  criterion.**
 - **039 done criterion 2 used `swift test 2>&1 | tail -3`**, which shows the
   swift-testing trailer (`Test run with 0 tests in 0 suites passed`), not the
   XCTest count — this package runs both harnesses. Use
