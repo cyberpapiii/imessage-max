@@ -286,6 +286,7 @@ actor GetMessagesTool {
         }
 
         let attachmentsMap = try getAttachmentsMap(messageIds: messageRows.map { $0.id })
+        let processor = ImageProcessor()
 
         var messages: [GetMessagesResponse.MessageInfo] = []
         var mediaCount = 0
@@ -332,7 +333,6 @@ actor GetMessagesTool {
                         // chat.db paths are data, not trusted input — contain to allowed roots.
                         // Out-of-root paths degrade to the AttachmentSummary fallthrough below.
                         if let validatedPath = AttachmentPathPolicy.validatedPath(path, allowedRoots: allowedRoots) {
-                            let processor = ImageProcessor()
                             if let metadata = processor.getMetadata(at: validatedPath) {
                                 if media == nil { media = [] }
                                 media?.append(GetMessagesResponse.MediaInfo(
