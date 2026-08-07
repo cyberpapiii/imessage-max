@@ -231,6 +231,86 @@ final class ModernDispatcherTests: XCTestCase {
         XCTAssertEqual(ModernDispatcher.decodeBase64Sentinel("=?base64?!!?="), "=?base64?!!?=")
     }
 
+    // MARK: - Catalog cache
+
+    func testCatalogCacheInvalidatesOnRegistryChange() async throws {
+        registerFakeTool(named: "first_tool")
+
+        let firstOutcome = await ModernDispatcher.handle(
+            modernRequest(method: "tools/list"),
+            transport: "test"
+        )
+        let firstTools = try XCTUnwrap(try result(from: firstOutcome)["tools"] as? [[String: Any]])
+        XCTAssertEqual(firstTools.map { $0["name"] as? String }, ["first_tool"])
+
+        // Registering bumps catalogVersion. Without that bump the second list
+        // would serve the stale single-tool cache.
+        registerFakeTool(named: "second_tool")
+
+        let secondOutcome = await ModernDispatcher.handle(
+            modernRequest(method: "tools/list"),
+            transport: "test"
+        )
+        let secondTools = try XCTUnwrap(try result(from: secondOutcome)["tools"] as? [[String: Any]])
+        XCTAssertEqual(
+            secondTools.map { $0["name"] as? String },
+            ["first_tool", "second_tool"]
+        )
+    }
+
+    func testCatalogCacheServesConsistentResultAcrossCalls() async throws {
+        registerFakeTool(named: "zeta_tool")
+        registerFakeTool(named: "alpha_tool")
+        registerFakeTool(named: "mid_tool")
+
+        let firstOutcome = await ModernDispatcher.handle(
+            modernRequest(method: "tools/list"),
+            transport: "test"
+        )
+        let secondOutcome = await ModernDispatcher.handle(
+            modernRequest(method: "tools/list"),
+            transport: "test"
+        )
+
+        let firstTools = try XCTUnwrap(try result(from: firstOutcome)["tools"] as? [[String: Any]])
+        let secondTools = try XCTUnwrap(try result(from: secondOutcome)["tools"] as? [[String: Any]])
+
+        // The cached second call must preserve both membership and order.
+        XCTAssertEqual(
+            firstTools.map { $0["name"] as? String },
+            secondTools.map { $0["name"] as? String }
+        )
+        XCTAssertEqual(
+            secondTools.map { $0["name"] as? String },
+            ["zeta_tool", "alpha_tool", "mid_tool"]
+        )
+    }
+
+    // MARK: - Log sanitization
+
+    func testLogFieldSanitization() {
+        // A newline would let a client forge whole log lines.
+        XCTAssertEqual(ModernDispatcher.sanitizedLogField("evil\nname"), "evilname")
+        XCTAssertEqual(ModernDispatcher.sanitizedLogField("tab\there\r\n"), "tabhere")
+
+        // Unbounded input is clamped so a client cannot flood the service log.
+        let long = String(repeating: "a", count: 300)
+        XCTAssertEqual(ModernDispatcher.sanitizedLogField(long).count, 64)
+
+        // Ordinary values pass through untouched.
+        XCTAssertEqual(ModernDispatcher.sanitizedLogField("plug/1.2.3"), "plug/1.2.3")
+    }
+
+    func testSerializeFallbackPreservesScalarId() {
+        // The correlation rule behind the id-preserving fallback: a client
+        // waiting on id 7 must not receive an id:null envelope.
+        XCTAssertEqual(ModernDispatcher.fallbackEnvelopeId(for: 7) as? Int, 7)
+        XCTAssertEqual(ModernDispatcher.fallbackEnvelopeId(for: "req-7") as? String, "req-7")
+        XCTAssertTrue(ModernDispatcher.fallbackEnvelopeId(for: nil) is NSNull)
+        // Non-scalar ids have no safe echo, so they degrade to null.
+        XCTAssertTrue(ModernDispatcher.fallbackEnvelopeId(for: ["a": 1]) is NSNull)
+    }
+
     // MARK: - Helpers
 
     private func registerFakeTool(

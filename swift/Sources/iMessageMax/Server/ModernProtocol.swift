@@ -35,6 +35,32 @@ struct ModernDispatchResult {
     static let accepted = ModernDispatchResult(data: nil, httpStatus: 202)
 }
 
+/// Lock-guarded memo for the encoded tool catalog, keyed by
+/// `ToolHandlerRegistry.catalogVersion`.
+///
+/// Uses the same NSLock idiom as `ToolHandlerRegistry` rather than an actor,
+/// because `[[String: Any]]` is not Sendable and the dispatcher's entry points
+/// are synchronous static functions.
+final class CatalogCache: @unchecked Sendable {
+    private var cached: (version: Int, tools: [[String: Any]])?
+    private let lock = NSLock()
+
+    /// Returns the memoized catalog only if it matches the current registry
+    /// version; a stale entry is treated as a miss.
+    func tools(forVersion version: Int) -> [[String: Any]]? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let cached, cached.version == version else { return nil }
+        return cached.tools
+    }
+
+    func store(tools: [[String: Any]], version: Int) {
+        lock.lock()
+        defer { lock.unlock() }
+        cached = (version, tools)
+    }
+}
+
 enum ModernDispatcher {
     /// JSON-RPC error codes defined by the 2026-07-28 spec.
     enum ErrorCode {
@@ -167,8 +193,8 @@ enum ModernDispatcher {
     // MARK: - Method implementations
 
     private static func discoverResult() -> [String: Any] {
-        var serverInfo = serverInfoJSON()
-        if let icons = iconsJSON() {
+        var serverInfo = serverInfoJSON
+        if let icons = iconsJSON {
             serverInfo["icons"] = icons
         }
         return [
@@ -233,38 +259,65 @@ enum ModernDispatcher {
     private static func completeResult() -> [String: Any] {
         [
             "resultType": "complete",
-            "_meta": [ModernMetaKey.serverInfo: serverInfoJSON()],
+            "_meta": [ModernMetaKey.serverInfo: serverInfoJSON],
         ]
     }
 
-    private static func serverInfoJSON() -> [String: Any] {
-        [
-            "name": Version.name,
-            "title": Version.title,
-            "version": Version.current,
-        ]
-    }
+    /// Three constant strings — build the dictionary once rather than on every
+    /// response. Immutable after init, hence `nonisolated(unsafe)`.
+    nonisolated(unsafe) private static let serverInfoJSON: [String: Any] = [
+        "name": Version.name,
+        "title": Version.title,
+        "version": Version.current,
+    ]
 
-    private static func iconsJSON() -> [[String: Any]]? {
+    /// Icons never change at runtime, so encode them once. `nil` remains a
+    /// legitimate "no icons" answer, so no failure log here.
+    nonisolated(unsafe) private static let iconsJSON: [[String: Any]]? = {
         guard let icons = IconMetadata.icons,
             let data = try? JSONEncoder().encode(icons),
             let json = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
         else { return nil }
         return json
-    }
+    }()
+
+    /// Encoded tool catalog, memoized against the registry's catalog version.
+    /// The dispatcher advertises a one-hour catalog TTL to clients; it should
+    /// believe itself rather than re-encoding ~13 schemas per request.
+    private static let catalogCache = CatalogCache()
 
     private static func toolsJSON() -> [[String: Any]] {
+        let currentVersion = ToolHandlerRegistry.shared.catalogVersion
+        if let cached = catalogCache.tools(forVersion: currentVersion) {
+            return cached
+        }
+
         let tools = ToolHandlerRegistry.shared.getTools()
         guard let data = try? JSONEncoder().encode(tools),
             let json = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
-        else { return [] }
+        else {
+            // Deliberately not cached: an empty catalog must not become sticky.
+            FileHandle.standardError.write(
+                Data("[iMessage Max] modern toolsJSON encode failed; returning empty catalog\n".utf8)
+            )
+            return []
+        }
+        catalogCache.store(tools: json, version: currentVersion)
         return json
     }
 
     private static func contentJSON(_ content: [Tool.Content]) -> [[String: Any]] {
         guard let data = try? JSONEncoder().encode(content),
             let json = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
-        else { return [] }
+        else {
+            // Shape safety still demands an array, but never silently: an
+            // empty content array turns a successful tool call into an
+            // empty-content success.
+            FileHandle.standardError.write(
+                Data("[iMessage Max] modern contentJSON encode failed; returning empty content\n".utf8)
+            )
+            return []
+        }
         return json
     }
 
@@ -318,24 +371,65 @@ enum ModernDispatcher {
         return ModernDispatchResult(data: serialize(envelope), httpStatus: httpStatus)
     }
 
+    /// Chooses the id for a fallback error envelope, preserving correlation
+    /// when the id is a JSON scalar. A client correlating by request id would
+    /// otherwise wait forever on an `id:null` envelope that looks like it
+    /// belongs to someone else.
+    ///
+    /// Internal so the correlation rule can be tested directly: the
+    /// serialization failure that reaches it cannot be provoked in a test,
+    /// because Foundation raises an uncatchable ObjC exception on invalid
+    /// JSON input rather than throwing a Swift error.
+    static func fallbackEnvelopeId(for id: Any?) -> Any {
+        switch id {
+        case let string as String: return string
+        case let number as NSNumber: return number
+        default: return NSNull()
+        }
+    }
+
     private static func serialize(_ object: [String: Any]) -> Data {
-        (try? JSONSerialization.data(withJSONObject: object))
-            ?? Data(#"{"jsonrpc":"2.0","id":null,"error":{"code":-32603,"message":"Internal error"}}"#.utf8)
+        do {
+            return try JSONSerialization.data(withJSONObject: object)
+        } catch {
+            FileHandle.standardError.write(
+                Data("[iMessage Max] modern serialize failed: \(error)\n".utf8)
+            )
+            let fallback: [String: Any] = [
+                "jsonrpc": "2.0",
+                "id": fallbackEnvelopeId(for: object["id"]),
+                "error": ["code": -32603, "message": "Internal error: response serialization failed"],
+            ]
+            return (try? JSONSerialization.data(withJSONObject: fallback))
+                ?? Data(#"{"jsonrpc":"2.0","id":null,"error":{"code":-32603,"message":"Internal error"}}"#.utf8)
+        }
     }
 
     // MARK: - Observability
 
     /// One structured stderr line per modern request: requested version,
     /// selected era, transport, peer identity. No arguments or credentials.
+    /// Client-supplied strings are untrusted: strip control characters
+    /// (log-line injection via an embedded newline) and clamp length before
+    /// logging. Internal so the rule can be asserted directly.
+    static func sanitizedLogField(_ value: String, maxLength: Int = 64) -> String {
+        String(value.unicodeScalars
+            .filter { !CharacterSet.controlCharacters.contains($0) }
+            .prefix(maxLength)
+            .map(Character.init))
+    }
+
     private static func logEra(transport: String, version: String, method: String, meta: [String: Any]) {
         var client = "unknown"
         if let info = meta[ModernMetaKey.clientInfo] as? [String: Any],
             let name = info["name"] as? String {
             let clientVersion = info["version"] as? String ?? "?"
-            client = "\(name)/\(clientVersion)"
+            client = "\(sanitizedLogField(name))/\(sanitizedLogField(clientVersion))"
         }
+        // `transport` and `version` are server-constrained (version passes the
+        // supported-versions guard before reaching here); `method` is not.
         FileHandle.standardError.write(
-            "[iMessage Max] era=modern transport=\(transport) version=\(version) method=\(method) client=\(client)\n"
+            "[iMessage Max] era=modern transport=\(transport) version=\(version) method=\(sanitizedLogField(method)) client=\(client)\n"
                 .data(using: .utf8)!
         )
     }

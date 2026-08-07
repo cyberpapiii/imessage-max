@@ -121,8 +121,21 @@ final class ToolHandlerRegistry: @unchecked Sendable {
     private var registrationOrder: [String] = []
     private var handlers: [String: @Sendable ([String: Value]?) async throws -> [Tool.Content]] = [:]
     private let lock = NSLock()
+    private var version: Int = 0
 
     private init() {}
+
+    /// Monotonic catalog version: bumps on every register/reset. Consumers may
+    /// cache derived catalog data keyed by this value.
+    ///
+    /// Correctness of any such cache rests on one invariant: **every mutation
+    /// of tool state bumps `version` under the lock**. Any future
+    /// unregister/replace must do the same.
+    var catalogVersion: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return version
+    }
 
     func register(
         tool: Tool,
@@ -135,6 +148,7 @@ final class ToolHandlerRegistry: @unchecked Sendable {
         }
         tools[tool.name] = tool
         handlers[tool.name] = handler
+        version += 1
     }
 
     /// Returns tools in registration order. The MCP 2026-07-28 spec asks for
@@ -158,6 +172,7 @@ final class ToolHandlerRegistry: @unchecked Sendable {
         tools.removeAll()
         registrationOrder.removeAll()
         handlers.removeAll()
+        version += 1
     }
 }
 
