@@ -483,6 +483,77 @@ final class SendResolverTests: XCTestCase {
         }
     }
 
+    func testResolveNameSingleMatchReturnsParticipant() async throws {
+        let dbPath = try makeResolverTestDatabase()
+        defer { try? FileManager.default.removeItem(atPath: dbPath) }
+
+        let contacts = ContactResolver(seedCache: ["+16317087185": "Nick Jones"])
+        let resolver = SendResolver(db: Database(path: dbPath), resolver: contacts)
+        let result = await resolver.resolve(chatId: nil, to: "Nick")
+
+        switch result {
+        case .failure(let message):
+            XCTFail("Unexpected failure: \(message)")
+        case .ambiguous:
+            XCTFail("Unexpected ambiguity")
+        case .success(let resolved):
+            guard case .participant(let handle, let chatId) = resolved.target else {
+                return XCTFail("Expected participant target")
+            }
+            XCTAssertEqual(handle, "+16317087185")
+            XCTAssertEqual(chatId, 11)
+            XCTAssertEqual(resolved.deliveredTo, ["Nick Jones"])
+        }
+    }
+
+    func testResolveNameMultiMatchReturnsAmbiguousSortedByRecency() async throws {
+        let dbPath = try makeResolverTestDatabase()
+        defer { try? FileManager.default.removeItem(atPath: dbPath) }
+
+        let contacts = ContactResolver(seedCache: [
+            "+16317087185": "Nick Jones",
+            "+15104615406": "Andrew Jones",
+        ])
+        let resolver = SendResolver(db: Database(path: dbPath), resolver: contacts)
+        let result = await resolver.resolve(chatId: nil, to: "Jones")
+
+        switch result {
+        case .failure(let message):
+            XCTFail("Unexpected failure: \(message)")
+        case .success:
+            XCTFail("Unexpected success")
+        case .ambiguous(let candidates):
+            XCTAssertEqual(candidates.count, 2)
+            // Handle 1 has a message row (date 1000); handle 2 has none.
+            // nil-lastContact sorts last per SendResolution.swift's comparator.
+            XCTAssertEqual(candidates[0].handle, "+16317087185")
+            XCTAssertEqual(candidates[1].handle, "+15104615406")
+            XCTAssertEqual(candidates[1].lastContact, "never")
+            // Deliberately not asserting candidates[0].lastContact's exact
+            // string — it's a relative-time format that drifts with the clock.
+        }
+    }
+
+    func testResolveNameNoMatchFails() async throws {
+        let dbPath = try makeResolverTestDatabase()
+        defer { try? FileManager.default.removeItem(atPath: dbPath) }
+
+        let contacts = ContactResolver(seedCache: ["+16317087185": "Nick Jones"])
+        let resolver = SendResolver(db: Database(path: dbPath), resolver: contacts)
+        let result = await resolver.resolve(chatId: nil, to: "Zelda")
+
+        guard case .failure(let message) = result else {
+            return XCTFail("Expected failure for unmatched name")
+        }
+        // Which of the two appears depends on the machine's real Contacts
+        // authorization — must pass on both authorized dev machines and
+        // unauthorized CI, so accept either.
+        XCTAssertTrue(
+            message.contains("No contact found matching 'Zelda'")
+                || message.contains("Cannot search by name without contacts access"),
+            "Unexpected failure message: \(message)"
+        )
+    }
 }
 
 private func makeResolverTestDatabase() throws -> String {
