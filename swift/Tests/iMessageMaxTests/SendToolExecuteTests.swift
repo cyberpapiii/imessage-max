@@ -18,32 +18,39 @@ final class StubScriptRunner: ScriptRunning, @unchecked Sendable {
 
     private(set) var invocations: [Call] = []
     var nextResult: Result<Void, SendError> = .success(())
+    /// When non-empty, each call pops the next result; nextResult is the fallback.
+    /// Lets a test express "payload 1 succeeds, payload 2 fails".
+    var queuedResults: [Result<Void, SendError>] = []
     /// Optional side effect run on every send call before nextResult is returned.
     /// Used to simulate Messages.app writing the chat.db row between send and verify.
     var onSend: (() -> Void)?
 
+    private func takeResult() -> Result<Void, SendError> {
+        queuedResults.isEmpty ? nextResult : queuedResults.removeFirst()
+    }
+
     func sendTextToParticipant(handle: String, message: String) async -> Result<Void, SendError> {
         invocations.append(.textToParticipant(handle: handle, message: message))
         onSend?()
-        return nextResult
+        return takeResult()
     }
 
     func sendFileToParticipant(handle: String, filePath: String) async -> Result<Void, SendError> {
         invocations.append(.fileToParticipant(handle: handle, filePath: filePath))
         onSend?()
-        return nextResult
+        return takeResult()
     }
 
     func sendTextToChat(guid: String, message: String) async -> Result<Void, SendError> {
         invocations.append(.textToChat(guid: guid, message: message))
         onSend?()
-        return nextResult
+        return takeResult()
     }
 
     func sendFileToChat(guid: String, filePath: String) async -> Result<Void, SendError> {
         invocations.append(.fileToChat(guid: guid, filePath: filePath))
         onSend?()
-        return nextResult
+        return takeResult()
     }
 }
 
@@ -442,6 +449,112 @@ final class SendToolExecuteTests: XCTestCase {
             XCTAssertEqual(stub.invocations.count, 1,
                 "Stub should have been invoked exactly once with confirm: \(confirmValue)")
         }
+    }
+
+    // MARK: - Partial multi-payload send reporting (plan 026)
+
+    // NOTE on payload order: SendPayload.build appends FILES first, then the
+    // text. So for `text` + one `file_paths` entry the dispatch order is
+    // [file, text] — the file is payload 0 and the text is payload 1.
+
+    // An earlier payload was dispatched and a later one hard-failed: the
+    // response must say so, not report a blanket "failed" that invites a
+    // retry duplicating what the recipient already received.
+    func testPartialFailureWhenLaterPayloadFails() async throws {
+        let fixture = try makeSendFixture()
+        let stub = StubScriptRunner()
+        // Payload 0 (the file) succeeds; payload 1 (the text) hard-fails.
+        stub.queuedResults = [.success(()), .failure(.messagesAppUnavailable)]
+
+        let tool = SendTool(
+            db: fixture.database(),
+            resolver: makeSeededResolver(),
+            runner: stub,
+            verifier: fastVerifier(fixture: fixture)
+        )
+
+        do {
+            _ = try await tool.execute(args: [
+                "to": .string("+15550000001"),
+                "text": .string("Hello Alice"),
+                "file_paths": .array([.string("/tmp/x.jpg")]),
+            ])
+            XCTFail("Expected ToolError for a partial send failure")
+        } catch let error as ToolError {
+            let json = try decodeJSONDictionary(from: error.content)
+            XCTAssertEqual(json["status"] as? String, "partial_failure",
+                "A dispatched payload followed by a hard failure must not report a blanket 'failed'")
+
+            let message = json["message"] as? String ?? ""
+            XCTAssertTrue(message.contains("file 'x.jpg'"),
+                "The message must name the already-dispatched file; got: \(message)")
+            XCTAssertTrue(message.contains("text message"),
+                "The message must name the failed payload; got: \(message)")
+            XCTAssertFalse(message.contains("/tmp/"),
+                "The breakdown must name files by filename only, never a full path")
+        }
+
+        XCTAssertEqual(stub.invocations.count, 2,
+            "Both payloads should have been attempted before the failure stopped the loop")
+    }
+
+    // When the very first payload fails, nothing was dispatched — the response
+    // stays a plain "failed", and later payloads are never attempted.
+    func testFirstPayloadFailureReturnsPlainFailedAndStopsSending() async throws {
+        let fixture = try makeSendFixture()
+        let stub = StubScriptRunner()
+        // Payload 0 (the file) hard-fails immediately.
+        stub.queuedResults = [.failure(.messagesAppUnavailable)]
+
+        let tool = SendTool(
+            db: fixture.database(),
+            resolver: makeSeededResolver(),
+            runner: stub,
+            verifier: fastVerifier(fixture: fixture)
+        )
+
+        do {
+            _ = try await tool.execute(args: [
+                "to": .string("+15550000001"),
+                "text": .string("Hello Alice"),
+                "file_paths": .array([.string("/tmp/x.jpg")]),
+            ])
+            XCTFail("Expected ToolError when the first payload fails")
+        } catch let error as ToolError {
+            let json = try decodeJSONDictionary(from: error.content)
+            XCTAssertEqual(json["status"] as? String, "failed",
+                "Nothing was dispatched, so this stays a plain 'failed' — not 'partial_failure'")
+        }
+
+        XCTAssertEqual(stub.invocations.count, 1,
+            "The loop must stop at the first hard failure; the text must never be attempted")
+    }
+
+    // A soft transfer outcome is not a hard failure: sending continues, and the
+    // aggregate stays pending_confirmation. Unchanged behavior, now locked down.
+    func testSoftPendingKeepsSendingRemainingPayloads() async throws {
+        let fixture = try makeSendFixture()
+        let stub = StubScriptRunner()
+        // Two files: the first reports a pending transfer, the second succeeds.
+        stub.queuedResults = [.failure(.transferPending("a.jpg")), .success(())]
+
+        let tool = SendTool(
+            db: fixture.database(),
+            resolver: makeSeededResolver(),
+            runner: stub,
+            verifier: fastVerifier(fixture: fixture)
+        )
+
+        let contents = try await tool.execute(args: [
+            "to": .string("+15550000001"),
+            "file_paths": .array([.string("/tmp/a.jpg"), .string("/tmp/b.jpg")]),
+        ])
+
+        let json = try decodeJSONDictionary(from: contents)
+        XCTAssertEqual(json["status"] as? String, "pending_confirmation",
+            "A pending transfer is a soft outcome and must not become a hard failure")
+        XCTAssertEqual(stub.invocations.count, 2,
+            "A soft outcome must not stop the loop; the second file must still be sent")
     }
 }
 

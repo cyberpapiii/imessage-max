@@ -60,7 +60,7 @@ Use this when the user wants to reply, send an update, or share a file.
 - Prefer `chat_id` when the exact thread matters.
 - Use `to` only when starting from a person is acceptable.
 - If there is any ambiguity about the destination, resolve the chat first with `find_chat`.
-- Sends execute immediately when the destination is exact; there is no confirmation step and the deprecated `confirm` parameter is ignored. Check the returned `status`: `confirmed` is verified delivery, `uncertain` means follow up with `get_messages`, `mismatch` means it landed in the wrong chat — tell the user. `failed_delivery` means chat.db recorded a delivery error — the message did not send; tell the user and consider the destination unreachable. `pending_confirmation` appears only for file attachments whose transfer hasn't finished; it is not a request to retry.
+- Sends execute immediately when the destination is exact; there is no confirmation step and the deprecated `confirm` parameter is ignored. Check the returned `status`: `confirmed` is verified delivery, `uncertain` means follow up with `get_messages`, `mismatch` means it landed in the wrong chat — tell the user. `failed_delivery` means chat.db recorded a delivery error — the message did not send; tell the user and consider the destination unreachable. `partial_failure` means a send with several payloads got some out before a later one failed — read the message, and resend only the failed payload. `pending_confirmation` appears only for file attachments whose transfer hasn't finished; it is not a request to retry.
 - In your response to the user, name the destination using the returned `chat.name` or participant labels, not the `chat_id`.
 
 ## Tool Selection

@@ -18,6 +18,7 @@ Shared domain vocabulary for this project — entities, named processes, and sta
 
 - **mismatch**: Verification found the message in a different conversation than intended; never treated as success.
 - **failed_delivery**: Verification found the sent message recorded with a delivery error; the message did not deliver. Treated as a failure, with the message id and error code as evidence.
+- **partial_failure**: A send carrying several payloads dispatched some of them before a later one failed; the message lists which were dispatched and which failed. Never blind-retry the whole call — retry only the failed payload.
 
 - **sent**: Transport accepted the send but verification was unavailable, so delivery is unproven.
 
