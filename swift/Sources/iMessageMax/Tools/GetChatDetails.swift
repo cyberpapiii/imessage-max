@@ -100,15 +100,17 @@ enum GetChatDetailsTool {
 
             let shared: [SharedMessageItem]?
             if includeShared {
-                shared = try await ListAttachments(db: database, resolver: resolver).browseSharedMessages(
+                let page = try await ListAttachments(db: database, resolver: resolver).browseSharedMessages(
                     chatId: numericChatId,
                     fromPerson: nil,
                     typeFilter: nil,
                     since: nil,
                     before: nil,
                     limit: 5,
-                    sort: .recentFirst
+                    sort: .recentFirst,
+                    cursor: nil
                 )
+                shared = page.messages
             } else {
                 shared = nil
             }

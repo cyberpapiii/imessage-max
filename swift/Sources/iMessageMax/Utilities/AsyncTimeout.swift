@@ -4,11 +4,24 @@ enum AsyncTimeout {
     /// Dispatch-backed sleep. NEVER sleep Swift tasks inside the launchd service
     /// (sleeping unstructured tasks abort in swift_task_dealloc at wakeup.
     /// See HTTPTransport.swift storePendingRequest for the known-good pattern).
+    ///
+    /// Honors task cancellation: cancels the Dispatch timer and resumes so the
+    /// awaiting task can observe `Task.isCancelled` without leaking a continuation.
     static func sleep(_ duration: Duration) async {
-        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
-            DispatchQueue.global(qos: .utility).asyncAfter(
-                deadline: .now() + dispatchInterval(for: duration)
-            ) { cont.resume() }
+        let gate = ResumeGate()
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                let work = DispatchWorkItem {
+                    gate.resume(continuation)
+                }
+                gate.arm(work: work, continuation: continuation)
+                DispatchQueue.global(qos: .utility).asyncAfter(
+                    deadline: .now() + dispatchInterval(for: duration),
+                    execute: work
+                )
+            }
+        } onCancel: {
+            gate.cancelAndResume()
         }
     }
 
@@ -33,5 +46,54 @@ enum AsyncTimeout {
             ? Int.max
             : secondNanoseconds + fractionalNanoseconds
         return .nanoseconds(nanoseconds)
+    }
+
+    /// Single-resume gate for Dispatch sleep + cancellation.
+    private final class ResumeGate: @unchecked Sendable {
+        private let lock = NSLock()
+        private var work: DispatchWorkItem?
+        private var continuation: CheckedContinuation<Void, Never>?
+        private var resumed = false
+        private var cancelled = false
+
+        func arm(work: DispatchWorkItem, continuation: CheckedContinuation<Void, Never>) {
+            lock.lock()
+            defer { lock.unlock() }
+            if cancelled || resumed {
+                if !resumed {
+                    resumed = true
+                    continuation.resume()
+                }
+                return
+            }
+            self.work = work
+            self.continuation = continuation
+        }
+
+        func resume(_ continuation: CheckedContinuation<Void, Never>) {
+            lock.lock()
+            defer { lock.unlock() }
+            guard !resumed else { return }
+            resumed = true
+            self.continuation = nil
+            continuation.resume()
+        }
+
+        func cancelAndResume() {
+            lock.lock()
+            cancelled = true
+            let item = work
+            let cont = continuation
+            let already = resumed
+            if !already {
+                resumed = true
+                continuation = nil
+            }
+            lock.unlock()
+            item?.cancel()
+            if !already, let cont {
+                cont.resume()
+            }
+        }
     }
 }

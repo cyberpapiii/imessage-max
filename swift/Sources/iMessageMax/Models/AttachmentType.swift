@@ -30,4 +30,27 @@ enum AttachmentType: String, Codable {
             return .other
         }
     }
+
+    /// SQL boolean expression over `alias.mime_type` / `alias.uti`.
+    /// Returns nil for `"any"` / unknown filters.
+    static func sqlPredicate(for typeFilter: String?, alias: String = "a") -> String? {
+        guard let typeFilter, typeFilter != "any" else { return nil }
+
+        let mime = "LOWER(COALESCE(\(alias).mime_type, ''))"
+        let uti = "LOWER(COALESCE(\(alias).uti, ''))"
+        switch typeFilter {
+        case "image":
+            return "\(mime) LIKE '%image%' OR \(uti) LIKE '%image%' OR \(uti) LIKE '%jpeg%' OR \(uti) LIKE '%png%' OR \(uti) LIKE '%heic%'"
+        case "video":
+            return "\(mime) LIKE '%video%' OR \(uti) LIKE '%movie%' OR \(uti) LIKE '%video%'"
+        case "audio":
+            return "\(mime) LIKE '%audio%' OR \(uti) LIKE '%audio%'"
+        case "pdf":
+            return "\(mime) LIKE '%pdf%' OR \(uti) LIKE '%pdf%'"
+        case "document":
+            return "\(mime) LIKE '%document%' OR \(mime) LIKE '%msword%' OR \(mime) LIKE '%spreadsheet%' OR \(mime) LIKE '%presentation%'"
+        default:
+            return nil
+        }
+    }
 }

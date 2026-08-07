@@ -299,8 +299,24 @@ extension GetMessagesTool {
             switch has {
             case "links":
                 query.where("(m.text LIKE '%http://%' OR m.text LIKE '%https://%')")
-            case "attachments", "images":
-                query.join("message_attachment_join maj ON m.ROWID = maj.message_id")
+            case "attachments":
+                query.where("""
+                    EXISTS (
+                        SELECT 1 FROM message_attachment_join maj
+                        WHERE maj.message_id = m.ROWID
+                    )
+                    """)
+            case "images":
+                if let imagePredicate = AttachmentType.sqlPredicate(for: "image", alias: "a") {
+                    query.where("""
+                        EXISTS (
+                            SELECT 1 FROM attachment a
+                            JOIN message_attachment_join maj ON a.ROWID = maj.attachment_id
+                            WHERE maj.message_id = m.ROWID
+                              AND (\(imagePredicate))
+                        )
+                        """)
+                }
             default:
                 break
             }

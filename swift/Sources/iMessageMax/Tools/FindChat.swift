@@ -138,7 +138,12 @@ enum FindChatTool {
             if let participants = params.participants, !participants.isEmpty {
                 let handleGroups = await buildHandleGroups(participants: participants, resolver: resolver)
                 if !handleGroups.isEmpty {
-                    let chats = try findChatsByHandleGroups(database: database, handleGroups: handleGroups)
+                    let chats = try findChatsByHandleGroups(
+                        database: database,
+                        handleGroups: handleGroups,
+                        isGroup: params.isGroup,
+                        limit: params.limit
+                    )
                     for chat in chats {
                         results.append(try await buildChatResult(
                             database: database,
@@ -151,7 +156,12 @@ enum FindChatTool {
             }
 
             if let name = params.name, results.isEmpty {
-                let chats = try findChatsByName(database: database, name: name, limit: params.limit)
+                let chats = try findChatsByName(
+                    database: database,
+                    name: name,
+                    limit: params.limit,
+                    isGroup: params.isGroup
+                )
                 for chat in chats {
                     results.append(try await buildChatResult(
                         database: database,
@@ -163,7 +173,12 @@ enum FindChatTool {
             }
 
             if let containsRecent = params.containsRecent, results.isEmpty {
-                let chats = try findChatsByContent(database: database, content: containsRecent, limit: params.limit)
+                let chats = try findChatsByContent(
+                    database: database,
+                    content: containsRecent,
+                    limit: params.limit,
+                    isGroup: params.isGroup
+                )
                 for chat in chats {
                     results.append(try await buildChatResult(
                         database: database,
@@ -172,10 +187,6 @@ enum FindChatTool {
                         matchType: "content"
                     ))
                 }
-            }
-
-            if let isGroup = params.isGroup {
-                results = results.filter { ($0.group ?? false) == isGroup }
             }
 
             var seen = Set<String>()
@@ -252,15 +263,27 @@ enum FindChatTool {
         return handleGroups
     }
 
+    /// SQL fragment filtering chats by handle count before LIMIT (groups > 1, DMs <= 1).
+    private static func groupFilterSQL(isGroup: Bool?) -> String {
+        guard let isGroup else { return "" }
+        if isGroup {
+            return " AND (SELECT COUNT(*) FROM chat_handle_join chj_g WHERE chj_g.chat_id = c.ROWID) > 1"
+        }
+        return " AND (SELECT COUNT(*) FROM chat_handle_join chj_g WHERE chj_g.chat_id = c.ROWID) <= 1"
+    }
+
     private static func findChatsByHandleGroups(
         database: Database,
-        handleGroups: [[String]]
+        handleGroups: [[String]],
+        isGroup: Bool?,
+        limit: Int
     ) throws -> [ChatRow] {
         guard !handleGroups.isEmpty else { return [] }
 
         // Flatten all handles for initial query
         let allHandles = handleGroups.flatMap { $0 }
         let placeholders = allHandles.map { _ in "?" }.joined(separator: ", ")
+        let groupSQL = groupFilterSQL(isGroup: isGroup)
 
         // Get candidate chats
         let sql = """
@@ -269,6 +292,7 @@ enum FindChatTool {
             JOIN chat_handle_join chj ON c.ROWID = chj.chat_id
             JOIN handle h ON chj.handle_id = h.ROWID
             WHERE h.id IN (\(placeholders))
+            \(groupSQL)
             """
 
         let candidates = try database.query(sql, params: allHandles) { row in
@@ -279,32 +303,35 @@ enum FindChatTool {
             )
         }
 
+        let sorted: [ChatRow]
         // For single group, filter to those with matching handles
         if handleGroups.count == 1 {
-            return try enrichAndSortChats(database: database, chats: candidates, targetCount: 2)
-        }
+            sorted = try enrichAndSortChats(database: database, chats: candidates, targetCount: 2)
+        } else {
+            // For multiple groups, filter to chats that have at least one handle from each group
+            var matchingChats: [ChatRow] = []
 
-        // For multiple groups, filter to chats that have at least one handle from each group
-        var matchingChats: [ChatRow] = []
+            for chat in candidates {
+                let chatHandles = try getChatHandles(database: database, chatId: chat.id)
 
-        for chat in candidates {
-            let chatHandles = try getChatHandles(database: database, chatId: chat.id)
+                var hasAllGroups = true
+                for group in handleGroups {
+                    if !group.contains(where: { chatHandles.contains($0) }) {
+                        hasAllGroups = false
+                        break
+                    }
+                }
 
-            var hasAllGroups = true
-            for group in handleGroups {
-                if !group.contains(where: { chatHandles.contains($0) }) {
-                    hasAllGroups = false
-                    break
+                if hasAllGroups {
+                    matchingChats.append(chat)
                 }
             }
 
-            if hasAllGroups {
-                matchingChats.append(chat)
-            }
+            let targetCount = handleGroups.count + 1  // participants + me
+            sorted = try enrichAndSortChats(database: database, chats: matchingChats, targetCount: targetCount)
         }
 
-        let targetCount = handleGroups.count + 1  // participants + me
-        return try enrichAndSortChats(database: database, chats: matchingChats, targetCount: targetCount)
+        return Array(sorted.prefix(limit))
     }
 
     private static func getChatHandles(database: Database, chatId: Int64) throws -> Set<String> {
@@ -368,13 +395,16 @@ enum FindChatTool {
     private static func findChatsByName(
         database: Database,
         name: String,
-        limit: Int
+        limit: Int,
+        isGroup: Bool?
     ) throws -> [ChatRow] {
         let escaped = QueryBuilder.escapeLike(name)
+        let groupSQL = groupFilterSQL(isGroup: isGroup)
         let sql = """
             SELECT c.ROWID as id, c.guid, c.display_name
             FROM chat c
             WHERE c.display_name LIKE ? ESCAPE '\\'
+            \(groupSQL)
             LIMIT ?
             """
 
@@ -390,26 +420,50 @@ enum FindChatTool {
     private static func findChatsByContent(
         database: Database,
         content: String,
-        limit: Int
+        limit: Int,
+        isGroup: Bool?
     ) throws -> [ChatRow] {
         let escaped = QueryBuilder.escapeLike(content)
+        let groupSQL = groupFilterSQL(isGroup: isGroup)
+        // Over-fetch: attributedBody matches are confirmed in Swift after typedstream extract.
+        let fetchLimit = min(max(limit * 10, 50), 200)
         let sql = """
-            SELECT DISTINCT c.ROWID as id, c.guid, c.display_name
+            SELECT c.ROWID as id, c.guid, c.display_name, m.text, m.attributedBody
             FROM chat c
             JOIN chat_message_join cmj ON c.ROWID = cmj.chat_id
             JOIN message m ON cmj.message_id = m.ROWID
-            WHERE m.text LIKE ? ESCAPE '\\'
+            WHERE m.associated_message_type = 0
+              AND (
+                m.text LIKE ? ESCAPE '\\'
+                OR m.attributedBody IS NOT NULL
+              )
+              \(groupSQL)
             ORDER BY m.date DESC
             LIMIT ?
             """
 
-        return try database.query(sql, params: ["%\(escaped)%", limit]) { row in
-            ChatRow(
+        let rows = try database.query(sql, params: ["%\(escaped)%", fetchLimit]) { row in
+            (
                 id: row.int(0),
                 guid: row.string(1),
-                displayName: row.string(2)
+                displayName: row.string(2),
+                text: row.string(3),
+                attributedBody: row.blob(4)
             )
         }
+
+        let needle = content.lowercased()
+        var seen = Set<Int64>()
+        var chats: [ChatRow] = []
+        for row in rows {
+            let extracted = MessageTextExtractor.extract(text: row.text, attributedBody: row.attributedBody)
+            guard let extracted, extracted.lowercased().contains(needle) else { continue }
+            if seen.insert(row.id).inserted {
+                chats.append(ChatRow(id: row.id, guid: row.guid, displayName: row.displayName))
+                if chats.count >= limit { break }
+            }
+        }
+        return chats
     }
 
     private static func buildChatResult(

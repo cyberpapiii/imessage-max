@@ -72,6 +72,10 @@ final class ListAttachments {
                     "description": "Sort order",
                     "enum": ["recent_first", "oldest_first", "largest_first"],
                 ]),
+                "cursor": .object([
+                    "type": "string",
+                    "description": "Pagination cursor from a previous list_attachments response (date sorts only)",
+                ]),
             ]),
             "additionalProperties": false,
         ])
@@ -96,6 +100,7 @@ final class ListAttachments {
             let before = arguments?["before"]?.stringValue
             let limit = arguments?["limit"]?.intValue ?? 50
             let sort = arguments?["sort"]?.stringValue ?? "recent_first"
+            let cursor = arguments?["cursor"]?.stringValue
 
             let tool = ListAttachments(db: db, resolver: resolver)
             let result = await tool.execute(
@@ -105,7 +110,8 @@ final class ListAttachments {
                 since: since,
                 before: before,
                 limit: limit,
-                sort: sort
+                sort: sort,
+                cursor: cursor
             )
 
             switch result {
@@ -133,7 +139,8 @@ final class ListAttachments {
         since: String? = nil,
         before: String? = nil,
         limit: Int = 50,
-        sort: String = "recent_first"
+        sort: String = "recent_first",
+        cursor: String? = nil
     ) async -> Result<ListAttachmentsResponse, ListAttachmentsError> {
         // Validate and constrain inputs
         let effectiveLimit = max(1, min(limit, 100))
@@ -165,22 +172,23 @@ final class ListAttachments {
                 numericChatId = nil
             }
 
-            let sharedMessages = try await browseSharedMessages(
+            let timelineCursor = cursor.flatMap(TimelineCursor.decode)
+            let (sharedMessages, hasMore, nextCursor) = try await browseSharedMessages(
                 chatId: numericChatId,
                 fromPerson: fromPerson,
                 typeFilter: typeFilter,
                 since: since,
                 before: before,
                 limit: effectiveLimit,
-                sort: effectiveSort
+                sort: effectiveSort,
+                cursor: timelineCursor
             )
 
             return .success(ListAttachmentsResponse(
                 messages: sharedMessages,
                 total: sharedMessages.count,
-                // Cursor pagination not implemented; never advertise more pages.
-                more: false,
-                cursor: nil
+                more: hasMore,
+                cursor: nextCursor
             ))
 
         } catch let error as DatabaseError {
@@ -234,16 +242,20 @@ final class ListAttachments {
         since: String?,
         before: String?,
         limit: Int,
-        sort: AttachmentSort
-    ) async throws -> [SharedMessageItem] {
+        sort: AttachmentSort,
+        cursor: TimelineCursor?
+    ) async throws -> (messages: [SharedMessageItem], more: Bool, cursor: String?) {
+        let supportsCursor = sort != .largestFirst
+        let fetchLimit = supportsCursor ? limit + 1 : limit
         let (sql, params) = buildMessageQuery(
             chatId: chatId,
             fromPerson: fromPerson,
             typeFilter: typeFilter,
             since: since,
             before: before,
-            limit: limit,
-            sort: sort
+            limit: fetchLimit,
+            sort: sort,
+            cursor: supportsCursor ? cursor : nil
         )
 
         let messageRows = try db.query(sql, params: params) { row in
@@ -259,10 +271,13 @@ final class ListAttachments {
             )
         }
 
+        let hasMore = supportsCursor && messageRows.count > limit
+        let pageRows = Array(messageRows.prefix(limit))
+
         var chatNameCache: [Int64: String] = [:]
         var results: [SharedMessageItem] = []
 
-        for row in messageRows {
+        for row in pageRows {
             let attachments = try attachmentsForMessage(messageId: row.msgId, typeFilter: typeFilter)
             guard !attachments.isEmpty else { continue }
 
@@ -314,7 +329,14 @@ final class ListAttachments {
             )
         }
 
-        return results
+        let nextCursor: String?
+        if hasMore, let last = pageRows.last {
+            nextCursor = TimelineCursor.encode(date: last.date, messageId: last.msgId)
+        } else {
+            nextCursor = nil
+        }
+
+        return (results, hasMore, nextCursor)
     }
 
     private func buildMessageQuery(
@@ -324,7 +346,8 @@ final class ListAttachments {
         since: String?,
         before: String?,
         limit: Int,
-        sort: AttachmentSort
+        sort: AttachmentSort,
+        cursor: TimelineCursor?
     ) -> (String, [Any]) {
         var sql = """
             SELECT
@@ -372,8 +395,21 @@ final class ListAttachments {
             params.append(beforeTs)
         }
 
-        if let predicate = typePredicateSQL(typeFilter, attachmentAlias: "a") {
+        if let predicate = AttachmentType.sqlPredicate(for: typeFilter, alias: "a") {
             sql += " AND (\(predicate))"
+        }
+
+        if let cursor {
+            switch sort {
+            case .recentFirst:
+                sql += " AND \(cursor.olderThanSQL)"
+                params.append(contentsOf: cursor.olderThanParams)
+            case .oldestFirst:
+                sql += " AND \(cursor.newerThanSQL)"
+                params.append(contentsOf: cursor.newerThanParams)
+            case .largestFirst:
+                break
+            }
         }
 
         sql += " GROUP BY m.ROWID"
@@ -403,7 +439,7 @@ final class ListAttachments {
             JOIN message_attachment_join maj ON a.ROWID = maj.attachment_id
             WHERE maj.message_id = ?
             """
-        if let predicate = typePredicateSQL(typeFilter, attachmentAlias: "a") {
+        if let predicate = AttachmentType.sqlPredicate(for: typeFilter, alias: "a") {
             sql += " AND (\(predicate))"
         }
         sql += " ORDER BY a.ROWID ASC"
@@ -423,27 +459,6 @@ final class ListAttachments {
                 available: available,
                 sizeHuman: bytes.map { FormatUtils.fileSize($0) }
             )
-        }
-    }
-
-    func typePredicateSQL(_ typeFilter: String?, attachmentAlias: String) -> String? {
-        guard let typeFilter, typeFilter != "any" else { return nil }
-
-        let mime = "LOWER(COALESCE(\(attachmentAlias).mime_type, ''))"
-        let uti = "LOWER(COALESCE(\(attachmentAlias).uti, ''))"
-        switch typeFilter {
-        case "image":
-            return "\(mime) LIKE '%image%' OR \(uti) LIKE '%image%' OR \(uti) LIKE '%jpeg%' OR \(uti) LIKE '%png%' OR \(uti) LIKE '%heic%'"
-        case "video":
-            return "\(mime) LIKE '%video%' OR \(uti) LIKE '%movie%' OR \(uti) LIKE '%video%'"
-        case "audio":
-            return "\(mime) LIKE '%audio%' OR \(uti) LIKE '%audio%'"
-        case "pdf":
-            return "\(mime) LIKE '%pdf%' OR \(uti) LIKE '%pdf%'"
-        case "document":
-            return "\(mime) LIKE '%document%' OR \(mime) LIKE '%msword%' OR \(mime) LIKE '%spreadsheet%' OR \(mime) LIKE '%presentation%'"
-        default:
-            return nil
         }
     }
 

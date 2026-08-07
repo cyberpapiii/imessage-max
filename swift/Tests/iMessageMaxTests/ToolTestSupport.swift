@@ -70,17 +70,24 @@ final class ToolTestDatabase {
         associatedMessageType: Int = 0,
         associatedMessageGuid: String? = nil,
         error: Int = 0,
-        isSent: Int = 0
+        isSent: Int = 0,
+        attributedBody: Data? = nil
     ) throws {
         let textValue = text.map { "'\(escape($0))'" } ?? "NULL"
         let handleValue = handleId.map(String.init) ?? "NULL"
         let assocGuidValue = associatedMessageGuid.map { "'\(escape($0))'" } ?? "NULL"
+        let attributedValue: String
+        if let attributedBody {
+            attributedValue = "X'\(attributedBody.map { String(format: "%02X", $0) }.joined())'"
+        } else {
+            attributedValue = "NULL"
+        }
 
         try execute("""
             INSERT INTO message (
                 ROWID, guid, text, attributedBody, date, is_from_me, is_read, handle_id, associated_message_type, associated_message_guid, error, is_sent
             ) VALUES (
-                \(rowId), '\(escape(guid))', \(textValue), NULL, \(date), \(isFromMe ? 1 : 0), \(isRead ? 1 : 0), \(handleValue), \(associatedMessageType), \(assocGuidValue), \(error), \(isSent)
+                \(rowId), '\(escape(guid))', \(textValue), \(attributedValue), \(date), \(isFromMe ? 1 : 0), \(isRead ? 1 : 0), \(handleValue), \(associatedMessageType), \(assocGuidValue), \(error), \(isSent)
             );
             """)
     }

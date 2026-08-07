@@ -96,8 +96,12 @@ enum ListChatsTool {
                 ]),
                 "sort": .object([
                     "type": "string",
-                    "description": "Sort order. Use \"recent\" for a broad recent-overview across conversations. \"most_active\" currently aliases \"recent\".",
+                    "description": "Sort order. \"recent\" by last message; \"most_active\" by message count in the selected window; \"alphabetical\" by display name.",
                     "enum": ["recent", "alphabetical", "most_active"],
+                ]),
+                "cursor": .object([
+                    "type": "string",
+                    "description": "Pagination cursor from a previous list_chats response",
                 ]),
             ]),
             "additionalProperties": false,
@@ -122,6 +126,7 @@ enum ListChatsTool {
             let minParticipants = arguments?["min_participants"]?.intValue
             let maxParticipants = arguments?["max_participants"]?.intValue
             let sort = arguments?["sort"]?.stringValue ?? "recent"
+            let cursor = arguments?["cursor"]?.stringValue
 
             let result = await execute(
                 limit: limit,
@@ -130,6 +135,7 @@ enum ListChatsTool {
                 minParticipants: minParticipants,
                 maxParticipants: maxParticipants,
                 sort: sort,
+                cursor: cursor,
                 db: db,
                 resolver: resolver
             )
@@ -160,6 +166,7 @@ enum ListChatsTool {
         minParticipants: Int? = nil,
         maxParticipants: Int? = nil,
         sort: String = "recent",
+        cursor: String? = nil,
         db: Database = Database(),
         resolver: ContactResolver
     ) async -> Result<ListChatsResponse, ListChatsError> {
@@ -180,6 +187,7 @@ enum ListChatsTool {
                 "c.guid",
                 "c.display_name",
                 "COUNT(DISTINCT chj.handle_id) as participant_count",
+                "COUNT(m.ROWID) as message_count",
                 "MAX(m.date) as last_message_date"
             )
             .from("chat c")
@@ -207,25 +215,68 @@ enum ListChatsTool {
                 }
             }
 
-            switch sortOrder {
-            case .recent, .mostActive:
-                qb.orderBy("last_message_date DESC NULLS LAST")
-            case .alphabetical:
-                qb.orderBy("COALESCE(c.display_name, '') ASC")
+            if let cursor, let decoded = ChatListCursor.decode(cursor) {
+                switch sortOrder {
+                case .recent:
+                    qb.having(
+                        "(last_message_date < ? OR (last_message_date = ? AND c.ROWID < ?))",
+                        decoded.primary, decoded.primary, decoded.chatId
+                    )
+                case .mostActive:
+                    // primary = message_count, secondary = last_message_date
+                    let lastDate = decoded.secondary ?? 0
+                    qb.having(
+                        """
+                        (message_count < ?
+                         OR (message_count = ? AND last_message_date < ?)
+                         OR (message_count = ? AND last_message_date = ? AND c.ROWID < ?))
+                        """,
+                        decoded.primary, decoded.primary, lastDate,
+                        decoded.primary, lastDate, decoded.chatId
+                    )
+                case .alphabetical:
+                    // primary unused; secondary unused — lexicographic via chat id only is unsafe.
+                    // Alphabetical cursor encodes name hash in primary as 0 and uses chatId with name HAVING.
+                    break
+                }
             }
 
-            qb.limit(clampedLimit)
+            // Alphabetical keyset: "name\\0chatId" stored as opaque string via ChatListCursor.name form.
+            if sortOrder == .alphabetical, let cursor, let nameCursor = ChatListCursor.decodeName(cursor) {
+                qb.having(
+                    """
+                    (COALESCE(c.display_name, '') > ?
+                     OR (COALESCE(c.display_name, '') = ? AND c.ROWID > ?))
+                    """,
+                    nameCursor.name, nameCursor.name, nameCursor.chatId
+                )
+            }
+
+            switch sortOrder {
+            case .recent:
+                qb.orderBy("last_message_date DESC NULLS LAST", "c.ROWID DESC")
+            case .mostActive:
+                qb.orderBy("message_count DESC", "last_message_date DESC NULLS LAST", "c.ROWID DESC")
+            case .alphabetical:
+                qb.orderBy("COALESCE(c.display_name, '') ASC", "c.ROWID ASC")
+            }
+
+            qb.limit(clampedLimit + 1)
 
             let (sql, params) = qb.build()
-            let chatRows = try db.query(sql, params: params) { row in
+            let fetchedRows = try db.query(sql, params: params) { row in
                 ChatRow(
                     id: row.int(0),
                     guid: row.string(1),
                     displayName: row.string(2),
                     participantCount: Int(row.int(3)),
-                    lastMessageDate: row.optionalInt(4)
+                    messageCount: row.int(4),
+                    lastMessageDate: row.optionalInt(5)
                 )
             }
+
+            let hasMore = fetchedRows.count > clampedLimit
+            let chatRows = Array(fetchedRows.prefix(clampedLimit))
 
             // Batch-fetch participants and last messages for all chats at once.
             let chatIds = chatRows.map(\.id)
@@ -278,14 +329,38 @@ enum ListChatsTool {
 
             let totals = try getTotals(db: db)
 
+            let nextCursor: String?
+            if hasMore, let last = chatRows.last {
+                switch sortOrder {
+                case .recent:
+                    nextCursor = ChatListCursor.encode(
+                        primary: last.lastMessageDate,
+                        secondary: nil,
+                        chatId: last.id
+                    )
+                case .mostActive:
+                    nextCursor = ChatListCursor.encode(
+                        primary: last.messageCount,
+                        secondary: last.lastMessageDate,
+                        chatId: last.id
+                    )
+                case .alphabetical:
+                    nextCursor = ChatListCursor.encodeName(
+                        name: last.displayName ?? "",
+                        chatId: last.id
+                    )
+                }
+            } else {
+                nextCursor = nil
+            }
+
             return .success(ListChatsResponse(
                 chats: chats,
                 totalChats: totals.total,
                 totalGroups: totals.groups,
                 totalDms: totals.dms,
-                // Cursor pagination not implemented; never advertise more pages.
-                more: false,
-                cursor: nil
+                more: hasMore,
+                cursor: nextCursor
             ))
 
         } catch let error as DatabaseError {
@@ -326,6 +401,7 @@ enum ListChatsTool {
         let guid: String?
         let displayName: String?
         let participantCount: Int
+        let messageCount: Int64
         let lastMessageDate: Int64?
     }
 

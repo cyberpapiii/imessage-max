@@ -131,7 +131,7 @@ extension SearchTool {
             switch hasType {
             case "link":
                 builder.where("m.text LIKE ?", "%http%")
-            case "image", "video", "attachment":
+            case "attachment":
                 builder.where("""
                     EXISTS (
                         SELECT 1 FROM attachment a
@@ -139,6 +139,17 @@ extension SearchTool {
                         WHERE maj.message_id = m.ROWID
                     )
                     """)
+            case "image", "video":
+                if let typePredicate = AttachmentType.sqlPredicate(for: hasType, alias: "a") {
+                    builder.where("""
+                        EXISTS (
+                            SELECT 1 FROM attachment a
+                            JOIN message_attachment_join maj ON a.ROWID = maj.attachment_id
+                            WHERE maj.message_id = m.ROWID
+                              AND (\(typePredicate))
+                        )
+                        """)
+                }
             default:
                 break
             }
