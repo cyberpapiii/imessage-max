@@ -242,3 +242,39 @@ For current tradeoffs and "why we did it this way" context, see:
   decision (e.g. the send confirmation gate).
 - `CONCEPTS.md` — shared domain vocabulary (send statuses,
   verified send, capability contract).
+
+## Cursor Cloud specific instructions
+
+This is a **macOS-native** product. Cursor cloud agents run on a **Linux**
+VM (Ubuntu 24.04), so the app **cannot be built, tested, or run to
+completion here**. Full build/test/run requires **macOS 13+ with Xcode
+Command Line Tools**; CI enforces this on `macos-15` (see
+`.github/workflows/build.yml`, which runs `swift build` and `swift test`).
+
+What works and what doesn't on the Linux cloud VM:
+
+- A **Swift 6.1 Linux toolchain is installed at `/opt/swift`** and symlinked
+  onto `PATH` as `/usr/local/bin/swift` (also `swiftc`, `swift-package`).
+  `swift --version` and standalone `swift file.swift` scripts work.
+- `swift build` / `swift test` compile **all third-party SPM dependencies**
+  (MCP SDK, Hummingbird, SwiftNIO, swift-crypto, argument-parser, …) but then
+  **fail** on the app sources because they import Apple-only frameworks with
+  no `#if canImport` guards: `Contacts`, `AppKit`, `CoreImage`,
+  `CoreGraphics`, `ImageIO`, `UniformTypeIdentifiers`, `AVFoundation`. This is
+  expected — do not try to "fix" it by editing imports.
+- The Linux toolchain is still useful for editing/reviewing pure-`Foundation`
+  logic with compiler feedback and for `swift package resolve`.
+- Do **not** run the `swift/Makefile` (`make install`, etc.) on Linux — it
+  depends on macOS-only tools (`launchctl`, `codesign`, `security`, `open`)
+  and a launchd service.
+- If `/opt/swift` is ever missing on a fresh VM, reinstall by extracting the
+  Swift 6.1 Ubuntu 24.04 toolchain from `download.swift.org` to `/opt/swift`
+  and re-linking it onto `PATH`; the runtime `apt` deps are the standard
+  swift.org Ubuntu list (`binutils`, `libc6-dev`, `libcurl4-openssl-dev`,
+  `libedit2`, `libpython3-dev`, `libstdc++-13-dev`, `libxml2-dev`,
+  `zlib1g-dev`, etc.).
+
+To actually exercise the 12 MCP tools end to end (chat.db reads, contact
+resolution, image variants, send verification), use a macOS host and the
+standard workflow documented above (`cd swift && make install`, then the MCP
+protocol checks in the Build/Test sections).
