@@ -57,9 +57,9 @@ final class SendVerifierTests: XCTestCase {
         XCTAssertEqual(guid, "msg-guid-1")
     }
 
-    // 2. Row with error = 22 (measured failed-send pattern) → NOT confirmed.
+    // 2. Row with error = 22 (measured failed-send pattern) → failedDelivery, not confirmed.
     // This is §3 finding 3: failed iMessage sends write rows with error = 22 immediately.
-    func testErrorRowDoesNotConfirm() async throws {
+    func testErrorRowClassifiesAsFailedDelivery() async throws {
         let fixture = try makeFixture()
         let date = nowNs()
 
@@ -77,8 +77,8 @@ final class SendVerifierTests: XCTestCase {
             expectedText: "Hello Alice"
         )
 
-        XCTAssertEqual(result, .notFound,
-            "Row with error=22 must not confirm; the verification query requires error=0")
+        XCTAssertEqual(result, .failedDelivery(guid: "msg-guid-error", errorCode: 22),
+            "Row with error=22 must classify as a verified delivery failure, not confirm")
     }
 
     // 3. No row within the time window → notFound.
@@ -208,5 +208,89 @@ final class SendVerifierTests: XCTestCase {
             return XCTFail("Expected .confirmed within 3 attempts, got \(result)")
         }
         XCTAssertEqual(guid, "msg-guid-poll")
+    }
+
+    // MARK: - Failed-delivery classification (plan 021)
+
+    // 8. A failed row AND a clean row both match in the intended chat → confirmed.
+    //    Covers Messages' own immediate-retry behaviour: a clean row anywhere in the
+    //    window beats a failed one.
+    func testFailedThenCleanRowConfirms() async throws {
+        let fixture = try makeFixture()
+        let date = nowNs()
+
+        try fixture.insertMessage(
+            rowId: 10, guid: "msg-guid-failed-first", text: "Hello Alice",
+            date: date, isFromMe: true, error: 22, isSent: 0
+        )
+        try fixture.joinChatMessage(chatId: 1, messageId: 10)
+
+        try fixture.insertMessage(
+            rowId: 11, guid: "msg-guid-clean-retry", text: "Hello Alice",
+            date: date + 1, isFromMe: true, error: 0, isSent: 0
+        )
+        try fixture.joinChatMessage(chatId: 1, messageId: 11)
+
+        let verifier = makeVerifier(fixture: fixture)
+        let result = try await verifier.verify(
+            intendedChatId: 1,
+            handle: "+15550000001",
+            sendTime: Date(),
+            expectedText: "Hello Alice"
+        )
+
+        guard case .confirmed(let guid, _) = result else {
+            return XCTFail("Expected .confirmed (clean row wins over failed row), got \(result)")
+        }
+        XCTAssertEqual(guid, "msg-guid-clean-retry",
+            "The clean retry row should be the one reported as confirmed")
+    }
+
+    // 9. A failed row in a chat OTHER than the intended one stays invisible → notFound.
+    //    Mismatch fires only on clean rows, exactly as before this change.
+    func testFailedRowInDifferentChatIsInvisible() async throws {
+        let fixture = try makeFixture()
+        let date = nowNs()
+
+        // Failed row lands in chat 2 while chat 1 is intended; the handle joins both.
+        try fixture.insertMessage(
+            rowId: 12, guid: "msg-guid-failed-other-chat", text: "Hello Alice",
+            date: date, isFromMe: true, error: 22, isSent: 0
+        )
+        try fixture.joinChatMessage(chatId: 2, messageId: 12)
+
+        let verifier = makeVerifier(fixture: fixture)
+        let result = try await verifier.verify(
+            intendedChatId: 1,
+            handle: "+15550000001",
+            sendTime: Date(),
+            expectedText: "Hello Alice"
+        )
+
+        XCTAssertEqual(result, .notFound,
+            "A failed row in a different chat must not surface as mismatch or failedDelivery")
+    }
+
+    // 10. Fallback path with no intended chat: a failed matching row → failedDelivery.
+    func testFallbackFailedRowWithoutIntendedChat() async throws {
+        let fixture = try makeFixture()
+        let date = nowNs()
+
+        try fixture.insertMessage(
+            rowId: 13, guid: "msg-guid-fallback-failed", text: "Hello Alice",
+            date: date, isFromMe: true, error: 22, isSent: 0
+        )
+        try fixture.joinChatMessage(chatId: 1, messageId: 13)
+
+        let verifier = makeVerifier(fixture: fixture)
+        let result = try await verifier.verify(
+            intendedChatId: nil,        // no intended chat → fallback handle scan only
+            handle: "+15550000001",
+            sendTime: Date(),
+            expectedText: "Hello Alice"
+        )
+
+        XCTAssertEqual(result, .failedDelivery(guid: "msg-guid-fallback-failed", errorCode: 22),
+            "The fallback scan must classify a failed matching row as failedDelivery")
     }
 }

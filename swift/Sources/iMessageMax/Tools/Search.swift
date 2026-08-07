@@ -435,7 +435,7 @@ enum SearchTool {
                 return .failure(SearchError(error: "invalid_data", message: msg))
             }
         } catch {
-            return .failure(SearchError(error: "internal_error", message: error.localizedDescription))
+            return .failure(SearchError(error: "internal_error", message: ClientErrorMessages.sanitized(error)))
         }
     }
 

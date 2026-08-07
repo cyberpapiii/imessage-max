@@ -144,7 +144,7 @@ enum GetChatDetailsTool {
             }
             throw ToolError(content: [.plainText(try FormatUtils.encodeJSON(payload))])
         } catch {
-            let payload = GetChatDetailsError(error: "internal_error", message: error.localizedDescription)
+            let payload = GetChatDetailsError(error: "internal_error", message: ClientErrorMessages.sanitized(error))
             throw ToolError(content: [.plainText(try FormatUtils.encodeJSON(payload))])
         }
     }

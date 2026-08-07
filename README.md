@@ -342,6 +342,8 @@ Send result semantics (text sends are verified post-send against chat.db):
 - `status: "confirmed"` means the message row was found in chat.db with no error; `verified_message_guid` is the evidence
 - `status: "uncertain"` means transport accepted the send but the row was not found within the polling window; follow up with `get_messages`
 - `status: "mismatch"` means the message landed in a different chat than intended; do not treat as success
+- `status: "failed_delivery"` means the message row was found with a delivery error recorded; the message did not deliver, and `verified_message_guid` plus the error code are the evidence
+- `status: "partial_failure"` means a multi-payload send dispatched some payloads before a later one failed; `message` lists what was dispatched and what failed — retry only the failed payload, never the whole call
 - `status: "sent"` means verification was unavailable (DB unreadable); transport accepted only
 - `status: "pending_confirmation"` means Messages accepted an attachment send, but the file transfer was not confirmed as finished within the polling window
 - `status: "failed"` means the send failed

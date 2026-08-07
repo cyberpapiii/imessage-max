@@ -130,7 +130,7 @@ final class GetUnread {
             } catch let error as ToolError {
                 throw error
             } catch {
-                let errorResponse = ["error": "execution_error", "message": error.localizedDescription]
+                let errorResponse = ["error": "execution_error", "message": ClientErrorMessages.sanitized(error)]
                 throw ToolError(content: [.plainText(try FormatUtils.encodeJSONObject(errorResponse))])
             }
         }

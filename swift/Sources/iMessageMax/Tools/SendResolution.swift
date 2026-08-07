@@ -86,7 +86,7 @@ actor SendResolver {
                 )
             )
         } catch {
-            return .failure("Database error: \(error.localizedDescription)")
+            return .failure(ClientErrorMessages.sanitized(error))
         }
     }
 
@@ -139,7 +139,7 @@ actor SendResolver {
                 )
             )
         } catch {
-            return .failure("Database error: \(error.localizedDescription)")
+            return .failure(ClientErrorMessages.sanitized(error))
         }
     }
 
@@ -167,7 +167,7 @@ actor SendResolver {
                 )
             )
         } catch {
-            return .failure("Database error: \(error.localizedDescription)")
+            return .failure(ClientErrorMessages.sanitized(error))
         }
     }
 
@@ -194,7 +194,7 @@ actor SendResolver {
                     )
                 )
             } catch {
-                return .failure("Database error: \(error.localizedDescription)")
+                return .failure(ClientErrorMessages.sanitized(error))
             }
         }
 

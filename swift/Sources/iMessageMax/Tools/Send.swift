@@ -127,6 +127,24 @@ struct SendResponse: Encodable {
         )
     }
 
+    /// Row found in the intended chat with error ≠ 0 — delivery failed (verified).
+    static func failedDelivery(guid: String, errorCode: Int, deliveredTo: [String], chat: ChatReference?) -> SendResponse {
+        SendResponse(
+            status: "failed_delivery",
+            timestamp: TimeUtils.formatISO(Date()),
+            chat: chat,
+            deliveredTo: deliveredTo,
+            chatId: chat?.id,
+            message: "Messages.app accepted the send but chat.db recorded a delivery failure (error \(errorCode)). The message was NOT delivered. Do not tell the user it was sent; check the destination can receive iMessages and consider resending.",
+            error: nil,
+            candidates: nil,
+            verifiedMessageGuid: guid,
+            verifiedAt: TimeUtils.formatISO(Date()),
+            intendedChat: nil,
+            actualChatId: nil
+        )
+    }
+
     // MARK: - Existing statuses (unchanged)
 
     static func pending(_ message: String, deliveredTo: [String], chat: ChatReference?) -> SendResponse {
@@ -138,6 +156,27 @@ struct SendResponse: Encodable {
             chatId: chat?.id,
             message: message,
             error: nil,
+            candidates: nil,
+            verifiedMessageGuid: nil,
+            verifiedAt: nil,
+            intendedChat: nil,
+            actualChatId: nil
+        )
+    }
+
+    /// Some payloads were dispatched to Messages.app before a later payload failed.
+    static func partialFailure(
+        sentDescriptions: [String], failedDescription: String, error: String,
+        deliveredTo: [String], chat: ChatReference?
+    ) -> SendResponse {
+        SendResponse(
+            status: "partial_failure",
+            timestamp: TimeUtils.formatISO(Date()),
+            chat: chat,
+            deliveredTo: deliveredTo,
+            chatId: chat?.id,
+            message: "PARTIAL SEND: \(sentDescriptions.joined(separator: ", ")) already dispatched to Messages.app (not verified) before \(failedDescription) failed. Do NOT resend the already-dispatched payload(s); retry only the failed one.",
+            error: error,
             candidates: nil,
             verifiedMessageGuid: nil,
             verifiedAt: nil,
@@ -221,6 +260,8 @@ actor SendTool {
                   confirmed — row found in chat.db with error=0; include verified_message_guid as evidence.
                   uncertain — transport accepted but row not found within polling window; follow up with get_messages.
                   mismatch  — row found in a different chat than intended; alert the user, do not treat as success.
+                  failed_delivery — row found with a delivery error recorded; the message was NOT delivered.
+                  partial_failure — some payloads were dispatched before a later one failed; the message lists which. Never blind-retry the whole call.
                   sent      — verification unavailable (DB unreadable); transport accepted only.
                 Sends execute immediately when the destination is exact. Ambiguous destinations return status 'ambiguous' without sending. Invalid input returns status 'failed' without sending. File transfers may return 'pending_confirmation' while Messages.app completes the transfer.
                 """,
@@ -267,7 +308,8 @@ actor SendTool {
             replyTo: replyTo
         )
         let content: [Tool.Content] = [.plainText(try FormatUtils.encodeJSON(response))]
-        if response.status == "failed" || response.status == "ambiguous" {
+        if response.status == "failed" || response.status == "ambiguous"
+            || response.status == "failed_delivery" || response.status == "partial_failure" {
             throw ToolError(content: content)
         }
         return content
@@ -327,38 +369,78 @@ actor SendTool {
         // Capture send time before dispatch (design §5.2 option 1).
         let sendTime = Date()
 
-        let sendResults: [Result<Void, SendError>]
-        switch resolved.target {
-        case .participant(let handle, _):
-            sendResults = payloads.map { payload in
+        // Sequential by design: Messages.app ordering matters, so a text that
+        // follows a file must be sent after that file. Do not parallelize.
+        // Stops at the first hard failure: firing later payloads after one has
+        // failed produces out-of-order conversations and compounds the partial
+        // reporting below. Soft transfer outcomes keep sending.
+        var sendResults: [Result<Void, SendError>] = []
+        payloadLoop: for payload in payloads {
+            let result: Result<Void, SendError>
+            switch resolved.target {
+            case .participant(let handle, _):
                 switch payload {
                 case .text(let body):
-                    return runner.sendTextToParticipant(handle: handle, message: body)
+                    result = await runner.sendTextToParticipant(handle: handle, message: body)
                 case .file(let path):
-                    return runner.sendFileToParticipant(handle: handle, filePath: path)
+                    result = await runner.sendFileToParticipant(handle: handle, filePath: path)
+                }
+            case .chat(let guid, _):
+                switch payload {
+                case .text(let body):
+                    result = await runner.sendTextToChat(guid: guid, message: body)
+                case .file(let path):
+                    result = await runner.sendFileToChat(guid: guid, filePath: path)
                 }
             }
-        case .chat(let guid, _):
-            sendResults = payloads.map { payload in
-                switch payload {
-                case .text(let body):
-                    return runner.sendTextToChat(guid: guid, message: body)
-                case .file(let path):
-                    return runner.sendFileToChat(guid: guid, filePath: path)
+            sendResults.append(result)
+            if case .failure(let error) = result {
+                switch error {
+                case .transferPending, .transferStatusUnknown:
+                    break  // soft outcome; keep sending
+                default:
+                    break payloadLoop
                 }
             }
         }
 
+        /// Client-facing description of a payload, for the partial-failure breakdown.
+        /// Files are named by filename only — never the full path (plan 023).
+        func describePayload(_ payload: SendPayload) -> String {
+            switch payload {
+            case .text: return "text message"
+            case .file(let path): return "file '\((path as NSString).lastPathComponent)'"
+            }
+        }
+
         var pendingMessages: [String] = []
-        for result in sendResults {
+        var hardFailure: (index: Int, error: SendError)? = nil
+        for (index, result) in sendResults.enumerated() {
             if case .failure(let error) = result {
                 switch error {
                 case .transferPending, .transferStatusUnknown:
-                    pendingMessages.append(error.localizedDescription)
+                    pendingMessages.append(ClientErrorMessages.sanitized(error))
                 default:
-                    return .error(error.localizedDescription)
+                    hardFailure = (index, error)
                 }
             }
+        }
+
+        if let failure = hardFailure {
+            // Every result before the failing one is a payload that was
+            // dispatched without hard-failing (the loop stops at the first).
+            let sentCount = failure.index
+            if sentCount == 0 {
+                // Nothing reached Messages.app: a plain "failed", as before.
+                return .error(ClientErrorMessages.sanitized(failure.error))
+            }
+            return .partialFailure(
+                sentDescriptions: payloads.prefix(sentCount).map { describePayload($0) },
+                failedDescription: describePayload(payloads[failure.index]),
+                error: ClientErrorMessages.sanitized(failure.error),
+                deliveredTo: resolved.deliveredTo,
+                chat: resolved.chat
+            )
         }
 
         if !pendingMessages.isEmpty {
@@ -408,6 +490,11 @@ actor SendTool {
                     intendedChat: resolved.chat,
                     actualChatId: actualChatId,
                     deliveredTo: resolved.deliveredTo
+                )
+            case .failedDelivery(let guid, let errorCode):
+                return .failedDelivery(
+                    guid: guid, errorCode: errorCode,
+                    deliveredTo: resolved.deliveredTo, chat: resolved.chat
                 )
             case .notFound:
                 return .uncertain(deliveredTo: resolved.deliveredTo, chat: resolved.chat)
