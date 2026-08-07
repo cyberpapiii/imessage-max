@@ -122,10 +122,12 @@ struct GetMessagesErrorResponse: Encodable {
 actor GetMessagesTool {
     let db: Database
     let resolver: ContactResolver
+    private let allowedRoots: [String]
 
-    init(db: Database, resolver: ContactResolver) {
+    init(db: Database, resolver: ContactResolver, allowedRoots: [String] = AttachmentPathPolicy.defaultRoots) {
         self.db = db
         self.resolver = resolver
+        self.allowedRoots = allowedRoots
     }
 
     // MARK: - Tool Registration
@@ -327,20 +329,23 @@ actor GetMessagesTool {
 
                     if attType == "image" && mediaCount < maxMedia,
                        let path = att.filename {
-                        let expandedPath = (path as NSString).expandingTildeInPath
-                        let processor = ImageProcessor()
-                        if let metadata = processor.getMetadata(at: expandedPath) {
-                            if media == nil { media = [] }
-                            media?.append(GetMessagesResponse.MediaInfo(
-                                type: "image",
-                                id: "att\(att.id)",
-                                filename: metadata.filename,
-                                sizeBytes: metadata.sizeBytes,
-                                sizeHuman: FormatUtils.fileSize(metadata.sizeBytes),
-                                dimensions: .init(width: metadata.width, height: metadata.height)
-                            ))
-                            mediaCount += 1
-                            continue
+                        // chat.db paths are data, not trusted input — contain to allowed roots.
+                        // Out-of-root paths degrade to the AttachmentSummary fallthrough below.
+                        if let validatedPath = AttachmentPathPolicy.validatedPath(path, allowedRoots: allowedRoots) {
+                            let processor = ImageProcessor()
+                            if let metadata = processor.getMetadata(at: validatedPath) {
+                                if media == nil { media = [] }
+                                media?.append(GetMessagesResponse.MediaInfo(
+                                    type: "image",
+                                    id: "att\(att.id)",
+                                    filename: metadata.filename,
+                                    sizeBytes: metadata.sizeBytes,
+                                    sizeHuman: FormatUtils.fileSize(metadata.sizeBytes),
+                                    dimensions: .init(width: metadata.width, height: metadata.height)
+                                ))
+                                mediaCount += 1
+                                continue
+                            }
                         }
                     }
 
