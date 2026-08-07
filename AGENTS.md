@@ -238,7 +238,10 @@ Message text is often stored in `attributedBody` (binary typedstream format) ins
 Sleeping Swift tasks abort intermittently inside the launchd-run service
 (`swift_task_dealloc` / "freed pointer was not the last allocation").
 Use Dispatch timers instead: `AsyncTimeout.sleep` for tool code, or the
-`DispatchWorkItem` pattern in `HTTPTransport.storePendingRequest`. This
+cancellable `DispatchSourceTimer` pattern in
+`HTTPTransport.storePendingRequest` (not `asyncAfter`: a cancelled
+asyncAfter work item stays enqueued until its deadline, which retained
+every request's 300 s timeout timer under load — R0-02). This
 crashed production on 2026-06-11 (send-confirmation timeout path); do not
 reintroduce.
 

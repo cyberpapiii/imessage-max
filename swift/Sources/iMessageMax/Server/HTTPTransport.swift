@@ -41,7 +41,7 @@ public actor HTTPTransport: Transport {
     /// Tracks a pending request with its session
     private struct PendingRequest {
         let continuation: CheckedContinuation<Data, Error>
-        let timeoutWorkItem: DispatchWorkItem
+        let timeoutTimer: DispatchSourceTimer
     }
 
     private struct PendingRequestKey: Hashable {
@@ -620,7 +620,7 @@ public actor HTTPTransport: Transport {
 
         // Cancel all pending requests
         for (_, pending) in pendingRequests {
-            pending.timeoutWorkItem.cancel()
+            pending.timeoutTimer.cancel()
             pending.continuation.resume(throwing: MCPError.connectionClosed)
         }
         pendingRequests.removeAll()
@@ -658,45 +658,47 @@ public actor HTTPTransport: Transport {
         // Use a Dispatch timer instead of Task.sleep here. On this launchd-run
         // service, sleeping unstructured Swift tasks have repeatedly aborted in
         // swift_task_dealloc when they wake around the timeout boundary.
-        let timeout = requestTimeout
-        let timeoutWorkItem = DispatchWorkItem { [weak self] in
+        //
+        // Use a cancellable DispatchSourceTimer, not asyncAfter: a cancelled
+        // asyncAfter work item stays enqueued (timer source, group, blocks,
+        // ~0.65 KiB) until its deadline, so every served request retained its
+        // 300 s timer and sustained load carried tens of MB of dead timers
+        // (R0-02 diagnosis). Cancelling a timer source releases it immediately.
+        let timeoutTimer = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
+        timeoutTimer.setEventHandler { [weak self] in
             Task { [weak self] in
                 guard let self else { return }
                 await self.timeoutPendingRequest(sessionId: sessionId, id: id)
             }
         }
-        DispatchQueue.global(qos: .utility).asyncAfter(
-            deadline: .now() + AsyncTimeout.dispatchInterval(for: timeout),
-            execute: timeoutWorkItem
-        )
+        timeoutTimer.schedule(deadline: .now() + AsyncTimeout.dispatchInterval(for: requestTimeout))
+        timeoutTimer.resume()
 
         pendingRequests[key] = PendingRequest(
             continuation: continuation,
-            timeoutWorkItem: timeoutWorkItem
+            timeoutTimer: timeoutTimer
         )
 
         return true
     }
 
     private func timeoutPendingRequest(sessionId: String, id: String) {
-        if let pending = removePendingRequest(sessionId: sessionId, id: id, cancelTimeout: false) {
+        if let pending = removePendingRequest(sessionId: sessionId, id: id) {
             pending.continuation.resume(
                 throwing: MCPError.serverError(code: -32000, message: "Request timeout")
             )
         }
     }
 
-    /// Removes and returns a pending request
+    /// Removes and returns a pending request, releasing its timeout timer.
+    /// Cancelling after the timer has fired is safe and unregisters the source.
     private func removePendingRequest(
         sessionId: String,
-        id: String,
-        cancelTimeout: Bool = true
+        id: String
     ) -> PendingRequest? {
         let key = PendingRequestKey(sessionId: sessionId, requestId: id)
         let pending = pendingRequests.removeValue(forKey: key)
-        if cancelTimeout {
-            pending?.timeoutWorkItem.cancel()
-        }
+        pending?.timeoutTimer.cancel()
         return pending
     }
 
@@ -705,7 +707,7 @@ public actor HTTPTransport: Transport {
         let keysToRemove = pendingRequests.keys.filter { $0.sessionId == sessionId }
         for key in keysToRemove {
             guard let pending = pendingRequests.removeValue(forKey: key) else { continue }
-            pending.timeoutWorkItem.cancel()
+            pending.timeoutTimer.cancel()
             pending.continuation.resume(
                 throwing: MCPError.serverError(code: -32000, message: "Session terminated")
             )
