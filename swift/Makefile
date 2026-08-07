@@ -21,6 +21,22 @@ PORT         := 8080
 CERT_CN      := iMessage Max Dev
 VERIFY_ATTEMPTS := 45
 
+# Resolve CERT_CN to a certificate SHA-1. `codesign --sign <name>` fails with
+# "ambiguous" when the login keychain holds more than one cert with that common
+# name, which is a state setup-signing itself used to create. A hash is unique
+# by construction, and find-identity lists only certs that have a usable
+# private key — so this both disambiguates and filters out orphaned certs.
+# Evaluated lazily (`=`, not `:=`) so that a target running later in the same
+# make invocation (e.g. `make setup-signing install`) sees an identity created
+# by an earlier target instead of the parse-time snapshot.
+#
+# NOTE: lazy still means "expanded when the recipe is expanded", which is just
+# BEFORE that recipe's shell runs — not during it. A recipe that creates the
+# identity itself cannot observe it through this variable; it must re-query at
+# shell runtime. See the tail of setup-signing.
+SIGN_HASH = $(shell security find-identity -v -p codesigning 2>/dev/null | \
+	grep -F '"$(CERT_CN)"' | head -1 | awk '{print $$2}')
+
 .PHONY: build test sign install restart status logs clean setup-signing verify help
 
 help: ## Show this help
@@ -35,17 +51,16 @@ test: ## Run the full test suite
 	@swift test
 
 sign: build ## Build and sign with persistent identity
-	@if codesign --force --sign "$(IDENTITY)" $(BINARY) 2>/dev/null; then \
-		echo "✓ Signed with '$(IDENTITY)' — FDA persists across rebuilds"; \
-	elif security find-certificate -c "$(CERT_CN)" ~/Library/Keychains/login.keychain-db >/dev/null 2>&1; then \
-		if codesign --force --sign "$(IDENTITY)" $(BINARY); then \
-			echo "✓ Signed with '$(IDENTITY)'"; \
+	@HASH="$(SIGN_HASH)"; \
+	if [ -n "$$HASH" ]; then \
+		if codesign --force --sign "$$HASH" $(BINARY); then \
+			echo "✓ Signed with '$(CERT_CN)' ($$HASH) — FDA persists across rebuilds"; \
 		else \
-			echo "✗ Failed to sign with '$(IDENTITY)'"; \
+			echo "✗ Found identity '$(CERT_CN)' ($$HASH) but signing failed — see the error above"; \
 			exit 1; \
 		fi; \
 	else \
-		echo "⚠ No signing identity '$(IDENTITY)' — using ad-hoc (FDA needs re-granting each build)"; \
+		echo "⚠ No signing identity '$(CERT_CN)' — using ad-hoc (FDA needs re-granting each build)"; \
 		echo "  Run 'make setup-signing' once to fix this permanently"; \
 		codesign --force --sign - $(BINARY); \
 	fi
@@ -140,9 +155,16 @@ clean: ## Remove debug artifacts and old logs
 #     removes the manual Keychain Access trust step. Pops a login-password
 #     dialog (expected). Signing already works without this; trust only affects
 #     how the cert is reported, not signability.
+#     This step is now load-bearing for idempotency: SIGN_HASH reads
+#     `find-identity -v`, and an untrusted self-signed cert is reported
+#     CSSMERR_TP_NOT_TRUSTED and excluded from `-v`. If the trust dialog is
+#     cancelled, SIGN_HASH stays empty, the guard above will not fire, and a
+#     re-run imports another cert — the original cumulative bug. If that shows
+#     up, prefer fixing trust over dropping `-v`: without `-v` the hash could
+#     point at a cert that has no usable private key.
 setup-signing: ## Create persistent code signing identity (one-time)
-	@if codesign --force --sign "$(IDENTITY)" --generate-entitlement-der /dev/null 2>/dev/null; then \
-		echo "✓ Signing identity '$(IDENTITY)' already works"; \
+	@if [ -n "$(SIGN_HASH)" ]; then \
+		echo "✓ Signing identity '$(CERT_CN)' already exists ($(SIGN_HASH))"; \
 		exit 0; \
 	fi; \
 	SIGNTMP=$$(mktemp -d); \
@@ -173,12 +195,15 @@ setup-signing: ## Create persistent code signing identity (one-time)
 	echo "Trusting the cert for code signing (a login-password dialog is expected)..."; \
 	security add-trusted-cert -r trustRoot -p codeSign "$$SIGNTMP/cert.pem" 2>/dev/null || true; \
 	echo ""; \
-	if codesign --force --sign "$(IDENTITY)" $(BINARY) 2>/dev/null; then \
-		echo "✓ Signing identity '$(IDENTITY)' created and working"; \
+	NEW_HASH=$$(security find-identity -v -p codesigning 2>/dev/null | \
+		grep -F '"$(CERT_CN)"' | head -1 | awk '{print $$2}'); \
+	if [ -n "$$NEW_HASH" ]; then \
+		echo "✓ Signing identity '$(CERT_CN)' created and working ($$NEW_HASH)"; \
 		echo "  Grant FDA one more time in System Settings — it will persist across rebuilds."; \
 	else \
-		echo "⚠ Certificate imported but needs manual trust:"; \
-		echo "  1. Open Keychain Access"; \
-		echo "  2. Find '$(CERT_CN)' in login keychain"; \
-		echo "  3. Double-click → Trust → Code Signing → Always Trust"; \
+		echo "⚠ Certificate imported but no usable signing identity was found."; \
+		echo "  This usually means the private key did not import. Check with:"; \
+		echo "    security find-identity -v -p codesigning"; \
+		echo "  If '$(CERT_CN)' is absent there, the import failed — re-run this target."; \
+		echo "  If it IS listed, signing should now work; report this as a bug."; \
 	fi
