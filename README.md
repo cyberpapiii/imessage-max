@@ -123,6 +123,27 @@ For local development, advanced setup, and the signed install workflow, see:
 
 - [swift/README.md](swift/README.md)
 
+## Protocol Support
+
+iMessage Max is a dual-era MCP server. Both transports (stdio and HTTP)
+serve both eras concurrently, selected per request:
+
+| Era | Revisions | Lifecycle | Selected by |
+| --- | --- | --- | --- |
+| Modern | `2026-07-28` | Stateless, per-request `_meta` | `io.modelcontextprotocol/protocolVersion` in the request `_meta` (or `server/discover`) |
+| Legacy | `2025-03-26` … `2025-11-25` | `initialize` + session | `initialize` request / `Mcp-Session-Id` |
+
+Modern clients probe with `server/discover` and send the required
+`MCP-Protocol-Version`, `Mcp-Method`, and (for `tools/call`) `Mcp-Name`
+headers over HTTP. Legacy clients keep working unchanged — no client
+migration is required, and legacy support will not be removed while real
+clients depend on it.
+
+The server implements the tools surface only. Prompts, resources,
+completion, subscriptions, tasks, and MRTR flows are intentionally not
+implemented; the official conformance suite runs against both eras with
+the documented baseline in `docs/conformance-baseline.yml`.
+
 ## Client Icon Metadata
 
 iMessage Max ships icons for the main MCP protocol surface and the client

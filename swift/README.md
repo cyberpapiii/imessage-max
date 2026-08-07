@@ -53,8 +53,10 @@ Sources/iMessageMax/
 ├── main.swift              # Entry point, CLI parsing
 ├── Server/
 │   ├── MCPServer.swift     # Server lifecycle (stdio mode)
-│   ├── HTTPTransport.swift # HTTP Streamable transport (MCP spec 2025-11-25)
-│   ├── SessionManager.swift # Per-session Server instances
+│   ├── HTTPTransport.swift # HTTP Streamable transport (dual-era)
+│   ├── ModernProtocol.swift # MCP 2026-07-28 stateless dispatcher
+│   ├── DualEraStdioTransport.swift # stdio era router
+│   ├── SessionManager.swift # Per-session Server instances (legacy era)
 │   ├── SSEConnection.swift # Server-Sent Events streaming
 │   ├── OriginValidationMiddleware.swift # DNS rebinding protection
 │   └── ToolRegistry.swift  # Tool registration
@@ -109,7 +111,8 @@ Sources/iMessageMax/
 
 ### HTTP Mode
 
-Implements MCP Streamable HTTP transport (spec 2025-11-25) with:
+Implements MCP Streamable HTTP transport — legacy sessions (specs through
+2025-11-25) and the stateless 2026-07-28 era on the same endpoint — with:
 
 - **Per-session Server instances** - Each client gets isolated state, enabling clean reconnection
 - **Session management** - 1-hour timeout with automatic cleanup

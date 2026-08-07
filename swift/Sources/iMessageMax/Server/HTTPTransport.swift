@@ -40,6 +40,8 @@ public actor HTTPTransport: Transport {
     private var isConnected = false
     private let sessionManager: SessionManager
     private let sseManager = SSEConnectionManager()
+    private let database: Database
+    private let resolver: ContactResolver
 
     // Request correlation: maps JSON-RPC id to continuation for response
     private var pendingRequests: [PendingRequestKey: PendingRequest] = [:]
@@ -79,6 +81,8 @@ public actor HTTPTransport: Transport {
         self.host = host
         self.port = port
         self.requestTimeout = requestTimeout
+        self.database = database
+        self.resolver = resolver
         self.logger =
             logger
             ?? Logger(
@@ -97,6 +101,7 @@ public actor HTTPTransport: Transport {
         guard !isConnected else { return }
 
         await configureRoutingIfNeeded()
+        await ensureToolCatalogRegistered()
 
         let app = buildApplication()
 
@@ -112,8 +117,24 @@ public actor HTTPTransport: Transport {
 
     func makeApplicationForTesting() async -> some ApplicationProtocol {
         await configureRoutingIfNeeded()
+        await ensureToolCatalogRegistered()
         isConnected = true
         return buildApplication()
+    }
+
+    /// Populates the global tool registry at startup so the stateless modern
+    /// lane can serve `tools/list`/`tools/call` before (or without) any
+    /// legacy session ever being created.
+    private func ensureToolCatalogRegistered() async {
+        guard ToolHandlerRegistry.shared.getTools().isEmpty else { return }
+        let server = Server(
+            name: Version.name,
+            version: Version.current,
+            title: Version.title,
+            instructions: Version.instructions,
+            capabilities: Version.serverCapabilities
+        )
+        await ToolRegistry.registerAll(on: server, db: database, resolver: resolver)
     }
 
     func registerMethodHandlerForTesting<M: MCP.Method>(
@@ -189,6 +210,22 @@ public actor HTTPTransport: Transport {
 
         let messageType = detectMessageType(json)
         let isInitialize = (json["method"] as? String) == "initialize"
+
+        // Era selection (dual-era server, MCP 2026-07-28 backward-compat
+        // model): an `initialize` request selects legacy session semantics;
+        // modern per-request `_meta` (or `server/discover`) selects the
+        // stateless 2026-07-28 lane. Only the BODY selects the era — real
+        // legacy clients (plug) send Mcp-Method/MCP-Protocol-Version headers
+        // on session traffic too, so header presence must not reroute them.
+        if !isInitialize, ModernDispatcher.isModernMessage(json) {
+            return await handleModernPost(
+                request: request,
+                requestData: requestData,
+                json: json,
+                messageType: messageType
+            )
+        }
+
         let requestedProtocolVersion = isInitialize
             ? parseInitializeProtocolVersion(from: json)
             : nil
@@ -219,6 +256,10 @@ public actor HTTPTransport: Transport {
             sessionId = session.id
             responseHeaders[.mcpSessionId] = sessionId
             logger.info("Created new session with dedicated Server: \(sessionId)")
+            FileHandle.standardError.write(
+                "[iMessage Max] era=legacy transport=http version=\(requestedProtocolVersion ?? MCPProtocolVersion.latest) method=initialize session=\(sessionId.prefix(8))\n"
+                    .data(using: .utf8)!
+            )
         } else {
             // Validate existing session
             guard let requestSessionId = request.headers[.mcpSessionId] else {
@@ -317,6 +358,109 @@ public actor HTTPTransport: Transport {
             )
 
         }
+    }
+
+    // MARK: - Modern era (2026-07-28)
+
+    private func handleModernPost(
+        request: Request,
+        requestData: Data,
+        json: [String: Any],
+        messageType: JSONRPCMessageType
+    ) async -> Response {
+        switch messageType {
+        case .response:
+            // Modern clients MUST NOT POST JSON-RPC responses.
+            return modernResponse(
+                ModernDispatcher.errorResult(
+                    id: nil,
+                    code: ModernDispatcher.ErrorCode.invalidRequest,
+                    message: "JSON-RPC responses are not accepted",
+                    httpStatus: 400
+                )
+            )
+        case .notification:
+            // Header requirements for notification POSTs are undefined in
+            // this revision; accept with no body.
+            return Response(status: .accepted)
+        case .request:
+            break
+        }
+
+        if let mismatch = validateModernHeaders(request: request, json: json) {
+            return modernResponse(mismatch)
+        }
+
+        let result = await ModernDispatcher.handle(requestData, transport: "http")
+        return modernResponse(result)
+    }
+
+    /// Enforces the required Streamable HTTP request-metadata headers
+    /// (`MCP-Protocol-Version`, `Mcp-Method`, `Mcp-Name`) and their
+    /// header/body consistency. Returns a HeaderMismatch (-32020) outcome on
+    /// failure, per spec section "Server Validation".
+    private nonisolated func validateModernHeaders(
+        request: Request,
+        json: [String: Any]
+    ) -> ModernDispatchResult? {
+        let id = json["id"]
+        let method = json["method"] as? String ?? ""
+        let params = json["params"] as? [String: Any]
+        let bodyVersion = ModernDispatcher.requestedProtocolVersion(in: json)
+
+        func mismatch(_ message: String) -> ModernDispatchResult {
+            ModernDispatcher.errorResult(
+                id: id,
+                code: ModernDispatcher.ErrorCode.headerMismatch,
+                message: message,
+                httpStatus: 400
+            )
+        }
+
+        guard let headerVersion = request.headers[.mcpProtocolVersion] else {
+            return mismatch("Missing required MCP-Protocol-Version header")
+        }
+        if let bodyVersion, bodyVersion != headerVersion {
+            return mismatch(
+                "Header mismatch: MCP-Protocol-Version header value '\(headerVersion)' does not match body value '\(bodyVersion)'"
+            )
+        }
+
+        guard let headerMethod = request.headers[.mcpMethod] else {
+            return mismatch("Missing required Mcp-Method header")
+        }
+        guard headerMethod == method else {
+            return mismatch(
+                "Header mismatch: Mcp-Method header value '\(headerMethod)' does not match body value '\(method)'"
+            )
+        }
+
+        if ["tools/call", "resources/read", "prompts/get"].contains(method) {
+            guard let rawName = request.headers[.mcpName] else {
+                return mismatch("Missing required Mcp-Name header")
+            }
+            let headerName = ModernDispatcher.decodeBase64Sentinel(rawName)
+            let bodyName = (params?["name"] as? String) ?? (params?["uri"] as? String) ?? ""
+            guard headerName == bodyName else {
+                return mismatch(
+                    "Header mismatch: Mcp-Name header value '\(headerName)' does not match body value '\(bodyName)'"
+                )
+            }
+        }
+
+        return nil
+    }
+
+    private nonisolated func modernResponse(_ result: ModernDispatchResult) -> Response {
+        let status = HTTPResponse.Status(code: result.httpStatus)
+        guard let data = result.data else {
+            return Response(status: status)
+        }
+        return Response(
+            status: status,
+            headers: [.contentType: "application/json"],
+            body: .init(byteBuffer: ByteBuffer(data: data))
+        )
     }
 
     /// Handles GET requests for SSE streaming
@@ -750,4 +894,10 @@ extension HTTPField.Name {
 
     /// MCP protocol version header
     static let mcpProtocolVersion = HTTPField.Name("MCP-Protocol-Version")!
+
+    /// Mcp-Method request-metadata header (2026-07-28)
+    static let mcpMethod = HTTPField.Name("Mcp-Method")!
+
+    /// Mcp-Name request-metadata header (2026-07-28)
+    static let mcpName = HTTPField.Name("Mcp-Name")!
 }

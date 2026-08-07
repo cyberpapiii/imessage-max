@@ -1,0 +1,86 @@
+# MCP conformance expected-failures baseline for iMessage Max.
+#
+# Usage (official suite: github.com/modelcontextprotocol/conformance):
+#   npx @modelcontextprotocol/conformance server --url http://127.0.0.1:8080 \
+#     --suite draft  --expected-failures docs/conformance-baseline.yml
+#   npx @modelcontextprotocol/conformance server --url http://127.0.0.1:8080 \
+#     --suite active --expected-failures docs/conformance-baseline.yml
+#
+# Every entry below is a feature the server intentionally does not implement,
+# or a check that requires the suite's purpose-built diagnostic tools
+# (test_* tools only conformance example servers expose). Rationale for each
+# group is recorded in plans/018-mcp-2026-07-28-dual-era.md.
+server:
+  # --- draft suite (MCP 2026-07-28, stateless lane) ---
+  # Untestable without the suite's diagnostic tools (test_missing_capability,
+  # test_streaming_elicitation, test_logging_tool). The server declares no
+  # capability-gated tools, uses no MRTR flows, and emits no log notifications.
+  - server-stateless:sep-2575-server-rejects-undeclared-capability
+  - server-stateless:sep-2575-missing-capability-http-400
+  - server-stateless:sep-2575-http-server-no-independent-requests-on-stream
+  - server-stateless:sep-2575-server-no-log-without-loglevel
+  # Intentional dual-era deviation: `initialize` is NOT a removed method here.
+  # It selects the legacy (2025-11-25 and earlier) session lane, which real
+  # clients (plug, mcpb stdio bundle, Codex) require. A stateless-only server
+  # would 404 it; a dual-era server must keep serving it.
+  - server-stateless:sep-2575-http-server-method-not-found-404-initialize
+  # prompts/resources are not implemented (no capability declared); the
+  # cache-hint checks for their list methods cannot apply.
+  - caching:sep-2549-prompts-list-caching-hints
+  - caching:sep-2549-resources-list-caching-hints
+  - caching:sep-2549-resources-templates-list-caching-hints
+  # No tool declares x-mcp-header annotations.
+  - http-custom-header-server-validation
+  # MRTR (input-required results / requestState) is not used: the server
+  # never needs sampling, elicitation, or roots. These scenarios require
+  # test_input_required_result_* diagnostic tools.
+  - input-required-result-basic-elicitation
+  - input-required-result-basic-sampling
+  - input-required-result-basic-list-roots
+  - input-required-result-request-state
+  - input-required-result-multiple-input-requests
+  - input-required-result-multi-round
+  - input-required-result-non-tool-request
+  - input-required-result-result-type
+  - input-required-result-tampered-state
+  - input-required-result-capability-check
+  # Same missing-diagnostic-tool cause; the check downgrades to WARNING,
+  # which the baseline runner still counts as a failure.
+  - input-required-result-ignore-extra-params:sep-2322-ignore-unexpected-params
+  - input-required-result-missing-input-response:sep-2322-missing-response-rerequests
+  # resources/read is not implemented at all, so nonexistent-resource reads
+  # get -32601 (method not found) rather than the resource-specific -32602
+  # SHOULD shape.
+  - sep-2164-resource-not-found:sep-2164-error-code
+  - sep-2164-resource-not-found:sep-2164-data-uri
+  # --- active suite (legacy dated revisions, session lane) ---
+  # The logging capability is not declared; the scenario probes it anyway.
+  - logging-set-level
+  # completion/prompts/resources capabilities are not implemented.
+  - completion-complete
+  - resources-list
+  - resources-read-text
+  - resources-read-binary
+  - resources-templates-read
+  - resources-subscribe
+  - resources-unsubscribe
+  - prompts-list
+  - prompts-get-simple
+  - prompts-get-with-args
+  - prompts-get-embedded-resource
+  - prompts-get-with-image
+  # These require the suite's diagnostic tools (test_simple_text, test_image,
+  # logging/progress/sampling/elicitation fixtures) that a production server
+  # does not expose.
+  - tools-call-simple-text
+  - tools-call-image
+  - tools-call-audio
+  - tools-call-embedded-resource
+  - tools-call-mixed-content
+  - tools-call-with-logging
+  - tools-call-error
+  - tools-call-with-progress
+  - tools-call-sampling
+  - tools-call-elicitation
+  - elicitation-sep1034-defaults
+  - elicitation-sep1330-enums

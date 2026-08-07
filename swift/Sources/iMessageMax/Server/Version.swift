@@ -2,7 +2,7 @@ import Foundation
 import MCP
 
 enum Version {
-    static let current = "1.2.1"
+    static let current = "1.3.0"
     static let name = "iMessage Max"
     static let title = "iMessage Max"
     static let instructions = """

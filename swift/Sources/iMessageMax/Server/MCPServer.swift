@@ -21,7 +21,10 @@ actor MCPServerWrapper {
     func start(transport: any Transport) async throws {
         // Register tools and start server FIRST so MCP handshake can complete
         await ToolRegistry.registerAll(on: server, db: database, resolver: resolver)
-        let transport = IconMetadataTransport(base: transport)
+        // Dual-era stdio: modern 2026-07-28 messages are answered by
+        // ModernDispatcher inside DualEraStdioTransport; legacy traffic
+        // continues through the SDK Server (with icon injection on send).
+        let transport = IconMetadataTransport(base: DualEraStdioTransport(base: transport))
 
         // Start server in background, then do startup checks
         // This allows MCP initialization to complete while contacts load

@@ -118,6 +118,7 @@ final class ToolHandlerRegistry: @unchecked Sendable {
     static let shared = ToolHandlerRegistry()
 
     private var tools: [String: Tool] = [:]
+    private var registrationOrder: [String] = []
     private var handlers: [String: @Sendable ([String: Value]?) async throws -> [Tool.Content]] = [:]
     private let lock = NSLock()
 
@@ -129,14 +130,20 @@ final class ToolHandlerRegistry: @unchecked Sendable {
     ) {
         lock.lock()
         defer { lock.unlock() }
+        if tools[tool.name] == nil {
+            registrationOrder.append(tool.name)
+        }
         tools[tool.name] = tool
         handlers[tool.name] = handler
     }
 
+    /// Returns tools in registration order. The MCP 2026-07-28 spec asks for
+    /// deterministic `tools/list` ordering so clients can cache catalogs and
+    /// LLM prompt caches stay warm.
     func getTools() -> [Tool] {
         lock.lock()
         defer { lock.unlock() }
-        return Array(tools.values)
+        return registrationOrder.compactMap { tools[$0] }
     }
 
     func getHandler(for name: String) -> (@Sendable ([String: Value]?) async throws -> [Tool.Content])? {
@@ -149,6 +156,7 @@ final class ToolHandlerRegistry: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         tools.removeAll()
+        registrationOrder.removeAll()
         handlers.removeAll()
     }
 }
