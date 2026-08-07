@@ -256,6 +256,52 @@ final class SessionManagerLifecycleTests: XCTestCase {
     }
 }
 
+// MARK: - JSON-RPC Id Canonicalization Tests
+
+final class JsonRpcIdCanonicalizationTests: XCTestCase {
+
+    func testIntAndStringIdsDoNotCollide() {
+        // `1` and `"1"` are distinct legal JSON-RPC ids. Collapsing both to
+        // "1" made the second concurrent request look like a duplicate.
+        XCTAssertNotEqual(
+            HTTPTransport.parseJsonRpcId(from: ["id": 1]),
+            HTTPTransport.parseJsonRpcId(from: ["id": "1"])
+        )
+    }
+
+    func testHugeDoubleIdDoesNotTrap() {
+        // Reaching this assertion at all is the regression test: the old
+        // implementation trapped and aborted the process on this input.
+        let key = HTTPTransport.parseJsonRpcId(from: ["id": 1e300])
+        XCTAssertTrue(key.hasPrefix("d:"), "Expected d: namespace, got \(key)")
+    }
+
+    func testFractionalDoubleIdDoesNotTrap() {
+        let key = HTTPTransport.parseJsonRpcId(from: ["id": 1.5])
+        XCTAssertEqual(key, "d:1.5")
+    }
+
+    func testIntegralDoubleMatchesIntId() {
+        // JSON does not distinguish 2 from 2.0, so a client sending one and
+        // receiving the other back must still correlate.
+        XCTAssertEqual(
+            HTTPTransport.parseJsonRpcId(from: ["id": 2.0]),
+            HTTPTransport.parseJsonRpcId(from: ["id": 2])
+        )
+    }
+
+    func testNullIdIsStable() {
+        XCTAssertEqual(HTTPTransport.parseJsonRpcId(from: ["id": NSNull()]), "n:null")
+    }
+
+    func testMissingIdGeneratesUniqueKeys() {
+        XCTAssertNotEqual(
+            HTTPTransport.parseJsonRpcId(from: [:]),
+            HTTPTransport.parseJsonRpcId(from: [:])
+        )
+    }
+}
+
 // MARK: - Message Classification Tests
 
 final class MessageClassificationTests: XCTestCase {

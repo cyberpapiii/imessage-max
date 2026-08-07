@@ -289,6 +289,92 @@ final class HTTPTransportIntegrationTests: XCTestCase {
         }
     }
 
+    func testHugeJsonRpcIdDoesNotCrashTheServer() async throws {
+        let transport = HTTPTransport(
+            host: "127.0.0.1",
+            port: 0,
+            database: Database(),
+            resolver: ContactResolver(seedCache: [:]),
+            requestTimeout: .seconds(2)
+        )
+        let app = await transport.makeApplicationForTesting()
+
+        try await app.test(TestingSetup.router) { client in
+            // `1e300` is a legal JSON number but outside Int's range. The old
+            // id parser forced it through a non-failable Int conversion and
+            // trapped, aborting the process on the first unauthenticated POST.
+            let hugeIdPayload = """
+                {"jsonrpc":"2.0","id":1e300,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"tests","version":"1.0"}}}
+                """
+
+            let hugeResponse = try await client.executeRequest(
+                uri: "/",
+                method: HTTPRequest.Method.post,
+                headers: jsonHeaders(),
+                body: byteBuffer(for: hugeIdPayload)
+            )
+
+            // Reaching this line at all is the regression test: any HTTP
+            // status beats aborting the process.
+            XCTAssertTrue(
+                (100...599).contains(Int(hugeResponse.head.status.code)),
+                "Expected a real HTTP status, got \(hugeResponse.head.status)"
+            )
+
+            // And the server is still serving afterwards.
+            let normalResponse = try await client.executeRequest(
+                uri: "/",
+                method: HTTPRequest.Method.post,
+                headers: jsonHeaders(),
+                body: byteBuffer(for: initializePayload(id: 1))
+            )
+            XCTAssertEqual(normalResponse.head.status, .ok)
+        }
+    }
+
+    func testMaliciousProtocolVersionHeaderYieldsWellFormedJson() async throws {
+        let transport = HTTPTransport(
+            host: "127.0.0.1",
+            port: 0,
+            database: Database(),
+            resolver: ContactResolver(seedCache: [:]),
+            requestTimeout: .seconds(2)
+        )
+        let app = await transport.makeApplicationForTesting()
+
+        try await app.test(TestingSetup.router) { client in
+            // Backslash + quote is the attack shape: HTTP/1.1 header values
+            // cannot contain newlines, and the old builder escaped only `"`,
+            // so a trailing backslash broke out of the JSON string.
+            let maliciousVersion = #"bad\version"x"#
+            var headers = jsonHeaders()
+            headers[.mcpProtocolVersion] = maliciousVersion
+
+            let response = try await client.executeRequest(
+                uri: "/",
+                method: HTTPRequest.Method.post,
+                headers: headers,
+                body: byteBuffer(for: initializePayload(id: 1))
+            )
+
+            XCTAssertEqual(response.head.status, .badRequest)
+
+            // decodeJSON parses with JSONSerialization, so it throws if the
+            // body is malformed — that parse IS the injection assertion.
+            let json = try decodeJSON(from: response.body)
+            let error = try XCTUnwrap(json["error"] as? [String: Any])
+            XCTAssertEqual(error["code"] as? Int, -32600)
+
+            // The value round-trips intact rather than being mangled or
+            // truncated at the quote, proving it was encoded, not escaped.
+            let message = try XCTUnwrap(error["message"] as? String)
+            XCTAssertTrue(
+                message.contains(maliciousVersion),
+                "Expected the raw header echoed back safely, got \(message)"
+            )
+        }
+    }
+
     func testOriginMiddlewareRejectsBadOriginAndHost() async throws {
         let middleware = OriginValidationMiddleware<BasicRequestContext>()
         let context = BasicRequestContext(

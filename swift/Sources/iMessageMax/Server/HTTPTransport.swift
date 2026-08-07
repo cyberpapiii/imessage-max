@@ -297,7 +297,7 @@ public actor HTTPTransport: Transport {
         switch messageType {
         case .request:
             // Route to session's Server and wait for response
-            let jsonRpcId = parseJsonRpcId(from: json)
+            let jsonRpcId = Self.parseJsonRpcId(from: json)
 
             do {
                 let responseData = try await withCheckedThrowingContinuation {
@@ -589,11 +589,14 @@ public actor HTTPTransport: Transport {
             return
         }
 
-        let jsonRpcId = parseJsonRpcId(from: json)
+        let jsonRpcId = Self.parseJsonRpcId(from: json)
 
-        // Check if this matches a pending request
-        let key = PendingRequestKey(sessionId: sessionId, requestId: jsonRpcId)
-        if let pending = pendingRequests.removeValue(forKey: key) {
+        // Check if this matches a pending request. Route through the helper so
+        // the timeout work item is cancelled — removing the entry directly left
+        // an armed 300s timer plus a wakeup Task behind for every served
+        // request, which is exactly the stray-wakeup churn this runtime is
+        // documented to be sensitive to.
+        if let pending = removePendingRequest(sessionId: sessionId, id: jsonRpcId) {
             pending.continuation.resume(returning: data)
             logger.trace("Routed response for request: \(jsonRpcId)")
         } else {
@@ -792,7 +795,11 @@ public actor HTTPTransport: Transport {
             guard MCPProtocolVersion.supported.contains(versionHeader) else {
                 return errorResponse(
                     status: .badRequest,
-                    message: "Unsupported protocol version: \(versionHeader)",
+                    // Only reachable with arbitrary client input, so the clamp
+                    // is load-bearing here: keep a garbage header from bloating
+                    // the response and the log. Serialization already makes any
+                    // content safe.
+                    message: "Unsupported protocol version: \(String(versionHeader.prefix(64)))",
                     code: -32600
                 )
             }
@@ -810,7 +817,10 @@ public actor HTTPTransport: Transport {
             guard let versionHeader else {
                 return errorResponse(
                     status: .badRequest,
-                    message: "Missing MCP-Protocol-Version header for negotiated protocol version \(negotiated)",
+                    // `negotiated` is already constrained to
+                    // MCPProtocolVersion.supported, so this clamp is
+                    // belt-and-braces against a future reordering of the guards.
+                    message: "Missing MCP-Protocol-Version header for negotiated protocol version \(String(negotiated.prefix(64)))",
                     code: -32600
                 )
             }
@@ -818,7 +828,9 @@ public actor HTTPTransport: Transport {
             guard versionHeader == negotiated else {
                 return errorResponse(
                     status: .badRequest,
-                    message: "MCP-Protocol-Version header \(versionHeader) does not match negotiated version \(negotiated)",
+                    // Both values already passed the `supported` guard above;
+                    // clamped for the same defensive reason.
+                    message: "MCP-Protocol-Version header \(String(versionHeader.prefix(64))) does not match negotiated version \(String(negotiated.prefix(64)))",
                     code: -32600
                 )
             }
@@ -849,34 +861,57 @@ public actor HTTPTransport: Transport {
         return .notification  // Default fallback
     }
 
-    /// Parses the JSON-RPC id from a message
-    private nonisolated func parseJsonRpcId(from json: [String: Any]) -> String {
-        if let id = json["id"] {
-            if let stringId = id as? String {
-                return stringId
-            } else if let intId = id as? Int {
-                return String(intId)
-            } else if let doubleId = id as? Double {
-                return String(Int(doubleId))
-            } else if id is NSNull {
-                return "null"
-            }
+    /// Canonicalizes the JSON-RPC id to a collision-free string form.
+    /// Type-tagged so `1` and `"1"` (both legal, distinct ids) never collide.
+    /// Total: never traps, whatever the client sends.
+    ///
+    /// The previous form forced a Double id through a non-failable Int
+    /// conversion, which trapped on any id outside Int's range —
+    /// `{"id": 1e300}` on an unauthenticated POST aborted the whole
+    /// launchd service.
+    ///
+    /// Branch order matters: `["id": 1]` bridges to NSNumber, and on Apple
+    /// platforms both `as? Int` and `as? Double` succeed for integral
+    /// NSNumbers, so Int must be tested first to keep `1` in the `i:` space.
+    nonisolated static func parseJsonRpcId(from json: [String: Any]) -> String {
+        guard let id = json["id"] else {
+            return "u:\(UUID().uuidString)"  // No id — generate a unique key
         }
-        return UUID().uuidString  // Generate unique ID if none found
+        if let stringId = id as? String {
+            return "s:\(stringId)"
+        }
+        if let intId = id as? Int {
+            return "i:\(intId)"
+        }
+        if let doubleId = id as? Double {
+            if let exact = Int(exactly: doubleId) {
+                return "i:\(exact)"  // 2.0 and 2 are the same JSON number
+            }
+            return "d:\(doubleId)"  // fractional or out-of-Int-range; no trap
+        }
+        if id is NSNull {
+            return "n:null"
+        }
+        return "u:\(UUID().uuidString)"
     }
 
     /// Creates a JSON-RPC error response
     private nonisolated func errorResponse(status: HTTPResponse.Status, message: String, code: Int = -32600) -> Response
     {
-        let escapedMessage = message.replacingOccurrences(of: "\"", with: "\\\"")
-        let errorJson =
-            """
-            {"jsonrpc":"2.0","error":{"code":\(code),"message":"\(escapedMessage)"},"id":null}
-            """
+        // Serialize rather than interpolate. The old form escaped only `"`,
+        // so a client-controlled message containing a backslash or a control
+        // character produced malformed — and injectable — JSON.
+        let object: [String: Any] = [
+            "jsonrpc": "2.0",
+            "error": ["code": code, "message": message],
+            "id": NSNull(),
+        ]
+        let data = (try? JSONSerialization.data(withJSONObject: object))
+            ?? Data(#"{"jsonrpc":"2.0","error":{"code":-32603,"message":"Internal error"},"id":null}"#.utf8)
         return Response(
             status: status,
             headers: [.contentType: "application/json"],
-            body: .init(byteBuffer: ByteBuffer(string: errorJson))
+            body: .init(byteBuffer: ByteBuffer(bytes: data))
         )
     }
 }
