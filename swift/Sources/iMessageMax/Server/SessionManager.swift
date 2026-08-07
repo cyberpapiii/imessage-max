@@ -228,7 +228,7 @@ actor SessionManager {
     private func startCleanupTask() {
         cleanupTask = Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(300))  // Run every 5 minutes
+                await AsyncTimeout.sleep(.seconds(300))  // Run every 5 minutes
                 await self?.cleanupExpiredSessions()
             }
         }

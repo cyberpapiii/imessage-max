@@ -106,7 +106,7 @@ final class SSEChannel: @unchecked Sendable {
                     // Keep-alive task
                     group.addTask {
                         while !Task.isCancelled {
-                            try? await Task.sleep(for: .seconds(30))
+                            await AsyncTimeout.sleep(.seconds(30))
                             if Task.isCancelled { break }
                             continuation.yield(SSEEvent.keepAlive())
                         }

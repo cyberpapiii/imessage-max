@@ -367,7 +367,7 @@ struct GetAttachment {
 
             // Wait briefly for small files
             for _ in 0..<10 {
-                try? await Task.sleep(nanoseconds: 500_000_000)
+                await AsyncTimeout.sleep(.milliseconds(500))
                 if FileManager.default.fileExists(atPath: url.path) {
                     return true
                 }
