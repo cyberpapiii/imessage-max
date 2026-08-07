@@ -21,7 +21,7 @@ final class SendResolverTests: XCTestCase {
             }
             XCTAssertEqual(guid, "any;+;chat-test-guid")
             XCTAssertEqual(chatId, 10)
-            XCTAssertEqual(Set(resolved.deliveredTo), Set(["+1 (555) 555-0123", "+1 (510) 461-5406"]))
+            XCTAssertEqual(Set(resolved.deliveredTo), Set(["+1 (555) 555-0123", "+1 (555) 555-0124"]))
         }
     }
 
@@ -76,7 +76,7 @@ final class SendResolverTests: XCTestCase {
 
         let contacts = ContactResolver(seedCache: [
             "+15555550123": "Nick Jones",
-            "+15104615406": "Andrew Jones",
+            "+15555550124": "Andrew Jones",
         ])
         let resolver = SendResolver(db: Database(path: dbPath), resolver: contacts)
         let result = await resolver.resolve(chatId: nil, to: "Jones")
@@ -91,7 +91,7 @@ final class SendResolverTests: XCTestCase {
             // Handle 1 has a message row (date 1000); handle 2 has none.
             // nil-lastContact sorts last per SendResolution.swift's comparator.
             XCTAssertEqual(candidates[0].handle, "+15555550123")
-            XCTAssertEqual(candidates[1].handle, "+15104615406")
+            XCTAssertEqual(candidates[1].handle, "+15555550124")
             XCTAssertEqual(candidates[1].lastContact, "never")
             // Deliberately not asserting candidates[0].lastContact's exact
             // string. It's a relative-time format that drifts with the clock.
@@ -137,7 +137,7 @@ private func makeResolverTestDatabase() throws -> String {
         "CREATE TABLE chat_handle_join (chat_id INTEGER, handle_id INTEGER);",
         "CREATE TABLE message (ROWID INTEGER PRIMARY KEY, handle_id INTEGER, date INTEGER);",
         "INSERT INTO handle (ROWID, id) VALUES (1, '+15555550123');",
-        "INSERT INTO handle (ROWID, id) VALUES (2, '+15104615406');",
+        "INSERT INTO handle (ROWID, id) VALUES (2, '+15555550124');",
         "INSERT INTO chat (ROWID, guid, display_name) VALUES (10, 'any;+;chat-test-guid', NULL);",
         "INSERT INTO chat_handle_join (chat_id, handle_id) VALUES (10, 1);",
         "INSERT INTO chat_handle_join (chat_id, handle_id) VALUES (10, 2);",

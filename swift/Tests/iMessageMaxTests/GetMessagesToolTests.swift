@@ -174,6 +174,35 @@ final class GetMessagesToolTests: XCTestCase {
         XCTAssertEqual(secondMessages.count, 1)
         XCTAssertEqual(secondMessages.first?["id"] as? String, "msg_202")
     }
+
+    func testMediaTruncatedWhenEnrichableImagesExceedMaxMedia() async throws {
+        let fixture = try makeMediaTruncationFixture(imageCount: 11)
+        let tool = GetMessagesTool(
+            db: fixture.database(),
+            resolver: makeSeededResolver(),
+            allowedRoots: [FileManager.default.temporaryDirectory.path]
+        )
+
+        let response = try await decodeGetMessagesResponse(
+            await tool.execute(args: [
+                "chat_id": .string("chat40"),
+                "limit": .int(10),
+            ])
+        )
+
+        XCTAssertEqual(response["media_truncated"] as? Bool, true)
+        XCTAssertEqual(response["media_total"] as? Int, 11)
+        XCTAssertEqual(response["media_included"] as? Int, 10)
+
+        let messages = try decodeJSONArray(try XCTUnwrap(response["messages"]))
+        let target = try XCTUnwrap(messages.first(where: { $0["id"] as? String == "msg_401" }))
+        let media = try decodeJSONArray(target["media"])
+        XCTAssertEqual(media.count, 10)
+
+        let attachments = try decodeJSONArray(target["attachments"])
+        XCTAssertFalse(attachments.isEmpty)
+        XCTAssertNotNil(attachments.first?["id"] as? String)
+    }
 }
 
 private func decodeGetMessagesResponse(_ contents: [Tool.Content]) async throws -> [String: Any] {
@@ -231,6 +260,44 @@ func makeGetMessagesFixture() throws -> ToolTestDatabase {
 
     try fixture.insertMessage(rowId: 300, guid: "gm300", text: "trip planning notes", date: base + (4 * minute), isFromMe: false, handleId: 2)
     try fixture.joinChatMessage(chatId: 30, messageId: 300)
+
+    return fixture
+}
+
+private func makeMediaTruncationFixture(imageCount: Int) throws -> ToolTestDatabase {
+    let fixture = try ToolTestDatabase(name: "get-messages-media-truncation")
+    try fixture.insertHandle(rowId: 1, handle: "+15550000001")
+    try fixture.insertChat(rowId: 40, guid: "chat-media-guid", displayName: "Media Truncation")
+    try fixture.joinChatHandle(chatId: 40, handleId: 1)
+
+    let base: Int64 = 2_000_000_000_000
+    try fixture.insertMessage(
+        rowId: 401,
+        guid: "gm401",
+        text: "lots of photos",
+        date: base,
+        isFromMe: false,
+        handleId: 1
+    )
+    try fixture.joinChatMessage(chatId: 40, messageId: 401)
+
+    for index in 0..<imageCount {
+        let imageURL = try makeFixtureImage(
+            name: "truncation-\(index).jpg",
+            width: 80,
+            height: 60
+        )
+        let attachmentId = 1000 + index
+        try fixture.insertAttachment(
+            rowId: attachmentId,
+            filename: imageURL.path,
+            mimeType: "image/jpeg",
+            uti: "public.jpeg",
+            totalBytes: (try? FileManager.default.attributesOfItem(atPath: imageURL.path)[.size] as? Int) ?? 0,
+            transferName: imageURL.lastPathComponent
+        )
+        try fixture.joinMessageAttachment(messageId: 401, attachmentId: attachmentId)
+    }
 
     return fixture
 }

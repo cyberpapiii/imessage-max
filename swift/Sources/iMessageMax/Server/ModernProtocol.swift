@@ -248,7 +248,11 @@ enum ModernDispatcher {
             result["content"] = contentJSON(error.content)
             result["isError"] = true
         } catch {
-            result["content"] = contentJSON([.plainText("Error: \(ClientErrorMessages.sanitized(error))")])
+            result["content"] = contentJSON([
+                .plainText(
+                    "Error: \(ClientErrorMessages.internalDetail(error, context: "Tool execution"))"
+                )
+            ])
             result["isError"] = true
         }
         return successResult(id: id, result: result)

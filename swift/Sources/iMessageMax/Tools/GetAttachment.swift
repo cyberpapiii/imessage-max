@@ -190,12 +190,16 @@ struct GetAttachment {
                 }
             }
 
-            let attType = getAttachmentType(mimeType: attachment.mimeType, uti: attachment.uti)
+            let attachmentType = AttachmentType.from(
+                mimeType: attachment.mimeType,
+                uti: attachment.uti
+            )
+            let attType = attachmentType.rawValue
             let displayName = attachment.transferName ?? (expandedPath as NSString).lastPathComponent
             let chat = try resolveAttachmentChat(rowId: rowId)
 
-            switch attType {
-            case "image":
+            switch attachmentType {
+            case .image:
                 guard let result = imageProcessor.process(at: expandedPath, variant: imageVariant) else {
                     return .error(
                         type: "processing_failed",
@@ -218,7 +222,7 @@ struct GetAttachment {
                     mimeType: "image/jpeg"
                 )
 
-            case "video":
+            case .video:
                 return .error(
                     type: "unsupported_type",
                     message: "Video attachments are not yet supported with the new variant system. Use list_attachments to see video metadata.",
@@ -229,7 +233,7 @@ struct GetAttachment {
                     ]
                 )
 
-            default:
+            case .audio, .pdf, .document, .other:
                 return .error(
                     type: "unsupported_type",
                     message: "Attachment type '\(attType)' not supported. Only images are supported.",
@@ -259,17 +263,13 @@ struct GetAttachment {
         } catch {
             return .error(
                 type: "internal_error",
-                message: ClientErrorMessages.sanitized(error),
+                message: ClientErrorMessages.internalDetail(error, context: "get_attachment"),
                 details: nil
             )
         }
     }
 
     // MARK: - Private Helpers
-
-    private func getAttachmentType(mimeType: String?, uti: String?) -> String {
-        AttachmentType.from(mimeType: mimeType, uti: uti).rawValue
-    }
 
     private func resolveAttachmentChat(rowId: Int) throws -> ChatReference? {
         let rows: [(Int64, String?)]

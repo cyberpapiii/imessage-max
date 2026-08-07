@@ -461,10 +461,6 @@ extension GetMessagesTool {
         return map
     }
 
-    func getAttachmentType(mimeType: String?, uti: String?) -> String {
-        AttachmentType.from(mimeType: mimeType, uti: uti).rawValue
-    }
-
     func extractLinks(from text: String) -> [String] {
         let pattern = #"https?://[^\s<>\"{}|\\^`\[\]]+"#
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }

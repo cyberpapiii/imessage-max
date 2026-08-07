@@ -178,7 +178,8 @@ final class ListAttachments {
             return .success(ListAttachmentsResponse(
                 messages: sharedMessages,
                 total: sharedMessages.count,
-                more: sharedMessages.count == effectiveLimit,
+                // Cursor pagination not implemented; never advertise more pages.
+                more: false,
                 cursor: nil
             ))
 

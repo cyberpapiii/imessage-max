@@ -190,9 +190,10 @@ enum FindChatTool {
                 }
             }
 
+            // No cursor on find_chat; never advertise more pages.
             let response = Response(
                 chats: uniqueResults,
-                more: results.count > params.limit
+                more: false
             )
 
             return [.plainText(try FormatUtils.encodeJSON(response))]

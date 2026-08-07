@@ -284,7 +284,8 @@ enum GetActiveConversations {
             conversations: conversations,
             total: conversations.count,
             windowHours: clampedHours,
-            more: conversations.count >= clampedLimit,
+            // Cursor pagination not implemented; never advertise more pages.
+            more: false,
             cursor: nil
         )
     }

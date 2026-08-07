@@ -280,6 +280,15 @@ public actor HTTPTransport: Transport {
             sessionId = requestSessionId
             await sessionManager.touch(sessionId: sessionId)
             responseHeaders[.mcpSessionId] = sessionId
+            let method = (json["method"] as? String)
+                ?? (messageType == .notification ? "notification" : "response")
+            let version = request.headers[.mcpProtocolVersion] ?? "legacy"
+            FileHandle.standardError.write(
+                Data(
+                    "[iMessage Max] era=legacy transport=http version=\(ModernDispatcher.sanitizedLogField(version)) method=\(ModernDispatcher.sanitizedLogField(method)) session=\(sessionId.prefix(8))\n"
+                        .utf8
+                )
+            )
         }
 
         // Handle based on message type

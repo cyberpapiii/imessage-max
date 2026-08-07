@@ -332,11 +332,27 @@ enum AppleScriptRunner {
             let output = execution.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
 
             guard execution.terminationStatus == 0 else {
-                let raw = output.isEmpty ? execution.stderr : output
-                throw classifySendStderr(
-                    raw,
-                    sentFileName: trackingName,
-                    missingTargetError: .failed("transfer status query failed")
+                // Status probe is not a send: never map through classifySendStderr
+                // (fileNotFound / chatNotFound arms are wrong here).
+                let raw = (output.isEmpty ? execution.stderr : output)
+                    .replacingOccurrences(of: "\u{2019}", with: "'")
+                let firstLine = String(
+                    (raw.split(separator: "\n", maxSplits: 1).first ?? "").prefix(300)
+                )
+                if firstLine.contains("/Users/")
+                    || firstLine.contains("/private/")
+                    || firstLine.contains("/var/")
+                    || firstLine.contains("imessage-max-staging")
+                {
+                    FileHandle.standardError.write(
+                        Data("[imessage-max] transfer status stderr (scrubbed): \(firstLine)\n".utf8)
+                    )
+                    throw SendError.failed(
+                        "Transfer status query failed. Check the server log for details."
+                    )
+                }
+                throw SendError.failed(
+                    firstLine.isEmpty ? "transfer status query failed" : firstLine
                 )
             }
 
@@ -495,10 +511,22 @@ enum AppleScriptRunner {
             return missingTargetError
         }
 
-        // Untrusted, unbounded osascript stderr: keep the first line, clamped,
-        // so client errors stay informative but bounded.
-        let firstLine = stderr.split(separator: "\n", maxSplits: 1).first ?? ""
-        return .failed(String(firstLine.prefix(300)))
+        // Untrusted, unbounded osascript stderr: keep the first line, clamped.
+        // Absolute paths (home, staging) never go to the client.
+        let firstLine = String(
+            (stderr.split(separator: "\n", maxSplits: 1).first ?? "").prefix(300)
+        )
+        if firstLine.contains("/Users/")
+            || firstLine.contains("/private/")
+            || firstLine.contains("/var/")
+            || firstLine.contains("imessage-max-staging")
+        {
+            FileHandle.standardError.write(
+                Data("[imessage-max] osascript stderr (scrubbed for client): \(firstLine)\n".utf8)
+            )
+            return .failed("Send failed. Check the server log for details.")
+        }
+        return .failed(firstLine)
     }
 
     private static func run(

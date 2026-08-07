@@ -228,7 +228,11 @@ extension Server {
                 throw error
             } catch {
                 return CallTool.Result(
-                    content: [.plainText("Error: \(ClientErrorMessages.sanitized(error))")],
+                    content: [
+                        .plainText(
+                            "Error: \(ClientErrorMessages.internalDetail(error, context: "Tool execution"))"
+                        )
+                    ],
                     isError: true
                 )
             }

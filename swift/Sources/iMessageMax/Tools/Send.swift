@@ -309,7 +309,8 @@ actor SendTool {
         )
         let content: [Tool.Content] = [.plainText(try FormatUtils.encodeJSON(response))]
         if response.status == "failed" || response.status == "ambiguous"
-            || response.status == "failed_delivery" || response.status == "partial_failure" {
+            || response.status == "failed_delivery" || response.status == "partial_failure"
+            || response.status == "mismatch" {
             throw ToolError(content: content)
         }
         return content

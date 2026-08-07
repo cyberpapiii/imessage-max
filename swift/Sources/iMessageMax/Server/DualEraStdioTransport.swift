@@ -49,7 +49,8 @@ actor DualEraStdioTransport: Transport {
             await withDiscardingTaskGroup { group in
                 do {
                     for try await data in upstream {
-                        if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                        let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+                        if let json,
                             (json["method"] as? String) != "initialize",
                             ModernDispatcher.isModernMessage(json) {
                             // Modern lane is stateless: safe to handle
@@ -69,6 +70,16 @@ actor DualEraStdioTransport: Transport {
                             }
                             continue
                         }
+                        let method = (json?["method"] as? String)
+                            ?? (json?["id"] != nil ? "response" : "unknown")
+                        let version = (json?["params"] as? [String: Any])?["protocolVersion"] as? String
+                            ?? "legacy"
+                        FileHandle.standardError.write(
+                            Data(
+                                "[iMessage Max] era=legacy transport=stdio version=\(ModernDispatcher.sanitizedLogField(version)) method=\(ModernDispatcher.sanitizedLogField(method))\n"
+                                    .utf8
+                            )
+                        )
                         continuation.yield(data)
                     }
                     continuation.finish()

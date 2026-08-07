@@ -305,7 +305,8 @@ final class GetUnread {
             messages: unreadMessages,
             totalUnread: totalUnread,
             chatsWithUnread: chatsWithUnread,
-            more: unreadMessages.count < totalUnread,
+            // Cursor pagination not implemented; never advertise more pages.
+            more: false,
             cursor: nil
         )
     }

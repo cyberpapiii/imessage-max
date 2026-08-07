@@ -73,6 +73,7 @@ struct GetMessagesResponse: Encodable {
     }
 
     struct AttachmentSummary: Encodable {
+        let id: String
         let type: String
         let filename: String?
         let size: Int?
@@ -295,8 +296,8 @@ actor GetMessagesTool {
         let processor = ImageProcessor()
 
         var messages: [GetMessagesResponse.MessageInfo] = []
-        var mediaTotal = 0
-        var mediaIncluded = 0
+        var mediaCountsByMessageId: [String: (total: Int, included: Int)] = [:]
+        var mediaIncludedGlobal = 0
 
         for row in messageRows {
             let fromKey: String
@@ -330,42 +331,59 @@ actor GetMessagesTool {
 
             var media: [GetMessagesResponse.MediaInfo]? = nil
             var attachments: [GetMessagesResponse.AttachmentSummary]? = nil
+            let messageId = "msg_\(row.id)"
+            var messageMediaTotal = 0
+            var messageMediaIncluded = 0
 
             if let rowAttachments = attachmentsMap[row.id] {
                 for att in rowAttachments {
-                    let attType = getAttachmentType(mimeType: att.mimeType, uti: att.uti)
+                    let attachmentType = AttachmentType.from(
+                        mimeType: att.mimeType,
+                        uti: att.uti
+                    )
+                    let attachmentId = "att\(att.id)"
 
-                    if attType == "image",
+                    if attachmentType == .image,
                        let path = att.filename {
                         // chat.db paths are data, not trusted input. Contain them to allowed roots.
                         // Out-of-root paths degrade to the AttachmentSummary fallthrough below.
                         if let validatedPath = AttachmentPathPolicy.validatedPath(path, allowedRoots: allowedRoots) {
                             if let metadata = processor.getMetadata(at: validatedPath) {
-                                mediaTotal += 1
-                                if mediaIncluded < maxMedia {
+                                messageMediaTotal += 1
+                                if mediaIncludedGlobal < maxMedia {
                                     if media == nil { media = [] }
                                     media?.append(GetMessagesResponse.MediaInfo(
                                         type: "image",
-                                        id: "att\(att.id)",
+                                        id: attachmentId,
                                         filename: metadata.filename,
                                         sizeBytes: metadata.sizeBytes,
                                         sizeHuman: FormatUtils.fileSize(metadata.sizeBytes),
                                         dimensions: .init(width: metadata.width, height: metadata.height)
                                     ))
-                                    mediaIncluded += 1
+                                    messageMediaIncluded += 1
+                                    mediaIncludedGlobal += 1
                                     continue
                                 }
+                                // Past response-wide cap: keep id-bearing summary
+                                // so get_attachment still works.
                             }
                         }
                     }
 
                     if attachments == nil { attachments = [] }
                     attachments?.append(GetMessagesResponse.AttachmentSummary(
-                        type: attType,
+                        id: attachmentId,
+                        type: attachmentType.rawValue,
                         filename: att.filename?.components(separatedBy: "/").last,
                         size: att.totalBytes
                     ))
                 }
+            }
+            if messageMediaTotal > 0 {
+                mediaCountsByMessageId[messageId] = (
+                    total: messageMediaTotal,
+                    included: messageMediaIncluded
+                )
             }
 
             var links: [String]? = nil
@@ -377,7 +395,7 @@ actor GetMessagesTool {
             }
 
             messages.append(GetMessagesResponse.MessageInfo(
-                id: "msg_\(row.id)",
+                id: messageId,
                 ts: row.date.flatMap { AppleTime.toDate($0) }.flatMap { TimeUtils.formatISO($0) },
                 text: row.text,
                 from: fromKey,
@@ -401,6 +419,14 @@ actor GetMessagesTool {
         if let sessionFilter = sessionFilter {
             finalMessages = finalMessages.filter { $0.sessionId == sessionFilter }
             finalSessions = finalSessions.filter { $0.sessionId == sessionFilter }
+        }
+
+        // Recount after session filter so flags match returned messages.
+        var mediaTotal = 0
+        var mediaIncluded = 0
+        for message in finalMessages {
+            mediaIncluded += message.media?.count ?? 0
+            mediaTotal += mediaCountsByMessageId[message.id]?.total ?? 0
         }
 
         let rawDisplayName = chatInfo?.trimmingCharacters(in: .whitespacesAndNewlines)

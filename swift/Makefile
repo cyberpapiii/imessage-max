@@ -43,7 +43,11 @@ help: ## Show this help
 
 build: ## Build release binary
 	@echo "Building release..."
-	@swift build -c release
+	@swift build -c release \
+		-Xlinker -sectcreate \
+		-Xlinker __TEXT \
+		-Xlinker __info_plist \
+		-Xlinker "$(CURDIR)/Sources/Resources/Info.plist"
 	@echo "✓ Built $(BINARY)"
 
 test: ## Run the full test suite

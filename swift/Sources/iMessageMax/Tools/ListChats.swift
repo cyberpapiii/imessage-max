@@ -283,7 +283,8 @@ enum ListChatsTool {
                 totalChats: totals.total,
                 totalGroups: totals.groups,
                 totalDms: totals.dms,
-                more: chats.count == clampedLimit,
+                // Cursor pagination not implemented; never advertise more pages.
+                more: false,
                 cursor: nil
             ))
 
