@@ -90,15 +90,10 @@ Sources/iMessageMax/
 │   ├── ContactResolver.swift   # CNContactStore integration
 │   └── PhoneUtils.swift        # Phone number formatting (E.164 normalization)
 ├── Enrichment/
-│   ├── ImageProcessor.swift    # Core Image resizing
-│   ├── VideoProcessor.swift    # AVFoundation metadata
-│   └── AudioProcessor.swift    # Audio duration extraction
+│   └── ImageProcessor.swift    # Core Image resizing
 ├── Models/
-│   ├── Attachment.swift
 │   ├── AttachmentType.swift    # Attachment type derived from MIME type or UTI
-│   ├── Chat.swift
 │   ├── ChatIdentity.swift      # Canonical conversation identity shared across discovery, retrieval, and sending
-│   ├── Message.swift
 │   ├── Participant.swift
 │   ├── Reactions.swift         # Tapback/reaction type mapping
 │   ├── ResponsePrimitives.swift # Shared Codable response DTOs (ChatSummary, etc.)

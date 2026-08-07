@@ -575,3 +575,35 @@ private func decodeJSONDictionary(from contents: [Tool.Content]) throws -> [Stri
 private func decodeJSONDictionary(from error: ToolError) throws -> [String: Any] {
     return try decodeJSONDictionary(from: error.content)
 }
+
+// MARK: - Moved from PlaceholderTests.swift (plan 032)
+
+final class SendToolExecutionTests: XCTestCase {
+    func testExecuteRejectsReplyToBeforeAttemptingSend() async {
+        let tool = SendTool(db: Database(path: "/tmp/nonexistent.sqlite"), resolver: ContactResolver())
+
+        do {
+            _ = try await tool.execute(args: [
+                "to": .string("+16317087185"),
+                "text": .string("Hello"),
+                "reply_to": .string("msg_1"),
+            ])
+            XCTFail("Expected reply_to validation error")
+        } catch let error as ToolError {
+            let payload = decodeToolErrorText(error)
+            XCTAssertTrue(payload.contains("reply_to is not yet implemented"))
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+}
+
+private func decodeToolErrorText(_ error: ToolError) -> String {
+    guard let first = error.content.first else { return "" }
+    switch first {
+    case .text(let text, _, _):
+        return text
+    default:
+        return ""
+    }
+}
