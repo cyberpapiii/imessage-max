@@ -2,6 +2,15 @@ import Foundation
 import Logging
 import MCP
 
+/// Outcome of createSession: capacity refusal and startup failure need
+/// different HTTP answers (503 retry-later vs 500 internal). Collapsing both
+/// into `nil` told clients to retry against a server that would never succeed.
+enum SessionCreationResult {
+    case created(SessionManager.MCPSessionState)
+    case atCapacity
+    case startFailed(any Error)
+}
+
 /// Manages MCP sessions for the HTTP transport.
 ///
 /// Each session has its own Server instance, enabling clean reconnection.
@@ -36,11 +45,11 @@ actor SessionManager {
     /// Active sessions keyed by session ID
     private var sessions: [String: MCPSessionState] = [:]
 
-    /// Session timeout duration (1 hour)
-    private let sessionTimeout: TimeInterval = 3600
+    /// Session timeout duration (1 hour by default)
+    private let sessionTimeout: TimeInterval
 
     /// Maximum number of concurrent sessions
-    private let maxSessions = 100
+    private let maxSessions: Int
 
     /// Task for periodic cleanup
     private var cleanupTask: Task<Void, Never>?
@@ -57,9 +66,20 @@ actor SessionManager {
     /// Callback when sessions are terminated (for SSE cleanup)
     private var sessionTerminationHandler: ((String) async -> Void)?
 
-    init(database: Database, resolver: ContactResolver) {
+    /// - Parameters:
+    ///   - sessionTimeout: idle TTL before a session is reaped. Production
+    ///     uses the 3600s default; tests shrink it to exercise cleanup.
+    ///   - maxSessions: concurrent-session cap. Production uses the default.
+    init(
+        database: Database,
+        resolver: ContactResolver,
+        sessionTimeout: TimeInterval = 3600,
+        maxSessions: Int = 100
+    ) {
         self.database = database
         self.resolver = resolver
+        self.sessionTimeout = sessionTimeout
+        self.maxSessions = maxSessions
     }
 
     deinit {
@@ -79,9 +99,11 @@ actor SessionManager {
     /// Creates a new session with its own Server instance
     ///
     /// This is the key to supporting reconnection - each session gets a fresh Server.
-    func createSession(protocolVersion: String = MCPProtocolVersion.defaultAssumed) async -> MCPSessionState? {
+    func createSession(
+        protocolVersion: String = MCPProtocolVersion.defaultAssumed
+    ) async -> SessionCreationResult {
         guard sessions.count < maxSessions else {
-            return nil  // Caller returns 503 Service Unavailable
+            return .atCapacity  // Caller returns 503 Service Unavailable
         }
 
         // Start cleanup task on first session creation
@@ -127,7 +149,10 @@ actor SessionManager {
             try await server.start(transport: adapter)
         } catch {
             session.messageContinuation.finish()
-            return nil
+            FileHandle.standardError.write(
+                Data("[iMessage Max] session Server.start failed: \(error)\n".utf8)
+            )
+            return .startFailed(error)
         }
 
         session.serverTask = Task {
@@ -135,7 +160,7 @@ actor SessionManager {
         }
 
         sessions[sessionId] = session
-        return session
+        return .created(session)
     }
 
     /// Routes an incoming message to the appropriate session's Server
@@ -234,8 +259,11 @@ actor SessionManager {
         }
     }
 
-    /// Removes expired sessions
-    private func cleanupExpiredSessions() {
+    /// Removes expired sessions.
+    ///
+    /// Driven by the 5-minute timer loop above; also callable directly by
+    /// tests, which inject a short `sessionTimeout` rather than waiting.
+    func cleanupExpiredSessions() {
         let now = Date()
         let expiredIds = sessions.filter { _, session in
             now.timeIntervalSince(session.lastActivity) > sessionTimeout

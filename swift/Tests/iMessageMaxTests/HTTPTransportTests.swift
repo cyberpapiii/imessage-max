@@ -135,6 +135,127 @@ final class SSEConnectionManagerTests: XCTestCase {
     }
 }
 
+// MARK: - SSE Channel Tests
+
+final class SSEChannelTests: XCTestCase {
+
+    /// Keep-alive spacing long enough that no heartbeat can race the
+    /// assertions in tests that only care about data events.
+    private let quietKeepAlive: Duration = .seconds(600)
+
+    func testEventsFlowAndCloseFinishes() async {
+        let channel = SSEChannel(keepAliveInterval: quietKeepAlive)
+
+        channel.send("event-one")
+        channel.send("event-two")
+        channel.close()
+
+        var received: [String] = []
+        for await event in channel.stream {
+            received.append(event)
+        }
+
+        // Both events arrive in order, then close() ends the stream so the
+        // for-await terminates rather than hanging.
+        XCTAssertEqual(received, ["event-one", "event-two"])
+    }
+
+    func testKeepAlivesInterleave() async {
+        let channel = SSEChannel(keepAliveInterval: .milliseconds(20))
+
+        // Nothing is sent, so the first item to arrive must be a heartbeat.
+        // Bounded: take exactly one item instead of looping.
+        var iterator = channel.stream.makeAsyncIterator()
+        let first = await iterator.next()
+
+        XCTAssertEqual(first, SSEEvent.keepAlive())
+    }
+
+    func testStreamIsStoredAndNotRespawnedPerAccess() async {
+        // Contract documentation, not a discriminating regression test: the
+        // old computed property would also report nothing on a second pass
+        // here, because it rebuilt its merger over an already-finished base
+        // stream. What this pins is the consume-exactly-once semantics that
+        // callers may now rely on — once exhausted, `stream` stays exhausted
+        // and never replays or restarts a keep-alive loop.
+        let channel = SSEChannel(keepAliveInterval: .milliseconds(50))
+
+        channel.send("only-event")
+        channel.close()
+
+        var firstPass: [String] = []
+        for await event in channel.stream {
+            firstPass.append(event)
+        }
+        XCTAssertEqual(
+            firstPass.filter { $0 != SSEEvent.keepAlive() },
+            ["only-event"]
+        )
+
+        var secondIterator = channel.stream.makeAsyncIterator()
+        let afterExhaustion = await secondIterator.next()
+        XCTAssertNil(
+            afterExhaustion,
+            "A second access to `stream` must not respawn a merger or keep-alive loop"
+        )
+    }
+}
+
+// MARK: - Session Manager Lifecycle Tests
+
+final class SessionManagerLifecycleTests: XCTestCase {
+
+    func testCreateSessionAtCapacityReturnsAtCapacity() async {
+        let manager = SessionManager(
+            database: Database(),
+            resolver: ContactResolver(seedCache: [:]),
+            maxSessions: 1
+        )
+
+        let first = await manager.createSession()
+        guard case .created = first else {
+            return XCTFail("First session should be created, got \(first)")
+        }
+
+        // The cap is now full: the refusal must be distinguishable from a
+        // startup failure so the caller can answer 503 rather than 500.
+        let second = await manager.createSession()
+        guard case .atCapacity = second else {
+            return XCTFail("Second session should be refused as .atCapacity, got \(second)")
+        }
+
+        let count = await manager.sessionCount
+        XCTAssertEqual(count, 1)
+    }
+
+    func testExpiredSessionIsCleanedUp() async {
+        let manager = SessionManager(
+            database: Database(),
+            resolver: ContactResolver(seedCache: [:]),
+            sessionTimeout: 0.01
+        )
+
+        let result = await manager.createSession()
+        guard case .created(let session) = result else {
+            return XCTFail("Session should be created, got \(result)")
+        }
+
+        let routedWhileLive = await manager.routeMessage(sessionId: session.id, data: Data())
+        XCTAssertTrue(routedWhileLive, "A fresh session should accept messages")
+
+        // Idle past the injected 10ms TTL, then run the reaper the 5-minute
+        // timer loop would otherwise drive.
+        await AsyncTimeout.sleep(.milliseconds(100))
+        await manager.cleanupExpiredSessions()
+
+        let routedAfterExpiry = await manager.routeMessage(sessionId: session.id, data: Data())
+        XCTAssertFalse(routedAfterExpiry, "An expired session should be gone after cleanup")
+
+        let count = await manager.sessionCount
+        XCTAssertEqual(count, 0)
+    }
+}
+
 // MARK: - Message Classification Tests
 
 final class MessageClassificationTests: XCTestCase {

@@ -244,22 +244,32 @@ public actor HTTPTransport: Transport {
         responseHeaders[.contentType] = "application/json"
 
         if isInitialize {
-            // Create new session with its own Server instance
-            guard let session = await sessionManager.createSession(
+            // Create new session with its own Server instance. Capacity
+            // refusal and startup failure are distinct: the first is
+            // retryable (503), the second is an internal fault (500).
+            let creation: SessionCreationResult = await sessionManager.createSession(
                 protocolVersion: requestedProtocolVersion ?? MCPProtocolVersion.latest
-            ) else {
+            )
+            switch creation {
+            case .created(let session):
+                sessionId = session.id
+                responseHeaders[.mcpSessionId] = sessionId
+                logger.info("Created new session with dedicated Server: \(sessionId)")
+                FileHandle.standardError.write(
+                    "[iMessage Max] era=legacy transport=http version=\(requestedProtocolVersion ?? MCPProtocolVersion.latest) method=initialize session=\(sessionId.prefix(8))\n"
+                        .data(using: .utf8)!
+                )
+            case .atCapacity:
                 return errorResponse(
                     status: .serviceUnavailable,
                     message: "Too many active sessions. Try again later."
                 )
+            case .startFailed:
+                return errorResponse(
+                    status: .internalServerError,
+                    message: "Failed to start session. Check the server log."
+                )
             }
-            sessionId = session.id
-            responseHeaders[.mcpSessionId] = sessionId
-            logger.info("Created new session with dedicated Server: \(sessionId)")
-            FileHandle.standardError.write(
-                "[iMessage Max] era=legacy transport=http version=\(requestedProtocolVersion ?? MCPProtocolVersion.latest) method=initialize session=\(sessionId.prefix(8))\n"
-                    .data(using: .utf8)!
-            )
         } else {
             // Validate existing session
             guard let requestSessionId = request.headers[.mcpSessionId] else {

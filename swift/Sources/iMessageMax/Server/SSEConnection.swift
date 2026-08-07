@@ -86,29 +86,42 @@ struct SSEEvent: Sendable {
 /// Includes automatic keep-alive event generation.
 final class SSEChannel: @unchecked Sendable {
     private let continuation: AsyncStream<String>.Continuation
-    private let _stream: AsyncStream<String>
 
-    /// The event stream with interleaved keep-alives
-    var stream: AsyncStream<String> {
-        let baseStream = _stream
-        return AsyncStream { continuation in
-            Task {
+    /// The event stream with interleaved keep-alives.
+    ///
+    /// Single-consumer: built once at init and consumed exactly once. It used
+    /// to be a computed property, so every access spawned a fresh merging task
+    /// group over the same single-consumer base stream — a second reader would
+    /// silently steal events and leak a task group per access.
+    let stream: AsyncStream<String>
+
+    /// - Parameter keepAliveInterval: heartbeat spacing. Production uses the
+    ///   30s default; tests shorten it to keep runtime bounded.
+    init(keepAliveInterval: Duration = .seconds(30)) {
+        var cont: AsyncStream<String>.Continuation!
+        let baseStream = AsyncStream<String> { cont = $0 }
+        self.continuation = cont
+
+        self.stream = AsyncStream { downstream in
+            let merger = Task {
                 // Merge events with keep-alives
                 await withTaskGroup(of: Void.self) { group in
                     // Event forwarding task
                     group.addTask {
                         for await event in baseStream {
-                            continuation.yield(event)
+                            downstream.yield(event)
                         }
-                        continuation.finish()
+                        downstream.finish()
                     }
 
-                    // Keep-alive task
+                    // Keep-alive task. AsyncTimeout.sleep is launchd-safe but
+                    // non-cancellable, so cancellation lands at the next
+                    // interval boundary — the accepted plan-019 trade.
                     group.addTask {
                         while !Task.isCancelled {
-                            await AsyncTimeout.sleep(.seconds(30))
+                            await AsyncTimeout.sleep(keepAliveInterval)
                             if Task.isCancelled { break }
-                            continuation.yield(SSEEvent.keepAlive())
+                            downstream.yield(SSEEvent.keepAlive())
                         }
                     }
 
@@ -117,13 +130,13 @@ final class SSEChannel: @unchecked Sendable {
                     group.cancelAll()
                 }
             }
-        }
-    }
 
-    init() {
-        var cont: AsyncStream<String>.Continuation!
-        self._stream = AsyncStream { cont = $0 }
-        self.continuation = cont
+            // Client disconnect drops the response-body iterator; stop the
+            // merger instead of letting the keep-alive spin on a dead stream.
+            downstream.onTermination = { _ in
+                merger.cancel()
+            }
+        }
     }
 
     func send(_ event: String) {
