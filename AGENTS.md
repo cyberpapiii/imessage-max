@@ -33,6 +33,22 @@ The server runs as a launchd service (`local.imessage-max`) on port 8080, config
 
 Connected via MCP Router as `remote-streamable` at `http://127.0.0.1:8080`. After restarting the service, MCP Router clients may need to reconnect (e.g. `/mcp` in Codex).
 
+Rob's Mac also has a stable Portless HTTPS alias for humans and agents:
+
+- `https://imessage-max.localhost`
+- target: `127.0.0.1:8080`
+- owner: `local.imessage-max` LaunchAgent
+
+Keep the LaunchAgent/raw service on `127.0.0.1:8080`; the Portless name is only
+the stable external handle. After changing install, signing, host binding, or
+HTTP transport behavior, verify both:
+
+```bash
+cd swift
+make status
+curl --max-time 8 -k https://imessage-max.localhost/
+```
+
 ### Manual Build & Run (without Makefile)
 
 ```bash
