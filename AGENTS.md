@@ -264,11 +264,11 @@ current session.
 
 ### Image Handling
 
-Images are returned using MCP's native image content type (not base64 in JSON text) to avoid token bloat:
+Images are returned using MCP's native image content type (not base64 in JSON text) to avoid token bloat. Use the `.plainText`/`.plainImage` helpers defined in `Server/ServerExtensions.swift` (annotations-free wrappers over the SDK's content cases):
 ```swift
 return [
-    .text("photo.jpg (800x600, 45KB)"),
-    .image(data: base64String, mimeType: "image/jpeg", metadata: nil)
+    .plainText(try FormatUtils.encodeJSON(metadata)),
+    .plainImage(data: base64String, mimeType: "image/jpeg")
 ]
 ```
 

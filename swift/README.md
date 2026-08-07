@@ -41,7 +41,7 @@ default HTTP port is `8080`.
 
 ## Requirements
 
-- macOS 13+ (Ventura)
+- macOS 14+ (Sonoma)
 - Xcode Command Line Tools or full Xcode
 
 ## Architecture
@@ -50,41 +50,74 @@ default HTTP port is `8080`.
 
 ```
 Sources/iMessageMax/
-├── main.swift              # Entry point, CLI parsing
+├── main.swift                  # Entry point, CLI parsing
 ├── Server/
-│   ├── MCPServer.swift     # Server lifecycle (stdio mode)
-│   ├── HTTPTransport.swift # HTTP Streamable transport (dual-era)
-│   ├── ModernProtocol.swift # MCP 2026-07-28 stateless dispatcher
+│   ├── MCPServer.swift         # Server lifecycle (stdio mode)
+│   ├── HTTPTransport.swift     # HTTP Streamable transport (dual-era)
+│   ├── ModernProtocol.swift    # MCP 2026-07-28 stateless dispatcher
 │   ├── DualEraStdioTransport.swift # stdio era router
-│   ├── SessionManager.swift # Per-session Server instances (legacy era)
-│   ├── SSEConnection.swift # Server-Sent Events streaming
+│   ├── SessionManager.swift    # Per-session Server instances (legacy era)
+│   ├── SSEConnection.swift     # Server-Sent Events streaming
 │   ├── OriginValidationMiddleware.swift # DNS rebinding protection
-│   └── ToolRegistry.swift  # Tool registration
+│   ├── ToolRegistry.swift      # Tool registration
+│   ├── ServerExtensions.swift  # .plainText/.plainImage content helpers, schema builders
+│   ├── IconMetadata.swift      # Embedded server icon metadata
+│   └── Version.swift           # Server version/name/instructions
 ├── Database/
-│   ├── Database.swift      # SQLite wrapper
-│   └── QueryBuilder.swift  # SQL construction
-├── Tools/                  # 12 MCP tools
+│   ├── Database.swift          # SQLite wrapper
+│   ├── QueryBuilder.swift      # SQL construction
+│   ├── SQLiteRow.swift         # Typed column accessors for a SQLite row
+│   ├── Errors.swift            # DatabaseError cases
+│   └── AppleTime.swift         # Apple epoch conversion
+├── Tools/                      # 12 tool files + internals/helpers
 │   ├── FindChat.swift
+│   ├── GetChatDetails.swift    # Chat detail: participants, identity, last message
 │   ├── GetMessages.swift
+│   ├── GetMessagesInternals.swift  # helper: cursor/row types for GetMessages
 │   ├── ListChats.swift
 │   ├── Search.swift
+│   ├── SearchInternals.swift   # helper: cursor/filter types for Search
 │   ├── GetContext.swift
 │   ├── GetActiveConversations.swift
 │   ├── ListAttachments.swift
 │   ├── GetUnread.swift
 │   ├── Send.swift
+│   ├── SendResolution.swift    # helper: resolves send targets (participant vs chat)
+│   ├── SendVerifier.swift      # helper: post-send chat.db verification polling
 │   ├── GetAttachment.swift
 │   └── Diagnose.swift
 ├── Contacts/
-│   └── ContactResolver.swift  # CNContactStore integration
+│   ├── ContactResolver.swift   # CNContactStore integration
+│   └── PhoneUtils.swift        # Phone number formatting (E.164 normalization)
 ├── Enrichment/
-│   ├── ImageProcessor.swift   # Core Image resizing
-│   ├── VideoProcessor.swift   # AVFoundation metadata
-│   └── AudioProcessor.swift   # Audio duration extraction
+│   ├── ImageProcessor.swift    # Core Image resizing
+│   ├── VideoProcessor.swift    # AVFoundation metadata
+│   └── AudioProcessor.swift    # Audio duration extraction
+├── Models/
+│   ├── Attachment.swift
+│   ├── AttachmentType.swift    # Attachment type derived from MIME type or UTI
+│   ├── Chat.swift
+│   ├── ChatIdentity.swift      # Canonical conversation identity shared across discovery, retrieval, and sending
+│   ├── Message.swift
+│   ├── Participant.swift
+│   ├── Reactions.swift         # Tapback/reaction type mapping
+│   ├── ResponsePrimitives.swift # Shared Codable response DTOs (ChatSummary, etc.)
+│   └── SendPayload.swift       # Send payload variants (text/file) and build result
 └── Utilities/
-    ├── AppleTime.swift        # Apple epoch conversion
-    ├── PhoneUtils.swift       # Phone number formatting
-    └── TimeUtils.swift        # ISO/relative time formatting
+    ├── AppleScript.swift       # AppleScript automation runner (ScriptRunning protocol)
+    ├── AsyncTimeout.swift      # Dispatch-backed sleep (launchd-safe; never sleep Swift tasks)
+    ├── AttachmentPathPolicy.swift # Validates attachment paths stay inside allowed roots
+    ├── AutomationPermission.swift # Automation permission probes (mockable for tests)
+    ├── ChatSummaryQueries.swift # Batched query layer for list/overview tools (avoids N+1)
+    ├── ClientErrorMessages.swift # User-facing error message constants
+    ├── DisplayNameGenerator.swift # Group chat display name generation from participant names
+    ├── FormatUtils.swift       # Deterministic JSON encoding helpers
+    ├── HostBindingPolicy.swift # Loopback-only HTTP bind validation
+    ├── IdentityDisplayFormatter.swift # Handle/contact name display formatting
+    ├── MessageTextExtractor.swift # Extract text from plain or typedstream attributedBody
+    ├── PreviewResolvers.swift  # Message preview summary resolution
+    ├── SummaryPreviewFormatter.swift # Formats truncated text previews
+    └── TimeUtils.swift         # ISO/relative time formatting
 ```
 
 ### Dependencies
