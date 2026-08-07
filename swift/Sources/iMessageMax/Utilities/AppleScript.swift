@@ -448,6 +448,61 @@ enum AppleScriptRunner {
         }
     }
 
+    /// Map osascript stderr onto a client-facing SendError.
+    ///
+    /// AppleScript writes the typographic apostrophe in its errors ("can’t get
+    /// chat id", "doesn’t understand"). Matching only the straight form misses
+    /// every one of them, and the raw stderr (script line and column numbers
+    /// included) falls through to the client. Normalize once up front so the
+    /// checks below only have to spell the straight form.
+    ///
+    /// `sentFileName` is the filename alone. The full argument is the private
+    /// staged copy, not the path the caller asked to send (plan 023).
+    ///
+    /// Internal rather than private so the classification can be tested without
+    /// running osascript.
+    static func classifySendStderr(
+        _ rawStderr: String,
+        sentFileName: String,
+        missingTargetError: SendError
+    ) -> SendError {
+        let stderr = rawStderr
+            .replacingOccurrences(of: "\u{2019}", with: "'")
+            .lowercased()
+
+        if stderr.contains("not allowed") ||
+            stderr.contains("not permitted") ||
+            stderr.contains("assistive access")
+        {
+            return .automationPermissionRequired
+        }
+
+        if stderr.contains("connection is invalid") ||
+            stderr.contains("application isn't running")
+        {
+            return .messagesAppUnavailable
+        }
+
+        if stderr.contains("no such file") ||
+            stderr.contains("file") && stderr.contains("wasn't found")
+        {
+            return .fileNotFound(sentFileName)
+        }
+
+        if stderr.contains("can't get participant") ||
+            stderr.contains("can't get chat") ||
+            stderr.contains("doesn't understand") ||
+            stderr.contains("invalid key form")
+        {
+            return missingTargetError
+        }
+
+        // Untrusted, unbounded osascript stderr: keep the first line, clamped,
+        // so client errors stay informative but bounded.
+        let firstLine = stderr.split(separator: "\n", maxSplits: 1).first ?? ""
+        return .failed(String(firstLine.prefix(300)))
+    }
+
     private static func run(
         script: String,
         arguments: [String],
@@ -459,46 +514,11 @@ enum AppleScriptRunner {
             return .failure(error)
         case .success(let execution):
             if execution.terminationStatus != 0 {
-                let stderr = execution.stderr.lowercased()
-
-                // Detect Automation permission errors
-                if stderr.contains("not allowed") ||
-                    stderr.contains("not permitted") ||
-                    stderr.contains("assistive access")
-                {
-                    return .failure(.automationPermissionRequired)
-                }
-
-                // Detect if Messages app isn't running/responding
-                if stderr.contains("connection is invalid") ||
-                    stderr.contains("application isn't running")
-                {
-                    return .failure(.messagesAppUnavailable)
-                }
-
-                if stderr.contains("no such file") ||
-                    stderr.contains("file") && stderr.contains("wasn’t found") ||
-                    stderr.contains("file") && stderr.contains("wasn't found")
-                {
-                    // Report only the filename: `arguments.last` is the private
-                    // staged copy, not the path the caller asked to send.
-                    return .failure(.fileNotFound(
-                        ((arguments.last ?? "") as NSString).lastPathComponent
-                    ))
-                }
-
-                if stderr.contains("can't get participant") ||
-                    stderr.contains("can't get chat") ||
-                    stderr.contains("doesn't understand") ||
-                    stderr.contains("invalid key form")
-                {
-                    return .failure(missingTargetError)
-                }
-
-                // Untrusted, unbounded osascript stderr: keep the first line,
-                // clamped, so client errors stay informative but bounded.
-                let firstLine = stderr.split(separator: "\n", maxSplits: 1).first ?? ""
-                return .failure(.failed(String(firstLine.prefix(300))))
+                return .failure(classifySendStderr(
+                    execution.stderr,
+                    sentFileName: ((arguments.last ?? "") as NSString).lastPathComponent,
+                    missingTargetError: missingTargetError
+                ))
             }
 
             return .success(())

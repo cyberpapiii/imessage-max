@@ -38,6 +38,79 @@ final class AppleScriptRunnerValidationTests: XCTestCase {
         }
     }
 
+    // MARK: - osascript stderr classification
+
+    /// Verbatim stderr from a real failed send on 2026-08-07: a chat-route send
+    /// to an `any;-;` service chat. AppleScript spells "can’t" with the
+    /// typographic apostrophe, which the straight-form-only match missed, so
+    /// this whole string reached the client instead of `.chatNotFound`.
+    func testCurlyApostropheStderrClassifiesAsMissingTarget() {
+        let stderr = "186:202: execution error: messages got an error: "
+            + "can\u{2019}t get chat id \"any;-;+16317087185\". (-1728)"
+
+        let error = AppleScriptRunner.classifySendStderr(
+            stderr,
+            sentFileName: "",
+            missingTargetError: .chatNotFound("any;-;+16317087185")
+        )
+
+        XCTAssertEqual(
+            error.localizedDescription,
+            "Could not find chat 'any;-;+16317087185' in Messages.app."
+        )
+        XCTAssertFalse(
+            error.localizedDescription.contains("186:202"),
+            "Raw osascript line and column numbers must not reach the client"
+        )
+    }
+
+    func testStraightApostropheStderrStillClassifiesAsMissingTarget() {
+        let error = AppleScriptRunner.classifySendStderr(
+            "execution error: messages got an error: can't get participant \"x\".",
+            sentFileName: "",
+            missingTargetError: .recipientNotFound("x")
+        )
+
+        XCTAssertEqual(
+            error.localizedDescription,
+            "Could not find recipient 'x' in Messages.app."
+        )
+    }
+
+    func testCurlyApostropheFileNotFoundStderrReportsFilenameOnly() {
+        let error = AppleScriptRunner.classifySendStderr(
+            "execution error: the file photo.png wasn\u{2019}t found. (-43)",
+            sentFileName: "photo.png",
+            missingTargetError: .chatNotFound("chat1")
+        )
+
+        XCTAssertEqual(error.localizedDescription, "Could not read file at 'photo.png'.")
+    }
+
+    func testCurlyApostropheDoesNotUnderstandClassifiesAsMissingTarget() {
+        let error = AppleScriptRunner.classifySendStderr(
+            "execution error: messages doesn\u{2019}t understand the \"send\" message. (-1708)",
+            sentFileName: "",
+            missingTargetError: .chatNotFound("chat1")
+        )
+
+        XCTAssertEqual(
+            error.localizedDescription,
+            "Could not find chat 'chat1' in Messages.app."
+        )
+    }
+
+    func testUnrecognizedStderrKeepsFirstLineClamped() {
+        let error = AppleScriptRunner.classifySendStderr(
+            String(repeating: "z", count: 400) + "\nsecond line",
+            sentFileName: "",
+            missingTargetError: .chatNotFound("chat1")
+        )
+
+        XCTAssertEqual(error.localizedDescription, "Send failed: " + String(repeating: "z", count: 300))
+        XCTAssertFalse(error.localizedDescription.contains("second line"))
+    }
+
     func testSendTextToParticipantRejectsOverlongMessage() {
         let longMessage = String(repeating: "a", count: 20_001)
         let result = AppleScriptRunner.sendTextToParticipant(
