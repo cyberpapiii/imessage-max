@@ -269,9 +269,9 @@ final class SendToolExecuteTests: XCTestCase {
     }
 
     // Pre-insert a row with error=22 (measured failed-send pattern) → NOT confirmed.
-    // Verifier must check error=0; a row with error=22 should yield "uncertain".
-    // Uses the full multi-chat fixture (same topology as the confirm tests).
-    func testFailedRowDoesNotConfirm() async throws {
+    // The row is a verified delivery failure, so the tool reports "failed_delivery"
+    // and surfaces it as a ToolError. Uses the full multi-chat fixture.
+    func testFailedRowReturnsFailedDeliveryStatus() async throws {
         let fixture = try makeSendFixture()  // DM chat 1 (Alice) + group chat 2 (Alice+Bob)
         let stub = StubScriptRunner()
         stub.nextResult = .success(())
@@ -290,14 +290,19 @@ final class SendToolExecuteTests: XCTestCase {
             verifier: fastVerifier(fixture: fixture)
         )
 
-        let contents = try await tool.execute(args: [
-            "to": .string("+15550000001"),
-            "text": .string("Hello Alice"),
-        ])
-
-        let json = try decodeJSONDictionary(from: contents)
-        XCTAssertEqual(json["status"] as? String, "uncertain",
-            "A row with error=22 must not confirm; verifier requires error=0 (§3 finding 3)")
+        do {
+            _ = try await tool.execute(args: [
+                "to": .string("+15550000001"),
+                "text": .string("Hello Alice"),
+            ])
+            XCTFail("Expected ToolError for a verified delivery failure")
+        } catch let error as ToolError {
+            let json = try decodeJSONDictionary(from: error.content)
+            XCTAssertEqual(json["status"] as? String, "failed_delivery",
+                "A row with error=22 is a verified delivery failure, not 'uncertain' (§3 finding 3)")
+            XCTAssertEqual(json["verified_message_guid"] as? String, "msg-guid-error-row",
+                "The failed row's GUID is the evidence for the failure")
+        }
     }
 
     func testRecipientNotFoundDoesNotInvokeRunner() async throws {

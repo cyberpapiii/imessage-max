@@ -127,6 +127,24 @@ struct SendResponse: Encodable {
         )
     }
 
+    /// Row found in the intended chat with error ≠ 0 — delivery failed (verified).
+    static func failedDelivery(guid: String, errorCode: Int, deliveredTo: [String], chat: ChatReference?) -> SendResponse {
+        SendResponse(
+            status: "failed_delivery",
+            timestamp: TimeUtils.formatISO(Date()),
+            chat: chat,
+            deliveredTo: deliveredTo,
+            chatId: chat?.id,
+            message: "Messages.app accepted the send but chat.db recorded a delivery failure (error \(errorCode)). The message was NOT delivered. Do not tell the user it was sent; check the destination can receive iMessages and consider resending.",
+            error: nil,
+            candidates: nil,
+            verifiedMessageGuid: guid,
+            verifiedAt: TimeUtils.formatISO(Date()),
+            intendedChat: nil,
+            actualChatId: nil
+        )
+    }
+
     // MARK: - Existing statuses (unchanged)
 
     static func pending(_ message: String, deliveredTo: [String], chat: ChatReference?) -> SendResponse {
@@ -221,6 +239,7 @@ actor SendTool {
                   confirmed — row found in chat.db with error=0; include verified_message_guid as evidence.
                   uncertain — transport accepted but row not found within polling window; follow up with get_messages.
                   mismatch  — row found in a different chat than intended; alert the user, do not treat as success.
+                  failed_delivery — row found with a delivery error recorded; the message was NOT delivered.
                   sent      — verification unavailable (DB unreadable); transport accepted only.
                 Sends execute immediately when the destination is exact. Ambiguous destinations return status 'ambiguous' without sending. Invalid input returns status 'failed' without sending. File transfers may return 'pending_confirmation' while Messages.app completes the transfer.
                 """,
@@ -267,7 +286,8 @@ actor SendTool {
             replyTo: replyTo
         )
         let content: [Tool.Content] = [.plainText(try FormatUtils.encodeJSON(response))]
-        if response.status == "failed" || response.status == "ambiguous" {
+        if response.status == "failed" || response.status == "ambiguous"
+            || response.status == "failed_delivery" {
             throw ToolError(content: content)
         }
         return content
@@ -408,6 +428,11 @@ actor SendTool {
                     intendedChat: resolved.chat,
                     actualChatId: actualChatId,
                     deliveredTo: resolved.deliveredTo
+                )
+            case .failedDelivery(let guid, let errorCode):
+                return .failedDelivery(
+                    guid: guid, errorCode: errorCode,
+                    deliveredTo: resolved.deliveredTo, chat: resolved.chat
                 )
             case .notFound:
                 return .uncertain(deliveredTo: resolved.deliveredTo, chat: resolved.chat)
