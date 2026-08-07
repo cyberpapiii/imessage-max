@@ -5,7 +5,6 @@ import MCP
 enum IconMetadata {
     static let mimeType = "image/png"
 
-    private static let latestProtocolVersion = "2025-11-25"
     private static let serverInfoMarker = Data(#""serverInfo""#.utf8)
     private struct EmbeddedIcon {
         let size: String
@@ -56,7 +55,7 @@ enum IconMetadata {
         guard data.contains(serverInfoMarker),
               var object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               var result = object["result"] as? [String: Any],
-              result["protocolVersion"] as? String == latestProtocolVersion,
+              result["protocolVersion"] as? String == MCPProtocolVersion.latest,
               var serverInfo = result["serverInfo"] as? [String: Any],
               serverInfo["icons"] == nil else {
             return data

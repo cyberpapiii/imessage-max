@@ -1,41 +1,22 @@
 import Foundation
 import NIOCore
 
-/// Represents metadata about an SSE connection.
 struct SSEConnectionInfo: Sendable {
-    /// Unique identifier for this connection
     let id: String
-
-    /// Session ID this connection belongs to
     let sessionId: String
-
-    /// Last event ID received from client (for resumption)
-    let lastEventId: String?
-
-    /// When this connection was established
-    let connectedAt: Date
 
     init(
         id: String = UUID().uuidString,
-        sessionId: String,
-        lastEventId: String? = nil
+        sessionId: String
     ) {
         self.id = id
         self.sessionId = sessionId
-        self.lastEventId = lastEventId
-        self.connectedAt = Date()
     }
 }
 
-/// Represents a Server-Sent Event to be sent to clients.
 struct SSEEvent: Sendable {
-    /// Optional event ID for client resumption
     let id: String?
-
-    /// Event type (defaults to "message" if nil)
     let event: String?
-
-    /// Event data (JSON-RPC message)
     let data: String
 
     init(id: String? = nil, event: String? = nil, data: String) {
@@ -76,7 +57,6 @@ struct SSEEvent: Sendable {
         return result
     }
 
-    /// Creates a keep-alive comment (SSE heartbeat)
     static func keepAlive() -> String {
         return ": keep-alive\n\n"
     }
@@ -104,9 +84,7 @@ final class SSEChannel: @unchecked Sendable {
 
         self.stream = AsyncStream { downstream in
             let merger = Task {
-                // Merge events with keep-alives
                 await withTaskGroup(of: Void.self) { group in
-                    // Event forwarding task
                     group.addTask {
                         for await event in baseStream {
                             downstream.yield(event)
@@ -125,7 +103,6 @@ final class SSEChannel: @unchecked Sendable {
                         }
                     }
 
-                    // Wait for event stream to finish, then cancel keep-alive
                     await group.next()
                     group.cancelAll()
                 }
@@ -148,18 +125,11 @@ final class SSEChannel: @unchecked Sendable {
     }
 }
 
-/// Manages active SSE connections for sessions.
 actor SSEConnectionManager {
-    /// Connection metadata keyed by connection ID
     private var connectionInfo: [String: SSEConnectionInfo] = [:]
-
-    /// Channels for sending events, keyed by connection ID
     private var channels: [String: SSEChannel] = [:]
-
-    /// Connections grouped by session ID for efficient lookup
     private var sessionConnections: [String: Set<String>] = [:]
 
-    /// Registers a new SSE connection and returns its channel
     func register(info: SSEConnectionInfo) -> SSEChannel {
         connectionInfo[info.id] = info
 
@@ -174,29 +144,24 @@ actor SSEConnectionManager {
         return channel
     }
 
-    /// Unregisters an SSE connection
     func unregister(connectionId: String) {
         guard let info = connectionInfo.removeValue(forKey: connectionId) else { return }
 
-        // Close and remove channel
         channels[connectionId]?.close()
         channels.removeValue(forKey: connectionId)
 
         sessionConnections[info.sessionId]?.remove(connectionId)
 
-        // Clean up empty session entries
         if sessionConnections[info.sessionId]?.isEmpty == true {
             sessionConnections.removeValue(forKey: info.sessionId)
         }
     }
 
-    /// Gets all connection IDs for a session
     func connectionIds(forSession sessionId: String) -> [String] {
         guard let ids = sessionConnections[sessionId] else { return [] }
         return Array(ids)
     }
 
-    /// Sends an event to all connections for a session
     func broadcast(sessionId: String, event: String) {
         guard let connectionIds = sessionConnections[sessionId] else { return }
         for connectionId in connectionIds {
@@ -204,14 +169,6 @@ actor SSEConnectionManager {
         }
     }
 
-    /// Sends an event to all connections across all sessions
-    func broadcastAll(event: String) {
-        for channel in channels.values {
-            channel.send(event)
-        }
-    }
-
-    /// Removes all connections for a session
     func terminateSession(sessionId: String) {
         guard let connectionIds = sessionConnections.removeValue(forKey: sessionId) else { return }
         for connectionId in connectionIds {
@@ -221,14 +178,7 @@ actor SSEConnectionManager {
         }
     }
 
-    /// Returns the count of active connections
     var connectionCount: Int {
         connectionInfo.count
-    }
-
-    /// Checks if a session has any active SSE connections
-    func hasActiveConnections(forSession sessionId: String) -> Bool {
-        guard let connections = sessionConnections[sessionId] else { return false }
-        return !connections.isEmpty
     }
 }

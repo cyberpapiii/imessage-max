@@ -171,7 +171,6 @@ public actor HTTPTransport: Transport {
         request: Request,
         context: some Hummingbird.RequestContext
     ) async throws -> Response {
-        // Validate Content-Type
         guard let contentType = request.headers[.contentType],
             contentType.contains("application/json")
         else {
@@ -181,8 +180,8 @@ public actor HTTPTransport: Transport {
             )
         }
 
-        // Validate Accept header. Streamable HTTP clients advertise both response
-        // shapes because a request can complete as JSON or as an SSE stream.
+        // Streamable HTTP clients advertise both response shapes because a
+        // request can complete as JSON or as an SSE stream.
         guard let accept = request.headers[.accept],
             acceptsStreamableHTTP(accept)
         else {
@@ -192,11 +191,9 @@ public actor HTTPTransport: Transport {
             )
         }
 
-        // Collect request body
         let body = try await request.body.collect(upTo: 512 * 1024)  // 512KB
         let requestData = Data(buffer: body)
 
-        // Reject batch requests (JSON arrays)
         let jsonString = String(data: requestData, encoding: .utf8) ?? ""
         if jsonString.trimmingCharacters(in: .whitespaces).hasPrefix("[") {
             return errorResponse(
@@ -206,7 +203,6 @@ public actor HTTPTransport: Transport {
             )
         }
 
-        // Parse JSON to determine message type
         guard let json = try? JSONSerialization.jsonObject(with: requestData) as? [String: Any]
         else {
             return errorResponse(
@@ -485,7 +481,6 @@ public actor HTTPTransport: Transport {
         request: Request,
         context: some Hummingbird.RequestContext
     ) async throws -> Response {
-        // Validate Accept header
         guard let accept = request.headers[.accept],
             accept.contains("text/event-stream")
         else {
@@ -495,7 +490,6 @@ public actor HTTPTransport: Transport {
             )
         }
 
-        // Validate session
         guard let sessionId = request.headers[.mcpSessionId] else {
             return errorResponse(
                 status: .badRequest,
@@ -512,21 +506,13 @@ public actor HTTPTransport: Transport {
 
         await sessionManager.touch(sessionId: sessionId)
 
-        // Get Last-Event-ID for resumption if provided
-        let lastEventId = request.headers[.lastEventId]
-
-        // Create streaming response
         var responseHeaders = HTTPFields()
         responseHeaders[.contentType] = "text/event-stream"
         responseHeaders[.cacheControl] = "no-cache"
         responseHeaders[.connection] = "keep-alive"
         responseHeaders[.mcpSessionId] = sessionId
 
-        // Create connection info and register
-        let connectionInfo = SSEConnectionInfo(
-            sessionId: sessionId,
-            lastEventId: lastEventId
-        )
+        let connectionInfo = SSEConnectionInfo(sessionId: sessionId)
 
         let channel = await sseManager.register(info: connectionInfo)
         let connectionId = connectionInfo.id
@@ -731,11 +717,6 @@ public actor HTTPTransport: Transport {
         }
     }
 
-    /// Async wrapper for cleanup (called from session termination handler)
-    private func cleanupPendingRequestsAsync(for sessionId: String) async {
-        cleanupPendingRequests(for: sessionId)
-    }
-
     private func configureRoutingIfNeeded() async {
         guard !routingConfigured else { return }
 
@@ -745,7 +726,7 @@ public actor HTTPTransport: Transport {
 
         await sessionManager.setSessionTerminationHandler { [weak self] sessionId in
             await self?.sseManager.terminateSession(sessionId: sessionId)
-            await self?.cleanupPendingRequestsAsync(for: sessionId)
+            await self?.cleanupPendingRequests(for: sessionId)
         }
 
         routingConfigured = true
@@ -923,13 +904,7 @@ private enum JSONRPCMessageType {
 // MARK: - HTTPField.Name Extensions
 
 extension HTTPField.Name {
-    /// MCP Session ID header
     static let mcpSessionId = HTTPField.Name("Mcp-Session-Id")!
-
-    /// Last-Event-ID header for SSE resumption
-    static let lastEventId = HTTPField.Name("Last-Event-ID")!
-
-    /// Connection header
     static let connection = HTTPField.Name("Connection")!
 
     /// MCP protocol version header

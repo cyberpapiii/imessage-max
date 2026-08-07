@@ -2,7 +2,6 @@
 import Foundation
 import MCP
 
-/// Response format for get_unread tool
 enum UnreadFormat: String, CaseIterable {
     case messages
     case summary
@@ -59,7 +58,6 @@ struct UnreadChatSummary: Codable {
     }
 }
 
-/// Get unread messages or summary
 final class GetUnread {
     private let database: Database
     private let contactResolver: ContactResolver
@@ -136,13 +134,12 @@ final class GetUnread {
         }
     }
 
-    /// Parameters for get_unread tool
     struct Parameters {
-        var chatId: String?         // Filter to specific chat (e.g., "chat123")
-        var since: String           // Time window (default "7d", accepts "all")
-        var format: UnreadFormat    // "messages" or "summary"
-        var limit: Int              // Max messages (default 50, max 100)
-        var cursor: String?         // Pagination cursor
+        var chatId: String?
+        var since: String
+        var format: UnreadFormat
+        var limit: Int
+        var cursor: String?
 
         init(
             chatId: String? = nil,
@@ -154,23 +151,20 @@ final class GetUnread {
             self.chatId = chatId
             self.since = since
             self.format = format
-            self.limit = max(1, min(limit, 100))  // Clamp to 1-100
+            self.limit = max(1, min(limit, 100))
             self.cursor = cursor
         }
     }
 
-    /// Execute get_unread with given parameters
     func execute(params: Parameters) async throws -> any Encodable {
-        // Initialize contact resolver
         try await contactResolver.initialize()
 
-        // Parse since parameter - "all" means no time filter
+        // "all" means no time filter
         var sinceApple: Int64?
         if params.since.lowercased() != "all" {
             sinceApple = AppleTime.parse(params.since)
         }
 
-        // Resolve chat_id to numeric ID if provided
         var numericChatId: Int64?
         if let chatId = params.chatId {
             numericChatId = try resolveChatId(chatId)
@@ -197,7 +191,6 @@ final class GetUnread {
     // MARK: - Private Methods
 
     private func resolveChatId(_ chatId: String) throws -> Int64? {
-        // Try parsing "chatXXX" format
         if chatId.hasPrefix("chat") {
             let numStr = String(chatId.dropFirst(4))
             if let num = Int64(numStr) {
@@ -205,7 +198,6 @@ final class GetUnread {
             }
         }
 
-        // Try to find by GUID
         let escapedChatId = QueryBuilder.escapeLike(chatId)
         let rows: [(Int64, String?)] = try database.query(
             "SELECT ROWID, guid FROM chat WHERE guid LIKE ? ESCAPE '\\'",
@@ -222,7 +214,6 @@ final class GetUnread {
         sinceApple: Int64?,
         limit: Int
     ) async throws -> UnreadMessagesResponse {
-        // Build query for unread messages
         // Unread = is_read = 0 AND is_from_me = 0
         var queryBuilder = QueryBuilder()
             .select(
@@ -261,7 +252,6 @@ final class GetUnread {
 
         let (sql, params) = queryBuilder.build()
 
-        // Fetch unread messages
         let rows: [UnreadMessageRow] = try database.query(sql, params: params) { row in
             UnreadMessageRow(
                 id: row.int(0),
@@ -278,13 +268,11 @@ final class GetUnread {
             )
         }
 
-        // Get total count and chat count
         let (totalUnread, chatsWithUnread) = try getUnreadCounts(
             chatId: chatId,
             sinceApple: sinceApple
         )
 
-        // Cache for chat participants
         var chatParticipantsCache: [Int64: [ParticipantInfo]] = [:]
 
         var unreadMessages: [UnreadMessageItem] = []
@@ -293,7 +281,6 @@ final class GetUnread {
             let msgChatId = row.chatId
             let senderHandle = row.senderHandle
 
-            // Ensure participants are cached for this chat
             if chatParticipantsCache[msgChatId] == nil {
                 chatParticipantsCache[msgChatId] = try await getChatParticipants(chatId: msgChatId)
             }
@@ -304,7 +291,6 @@ final class GetUnread {
                 participants: participants
             )
 
-            // Get message text
             let text = MessageTextExtractor.extract(text: row.text, attributedBody: row.attributedBody)
             let msgDate = AppleTime.toDate(row.date)
 
@@ -340,7 +326,6 @@ final class GetUnread {
         chatId: Int64?,
         sinceApple: Int64?
     ) async throws -> UnreadSummaryResponse {
-        // Build query for summary by chat
         var queryBuilder = QueryBuilder()
             .select(
                 "cmj.chat_id",

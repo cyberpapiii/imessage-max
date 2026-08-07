@@ -29,7 +29,6 @@ final class Database: @unchecked Sendable {
             return (false, "permission_denied")
         }
 
-        // Try to actually open
         var db: OpaquePointer?
         let result = sqlite3_open_v2(
             "file:\(path)?mode=ro",
@@ -74,19 +73,6 @@ final class Database: @unchecked Sendable {
         return results
     }
 
-    func execute(_ sql: String, params: [Any] = []) throws {
-        let conn = try openReadOnly()
-        defer { sqlite3_close(conn) }
-
-        let stmt = try prepare(conn, sql: sql, params: params)
-        defer { sqlite3_finalize(stmt) }
-
-        let result = sqlite3_step(stmt)
-        if result != SQLITE_DONE && result != SQLITE_ROW {
-            throw DatabaseError.queryFailed(String(cString: sqlite3_errmsg(conn)))
-        }
-    }
-
     // MARK: - Private
 
     private func openReadOnly() throws -> OpaquePointer {
@@ -106,7 +92,6 @@ final class Database: @unchecked Sendable {
             throw DatabaseError.permissionDenied(path)
         }
 
-        // Safety settings
         sqlite3_busy_timeout(db, 1000)
         var errMsg: UnsafeMutablePointer<CChar>?
         let pragmaResult = sqlite3_exec(db, "PRAGMA query_only = ON", nil, nil, &errMsg)
@@ -132,7 +117,6 @@ final class Database: @unchecked Sendable {
             throw DatabaseError.queryFailed(String(cString: sqlite3_errmsg(conn)))
         }
 
-        // Bind parameters
         for (index, param) in params.enumerated() {
             let idx = Int32(index + 1)
             switch param {

@@ -121,7 +121,6 @@ enum FindChatTool {
     ) async throws -> [Tool.Content] {
         let params = Parameters(from: arguments)
 
-        // Validate that at least one search parameter is provided
         guard params.participants != nil || params.name != nil || params.containsRecent != nil else {
             let error = ErrorResponse(
                 error: "validation_error",
@@ -136,75 +135,49 @@ enum FindChatTool {
         do {
             var results: [ChatResult] = []
 
-            // Strategy 1: Search by participant handles
             if let participants = params.participants, !participants.isEmpty {
                 let handleGroups = await buildHandleGroups(participants: participants, resolver: resolver)
                 if !handleGroups.isEmpty {
                     let chats = try findChatsByHandleGroups(database: database, handleGroups: handleGroups)
                     for chat in chats {
-                        var chatResult = try await buildChatResult(database: database, chat: chat, resolver: resolver)
-                        chatResult = ChatResult(
-                            id: chatResult.id,
-                            name: chatResult.name,
-                            group: chatResult.group,
-                            participantCount: chatResult.participantCount,
-                            participantsPreview: chatResult.participantsPreview,
-                            lastMessage: chatResult.lastMessage,
-                            participants: chatResult.participants,
-                            match: MatchInfo(type: "participants"),
-                            identity: chatResult.identity
-                        )
-                        results.append(chatResult)
+                        results.append(try await buildChatResult(
+                            database: database,
+                            chat: chat,
+                            resolver: resolver,
+                            matchType: "participants"
+                        ))
                     }
                 }
             }
 
-            // Strategy 2: Search by display name (only if no participant results)
             if let name = params.name, results.isEmpty {
                 let chats = try findChatsByName(database: database, name: name, limit: params.limit)
                 for chat in chats {
-                    var chatResult = try await buildChatResult(database: database, chat: chat, resolver: resolver)
-                        chatResult = ChatResult(
-                            id: chatResult.id,
-                            name: chatResult.name,
-                            group: chatResult.group,
-                            participantCount: chatResult.participantCount,
-                            participantsPreview: chatResult.participantsPreview,
-                            lastMessage: chatResult.lastMessage,
-                            participants: chatResult.participants,
-                            match: MatchInfo(type: "name"),
-                            identity: chatResult.identity
-                        )
-                    results.append(chatResult)
+                    results.append(try await buildChatResult(
+                        database: database,
+                        chat: chat,
+                        resolver: resolver,
+                        matchType: "name"
+                    ))
                 }
             }
 
-            // Strategy 3: Search by recent content (only if no results yet)
             if let containsRecent = params.containsRecent, results.isEmpty {
                 let chats = try findChatsByContent(database: database, content: containsRecent, limit: params.limit)
                 for chat in chats {
-                    var chatResult = try await buildChatResult(database: database, chat: chat, resolver: resolver)
-                        chatResult = ChatResult(
-                            id: chatResult.id,
-                            name: chatResult.name,
-                            group: chatResult.group,
-                            participantCount: chatResult.participantCount,
-                            participantsPreview: chatResult.participantsPreview,
-                            lastMessage: chatResult.lastMessage,
-                            participants: chatResult.participants,
-                            match: MatchInfo(type: "content"),
-                            identity: chatResult.identity
-                        )
-                    results.append(chatResult)
+                    results.append(try await buildChatResult(
+                        database: database,
+                        chat: chat,
+                        resolver: resolver,
+                        matchType: "content"
+                    ))
                 }
             }
 
-            // Filter by is_group if specified
             if let isGroup = params.isGroup {
                 results = results.filter { ($0.group ?? false) == isGroup }
             }
 
-            // Deduplicate and limit
             var seen = Set<String>()
             var uniqueResults: [ChatResult] = []
             for result in results {
@@ -255,16 +228,13 @@ enum FindChatTool {
         for participant in participants {
             var groupHandles: [String] = []
 
-            // If it starts with +, it's already a phone number
             if participant.hasPrefix("+") {
                 groupHandles.append(participant)
             } else {
-                // Try to normalize as phone number
                 if let normalized = PhoneUtils.normalizeToE164(participant) {
                     groupHandles.append(normalized)
                 }
 
-                // Also try name lookup via contacts
                 let matches = await resolver.searchByName(participant)
                 for (handle, _) in matches {
                     if !groupHandles.contains(handle) {
@@ -447,7 +417,8 @@ enum FindChatTool {
     private static func buildChatResult(
         database: Database,
         chat: ChatRow,
-        resolver: ContactResolver
+        resolver: ContactResolver,
+        matchType: String
     ) async throws -> ChatResult {
         // Get participants
         let participantSql = """
@@ -545,7 +516,7 @@ enum FindChatTool {
             ),
             lastMessage: lastMessage,
             participants: participants,
-            match: MatchInfo(type: ""),
+            match: MatchInfo(type: matchType),
             identity: identity
         )
     }

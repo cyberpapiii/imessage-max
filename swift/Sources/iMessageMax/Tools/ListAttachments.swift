@@ -224,15 +224,6 @@ final class ListAttachments {
         let senderHandle: String?
         let chatId: Int64
         let chatName: String?
-        let maxAttachmentSize: Int
-    }
-
-    private struct AttachmentRow {
-        let attId: Int64
-        let filename: String?
-        let mimeType: String?
-        let uti: String?
-        let totalBytes: Int?
     }
 
     func browseSharedMessages(
@@ -263,8 +254,7 @@ final class ListAttachments {
                 isFromMe: row.int(4) == 1,
                 senderHandle: row.string(5),
                 chatId: row.int(6),
-                chatName: row.string(7),
-                maxAttachmentSize: Int(row.int(8))
+                chatName: row.string(7)
             )
         }
 
@@ -454,23 +444,6 @@ final class ListAttachments {
         default:
             return nil
         }
-    }
-
-    private func normalizedPreview(
-        messageId: Int64,
-        text: String?,
-        attributedBody: Data?,
-        attachmentType: AttachmentType
-    ) async throws -> String? {
-        if let formatted = SummaryPreviewFormatter.formattedTextPreview(
-            text: text,
-            attributedBody: attributedBody,
-            maxLength: 50
-        ) {
-            return formatted
-        }
-
-        return SummaryPreviewFormatter.attachmentPlaceholder(for: [attachmentType])
     }
 
     func resolveChatName(

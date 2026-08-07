@@ -2,7 +2,6 @@
 import Foundation
 import MCP
 
-/// Result types for get_attachment tool
 enum GetAttachmentResult {
     case success(metadata: AttachmentMetadataSummary, imageData: String, mimeType: String)
     case error(type: String, message: String, details: [String: Any]?)
@@ -16,7 +15,6 @@ struct AttachmentMetadataSummary: Codable {
     let available: Bool
 }
 
-/// Get attachment content at specified resolution variant
 struct GetAttachment {
     private let db: Database
     private let imageProcessor: ImageProcessor
@@ -89,15 +87,9 @@ struct GetAttachment {
         }
     }
 
-    /// Execute the get_attachment tool
-    /// - Parameters:
-    ///   - attachmentId: Attachment identifier (e.g., "att123" or just "123")
-    ///   - variant: Resolution variant - "vision" (1568px, default), "thumb" (400px), or "full" (original)
-    ///   - allowedRoots: File-system roots that attachment paths must reside under. Defaults to
-    ///                   `AttachmentPathPolicy.defaultRoots`. Inject a different value in tests.
-    /// - Returns: GetAttachmentResult with image data or error
+    /// - Parameter allowedRoots: File-system roots that attachment paths must reside under.
+    ///   Defaults to `AttachmentPathPolicy.defaultRoots`. Inject a different value in tests.
     func execute(attachmentId: String, variant: String = "vision", allowedRoots: [String] = AttachmentPathPolicy.defaultRoots) async -> GetAttachmentResult {
-        // Validate variant
         guard let imageVariant = ImageVariant(rawValue: variant) else {
             let validVariants = ImageVariant.allCases.map { $0.rawValue }.sorted()
             return .error(
@@ -107,7 +99,6 @@ struct GetAttachment {
             )
         }
 
-        // Validate attachment_id
         guard !attachmentId.isEmpty else {
             return .error(
                 type: "validation_error",
@@ -116,7 +107,6 @@ struct GetAttachment {
             )
         }
 
-        // Extract numeric ID from "attXXX" format
         let numericId: Int?
         if attachmentId.hasPrefix("att") {
             numericId = Int(attachmentId.dropFirst(3))
@@ -132,7 +122,6 @@ struct GetAttachment {
             )
         }
 
-        // Query database for attachment
         do {
             let attachments: [(filename: String?, mimeType: String?, uti: String?, totalBytes: Int64?, transferName: String?)] = try db.query(
                 """
@@ -147,7 +136,6 @@ struct GetAttachment {
                 """,
                 params: [rowId]
             ) { row in
-                // Column indices: 0=filename, 1=mime_type, 2=uti, 3=total_bytes, 4=transfer_name
                 (
                     filename: row.string(0),
                     mimeType: row.string(1),
@@ -173,7 +161,7 @@ struct GetAttachment {
                 )
             }
 
-            // Expand ~ in path and contain to allowed roots
+            // Contain paths to allowed roots (security)
             guard let expandedPath = AttachmentPathPolicy.validatedPath(filename, allowedRoots: allowedRoots) else {
                 return .error(
                     type: "attachment_path_invalid",
@@ -183,9 +171,8 @@ struct GetAttachment {
             }
             let fileURL = URL(fileURLWithPath: expandedPath)
 
-            // Check if file exists locally
             if !FileManager.default.fileExists(atPath: expandedPath) {
-                // Check if it's an iCloud file that can be downloaded
+                // iCloud offload: trigger download and ask caller to retry
                 if let downloaded = await tryDownloadFromiCloud(url: fileURL) {
                     if !downloaded {
                         return .error(
@@ -203,12 +190,10 @@ struct GetAttachment {
                 }
             }
 
-            // Determine attachment type
             let attType = getAttachmentType(mimeType: attachment.mimeType, uti: attachment.uti)
             let displayName = attachment.transferName ?? (expandedPath as NSString).lastPathComponent
             let chat = try resolveAttachmentChat(rowId: rowId)
 
-            // Process based on type
             switch attType {
             case "image":
                 guard let result = imageProcessor.process(at: expandedPath, variant: imageVariant) else {
@@ -219,10 +204,8 @@ struct GetAttachment {
                     )
                 }
 
-                // Encode image data as base64
                 let base64Data = result.data.base64EncodedString()
 
-                // ImageProcessor outputs JPEG format
                 return .success(
                     metadata: AttachmentMetadataSummary(
                         id: "att\(rowId)",
@@ -284,7 +267,6 @@ struct GetAttachment {
 
     // MARK: - Private Helpers
 
-    /// Determine attachment type from MIME type or UTI
     private func getAttachmentType(mimeType: String?, uti: String?) -> String {
         guard mimeType != nil || uti != nil else {
             return "other"
@@ -336,10 +318,8 @@ struct GetAttachment {
         )
     }
 
-    /// Try to download an iCloud file if it's offloaded
-    /// Returns: nil if not an iCloud file, false if download started but not complete, true if available
+    /// iCloud offload: nil = not ubiquitous, false = download started (retry), true = available.
     private func tryDownloadFromiCloud(url: URL) async -> Bool? {
-        // Check if this is a ubiquitous (iCloud) item
         do {
             let resourceValues = try url.resourceValues(forKeys: [
                 .isUbiquitousItemKey,
@@ -347,25 +327,19 @@ struct GetAttachment {
             ])
 
             guard resourceValues.isUbiquitousItem == true else {
-                // Not an iCloud file
                 return nil
             }
 
-            // Check download status
             if let status = resourceValues.ubiquitousItemDownloadingStatus {
                 if status == .current {
-                    // Already downloaded
                     return true
                 } else if status == .downloaded {
-                    // Downloaded but may need refresh
                     return true
                 }
             }
 
-            // Try to start downloading
             try FileManager.default.startDownloadingUbiquitousItem(at: url)
 
-            // Wait briefly for small files
             for _ in 0..<10 {
                 await AsyncTimeout.sleep(.milliseconds(500))
                 if FileManager.default.fileExists(atPath: url.path) {
@@ -373,11 +347,9 @@ struct GetAttachment {
                 }
             }
 
-            // Download started but not complete yet
             return false
 
         } catch {
-            // Not an iCloud file or can't access
             return nil
         }
     }

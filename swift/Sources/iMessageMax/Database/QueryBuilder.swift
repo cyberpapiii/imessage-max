@@ -10,7 +10,6 @@ final class QueryBuilder {
     private var havingConditions: [(String, [Any])] = []
     private var orderByCols: [String] = []
     private var limitValue: Int?
-    private var offsetValue: Int?
 
     @discardableResult
     func select(_ columns: String...) -> QueryBuilder {
@@ -66,26 +65,14 @@ final class QueryBuilder {
         return self
     }
 
-    @discardableResult
-    func offset(_ n: Int) -> QueryBuilder {
-        offsetValue = n
-        return self
-    }
-
     func build() -> (sql: String, params: [Any]) {
         var parts: [String] = []
         var allParams: [Any] = []
 
-        // SELECT
         parts.append("SELECT \(selectCols.joined(separator: ", "))")
-
-        // FROM
         parts.append("FROM \(fromTable)")
-
-        // JOINs
         parts.append(contentsOf: joins)
 
-        // WHERE
         if !conditions.isEmpty {
             let whereClauses = conditions.map { $0.0 }
             parts.append("WHERE \(whereClauses.joined(separator: " AND "))")
@@ -94,12 +81,10 @@ final class QueryBuilder {
             }
         }
 
-        // GROUP BY
         if !groupByCols.isEmpty {
             parts.append("GROUP BY \(groupByCols.joined(separator: ", "))")
         }
 
-        // HAVING
         if !havingConditions.isEmpty {
             let havingClauses = havingConditions.map { $0.0 }
             parts.append("HAVING \(havingClauses.joined(separator: " AND "))")
@@ -108,25 +93,16 @@ final class QueryBuilder {
             }
         }
 
-        // ORDER BY
         if !orderByCols.isEmpty {
             parts.append("ORDER BY \(orderByCols.joined(separator: ", "))")
         }
 
-        // LIMIT
         if let limit = limitValue {
             parts.append("LIMIT \(limit)")
         }
 
-        // OFFSET
-        if let offset = offsetValue {
-            parts.append("OFFSET \(offset)")
-        }
-
         return (parts.joined(separator: "\n"), allParams)
     }
-
-    // MARK: - Utility
 
     static func escapeLike(_ s: String) -> String {
         s.replacingOccurrences(of: "\\", with: "\\\\")

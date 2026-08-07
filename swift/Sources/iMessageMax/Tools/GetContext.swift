@@ -2,7 +2,6 @@
 import Foundation
 import MCP
 
-/// Response for the get_context tool
 struct GetContextResponse: Codable {
     let chat: ChatInfo
     let people: [String: PersonInfo]
@@ -35,7 +34,6 @@ struct GetContextResponse: Codable {
     }
 }
 
-/// Error response for get_context tool
 struct GetContextError: LocalizedError, Codable {
     let error: String
     let message: String
@@ -45,7 +43,6 @@ struct GetContextError: LocalizedError, Codable {
     }
 }
 
-/// GetContext tool implementation
 enum GetContext {
     // MARK: - Tool Registration
 
@@ -115,15 +112,6 @@ enum GetContext {
         }
     }
 
-    /// Get messages surrounding a specific message
-    /// - Parameters:
-    ///   - messageId: Specific message ID to get context around (e.g., "msg_1" or "1")
-    ///   - chatId: Chat ID (required if using contains)
-    ///   - contains: Find message containing this text, then get context
-    ///   - before: Number of messages before the target (default 5, max 50)
-    ///   - after: Number of messages after the target (default 10, max 50)
-    ///   - database: Database instance (optional, for testing)
-    ///   - resolver: ContactResolver instance (optional, for testing)
     static func execute(
         messageId: String? = nil,
         chatId: String? = nil,
@@ -133,11 +121,9 @@ enum GetContext {
         database: Database = Database(),
         resolver: ContactResolver = ContactResolver()
     ) async -> Result<GetContextResponse, GetContextError> {
-        // Clamp before/after to reasonable bounds
         let beforeCount = max(0, min(before, 50))
         let afterCount = max(0, min(after, 50))
 
-        // Validate inputs
         if messageId == nil && (chatId == nil || contains == nil) {
             return .failure(GetContextError(
                 error: "invalid_params",
@@ -152,15 +138,12 @@ enum GetContext {
             ))
         }
 
-        // Initialize contact resolver
         try? await resolver.initialize()
 
         do {
-            // Find target message
             let targetResult: (msgId: Int64, text: String?, attributedBody: Data?, date: Int64, isFromMe: Bool, senderHandle: String?, chatId: Int64, chatName: String?)
 
             if let msgIdStr = messageId {
-                // Find by message ID
                 guard let numericId = parseMessageId(msgIdStr) else {
                     return .failure(GetContextError(
                         error: "invalid_id",
@@ -207,7 +190,6 @@ enum GetContext {
                 targetResult = found
 
             } else {
-                // Find by contains in chat
                 guard let cId = chatId, let searchText = contains else {
                     return .failure(GetContextError(
                         error: "invalid_params",
@@ -222,8 +204,7 @@ enum GetContext {
                     ))
                 }
 
-                // Fetch recent messages and search in Swift (to handle attributedBody)
-                // Note: We can't search attributedBody in SQL since it's a binary blob
+                // attributedBody is a binary blob — cannot search in SQL; filter in Swift
                 let sql = """
                     SELECT
                         m.ROWID as msg_id,
@@ -258,7 +239,6 @@ enum GetContext {
                     )
                 }
 
-                // Search in Swift after extracting text from both columns
                 let searchLower = searchText.lowercased()
                 guard let found = rows.first(where: { row in
                     let extractedText = MessageTextExtractor.extract(text: row.text, attributedBody: row.attributedBody)
@@ -275,7 +255,6 @@ enum GetContext {
             let targetDate = targetResult.date
             let targetChatId = targetResult.chatId
 
-            // Get messages before the target
             let beforeSql = """
                 SELECT
                     m.ROWID as msg_id,
@@ -305,7 +284,6 @@ enum GetContext {
                 )
             }.reversed()
 
-            // Get messages after the target
             let afterSql = """
                 SELECT
                     m.ROWID as msg_id,
@@ -335,7 +313,6 @@ enum GetContext {
                 )
             }
 
-            // Build people map
             var people: [String: GetContextResponse.PersonInfo] = [:]
             var handleToKey: [String: String] = [:]
             var personCounter = 1
@@ -361,7 +338,6 @@ enum GetContext {
                         return existingKey
                     }
 
-                    // Try to resolve contact name
                     let name = await resolver.resolve(h)
 
                     let key: String
@@ -403,7 +379,6 @@ enum GetContext {
                 )
             }
 
-            // Format target message
             let targetMessage = await formatMessage(
                 msgId: targetResult.msgId,
                 text: targetResult.text,
@@ -413,7 +388,6 @@ enum GetContext {
                 senderHandle: targetResult.senderHandle
             )
 
-            // Format before messages
             var beforeMessages: [GetContextResponse.ContextMessage] = []
             for row in beforeRows {
                 let msg = await formatMessage(
@@ -427,7 +401,6 @@ enum GetContext {
                 beforeMessages.append(msg)
             }
 
-            // Format after messages
             var afterMessages: [GetContextResponse.ContextMessage] = []
             for row in afterRows {
                 let msg = await formatMessage(
@@ -489,18 +462,16 @@ enum GetContext {
 
     // MARK: - Private Helpers
 
-    /// Parse message ID from "msg_XXX", "msgXXX", or "XXX" format
     private static func parseMessageId(_ idStr: String) -> Int64? {
         var numStr = idStr
         if numStr.hasPrefix("msg_") {
-            numStr = String(numStr.dropFirst(4))  // Handle "msg_" with underscore
+            numStr = String(numStr.dropFirst(4))
         } else if numStr.hasPrefix("msg") {
-            numStr = String(numStr.dropFirst(3))  // Handle "msg" without underscore
+            numStr = String(numStr.dropFirst(3))
         }
         return Int64(numStr)
     }
 
-    /// Parse chat ID from "chatXXX" or "XXX" format
     private static func parseChatId(_ idStr: String) -> Int64? {
         var numStr = idStr
         if numStr.hasPrefix("chat") {

@@ -30,20 +30,17 @@ struct iMessageMax: AsyncParsableCommand {
 
     mutating func run() async throws {
         if http {
-            // HTTP mode: HTTPTransport manages per-session Server instances
-            // This enables clean reconnection without "already initialized" errors
+            // Per-session Server instances: clean reconnection without "already initialized"
             let database = Database()
             let resolver = ContactResolver()
 
-            // Perform startup checks
             let (dbOk, dbStatus) = Database.checkAccess()
             if !dbOk {
                 FileHandle.standardError.write(
-                    "[iMessage Max] Database: \(dbStatus)\n".data(using: .utf8)!
+                    Data("[iMessage Max] Database: \(dbStatus)\n".utf8)
                 )
             }
 
-            // Initialize contacts
             let (contactsOk, contactsStatus) = ContactResolver.authorizationStatus()
             if !contactsOk && contactsStatus == "not_determined" {
                 _ = try? await resolver.requestAccess()
@@ -53,8 +50,8 @@ struct iMessageMax: AsyncParsableCommand {
             // Warn if binding to a non-loopback address (only reachable when --allow-external-bind is set)
             if !HostBindingPolicy.isLoopback(host) {
                 FileHandle.standardError.write(
-                    "[WARNING] Binding to '\(host)' exposes iMessage data to the network. Use 127.0.0.1 for local-only access.\n"
-                        .data(using: .utf8)!)
+                    Data("[WARNING] Binding to '\(host)' exposes iMessage data to the network. Use 127.0.0.1 for local-only access.\n".utf8)
+                )
             }
 
             let transport = HTTPTransport(
@@ -67,7 +64,6 @@ struct iMessageMax: AsyncParsableCommand {
             try await transport.connect()
             try await transport.waitForTermination()
         } else {
-            // Stdio mode: Single Server instance managed by MCPServerWrapper
             let server = MCPServerWrapper()
             let transport = StdioTransport()
             try await server.start(transport: transport)

@@ -15,7 +15,6 @@
 # Run `make setup-signing` once, then `make install` for every update.
 
 BINARY       := .build/release/imessage-max
-IDENTITY     := iMessage Max Dev
 LAUNCHD_LABEL := local.imessage-max
 PORT         := 8080
 CERT_CN      := iMessage Max Dev

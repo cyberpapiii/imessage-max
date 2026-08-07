@@ -2,7 +2,6 @@
 import Foundation
 import MCP
 
-/// Result type for get_active_conversations tool
 struct ActiveConversationsResult: Codable {
     let conversations: [ActiveConversation]
     let total: Int
@@ -19,7 +18,6 @@ struct ActiveConversationsResult: Codable {
     }
 }
 
-/// A conversation with bidirectional activity
 struct ActiveConversation: Codable {
     let id: String
     let name: String
@@ -42,7 +40,6 @@ struct ActiveConversation: Codable {
     }
 }
 
-/// Activity metrics within the time window
 struct ConversationActivity: Codable {
     let exchanges: Int
     let myMsgs: Int
@@ -61,7 +58,6 @@ struct ConversationActivity: Codable {
     }
 }
 
-/// Error result for get_active_conversations
 struct ActiveConversationsError: Codable {
     let error: String
     let message: String
@@ -133,16 +129,6 @@ enum GetActiveConversations {
         }
     }
 
-    /// Find conversations with recent bidirectional activity
-    ///
-    /// - Parameters:
-    ///   - hours: Time window to consider (default 24, max 168 = 1 week)
-    ///   - minExchanges: Minimum back-and-forth exchanges to qualify (default 2)
-    ///   - isGroup: true for groups only, false for DMs only, nil for both
-    ///   - limit: Max results (default 10, max 50)
-    ///   - database: Database instance
-    ///   - resolver: ContactResolver for name lookups
-    /// - Returns: ActiveConversationsResult or throws an error
     static func execute(
         hours: Int = 24,
         minExchanges: Int = 2,
@@ -151,20 +137,16 @@ enum GetActiveConversations {
         database: Database = Database(),
         resolver: ContactResolver
     ) async throws -> ActiveConversationsResult {
-        // Validate and clamp inputs
         let clampedHours = max(1, min(hours, 168))  // 1 hour to 1 week
         let clampedMinExchanges = max(1, min(minExchanges, 100))
         let clampedLimit = max(1, min(limit, 50))
 
-        // Calculate window start timestamp
         let now = Date()
         let windowStart = now.addingTimeInterval(-Double(clampedHours) * 3600)
         let windowStartApple = AppleTime.fromDate(windowStart)
 
-        // Initialize resolver
         try await resolver.initialize()
 
-        // Build query for chats with bidirectional activity
         var sql = """
             SELECT
                 c.ROWID as chat_id,
@@ -188,7 +170,6 @@ enum GetActiveConversations {
 
         var params: [Any] = [windowStartApple]
 
-        // Apply group filter
         if let filterGroup = isGroup {
             if filterGroup {
                 sql += " AND participant_count > 1"
@@ -204,7 +185,6 @@ enum GetActiveConversations {
         sql += " LIMIT ?"
         params.append(fetchLimit)
 
-        // Execute main query
         let chatRows = try database.query(sql, params: params) { row -> ChatActivityRow in
             ChatActivityRow(
                 chatId: row.int(0),
@@ -249,7 +229,6 @@ enum GetActiveConversations {
         var conversations: [ActiveConversation] = []
 
         for row in includedRows {
-            // Calculate exchanges (min of my and their messages)
             let exchanges = min(row.myCount, row.theirCount)
 
             let participantRows = participantsByChat[row.chatId] ?? []
@@ -263,7 +242,6 @@ enum GetActiveConversations {
                 }
             )
 
-            // Determine awaiting reply
             let awaitingReply: Bool
             if let lastFromThem = row.lastFromThem, let lastFromMe = row.lastFromMe {
                 awaitingReply = lastFromThem > lastFromMe

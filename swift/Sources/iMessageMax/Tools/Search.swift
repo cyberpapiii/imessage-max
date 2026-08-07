@@ -224,7 +224,6 @@ enum SearchTool {
                 openWorldHint: false
             )
         ) { arguments in
-            // Extract parameters
             let query = arguments?["query"]?.stringValue
             let fromPerson = arguments?["from_person"]?.stringValue
             let inChat = arguments?["in_chat"]?.stringValue

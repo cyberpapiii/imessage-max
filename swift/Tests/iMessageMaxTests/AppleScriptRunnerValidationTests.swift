@@ -217,7 +217,7 @@ final class AppleScriptRunnerValidationTests: XCTestCase {
 
         switch observation {
         case .finished:
-            XCTAssertTrue(true)
+            break
         default:
             XCTFail("Expected finished observation")
         }
@@ -228,7 +228,7 @@ final class AppleScriptRunnerValidationTests: XCTestCase {
 
         switch observation {
         case .failed:
-            XCTAssertTrue(true)
+            break
         default:
             XCTFail("Expected failed observation")
         }
@@ -239,7 +239,7 @@ final class AppleScriptRunnerValidationTests: XCTestCase {
 
         switch observation {
         case .pending:
-            XCTAssertTrue(true)
+            break
         default:
             XCTFail("Expected pending observation")
         }
@@ -250,7 +250,7 @@ final class AppleScriptRunnerValidationTests: XCTestCase {
 
         switch observation {
         case .unknown:
-            XCTAssertTrue(true)
+            break
         default:
             XCTFail("Expected unknown observation")
         }

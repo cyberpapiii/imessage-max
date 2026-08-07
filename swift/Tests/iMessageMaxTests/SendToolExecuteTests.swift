@@ -99,7 +99,6 @@ final class SendToolExecuteTests: XCTestCase {
             verifier: fastVerifier(fixture: fixture)
         )
 
-        // DM to Alice by phone number; short text, single recipient → no confirmation required.
         // No matching DB row → verifier returns notFound → "uncertain".
         let contents = try await tool.execute(args: [
             "to": .string("+15550000001"),
@@ -131,7 +130,6 @@ final class SendToolExecuteTests: XCTestCase {
             verifier: fastVerifier(fixture: fixture)
         )
 
-        // Sending to chat_id → chat target; confirm required for chat sends, so pass confirm: true.
         // No matching DB row → verifier returns notFound → "uncertain".
         let contents = try await tool.execute(args: [
             "chat_id": .string("chat2"),
@@ -373,7 +371,6 @@ final class SendToolExecuteTests: XCTestCase {
         let contents = try await tool.execute(args: [
             "chat_id": .string("chat1"),
             "text": .string("Hello Alice"),
-            // confirm omitted. Chat-target sends no longer gate.
         ])
 
         let json = try decodeJSONDictionary(from: contents)

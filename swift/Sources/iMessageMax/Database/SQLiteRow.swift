@@ -30,8 +30,4 @@ struct SQLiteRow {
         let size = sqlite3_column_bytes(stmt, column)
         return Data(bytes: ptr, count: Int(size))
     }
-
-    func double(_ column: Int32) -> Double {
-        sqlite3_column_double(stmt, column)
-    }
 }

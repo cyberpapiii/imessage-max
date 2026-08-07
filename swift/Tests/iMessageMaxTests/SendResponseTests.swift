@@ -29,9 +29,6 @@ final class SendResponseTests: XCTestCase {
         XCTAssertEqual(response.chatId, "chat456")
     }
 
-    // testCancelledResponseUsesCancelledStatus removed with plan 017:
-    // SendResponse.cancelled existed solely for the deleted confirmation gate.
-
     func testErrorResponseUsesFailedStatus() {
         let response = SendResponse.error("Send failed")
 

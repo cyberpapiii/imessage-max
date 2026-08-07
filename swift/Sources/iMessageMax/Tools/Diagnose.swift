@@ -25,7 +25,6 @@ typealias DatabaseProbe = @Sendable () -> (ok: Bool, status: String)
 /// Probe type for contacts authorization checks. Injectable so tests stay hermetic.
 typealias ContactsProbe = @Sendable () -> (authorized: Bool, status: String)
 
-/// Result type for the diagnose tool.
 struct DiagnoseResult: Codable {
     struct DatabaseStatus: Codable {
         let accessible: Bool
@@ -102,18 +101,9 @@ enum DiagnoseTool {
         }
     }
 
-    /// Diagnose iMessage MCP configuration, permissions, and runtime capabilities.
-    ///
     /// All three probes are injectable for testability. CI runners return
     /// "not_determined" for automation and may lack Full Disk Access, so tests
     /// MUST inject rather than call the real probes.
-    ///
-    /// - Parameters:
-    ///   - resolver: ContactResolver for loading the contacts count when authorized.
-    ///   - dbProbe: Probe for database/Full Disk Access; defaults to `Database.checkAccess()`.
-    ///   - contactsProbe: Probe for contacts authorization; defaults to `ContactResolver.authorizationStatus()`.
-    ///   - automationProbe: Probe for Automation permission; defaults to the real TCC check.
-    /// - Returns: DiagnoseResult with health fields and the full 15-key capability contract.
     static func execute(
         resolver: ContactResolver,
         dbProbe: DatabaseProbe = { Database.checkAccess() },
@@ -123,7 +113,6 @@ enum DiagnoseTool {
         let processId = ProcessInfo.processInfo.processIdentifier
         let databasePath = Database.defaultPath
 
-        // Probe 1: Full Disk Access
         let (dbOk, dbStatus) = dbProbe()
 
         var databaseFix: String? = nil
@@ -137,7 +126,6 @@ enum DiagnoseTool {
             }
         }
 
-        // Probe 2: Contacts authorization
         let (contactsAuthorized, authorizationStatus) = contactsProbe()
 
         var contactsStatus = authorizationStatus
@@ -158,10 +146,8 @@ enum DiagnoseTool {
                 "Contacts -> Add your terminal app or the imessage-max executable"
         }
 
-        // Probe 3: Automation permission
         let (automationOk, automationStatus) = automationProbe()
 
-        // Overall health status
         let allGood = dbOk && contactsAuthorized
         let overallStatus = allGood ? "ready" : "needs_setup"
 
@@ -170,7 +156,6 @@ enum DiagnoseTool {
         let automationFix = "Grant Automation access: System Settings -> Privacy & Security -> " +
             "Automation -> Enable Messages for your terminal app or the imessage-max executable"
 
-        // Send modes: driven solely by automation probe
         let sendState: String
         let sendFix: String?
         switch (automationOk, automationStatus) {
@@ -224,17 +209,14 @@ enum DiagnoseTool {
             verifiedSendDetail = nil
         }
 
-        // attachments_read: db-gated
         let attachmentsReadState = dbOk ? "supported" : "permission-gated"
         let attachmentsReadFix = dbOk ? nil : "Grant Full Disk Access to read attachment content"
 
-        // attachments_offloaded: supported with note when DB accessible; permission-gated otherwise
         let attachmentsOffloadedState = dbOk ? "supported" : "permission-gated"
         let attachmentsOffloadedNote: String? = dbOk
             ? "Offloaded files trigger iCloud download; retry get_attachment after a few seconds"
             : nil
 
-        // perm_full_disk
         let permFullDiskState: String
         let permFullDiskFix: String?
         switch dbStatus {
@@ -249,7 +231,6 @@ enum DiagnoseTool {
             permFullDiskFix = databaseFix
         }
 
-        // perm_contacts
         let permContactsState: String
         let permContactsFix: String?
         switch authorizationStatus {
@@ -264,7 +245,6 @@ enum DiagnoseTool {
             permContactsFix = nil
         }
 
-        // perm_automation
         let permAutomationState: String
         let permAutomationFix: String?
         switch (automationOk, automationStatus) {

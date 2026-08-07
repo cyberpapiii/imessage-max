@@ -2,9 +2,8 @@
 import Foundation
 
 enum MessageTextExtractor {
-    /// Extract displayable text from a message, trying plain text first,
-    /// then falling back to attributedBody binary parsing.
     /// Replaces \u{FFFC} (object replacement character) with [Photo].
+    /// Falls back to attributedBody typedstream when plain text is empty.
     static func extract(text: String?, attributedBody: Data?) -> String? {
         if let text = text, !text.isEmpty {
             return text.replacingOccurrences(of: "\u{FFFC}", with: "[Photo]")
@@ -14,9 +13,8 @@ enum MessageTextExtractor {
         return parsed.replacingOccurrences(of: "\u{FFFC}", with: "[Photo]")
     }
 
-    /// Parse Apple typedstream format to extract plain text.
-    /// Searches for "NSString" / "NSMutableString" marker, skips 5 bytes,
-    /// reads length byte (0x81 = 2-byte, 0x82 = 3-byte, < 0x80 = literal
+    /// Parse Apple typedstream: find "NSString"/"NSMutableString", skip 5 bytes,
+    /// read length byte (0x81 = 2-byte, 0x82 = 3-byte, < 0x80 = literal
     /// single byte). Any other byte (0x80-0x83, 0x84+) is an unrecognized
     /// length marker and returns nil rather than misreading it as a literal
     /// length. Garbage extraction is worse than nil here, since
@@ -27,14 +25,12 @@ enum MessageTextExtractor {
         // at 0; all math below assumes zero-based absolute indexing.
         let data = data.startIndex == 0 ? data : Data(data)
 
-        // Look for NSString or NSMutableString marker in the typedstream
         guard let nsStringRange = data.range(of: Data("NSString".utf8)) ??
               data.range(of: Data("NSMutableString".utf8)) else {
             return nil
         }
 
-        // Skip past the class name marker to the length field
-        // The format is: marker + some bytes + length + data
+        // typedstream: marker + 5 bytes + length + data
         let idx = nsStringRange.upperBound + 5
 
         guard idx < data.count else { return nil }
@@ -43,7 +39,6 @@ enum MessageTextExtractor {
         let length: Int
         let dataStart: Int
 
-        // Parse length based on prefix byte
         if lengthByte == 0x81 {
             // 2-byte length (little endian)
             guard idx + 3 <= data.count else { return nil }
