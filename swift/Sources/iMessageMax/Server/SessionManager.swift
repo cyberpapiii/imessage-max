@@ -22,7 +22,6 @@ actor SessionManager {
         let server: Server
         let protocolVersion: String
         let messageContinuation: AsyncThrowingStream<Data, Error>.Continuation
-        let createdAt: Date
         var lastActivity: Date
         var serverTask: Task<Void, Never>?
 
@@ -30,15 +29,13 @@ actor SessionManager {
             id: String,
             server: Server,
             protocolVersion: String,
-            messageContinuation: AsyncThrowingStream<Data, Error>.Continuation,
-            createdAt: Date = Date()
+            messageContinuation: AsyncThrowingStream<Data, Error>.Continuation
         ) {
             self.id = id
             self.server = server
             self.protocolVersion = protocolVersion
             self.messageContinuation = messageContinuation
-            self.createdAt = createdAt
-            self.lastActivity = createdAt
+            self.lastActivity = Date()
         }
     }
 
@@ -187,7 +184,7 @@ actor SessionManager {
 
         // Check if session has expired
         if Date().timeIntervalSince(session.lastActivity) > sessionTimeout {
-            terminateSession(sessionId)
+            terminateSession(sessionId: sessionId)
             return nil
         }
 
@@ -206,12 +203,7 @@ actor SessionManager {
     }
 
     /// Terminates a session and cleans up its Server
-    func terminate(sessionId: String) {
-        terminateSession(sessionId)
-    }
-
-    /// Internal session termination with cleanup
-    private func terminateSession(_ sessionId: String) {
+    func terminateSession(sessionId: String) {
         guard let session = sessions[sessionId] else { return }
 
         // Cancel server task
@@ -270,7 +262,7 @@ actor SessionManager {
         }.map(\.key)
 
         for id in expiredIds {
-            terminateSession(id)
+            terminateSession(sessionId: id)
         }
     }
 }

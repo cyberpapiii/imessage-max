@@ -336,15 +336,13 @@ enum SearchTool {
             var rows = try db.query(sql, params: params) { row in
                 SearchRow(
                     msgId: row.int(0),
-                    msgGuid: row.string(1) ?? "",
-                    text: row.string(2),
-                    attributedBody: row.blob(3),
-                    date: row.optionalInt(4),
-                    isFromMe: row.int(5) != 0,
-                    senderHandle: row.string(6),
-                    chatId: row.int(7),
-                    chatGuid: row.string(8) ?? "",
-                    chatDisplayName: row.string(9)
+                    text: row.string(1),
+                    attributedBody: row.blob(2),
+                    date: row.optionalInt(3),
+                    isFromMe: row.int(4) != 0,
+                    senderHandle: row.string(5),
+                    chatId: row.int(6),
+                    chatDisplayName: row.string(7)
                 )
             }
 
@@ -354,7 +352,7 @@ enum SearchTool {
             if hasQuery, let searchQuery = query?.trimmingCharacters(in: .whitespaces).lowercased(), !searchQuery.isEmpty {
                 // Split query into words (minimum 2 chars each to avoid noise)
                 let searchWords = searchQuery.split(separator: " ")
-                    .map { String($0).lowercased() }
+                    .map(String.init)
                     .filter { $0.count >= 2 }
 
                 if !searchWords.isEmpty {
@@ -364,7 +362,7 @@ enum SearchTool {
 
                         // Split message text into words for fuzzy matching
                         let textWords = text.split(whereSeparator: { !$0.isLetter && !$0.isNumber })
-                            .map { String($0).lowercased() }
+                            .map(String.init)
 
                         if matchAll {
                             // AND logic: all search words must be present

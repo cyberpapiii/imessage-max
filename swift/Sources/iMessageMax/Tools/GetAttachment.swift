@@ -268,25 +268,7 @@ struct GetAttachment {
     // MARK: - Private Helpers
 
     private func getAttachmentType(mimeType: String?, uti: String?) -> String {
-        guard mimeType != nil || uti != nil else {
-            return "other"
-        }
-
-        let mime = (mimeType ?? "").lowercased()
-        let utiStr = (uti ?? "").lowercased()
-
-        if mime.contains("image") || utiStr.contains("image") ||
-           utiStr.contains("jpeg") || utiStr.contains("png") || utiStr.contains("heic") {
-            return "image"
-        } else if mime.contains("video") || utiStr.contains("movie") || utiStr.contains("video") {
-            return "video"
-        } else if mime.contains("audio") || utiStr.contains("audio") {
-            return "audio"
-        } else if mime.contains("pdf") || utiStr.contains("pdf") {
-            return "pdf"
-        } else {
-            return "other"
-        }
+        AttachmentType.from(mimeType: mimeType, uti: uti).rawValue
     }
 
     private func resolveAttachmentChat(rowId: Int) throws -> ChatReference? {

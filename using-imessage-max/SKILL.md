@@ -66,6 +66,9 @@ Use this when the user wants to reply, send an update, or share a file.
   - `mismatch`: it landed in the wrong chat. Tell the user.
   - `failed_delivery`: chat.db recorded a delivery error. The message did not send. Tell the user and treat the destination as unreachable.
   - `partial_failure`: a send with several payloads got some out before a later one failed. Read the message and resend only the failed payload.
+  - `sent`: transport accepted but verification was unavailable; delivery unproven.
+  - `failed`: invalid input or send could not dispatch; nothing sent.
+  - `ambiguous`: destination not unique; nothing sent. Resolve with `find_chat` first.
   - `pending_confirmation`: a file transfer has not finished yet. This is not a request to retry.
 - In your response to the user, name the destination using the returned `chat.name` or participant labels, not the `chat_id`.
 

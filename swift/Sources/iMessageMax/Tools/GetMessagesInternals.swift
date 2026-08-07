@@ -144,12 +144,12 @@ extension GetMessagesTool {
         return rows?.first
     }
 
-    func getChatInfo(chatId: Int) throws -> (displayName: String?, serviceName: String?) {
+    func getChatInfo(chatId: Int) throws -> String? {
         let rows = try db.query(
-            "SELECT display_name, service_name FROM chat WHERE ROWID = ?",
+            "SELECT display_name FROM chat WHERE ROWID = ?",
             params: [chatId]
         ) { row in
-            (displayName: row.string(0), serviceName: row.string(1))
+            row.string(0)
         }
 
         guard let info = rows.first else {
@@ -462,20 +462,7 @@ extension GetMessagesTool {
     }
 
     func getAttachmentType(mimeType: String?, uti: String?) -> String {
-        let mime = (mimeType ?? "").lowercased()
-        let utiStr = (uti ?? "").lowercased()
-
-        if mime.contains("image") || utiStr.contains("image") ||
-           utiStr.contains("jpeg") || utiStr.contains("png") || utiStr.contains("heic") {
-            return "image"
-        } else if mime.contains("video") || utiStr.contains("movie") || utiStr.contains("video") {
-            return "video"
-        } else if mime.contains("audio") || utiStr.contains("audio") {
-            return "audio"
-        } else if mime.contains("pdf") || utiStr.contains("pdf") {
-            return "pdf"
-        }
-        return "other"
+        AttachmentType.from(mimeType: mimeType, uti: uti).rawValue
     }
 
     func extractLinks(from text: String) -> [String] {

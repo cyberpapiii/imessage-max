@@ -3,7 +3,7 @@ import XCTest
 
 final class SendResponseTests: XCTestCase {
     func testSuccessResponseUsesSentStatus() {
-        let response = SendResponse.success(
+        let response = SendResponse.sent(
             deliveredTo: ["Rob Dezendorf"],
             chat: ChatReference(id: "chat123", name: "Rob Dezendorf")
         )
@@ -39,7 +39,7 @@ final class SendResponseTests: XCTestCase {
 
     func testAmbiguousResponseUsesAmbiguousStatus() {
         let response = SendResponse.ambiguous(candidates: [
-            RecipientCandidate(name: "Rob Dezendorf", handle: "+16317087185", lastContact: "today")
+            RecipientCandidate(name: "Rob Dezendorf", handle: "+15555550123", lastContact: "today")
         ])
 
         XCTAssertEqual(response.status, "ambiguous")

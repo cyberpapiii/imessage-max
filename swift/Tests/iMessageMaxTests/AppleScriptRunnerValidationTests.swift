@@ -33,7 +33,7 @@ final class AppleScriptRunnerValidationTests: XCTestCase {
         case .failure(let error):
             XCTAssertEqual(
                 error.localizedDescription,
-                "Could not read file at '/definitely/missing/file.png'."
+                "Could not read file at 'file.png'."
             )
         }
     }
@@ -46,17 +46,17 @@ final class AppleScriptRunnerValidationTests: XCTestCase {
     /// this whole string reached the client instead of `.chatNotFound`.
     func testCurlyApostropheStderrClassifiesAsMissingTarget() {
         let stderr = "186:202: execution error: messages got an error: "
-            + "can\u{2019}t get chat id \"any;-;+16317087185\". (-1728)"
+            + "can\u{2019}t get chat id \"any;-;+15555550123\". (-1728)"
 
         let error = AppleScriptRunner.classifySendStderr(
             stderr,
             sentFileName: "",
-            missingTargetError: .chatNotFound("any;-;+16317087185")
+            missingTargetError: .chatNotFound("any;-;+15555550123")
         )
 
         XCTAssertEqual(
             error.localizedDescription,
-            "Could not find chat 'any;-;+16317087185' in Messages.app."
+            "Could not find chat 'any;-;+15555550123' in Messages.app."
         )
         XCTAssertFalse(
             error.localizedDescription.contains("186:202"),

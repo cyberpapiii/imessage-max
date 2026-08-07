@@ -12,20 +12,7 @@ enum MCPProtocolVersion {
     static let requiresHeaderAfterInitialize: Set<String> = [latest, "2025-06-18"]
 }
 
-/// A production-ready implementation of the MCP Streamable HTTP transport for servers.
-///
-/// This transport implements the [Streamable HTTP transport](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports)
-/// specification from the Model Context Protocol for server-side usage.
-///
-/// Key features:
-/// - **Per-session Server instances** - Each client session gets its own Server,
-///   enabling clean reconnection without "already initialized" errors
-/// - HTTP POST for client -> server JSON-RPC messages
-/// - HTTP GET with SSE for server -> client streaming
-/// - HTTP DELETE for session termination
-/// - Session ID via `Mcp-Session-Id` header
-///
-/// Built on Hummingbird 2.x for production-grade HTTP handling.
+/// MCP Streamable HTTP transport (Hummingbird): per-session Servers, POST/GET-SSE/DELETE, `Mcp-Session-Id`.
 public actor HTTPTransport: Transport {
     /// The host to listen on
     public let host: String
@@ -560,7 +547,7 @@ public actor HTTPTransport: Transport {
         }
 
         // Terminate session (this also stops its Server instance)
-        await sessionManager.terminate(sessionId: sessionId)
+        await sessionManager.terminateSession(sessionId: sessionId)
         await sseManager.terminateSession(sessionId: sessionId)
 
         // Clean up any pending requests for this session
@@ -619,7 +606,7 @@ public actor HTTPTransport: Transport {
 
         // Terminate all sessions
         for sessionId in await sessionManager.activeSessionIds() {
-            await sessionManager.terminate(sessionId: sessionId)
+            await sessionManager.terminateSession(sessionId: sessionId)
         }
 
         // Cancel all pending requests
@@ -792,10 +779,7 @@ public actor HTTPTransport: Transport {
             guard let versionHeader else {
                 return errorResponse(
                     status: .badRequest,
-                    // `negotiated` is already constrained to
-                    // MCPProtocolVersion.supported, so this clamp is
-                    // belt-and-braces against a future reordering of the guards.
-                    message: "Missing MCP-Protocol-Version header for negotiated protocol version \(String(negotiated.prefix(64)))",
+                    message: "Missing MCP-Protocol-Version header for negotiated protocol version \(negotiated)",
                     code: -32600
                 )
             }
@@ -803,9 +787,7 @@ public actor HTTPTransport: Transport {
             guard versionHeader == negotiated else {
                 return errorResponse(
                     status: .badRequest,
-                    // Both values already passed the `supported` guard above;
-                    // clamped for the same defensive reason.
-                    message: "MCP-Protocol-Version header \(String(versionHeader.prefix(64))) does not match negotiated version \(String(negotiated.prefix(64)))",
+                    message: "MCP-Protocol-Version header \(versionHeader) does not match negotiated version \(negotiated)",
                     code: -32600
                 )
             }

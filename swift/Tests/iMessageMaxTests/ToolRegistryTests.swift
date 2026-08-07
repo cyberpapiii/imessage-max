@@ -13,6 +13,20 @@ final class ToolRegistryTests: XCTestCase {
         let names = Set(tools.map(\.name))
 
         XCTAssertFalse(names.contains("update"))
+        XCTAssertEqual(names, [
+            "diagnose",
+            "find_chat",
+            "get_active_conversations",
+            "get_attachment",
+            "get_chat_details",
+            "get_context",
+            "get_messages",
+            "get_unread",
+            "list_attachments",
+            "list_chats",
+            "search",
+            "send",
+        ])
     }
 
     func testCatchUpToolDescriptionsBiasTowardBroadOverviewThenNarrowing() async throws {

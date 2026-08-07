@@ -171,7 +171,7 @@ enum DiagnoseTool {
         }
 
         // send_file_group: supported with a routing caveat when automation ok;
-        // otherwise same as other send modes (plan 017: no confirmation gate)
+        // otherwise same as other send modes
         let sendFileGroupState: String
         let sendFileGroupNote: String?
         let sendFileGroupFix: String?

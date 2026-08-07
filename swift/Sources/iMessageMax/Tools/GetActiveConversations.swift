@@ -255,9 +255,9 @@ enum GetActiveConversations {
                 exchanges: exchanges,
                 myMsgs: row.myCount,
                 theirMsgs: row.theirCount,
-                lastFromMe: formatTimestamp(row.lastFromMe),
-                lastFromThem: formatTimestamp(row.lastFromThem),
-                started: formatTimestamp(row.firstInWindow)
+                lastFromMe: row.lastFromMe.flatMap(AppleTime.toDate).flatMap(TimeUtils.formatISO),
+                lastFromThem: row.lastFromThem.flatMap(AppleTime.toDate).flatMap(TimeUtils.formatISO),
+                started: row.firstInWindow.flatMap(AppleTime.toDate).flatMap(TimeUtils.formatISO)
             )
 
             let lastPreview = lastMessagesByChat[row.chatId]?.info
@@ -303,14 +303,4 @@ enum GetActiveConversations {
         let lastInWindow: Int64?
     }
 
-    private static func formatTimestamp(_ appleTimestamp: Int64?) -> String? {
-        guard let ts = appleTimestamp,
-              let date = AppleTime.toDate(ts) else {
-            return nil
-        }
-
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime]
-        return formatter.string(from: date)
-    }
 }

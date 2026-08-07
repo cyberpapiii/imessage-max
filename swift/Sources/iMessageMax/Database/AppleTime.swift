@@ -3,7 +3,7 @@ import Foundation
 
 enum AppleTime {
     /// Apple epoch: January 1, 2001 00:00:00 UTC
-    static let epoch = Date(timeIntervalSinceReferenceDate: 0)
+    private static let epoch = Date(timeIntervalSinceReferenceDate: 0)
 
     /// Convert Apple nanoseconds timestamp to Date
     static func toDate(_ nanoseconds: Int64?) -> Date? {

@@ -94,7 +94,6 @@ Sources/iMessageMax/
 ├── Models/
 │   ├── AttachmentType.swift    # Attachment type derived from MIME type or UTI
 │   ├── ChatIdentity.swift      # Canonical conversation identity shared across discovery, retrieval, and sending
-│   ├── Participant.swift
 │   ├── Reactions.swift         # Tapback/reaction type mapping
 │   ├── ResponsePrimitives.swift # Shared Codable response DTOs (ChatSummary, etc.)
 │   └── SendPayload.swift       # Send payload variants (text/file) and build result

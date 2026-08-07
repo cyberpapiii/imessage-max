@@ -581,7 +581,7 @@ final class SendToolExecutionTests: XCTestCase {
 
         do {
             _ = try await tool.execute(args: [
-                "to": .string("+16317087185"),
+                "to": .string("+15555550123"),
                 "text": .string("Hello"),
                 "reply_to": .string("msg_1"),
             ])

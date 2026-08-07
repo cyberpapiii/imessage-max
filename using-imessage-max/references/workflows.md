@@ -74,4 +74,4 @@ Preferred sequence:
 2. Use `send(chat_id="...")` when exact placement matters
 
 Use `send(to="...")` only when the user is comfortable starting from a person rather than a specific thread.
-Sends are not gated. An exact destination sends immediately and is verified afterward, returning `confirmed`, `uncertain`, `mismatch`, `failed_delivery`, or `partial_failure`. The `confirm` parameter is deprecated and ignored. `pending_confirmation` appears only for file attachments whose transfer has not completed. Do not treat it as sent and do not retry. Check later with `list_attachments` or `get_messages`.
+Sends are not gated. An exact destination sends immediately and is verified afterward, returning `confirmed`, `uncertain`, `mismatch`, `failed_delivery`, `partial_failure`, or `sent`. Ambiguous destinations return `ambiguous` and send nothing; invalid input returns `failed`. The `confirm` parameter is deprecated and ignored. `pending_confirmation` appears only for file attachments whose transfer has not completed. Do not treat it as sent and do not retry. Check later with `list_attachments` or `get_messages`.

@@ -247,7 +247,8 @@ reintroduce.
 The `send` tool is agent-native (plan 017):
 
 - An exact destination sends immediately, then verifies against chat.db.
-  Result is `confirmed`, `uncertain`, `mismatch`, or `sent`.
+  Result is `confirmed`, `uncertain`, `mismatch`, `failed_delivery`,
+  `partial_failure`, or `sent`.
 - An ambiguous destination returns status `ambiguous` and sends nothing.
   Invalid input returns status `failed` and sends nothing.
 - The `confirm` parameter is deprecated and inert: accepted for

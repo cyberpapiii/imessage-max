@@ -112,13 +112,12 @@ final class GetUnread {
             let formatStr = arguments?["format"]?.stringValue ?? "summary"
             let limit = arguments?["limit"]?.intValue ?? 50
 
-            let format = UnreadFormat(rawValue: formatStr) ?? .messages
+            let format = UnreadFormat(rawValue: formatStr) ?? .summary
             let params = Parameters(
                 chatId: chatId,
                 since: since,
                 format: format,
-                limit: limit,
-                cursor: nil
+                limit: limit
             )
 
             let tool = GetUnread(database: db, contactResolver: resolver)
@@ -139,20 +138,17 @@ final class GetUnread {
         var since: String
         var format: UnreadFormat
         var limit: Int
-        var cursor: String?
 
         init(
             chatId: String? = nil,
             since: String = "7d",
             format: UnreadFormat = .summary,
-            limit: Int = 50,
-            cursor: String? = nil
+            limit: Int = 50
         ) {
             self.chatId = chatId
             self.since = since
             self.format = format
             self.limit = max(1, min(limit, 100))
-            self.cursor = cursor
         }
     }
 
@@ -218,16 +214,12 @@ final class GetUnread {
         var queryBuilder = QueryBuilder()
             .select(
                 "m.ROWID as id",
-                "m.guid",
                 "m.text",
                 "m.attributedBody",
                 "m.date",
-                "m.is_from_me",
-                "m.handle_id",
                 "h.id as sender_handle",
                 "c.ROWID as chat_id",
-                "c.display_name as chat_display_name",
-                "c.guid as chat_guid"
+                "c.display_name as chat_display_name"
             )
             .from("message m")
             .join("chat_message_join cmj ON m.ROWID = cmj.message_id")
@@ -255,16 +247,12 @@ final class GetUnread {
         let rows: [UnreadMessageRow] = try database.query(sql, params: params) { row in
             UnreadMessageRow(
                 id: row.int(0),
-                guid: row.string(1),
-                text: row.string(2),
-                attributedBody: row.blob(3),
-                date: row.optionalInt(4),
-                isFromMe: row.int(5) == 1,
-                handleId: row.optionalInt(6),
-                senderHandle: row.string(7),
-                chatId: row.int(8),
-                chatDisplayName: row.string(9),
-                chatGuid: row.string(10)
+                text: row.string(1),
+                attributedBody: row.blob(2),
+                date: row.optionalInt(3),
+                senderHandle: row.string(4),
+                chatId: row.int(5),
+                chatDisplayName: row.string(6)
             )
         }
 
@@ -331,8 +319,7 @@ final class GetUnread {
                 "cmj.chat_id",
                 "c.display_name as chat_display_name",
                 "COUNT(*) as unread_count",
-                "MIN(m.date) as oldest_unread_date",
-                "MAX(m.date) as latest_unread_date"
+                "MIN(m.date) as oldest_unread_date"
             )
             .from("message m")
             .join("chat_message_join cmj ON m.ROWID = cmj.message_id")
@@ -360,8 +347,7 @@ final class GetUnread {
                 chatId: row.int(0),
                 chatDisplayName: row.string(1),
                 unreadCount: Int(row.int(2)),
-                oldestUnreadDate: row.optionalInt(3),
-                latestUnreadDate: row.optionalInt(4)
+                oldestUnreadDate: row.optionalInt(3)
             )
         }
 
@@ -509,16 +495,12 @@ final class GetUnread {
 
 private struct UnreadMessageRow {
     let id: Int64
-    let guid: String?
     let text: String?
     let attributedBody: Data?
     let date: Int64?
-    let isFromMe: Bool
-    let handleId: Int64?
     let senderHandle: String?
     let chatId: Int64
     let chatDisplayName: String?
-    let chatGuid: String?
 }
 
 private struct SummaryRow {
@@ -526,7 +508,6 @@ private struct SummaryRow {
     let chatDisplayName: String?
     let unreadCount: Int
     let oldestUnreadDate: Int64?
-    let latestUnreadDate: Int64?
 }
 
 private struct ParticipantInfo {

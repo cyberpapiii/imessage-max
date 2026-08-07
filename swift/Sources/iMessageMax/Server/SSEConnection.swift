@@ -1,5 +1,4 @@
 import Foundation
-import NIOCore
 
 struct SSEConnectionInfo: Sendable {
     let id: String

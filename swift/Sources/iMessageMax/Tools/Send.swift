@@ -26,7 +26,7 @@ struct SendResponse: Encodable {
     let message: String?
     let error: String?
     let candidates: [RecipientCandidate]?
-    // Verification fields (non-nil only for "confirmed")
+    // Verification fields (non-nil for "confirmed" and "failed_delivery")
     let verifiedMessageGuid: String?
     let verifiedAt: String?
     // Mismatch fields (non-nil only for "mismatch")
@@ -50,7 +50,7 @@ struct SendResponse: Encodable {
 
     // MARK: - Transport-only fallback ("sent")
     // Returned only when verification cannot run (DB unreadable). Option D §4.3.
-    static func success(deliveredTo: [String], chat: ChatReference?) -> SendResponse {
+    static func sent(deliveredTo: [String], chat: ChatReference?) -> SendResponse {
         SendResponse(
             status: "sent",
             timestamp: TimeUtils.formatISO(Date()),
@@ -444,7 +444,7 @@ actor SendTool {
 
         guard let lastText = textBodies.last else {
             // File-only send. Verification does not apply, so status is unchanged.
-            return .success(deliveredTo: resolved.deliveredTo, chat: resolved.chat)
+            return .sent(deliveredTo: resolved.deliveredTo, chat: resolved.chat)
         }
 
         // Extract chatId and handle from the resolved target for the verifier.
@@ -485,7 +485,7 @@ actor SendTool {
             }
         } catch {
             // DB unreadable or task cancelled → Option D: transport-only fallback.
-            return .success(deliveredTo: resolved.deliveredTo, chat: resolved.chat)
+            return .sent(deliveredTo: resolved.deliveredTo, chat: resolved.chat)
         }
     }
 

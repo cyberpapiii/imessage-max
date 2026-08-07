@@ -295,7 +295,8 @@ actor GetMessagesTool {
         let processor = ImageProcessor()
 
         var messages: [GetMessagesResponse.MessageInfo] = []
-        var mediaCount = 0
+        var mediaTotal = 0
+        var mediaIncluded = 0
 
         for row in messageRows {
             let fromKey: String
@@ -311,7 +312,7 @@ actor GetMessagesTool {
             if includeReactions, let rowReactions = reactionsMap[row.guid] {
                 var reactionStrings: [String] = []
                 for r in rowReactions {
-                    guard let reactionType = ReactionType.fromType(r.type),
+                    guard let reactionType = ReactionType(rawValue: r.type),
                           !ReactionType.isRemoval(r.type) else { continue }
 
                     let reactor: String
@@ -334,23 +335,26 @@ actor GetMessagesTool {
                 for att in rowAttachments {
                     let attType = getAttachmentType(mimeType: att.mimeType, uti: att.uti)
 
-                    if attType == "image" && mediaCount < maxMedia,
+                    if attType == "image",
                        let path = att.filename {
                         // chat.db paths are data, not trusted input. Contain them to allowed roots.
                         // Out-of-root paths degrade to the AttachmentSummary fallthrough below.
                         if let validatedPath = AttachmentPathPolicy.validatedPath(path, allowedRoots: allowedRoots) {
                             if let metadata = processor.getMetadata(at: validatedPath) {
-                                if media == nil { media = [] }
-                                media?.append(GetMessagesResponse.MediaInfo(
-                                    type: "image",
-                                    id: "att\(att.id)",
-                                    filename: metadata.filename,
-                                    sizeBytes: metadata.sizeBytes,
-                                    sizeHuman: FormatUtils.fileSize(metadata.sizeBytes),
-                                    dimensions: .init(width: metadata.width, height: metadata.height)
-                                ))
-                                mediaCount += 1
-                                continue
+                                mediaTotal += 1
+                                if mediaIncluded < maxMedia {
+                                    if media == nil { media = [] }
+                                    media?.append(GetMessagesResponse.MediaInfo(
+                                        type: "image",
+                                        id: "att\(att.id)",
+                                        filename: metadata.filename,
+                                        sizeBytes: metadata.sizeBytes,
+                                        sizeHuman: FormatUtils.fileSize(metadata.sizeBytes),
+                                        dimensions: .init(width: metadata.width, height: metadata.height)
+                                    ))
+                                    mediaIncluded += 1
+                                    continue
+                                }
                             }
                         }
                     }
@@ -399,7 +403,7 @@ actor GetMessagesTool {
             finalSessions = finalSessions.filter { $0.sessionId == sessionFilter }
         }
 
-        let rawDisplayName = chatInfo.displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let rawDisplayName = chatInfo?.trimmingCharacters(in: .whitespacesAndNewlines)
         let displayName: String
         if let rawDisplayName, !rawDisplayName.isEmpty {
             displayName = rawDisplayName
@@ -409,7 +413,7 @@ actor GetMessagesTool {
             )
         }
 
-        let mediaTruncated = mediaCount > maxMedia
+        let mediaTruncated = mediaTotal > maxMedia
 
         return GetMessagesResponse(
             chat: .init(id: "chat\(numericChatId)", name: displayName),
@@ -419,8 +423,8 @@ actor GetMessagesTool {
             more: messages.count == limit,
             cursor: Self.nextCursor(from: messageRows, limit: limit),
             mediaTruncated: mediaTruncated ? true : nil,
-            mediaTotal: mediaTruncated ? mediaCount : nil,
-            mediaIncluded: mediaTruncated ? maxMedia : nil,
+            mediaTotal: mediaTruncated ? mediaTotal : nil,
+            mediaIncluded: mediaTruncated ? mediaIncluded : nil,
             suggestions: messages.isEmpty ? ["Try different filters or time range"] : nil
         )
     }

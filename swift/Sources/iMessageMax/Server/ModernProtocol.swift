@@ -248,7 +248,7 @@ enum ModernDispatcher {
             result["content"] = contentJSON(error.content)
             result["isError"] = true
         } catch {
-            result["content"] = contentJSON([.plainText("Error: \(error.localizedDescription)")])
+            result["content"] = contentJSON([.plainText("Error: \(ClientErrorMessages.sanitized(error))")])
             result["isError"] = true
         }
         return successResult(id: id, result: result)
@@ -326,8 +326,7 @@ enum ModernDispatcher {
     private static func structuredContentJSON(from content: [Tool.Content]) -> Any? {
         guard content.count == 1,
             case .text(let text, _, _) = content[0],
-            let data = text.data(using: .utf8),
-            let json = try? JSONSerialization.jsonObject(with: data)
+            let json = try? JSONSerialization.jsonObject(with: Data(text.utf8))
         else { return nil }
         return json
     }

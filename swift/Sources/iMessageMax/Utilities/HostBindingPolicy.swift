@@ -1,7 +1,7 @@
 import Foundation
 
 enum HostBindingPolicy {
-    static let loopbackHosts: Set<String> = ["127.0.0.1", "::1", "localhost"]
+    private static let loopbackHosts: Set<String> = ["127.0.0.1", "::1", "localhost"]
 
     static func isLoopback(_ host: String) -> Bool {
         loopbackHosts.contains(host.lowercased())

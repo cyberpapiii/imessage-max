@@ -311,10 +311,10 @@ enum AppleScriptRunner {
         var isDirectory: ObjCBool = false
         let exists = FileManager.default.fileExists(atPath: expandedPath, isDirectory: &isDirectory)
         guard exists, !isDirectory.boolValue else {
-            throw SendError.fileNotFound(filePath)
+            throw SendError.fileNotFound((filePath as NSString).lastPathComponent)
         }
         guard FileManager.default.isReadableFile(atPath: expandedPath) else {
-            throw SendError.fileNotFound(filePath)
+            throw SendError.fileNotFound((filePath as NSString).lastPathComponent)
         }
         return expandedPath
     }
@@ -332,7 +332,12 @@ enum AppleScriptRunner {
             let output = execution.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
 
             guard execution.terminationStatus == 0 else {
-                throw SendError.failed(output.isEmpty ? execution.stderr : output)
+                let raw = output.isEmpty ? execution.stderr : output
+                throw classifySendStderr(
+                    raw,
+                    sentFileName: trackingName,
+                    missingTargetError: .failed("transfer status query failed")
+                )
             }
 
             if output.isEmpty || output == "missing value" {
@@ -350,7 +355,6 @@ enum AppleScriptRunner {
         let pollInterval: TimeInterval = 0.5
         let deadline = Date().addingTimeInterval(timeoutSeconds)
         var sawPending = false
-        var sawStatuses = false
 
         while Date() < deadline {
             do {
@@ -366,11 +370,8 @@ enum AppleScriptRunner {
                     return .failure(.transferFailed(preparedFile.trackingName))
                 case .pending:
                     sawPending = true
-                    sawStatuses = true
                 case .unknown:
-                    if !newStatuses.isEmpty {
-                        sawStatuses = true
-                    }
+                    break
                 }
             } catch let error as SendError {
                 return .failure(error)
@@ -383,9 +384,6 @@ enum AppleScriptRunner {
 
         if sawPending {
             return .failure(.transferPending(preparedFile.trackingName))
-        }
-        if sawStatuses {
-            return .failure(.transferStatusUnknown(preparedFile.trackingName))
         }
         return .failure(.transferStatusUnknown(preparedFile.trackingName))
     }

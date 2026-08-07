@@ -21,7 +21,7 @@ final class SendResolverTests: XCTestCase {
             }
             XCTAssertEqual(guid, "any;+;chat-test-guid")
             XCTAssertEqual(chatId, 10)
-            XCTAssertEqual(Set(resolved.deliveredTo), Set(["+1 (631) 708-7185", "+1 (510) 461-5406"]))
+            XCTAssertEqual(Set(resolved.deliveredTo), Set(["+1 (555) 555-0123", "+1 (510) 461-5406"]))
         }
     }
 
@@ -30,7 +30,7 @@ final class SendResolverTests: XCTestCase {
         defer { try? FileManager.default.removeItem(atPath: dbPath) }
 
         let resolver = SendResolver(db: Database(path: dbPath), resolver: ContactResolver())
-        let result = await resolver.resolve(chatId: nil, to: "+16317087185")
+        let result = await resolver.resolve(chatId: nil, to: "+15555550123")
 
         switch result {
         case .failure(let message):
@@ -41,9 +41,9 @@ final class SendResolverTests: XCTestCase {
             guard case .participant(let handle, let chatId) = resolved.target else {
                 return XCTFail("Expected participant target")
             }
-            XCTAssertEqual(handle, "+16317087185")
+            XCTAssertEqual(handle, "+15555550123")
             XCTAssertEqual(chatId, 11)
-            XCTAssertEqual(resolved.deliveredTo, ["+1 (631) 708-7185"])
+            XCTAssertEqual(resolved.deliveredTo, ["+1 (555) 555-0123"])
         }
     }
 
@@ -51,7 +51,7 @@ final class SendResolverTests: XCTestCase {
         let dbPath = try makeResolverTestDatabase()
         defer { try? FileManager.default.removeItem(atPath: dbPath) }
 
-        let contacts = ContactResolver(seedCache: ["+16317087185": "Nick Jones"])
+        let contacts = ContactResolver(seedCache: ["+15555550123": "Nick Jones"])
         let resolver = SendResolver(db: Database(path: dbPath), resolver: contacts)
         let result = await resolver.resolve(chatId: nil, to: "Nick")
 
@@ -64,7 +64,7 @@ final class SendResolverTests: XCTestCase {
             guard case .participant(let handle, let chatId) = resolved.target else {
                 return XCTFail("Expected participant target")
             }
-            XCTAssertEqual(handle, "+16317087185")
+            XCTAssertEqual(handle, "+15555550123")
             XCTAssertEqual(chatId, 11)
             XCTAssertEqual(resolved.deliveredTo, ["Nick Jones"])
         }
@@ -75,7 +75,7 @@ final class SendResolverTests: XCTestCase {
         defer { try? FileManager.default.removeItem(atPath: dbPath) }
 
         let contacts = ContactResolver(seedCache: [
-            "+16317087185": "Nick Jones",
+            "+15555550123": "Nick Jones",
             "+15104615406": "Andrew Jones",
         ])
         let resolver = SendResolver(db: Database(path: dbPath), resolver: contacts)
@@ -90,7 +90,7 @@ final class SendResolverTests: XCTestCase {
             XCTAssertEqual(candidates.count, 2)
             // Handle 1 has a message row (date 1000); handle 2 has none.
             // nil-lastContact sorts last per SendResolution.swift's comparator.
-            XCTAssertEqual(candidates[0].handle, "+16317087185")
+            XCTAssertEqual(candidates[0].handle, "+15555550123")
             XCTAssertEqual(candidates[1].handle, "+15104615406")
             XCTAssertEqual(candidates[1].lastContact, "never")
             // Deliberately not asserting candidates[0].lastContact's exact
@@ -102,7 +102,7 @@ final class SendResolverTests: XCTestCase {
         let dbPath = try makeResolverTestDatabase()
         defer { try? FileManager.default.removeItem(atPath: dbPath) }
 
-        let contacts = ContactResolver(seedCache: ["+16317087185": "Nick Jones"])
+        let contacts = ContactResolver(seedCache: ["+15555550123": "Nick Jones"])
         let resolver = SendResolver(db: Database(path: dbPath), resolver: contacts)
         let result = await resolver.resolve(chatId: nil, to: "Zelda")
 
@@ -136,12 +136,12 @@ private func makeResolverTestDatabase() throws -> String {
         "CREATE TABLE handle (ROWID INTEGER PRIMARY KEY, id TEXT);",
         "CREATE TABLE chat_handle_join (chat_id INTEGER, handle_id INTEGER);",
         "CREATE TABLE message (ROWID INTEGER PRIMARY KEY, handle_id INTEGER, date INTEGER);",
-        "INSERT INTO handle (ROWID, id) VALUES (1, '+16317087185');",
+        "INSERT INTO handle (ROWID, id) VALUES (1, '+15555550123');",
         "INSERT INTO handle (ROWID, id) VALUES (2, '+15104615406');",
         "INSERT INTO chat (ROWID, guid, display_name) VALUES (10, 'any;+;chat-test-guid', NULL);",
         "INSERT INTO chat_handle_join (chat_id, handle_id) VALUES (10, 1);",
         "INSERT INTO chat_handle_join (chat_id, handle_id) VALUES (10, 2);",
-        "INSERT INTO chat (ROWID, guid, display_name) VALUES (11, 'any;-;+16317087185', NULL);",
+        "INSERT INTO chat (ROWID, guid, display_name) VALUES (11, 'any;-;+15555550123', NULL);",
         "INSERT INTO chat_handle_join (chat_id, handle_id) VALUES (11, 1);",
         "INSERT INTO message (ROWID, handle_id, date) VALUES (1, 1, 1000);"
     ]

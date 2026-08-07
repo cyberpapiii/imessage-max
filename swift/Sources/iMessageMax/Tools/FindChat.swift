@@ -263,7 +263,7 @@ enum FindChatTool {
 
         // Get candidate chats
         let sql = """
-            SELECT DISTINCT c.ROWID as id, c.guid, c.display_name, c.service_name
+            SELECT DISTINCT c.ROWID as id, c.guid, c.display_name
             FROM chat c
             JOIN chat_handle_join chj ON c.ROWID = chj.chat_id
             JOIN handle h ON chj.handle_id = h.ROWID
@@ -274,8 +274,7 @@ enum FindChatTool {
             ChatRow(
                 id: row.int(0),
                 guid: row.string(1),
-                displayName: row.string(2),
-                serviceName: row.string(3)
+                displayName: row.string(2)
             )
         }
 
@@ -372,7 +371,7 @@ enum FindChatTool {
     ) throws -> [ChatRow] {
         let escaped = QueryBuilder.escapeLike(name)
         let sql = """
-            SELECT c.ROWID as id, c.guid, c.display_name, c.service_name
+            SELECT c.ROWID as id, c.guid, c.display_name
             FROM chat c
             WHERE c.display_name LIKE ? ESCAPE '\\'
             LIMIT ?
@@ -382,8 +381,7 @@ enum FindChatTool {
             ChatRow(
                 id: row.int(0),
                 guid: row.string(1),
-                displayName: row.string(2),
-                serviceName: row.string(3)
+                displayName: row.string(2)
             )
         }
     }
@@ -395,7 +393,7 @@ enum FindChatTool {
     ) throws -> [ChatRow] {
         let escaped = QueryBuilder.escapeLike(content)
         let sql = """
-            SELECT DISTINCT c.ROWID as id, c.guid, c.display_name, c.service_name
+            SELECT DISTINCT c.ROWID as id, c.guid, c.display_name
             FROM chat c
             JOIN chat_message_join cmj ON c.ROWID = cmj.chat_id
             JOIN message m ON cmj.message_id = m.ROWID
@@ -408,8 +406,7 @@ enum FindChatTool {
             ChatRow(
                 id: row.int(0),
                 guid: row.string(1),
-                displayName: row.string(2),
-                serviceName: row.string(3)
+                displayName: row.string(2)
             )
         }
     }
@@ -530,5 +527,4 @@ private struct ChatRow {
     let id: Int64
     let guid: String?
     let displayName: String?
-    let serviceName: String?
 }

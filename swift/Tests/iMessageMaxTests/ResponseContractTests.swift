@@ -176,7 +176,7 @@ final class ResponseContractTests: XCTestCase {
     }
 
     func testSendResponseUsesNestedChat() throws {
-        let response = SendResponse.success(
+        let response = SendResponse.sent(
             deliveredTo: ["Contact A"],
             chat: ChatReference(id: "chat42", name: "Project Group")
         )

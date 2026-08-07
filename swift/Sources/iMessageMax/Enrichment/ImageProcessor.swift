@@ -3,12 +3,11 @@ import Foundation
 import CoreImage
 import CoreGraphics
 import ImageIO
-import UniformTypeIdentifiers
 
 enum ImageVariant: String, CaseIterable {
-    case vision = "vision"  // 1568px - AI analysis
-    case thumb = "thumb"    // 400px - quick preview
-    case full = "full"      // original resolution
+    case vision  // 1568px - AI analysis
+    case thumb   // 400px - quick preview
+    case full    // original resolution
 
     var maxDimension: Int? {
         switch self {
@@ -46,8 +45,6 @@ struct ImageProcessor {
     /// beyond this the payload stops being useful to any client. Oversized
     /// originals fall back to the vision-sized render.
     private static let maxFullVariantBytes = 8 * 1024 * 1024
-
-    init() {}
 
     /// Get metadata without full processing (fast path)
     func getMetadata(at path: String) -> ImageMetadata? {

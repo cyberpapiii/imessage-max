@@ -24,8 +24,4 @@ enum ReactionType: Int {
         case .questioned: return "❓"
         }
     }
-
-    static func fromType(_ type: Int) -> ReactionType? {
-        ReactionType(rawValue: type)
-    }
 }

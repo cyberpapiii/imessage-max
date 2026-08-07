@@ -38,15 +38,6 @@ struct SchemaType {
         }
     }
 
-    static func number(description: String) -> SchemaType {
-        SchemaType {
-            .object([
-                "type": "number",
-                "description": .string(description),
-            ])
-        }
-    }
-
     static func boolean(description: String) -> SchemaType {
         SchemaType {
             .object([
@@ -62,20 +53,6 @@ struct SchemaType {
                 "type": "array",
                 "description": .string(description),
                 "items": items.toValue(),
-            ])
-        }
-    }
-
-    static func object(description: String, properties: [String: SchemaType]) -> SchemaType {
-        SchemaType {
-            var propsValue: [String: Value] = [:]
-            for (key, val) in properties {
-                propsValue[key] = val.toValue()
-            }
-            return .object([
-                "type": "object",
-                "description": .string(description),
-                "properties": .object(propsValue),
             ])
         }
     }
@@ -251,7 +228,7 @@ extension Server {
                 throw error
             } catch {
                 return CallTool.Result(
-                    content: [.plainText("Error: \(error.localizedDescription)")],
+                    content: [.plainText("Error: \(ClientErrorMessages.sanitized(error))")],
                     isError: true
                 )
             }
@@ -260,13 +237,12 @@ extension Server {
 
     private nonisolated static func structuredContent(from content: [Tool.Content]) -> Value? {
         guard content.count == 1,
-            case .text(let text, _, _) = content[0],
-            let data = text.data(using: .utf8)
+            case .text(let text, _, _) = content[0]
         else {
             return nil
         }
 
-        return try? JSONDecoder().decode(Value.self, from: data)
+        return try? JSONDecoder().decode(Value.self, from: Data(text.utf8))
     }
 }
 

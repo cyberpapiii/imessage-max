@@ -12,14 +12,12 @@ struct SearchSenderFilter {
 
 struct SearchRow {
     let msgId: Int64
-    let msgGuid: String
     let text: String?
     let attributedBody: Data?
     let date: Int64?
     let isFromMe: Bool
     let senderHandle: String?
     let chatId: Int64
-    let chatGuid: String
     let chatDisplayName: String?
 }
 
@@ -61,14 +59,12 @@ extension SearchTool {
         let builder = QueryBuilder()
             .select(
                 "m.ROWID as msg_id",
-                "m.guid as msg_guid",
                 "m.text",
                 "m.attributedBody",
                 "m.date",
                 "m.is_from_me",
                 "h.id as sender_handle",
                 "c.ROWID as chat_id",
-                "c.guid as chat_guid",
                 "c.display_name as chat_display_name"
             )
             .from("message m")

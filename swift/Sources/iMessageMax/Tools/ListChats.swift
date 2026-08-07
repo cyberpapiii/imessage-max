@@ -96,7 +96,7 @@ enum ListChatsTool {
                 ]),
                 "sort": .object([
                     "type": "string",
-                    "description": "Sort order. Use \"recent\" for a broad recent-overview across conversations.",
+                    "description": "Sort order. Use \"recent\" for a broad recent-overview across conversations. \"most_active\" currently aliases \"recent\".",
                     "enum": ["recent", "alphabetical", "most_active"],
                 ]),
             ]),
