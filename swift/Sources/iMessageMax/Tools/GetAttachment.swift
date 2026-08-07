@@ -191,7 +191,7 @@ struct GetAttachment {
                         return .error(
                             type: "attachment_offloaded",
                             message: "Attachment is stored in iCloud and download was triggered. Try again in a few seconds.",
-                            details: ["path": expandedPath]
+                            details: ["filename": fileURL.lastPathComponent]
                         )
                     }
                 } else {
@@ -269,14 +269,14 @@ struct GetAttachment {
             default:
                 return .error(
                     type: "internal_error",
-                    message: error.localizedDescription,
+                    message: ClientErrorMessages.sanitized(error),
                     details: nil
                 )
             }
         } catch {
             return .error(
                 type: "internal_error",
-                message: error.localizedDescription,
+                message: ClientErrorMessages.sanitized(error),
                 details: nil
             )
         }

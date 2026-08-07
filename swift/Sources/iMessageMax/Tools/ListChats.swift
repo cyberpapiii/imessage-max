@@ -327,7 +327,7 @@ enum ListChatsTool {
         } catch {
             return .failure(ListChatsError(
                 error: "internal_error",
-                message: error.localizedDescription
+                message: ClientErrorMessages.sanitized(error)
             ))
         }
     }

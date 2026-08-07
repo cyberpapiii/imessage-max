@@ -238,7 +238,7 @@ enum FindChatTool {
             }
             throw ToolError(content: [.plainText(try FormatUtils.encodeJSON(error))])
         } catch {
-            let errorResp = ErrorResponse(error: "internal_error", message: error.localizedDescription)
+            let errorResp = ErrorResponse(error: "internal_error", message: ClientErrorMessages.sanitized(error))
             throw ToolError(content: [.plainText(try FormatUtils.encodeJSON(errorResp))])
         }
     }

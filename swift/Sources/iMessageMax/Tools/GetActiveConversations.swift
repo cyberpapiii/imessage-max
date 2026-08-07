@@ -126,7 +126,7 @@ enum GetActiveConversations {
             } catch {
                 let errorResponse = ActiveConversationsError(
                     error: "execution_error",
-                    message: error.localizedDescription
+                    message: ClientErrorMessages.sanitized(error)
                 )
                 throw ToolError(content: [.plainText(try FormatUtils.encodeJSON(errorResponse))])
             }

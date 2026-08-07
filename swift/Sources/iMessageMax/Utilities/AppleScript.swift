@@ -436,7 +436,11 @@ enum AppleScriptRunner {
                     stderr.contains("file") && stderr.contains("wasn’t found") ||
                     stderr.contains("file") && stderr.contains("wasn't found")
                 {
-                    return .failure(.fileNotFound(arguments.last ?? ""))
+                    // Report only the filename: `arguments.last` is the private
+                    // staged copy, not the path the caller asked to send.
+                    return .failure(.fileNotFound(
+                        ((arguments.last ?? "") as NSString).lastPathComponent
+                    ))
                 }
 
                 if stderr.contains("can't get participant") ||
@@ -447,7 +451,10 @@ enum AppleScriptRunner {
                     return .failure(missingTargetError)
                 }
 
-                return .failure(.failed(stderr))
+                // Untrusted, unbounded osascript stderr: keep the first line,
+                // clamped, so client errors stay informative but bounded.
+                let firstLine = stderr.split(separator: "\n", maxSplits: 1).first ?? ""
+                return .failure(.failed(String(firstLine.prefix(300))))
             }
 
             return .success(())

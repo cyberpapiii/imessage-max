@@ -208,7 +208,7 @@ final class ListAttachments {
         } catch {
             return .failure(ListAttachmentsError(
                 error: "internal_error",
-                message: error.localizedDescription
+                message: ClientErrorMessages.sanitized(error)
             ))
         }
     }

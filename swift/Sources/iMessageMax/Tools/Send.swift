@@ -374,9 +374,9 @@ actor SendTool {
             if case .failure(let error) = result {
                 switch error {
                 case .transferPending, .transferStatusUnknown:
-                    pendingMessages.append(error.localizedDescription)
+                    pendingMessages.append(ClientErrorMessages.sanitized(error))
                 default:
-                    return .error(error.localizedDescription)
+                    return .error(ClientErrorMessages.sanitized(error))
                 }
             }
         }

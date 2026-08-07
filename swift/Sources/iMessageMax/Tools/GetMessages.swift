@@ -195,7 +195,7 @@ actor GetMessagesTool {
         } catch {
             let errorResponse = GetMessagesErrorResponse(
                 error: "internal_error",
-                message: error.localizedDescription,
+                message: ClientErrorMessages.sanitized(error),
                 candidates: nil,
                 suggestion: nil
             )

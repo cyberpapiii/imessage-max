@@ -476,13 +476,13 @@ enum GetContext {
             default:
                 return .failure(GetContextError(
                     error: "internal_error",
-                    message: error.localizedDescription
+                    message: ClientErrorMessages.sanitized(error)
                 ))
             }
         } catch {
             return .failure(GetContextError(
                 error: "internal_error",
-                message: error.localizedDescription
+                message: ClientErrorMessages.sanitized(error)
             ))
         }
     }
