@@ -6,28 +6,50 @@ import Foundation
 /// Abstraction over the four send-execution functions used by SendTool.
 /// The production implementation is LiveScriptRunner; tests inject a stub.
 protocol ScriptRunning: Sendable {
-    func sendTextToParticipant(handle: String, message: String) -> Result<Void, SendError>
-    func sendFileToParticipant(handle: String, filePath: String) -> Result<Void, SendError>
-    func sendTextToChat(guid: String, message: String) -> Result<Void, SendError>
-    func sendFileToChat(guid: String, filePath: String) -> Result<Void, SendError>
+    func sendTextToParticipant(handle: String, message: String) async -> Result<Void, SendError>
+    func sendFileToParticipant(handle: String, filePath: String) async -> Result<Void, SendError>
+    func sendTextToChat(guid: String, message: String) async -> Result<Void, SendError>
+    func sendFileToChat(guid: String, filePath: String) async -> Result<Void, SendError>
 }
 
 /// Production implementation: forwards to AppleScriptRunner statics.
+/// The statics block their thread (process wait, transfer polling), so run
+/// them on a GCD background thread — never on the cooperative pool. GCD grows
+/// its pool to absorb blocked threads; the cooperative pool does not, so a
+/// blocked send there would stall unrelated requests service-wide.
 struct LiveScriptRunner: ScriptRunning {
-    func sendTextToParticipant(handle: String, message: String) -> Result<Void, SendError> {
-        AppleScriptRunner.sendTextToParticipant(handle: handle, message: message)
+    private func onBackgroundThread(
+        _ work: @escaping @Sendable () -> Result<Void, SendError>
+    ) async -> Result<Void, SendError> {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                continuation.resume(returning: work())
+            }
+        }
     }
 
-    func sendFileToParticipant(handle: String, filePath: String) -> Result<Void, SendError> {
-        AppleScriptRunner.sendFileToParticipant(handle: handle, filePath: filePath)
+    func sendTextToParticipant(handle: String, message: String) async -> Result<Void, SendError> {
+        await onBackgroundThread {
+            AppleScriptRunner.sendTextToParticipant(handle: handle, message: message)
+        }
     }
 
-    func sendTextToChat(guid: String, message: String) -> Result<Void, SendError> {
-        AppleScriptRunner.sendTextToChat(guid: guid, message: message)
+    func sendFileToParticipant(handle: String, filePath: String) async -> Result<Void, SendError> {
+        await onBackgroundThread {
+            AppleScriptRunner.sendFileToParticipant(handle: handle, filePath: filePath)
+        }
     }
 
-    func sendFileToChat(guid: String, filePath: String) -> Result<Void, SendError> {
-        AppleScriptRunner.sendFileToChat(guid: guid, filePath: filePath)
+    func sendTextToChat(guid: String, message: String) async -> Result<Void, SendError> {
+        await onBackgroundThread {
+            AppleScriptRunner.sendTextToChat(guid: guid, message: message)
+        }
+    }
+
+    func sendFileToChat(guid: String, filePath: String) async -> Result<Void, SendError> {
+        await onBackgroundThread {
+            AppleScriptRunner.sendFileToChat(guid: guid, filePath: filePath)
+        }
     }
 }
 
@@ -500,6 +522,29 @@ enum AppleScriptRunner {
         do {
             try process.run()
 
+            // Drain pipes concurrently with the exit wait. Reading only after
+            // exit deadlocks when the child fills a ~64KB pipe buffer: the
+            // child blocks on write, never exits, and the wait times out.
+            // Each queue writes its own property and the group join below
+            // establishes the happens-before edge for the reads.
+            final class DrainedOutput: @unchecked Sendable {
+                var stdout = Data()
+                var stderr = Data()
+            }
+            let drained = DrainedOutput()
+            let drainGroup = DispatchGroup()
+
+            drainGroup.enter()
+            DispatchQueue.global().async {
+                drained.stdout = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+                drainGroup.leave()
+            }
+            drainGroup.enter()
+            DispatchQueue.global().async {
+                drained.stderr = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+                drainGroup.leave()
+            }
+
             let semaphore = DispatchSemaphore(value: 0)
             DispatchQueue.global().async {
                 process.waitUntilExit()
@@ -511,12 +556,10 @@ enum AppleScriptRunner {
                 process.terminate()
                 return .failure(.timeout)
             }
+            drainGroup.wait()
 
-            let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-            let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
-
-            let stdout = String(data: stdoutData, encoding: .utf8) ?? ""
-            let stderr = String(data: stderrData, encoding: .utf8) ?? ""
+            let stdout = String(data: drained.stdout, encoding: .utf8) ?? ""
+            let stderr = String(data: drained.stderr, encoding: .utf8) ?? ""
 
             return .success(
                 ScriptExecutionResult(

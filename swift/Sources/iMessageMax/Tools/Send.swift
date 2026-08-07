@@ -347,24 +347,26 @@ actor SendTool {
         // Capture send time before dispatch (design §5.2 option 1).
         let sendTime = Date()
 
-        let sendResults: [Result<Void, SendError>]
+        // Sequential by design: Messages.app ordering matters, so a text that
+        // follows a file must be sent after that file. Do not parallelize.
+        var sendResults: [Result<Void, SendError>] = []
         switch resolved.target {
         case .participant(let handle, _):
-            sendResults = payloads.map { payload in
+            for payload in payloads {
                 switch payload {
                 case .text(let body):
-                    return runner.sendTextToParticipant(handle: handle, message: body)
+                    sendResults.append(await runner.sendTextToParticipant(handle: handle, message: body))
                 case .file(let path):
-                    return runner.sendFileToParticipant(handle: handle, filePath: path)
+                    sendResults.append(await runner.sendFileToParticipant(handle: handle, filePath: path))
                 }
             }
         case .chat(let guid, _):
-            sendResults = payloads.map { payload in
+            for payload in payloads {
                 switch payload {
                 case .text(let body):
-                    return runner.sendTextToChat(guid: guid, message: body)
+                    sendResults.append(await runner.sendTextToChat(guid: guid, message: body))
                 case .file(let path):
-                    return runner.sendFileToChat(guid: guid, filePath: path)
+                    sendResults.append(await runner.sendFileToChat(guid: guid, filePath: path))
                 }
             }
         }

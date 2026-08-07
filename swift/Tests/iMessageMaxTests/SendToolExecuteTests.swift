@@ -22,25 +22,25 @@ final class StubScriptRunner: ScriptRunning, @unchecked Sendable {
     /// Used to simulate Messages.app writing the chat.db row between send and verify.
     var onSend: (() -> Void)?
 
-    func sendTextToParticipant(handle: String, message: String) -> Result<Void, SendError> {
+    func sendTextToParticipant(handle: String, message: String) async -> Result<Void, SendError> {
         invocations.append(.textToParticipant(handle: handle, message: message))
         onSend?()
         return nextResult
     }
 
-    func sendFileToParticipant(handle: String, filePath: String) -> Result<Void, SendError> {
+    func sendFileToParticipant(handle: String, filePath: String) async -> Result<Void, SendError> {
         invocations.append(.fileToParticipant(handle: handle, filePath: filePath))
         onSend?()
         return nextResult
     }
 
-    func sendTextToChat(guid: String, message: String) -> Result<Void, SendError> {
+    func sendTextToChat(guid: String, message: String) async -> Result<Void, SendError> {
         invocations.append(.textToChat(guid: guid, message: message))
         onSend?()
         return nextResult
     }
 
-    func sendFileToChat(guid: String, filePath: String) -> Result<Void, SendError> {
+    func sendFileToChat(guid: String, filePath: String) async -> Result<Void, SendError> {
         invocations.append(.fileToChat(guid: guid, filePath: filePath))
         onSend?()
         return nextResult
