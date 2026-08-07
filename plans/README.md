@@ -46,7 +46,7 @@ Ordered by recommended land sequence, not plan number.
 | 034 | Image pipeline performance (shared CIContext, ImageIO downsampling, full-variant byte cap) | P3 | M | 022 | DONE 2026-08-07, merged to `main` (`60f354d`, stacked on the media-chain branch; 179/0 re-verified) |
 | 035 | Sync release metadata + docs with reality (Formula, macOS floor, content API, tree) | P3 | S | — (tree reflects 032 if landed) | DONE 2026-08-07, merged to `main` (`f14fd95`, branch `advisor/035-release-and-docs-sync`; 174/0 re-verified by reviewer) |
 | 036 | DX hardening (make test, dual-era verify probe, mktemp signing, CI parallel, dispatchInterval dedup) | P3 | S-M | — | DONE 2026-08-07, merged to `main` (`9e6a62d`, on the transport-chain branch; 192/0 re-verified; shipped probe differs from the plan's broken sketch — see follow-ups) |
-| 037 | Resolve the signing identity by hash so duplicate certs cannot break `make sign` | P2 | S | — | TODO (written 2026-08-07 against `58850fb`; found by a real deploy failure, not by audit) |
+| 037 | Resolve the signing identity by hash so duplicate certs cannot break `make sign` | P2 | S | — | DONE 2026-08-07, merged to `main` (`76fc529`; 233/0 re-verified; hash-vs-name evidence gathered against the real duplicate state, not the plan's scratch-keychain script — see follow-ups) |
 
 Status values: TODO | IN PROGRESS | DONE (date, commit, one-line evidence —
 merged to main) | BLOCKED (one-line reason) | REJECTED (one-line rationale)
@@ -212,6 +212,46 @@ Raised by executors while implementing this round; recorded so they aren't lost:
   silently picking one rule over the other. Correct call: **an instruction
   predicated on "if an equivalent exists" does not fire on a same-named
   non-equivalent.**
+- **Plan 037 shipped four defects — the worst rate of any plan this round, and
+  all four were caught.** Recorded in full because the first one is a genuine
+  Make semantics trap:
+  1. **The Step 3 tail could never have worked.** It read `$(SIGN_HASH)` inside
+     `setup-signing`'s recipe. Make expands a recipe *before* its shell runs,
+     and `setup-signing` is one backslash-continued logical line, so the
+     variable resolves to its pre-import value — empty — no matter what the
+     recipe subsequently creates. Every successful first-time setup would have
+     printed the *failure* message. Fixed with a shell-time re-query
+     (`NEW_HASH=$$(security find-identity …)`). The guard at the top of the
+     target legitimately keeps `$(SIGN_HASH)`, because it *should* read
+     pre-import state. **Lazy `=` means "expanded when the recipe is expanded",
+     not "expanded while the recipe runs."**
+  2. **The stated rationale for `=` over `:=` was wrong**, though the
+     conclusion was right. It matters across *targets* in one invocation
+     (`make setup-signing install`), not within a single recipe.
+  3. **`grep -c 'sign "$(IDENTITY)"'` was vacuous** — BSD grep's BRE does not
+     match the literal `$(`, so it returned 0 against the unfixed Makefile too.
+     Discriminating form is `grep -cF`: 4 before, 0 after (reviewer-confirmed
+     both).
+  4. **`security list-keychains | grep -c imx-plan037-test` was vacuous** —
+     `security create-keychain` never adds to the search list, so it reads 0
+     even with the scratch keychain fully present. Test for the file instead.
+- **Plan 037's Step 4 script does not reproduce the bug it was written to
+  reproduce**, for three separately-observed reasons: importing the *same*
+  cert twice dedupes (the real pathology needs two *distinct* certs sharing a
+  CN, which is what `setup-signing` produced — fresh key each run);
+  `codesign --keychain <scratch>` does not scope identity lookup, so the
+  ambiguity still resolved against `login.keychain-db`; and fresh self-signed
+  certs are `CSSMERR_TP_NOT_TRUSTED`, so `find-identity -v` reports
+  `0 valid identities found` in the scratch keychain. The executor tested
+  against the real duplicate state with a `/tmp` copy of the binary instead —
+  strictly better, since it exercises the state that caused the incident, and
+  still non-destructive.
+- **Residual risk flagged in the Makefile itself, not just here**: `SIGN_HASH`
+  reads `find-identity -v`, which excludes untrusted certs. If the
+  `add-trusted-cert` password dialog is cancelled, `SIGN_HASH` stays empty, the
+  new guard does not fire, and a re-run imports another cert — the original
+  cumulative bug through a narrower door. Fix trust rather than dropping `-v`;
+  without `-v` the hash could point at a cert with no usable private key.
 - **Pattern across this round: three plans shipped defective artifacts** — a
   vacuous grep (020), stale prose about a data structure (026), and a broken
   shell probe (036) — and in every case the executor caught it by running the
