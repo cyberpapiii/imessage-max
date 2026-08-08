@@ -677,16 +677,16 @@ public actor HTTPTransport: Transport {
     /// consuming the remaining body (bounded by `drainLimit`) before
     /// reporting `.tooLarge`.
     ///
-    /// The drain is the load-bearing part (R0-06). `collect(upTo:)` threw on
-    /// overflow and left the rest of the body unread. For clients that send
-    /// `Connection: close` (Python urllib does by default), Hummingbird's
-    /// HTTP1 loop skips its own post-response body drain and blocks on the
-    /// channel's closeFuture. With megabytes unread, NIO back-pressure stops
-    /// socket reads, EOF is never seen, and the server-side FD is never
-    /// closed - each oversized request leaked one descriptor (CLOSED /
-    /// FIN_WAIT_2 / TIME_WAIT entries under the pid in lsof) against a soft
-    /// limit of 256. Orderly keep-alive clients (http.client) were unaffected
-    /// because the HTTP1 loop drains before reading the next request head.
+    /// The drain is load-bearing. `collect(upTo:)` threw on overflow and left
+    /// the rest of the body unread. For clients that send `Connection: close`
+    /// (Python urllib does by default), Hummingbird's HTTP1 loop skips its
+    /// own post-response body drain and blocks on the channel's closeFuture.
+    /// With megabytes unread, NIO back-pressure stops socket reads, EOF is
+    /// never seen, and the server-side FD is never closed — each oversized
+    /// request leaked one descriptor (CLOSED / FIN_WAIT_2 / TIME_WAIT under
+    /// the pid in lsof) against a soft limit of 256. Orderly keep-alive
+    /// clients (http.client) were unaffected because the HTTP1 loop drains
+    /// before reading the next request head.
     ///
     /// The body is a single-iteration sequence, so draining cannot happen
     /// after `collect` throws; this helper owns the one iteration and does
@@ -738,8 +738,8 @@ public actor HTTPTransport: Transport {
         // Use a cancellable DispatchSourceTimer, not asyncAfter: a cancelled
         // asyncAfter work item stays enqueued (timer source, group, blocks,
         // ~0.65 KiB) until its deadline, so every served request retained its
-        // 300 s timer and sustained load carried tens of MB of dead timers
-        // (R0-02 diagnosis). Cancelling a timer source releases it immediately.
+        // 300 s timer and sustained load carried tens of MB of dead timers.
+        // Cancelling a timer source releases it immediately.
         let timeoutTimer = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
         timeoutTimer.setEventHandler { [weak self] in
             Task { [weak self] in

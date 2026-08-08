@@ -61,14 +61,14 @@ final class DatabaseErrorHandlingTests: XCTestCase {
         }
     }
 
-    // MARK: - Failed-open handle release (R0-04)
+    // MARK: - Failed-open handle release
 
     func testFailedOpensDoNotAccumulateSQLiteMemory() throws {
         // A failed sqlite3_open_v2 still allocates a connection handle that
         // must be passed to sqlite3_close. Skipping the close leaked ~1.5 KiB
-        // per call on the permission_denied path (R0-04 residual RSS growth).
+        // per call on the permission_denied path.
         let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("r004-\(UUID().uuidString)")
+            .appendingPathComponent("failed-open-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
         let path = dir.appendingPathComponent("chat.db").path

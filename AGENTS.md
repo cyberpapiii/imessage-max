@@ -240,10 +240,9 @@ Sleeping Swift tasks abort intermittently inside the launchd-run service
 Use Dispatch timers instead: `AsyncTimeout.sleep` for tool code, or the
 cancellable `DispatchSourceTimer` pattern in
 `HTTPTransport.storePendingRequest` (not `asyncAfter`: a cancelled
-asyncAfter work item stays enqueued until its deadline, which retained
-every request's 300 s timeout timer under load — R0-02). This
-crashed production on 2026-06-11 (send-confirmation timeout path); do not
-reintroduce.
+asyncAfter work item stays enqueued until its deadline and retains each
+request's timeout timer under load). This crashed production on
+2026-06-11 (send-confirmation timeout path); do not reintroduce.
 
 ### Send contract (no confirmation gate)
 

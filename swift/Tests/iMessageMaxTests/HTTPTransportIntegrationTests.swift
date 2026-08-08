@@ -290,7 +290,7 @@ final class HTTPTransportIntegrationTests: XCTestCase {
     }
 
     /// The request timeout must still fire now that the pending-request timer
-    /// is a cancellable DispatchSourceTimer (R0-02) rather than asyncAfter.
+    /// is a cancellable DispatchSourceTimer rather than asyncAfter.
     func testRequestTimeoutFiresWhenHandlerNeverResponds() async throws {
         let transport = HTTPTransport(
             host: "127.0.0.1",

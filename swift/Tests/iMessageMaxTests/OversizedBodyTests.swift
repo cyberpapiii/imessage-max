@@ -5,9 +5,9 @@ import HTTPTypes
 import NIOCore
 @testable import iMessageMax
 
-/// R0-06: oversized POST bodies must return 413 AND leave the request body
-/// fully consumed. The old `collect(upTo:)` path threw with megabytes unread;
-/// for `Connection: close` clients (Python urllib default) Hummingbird's HTTP1
+/// Oversized POST bodies must return 413 and leave the request body fully
+/// consumed. The old `collect(upTo:)` path threw with megabytes unread; for
+/// `Connection: close` clients (Python urllib default) Hummingbird's HTTP1
 /// loop then blocked on channel close with reads back-pressured off, leaking
 /// one server FD per oversized request.
 final class OversizedBodyTests: XCTestCase {
