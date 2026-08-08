@@ -178,8 +178,20 @@ public actor HTTPTransport: Transport {
             )
         }
 
-        let body = try await request.body.collect(upTo: 512 * 1024)  // 512KB
-        let requestData = Data(buffer: body)
+        let requestData: Data
+        switch try await Self.collectBodyDrainingOverflow(
+            request.body,
+            declaredLength: request.headers[.contentLength].flatMap(Int.init),
+            maxBytes: Self.maxRequestBodyBytes,
+            drainLimit: Self.overLimitDrainBytes
+        ) {
+        case .complete(let data):
+            requestData = data
+        case .tooLarge:
+            // Same observable shape as the old `collect(upTo:)` throw that
+            // Hummingbird converted to 413: empty body, Content-Length: 0.
+            return Response(status: .contentTooLarge)
+        }
 
         let jsonString = String(data: requestData, encoding: .utf8) ?? ""
         if jsonString.trimmingCharacters(in: .whitespaces).hasPrefix("[") {
@@ -644,6 +656,66 @@ public actor HTTPTransport: Transport {
         // In per-session model, each session has its own receive stream
         // Return empty stream for Transport protocol compliance
         return AsyncThrowingStream { $0.finish() }
+    }
+
+    // MARK: - Request body collection
+
+    /// Largest request body accepted on POST. Same 512 KB bound the old
+    /// `collect(upTo:)` call enforced.
+    static let maxRequestBodyBytes = 512 * 1024
+
+    /// Upper bound on how many over-limit bytes get read and discarded before
+    /// giving up on leaving the connection cleanly closable.
+    static let overLimitDrainBytes = 32 * 1024 * 1024
+
+    enum BodyCollection {
+        case complete(Data)
+        case tooLarge
+    }
+
+    /// Collects the request body up to `maxBytes`. On overflow, keeps
+    /// consuming the remaining body (bounded by `drainLimit`) before
+    /// reporting `.tooLarge`.
+    ///
+    /// The drain is the load-bearing part (R0-06). `collect(upTo:)` threw on
+    /// overflow and left the rest of the body unread. For clients that send
+    /// `Connection: close` (Python urllib does by default), Hummingbird's
+    /// HTTP1 loop skips its own post-response body drain and blocks on the
+    /// channel's closeFuture. With megabytes unread, NIO back-pressure stops
+    /// socket reads, EOF is never seen, and the server-side FD is never
+    /// closed - each oversized request leaked one descriptor (CLOSED /
+    /// FIN_WAIT_2 / TIME_WAIT entries under the pid in lsof) against a soft
+    /// limit of 256. Orderly keep-alive clients (http.client) were unaffected
+    /// because the HTTP1 loop drains before reading the next request head.
+    ///
+    /// The body is a single-iteration sequence, so draining cannot happen
+    /// after `collect` throws; this helper owns the one iteration and does
+    /// both jobs. Bodies whose declared Content-Length exceeds `drainLimit`
+    /// are rejected without reading; that keeps the work bounded and matches
+    /// the old behavior for absurd sizes.
+    nonisolated static func collectBodyDrainingOverflow(
+        _ body: RequestBody,
+        declaredLength: Int?,
+        maxBytes: Int,
+        drainLimit: Int
+    ) async throws -> BodyCollection {
+        if let declaredLength, declaredLength > drainLimit {
+            return .tooLarge
+        }
+
+        var collected = ByteBuffer()
+        var iterator = body.makeAsyncIterator()
+        while var chunk = try await iterator.next() {
+            guard collected.readableBytes + chunk.readableBytes <= maxBytes else {
+                var drained = chunk.readableBytes
+                while drained <= drainLimit, let more = try await iterator.next() {
+                    drained += more.readableBytes
+                }
+                return .tooLarge
+            }
+            collected.writeBuffer(&chunk)
+        }
+        return .complete(Data(buffer: collected))
     }
 
     // MARK: - Private Helpers
