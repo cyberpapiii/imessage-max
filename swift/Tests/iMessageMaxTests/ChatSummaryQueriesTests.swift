@@ -391,4 +391,54 @@ final class ChatSummaryQueriesTests: XCTestCase {
         XCTAssertEqual(result[10]?.info.text, "hello 10")
         XCTAssertEqual(result[20]?.info.text, "hello 20")
     }
+
+    /// get_unread pins the newest *unread inbound* date, which is not the
+    /// chat's newest message. The pinned lookup has to keep the unread filter,
+    /// or it hands back a message that is not unread.
+    func testPinnedUnreadLookupSkipsNewerReadMessages() async throws {
+        let fixture = try ToolTestDatabase(name: "csq-pinned-unread")
+        let resolver = makeSeededResolver()
+        let unreadDate: Int64 = 700_000_000_000_000_000
+
+        try fixture.insertHandle(rowId: 1, handle: "+15550000001")
+        try fixture.insertChat(rowId: 10, guid: "chat-10-guid")
+        try fixture.joinChatHandle(chatId: 10, handleId: 1)
+
+        let messages: [(Int, String, Int64, Bool)] = [
+            (1, "old unread", unreadDate - 86_400_000_000_000, false),
+            (2, "newest unread", unreadDate, false),
+            // Same instant, higher ROWID: a pinned lookup that dropped the
+            // unread filter would tie-break straight onto this one.
+            (3, "read reply", unreadDate, true),
+        ]
+        for (rowId, text, date, isRead) in messages {
+            try fixture.insertMessage(
+                rowId: rowId,
+                guid: "msg-\(rowId)",
+                text: text,
+                date: date,
+                isFromMe: false,
+                isRead: isRead,
+                handleId: 1
+            )
+            try fixture.joinChatMessage(chatId: 10, messageId: rowId)
+        }
+
+        let searched = try await ChatSummaryQueries.lastMessagesByChat(
+            db: fixture.database(),
+            chatIds: [10],
+            resolver: resolver,
+            onlyUnreadInbound: true
+        )
+        let pinned = try await ChatSummaryQueries.lastMessagesByChat(
+            db: fixture.database(),
+            chatIds: [10],
+            resolver: resolver,
+            onlyUnreadInbound: true,
+            newestDates: [10: unreadDate]
+        )
+
+        XCTAssertEqual(searched[10]?.info.text, "newest unread")
+        XCTAssertEqual(pinned[10]?.info.text, searched[10]?.info.text)
+    }
 }

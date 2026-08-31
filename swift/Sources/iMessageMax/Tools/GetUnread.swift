@@ -338,7 +338,10 @@ final class GetUnread {
                 "cmj.chat_id",
                 "c.display_name as chat_display_name",
                 "COUNT(*) as unread_count",
-                "MIN(m.date) as oldest_unread_date"
+                "MIN(m.date) as oldest_unread_date",
+                // Free alongside the MIN, and it saves the preview lookup from
+                // searching each chat's history for the message it names.
+                "MAX(m.date) as newest_unread_date"
             )
             .from("message m")
             .join("chat_message_join cmj ON m.ROWID = cmj.message_id")
@@ -366,7 +369,8 @@ final class GetUnread {
                 chatId: row.int(0),
                 chatDisplayName: row.string(1),
                 unreadCount: Int(row.int(2)),
-                oldestUnreadDate: row.optionalInt(3)
+                oldestUnreadDate: row.optionalInt(3),
+                newestUnreadDate: row.optionalInt(4)
             )
         }
 
@@ -381,6 +385,12 @@ final class GetUnread {
             chatIds: chatIds,
             resolver: contactResolver
         )
+        var newestUnreadDates: [Int64: Int64] = [:]
+        for row in rows {
+            if let newest = row.newestUnreadDate {
+                newestUnreadDates[row.chatId] = newest
+            }
+        }
         let lastByChat = try await ChatSummaryQueries.lastMessagesByChat(
             db: database,
             chatIds: chatIds,
@@ -389,7 +399,8 @@ final class GetUnread {
             previewMaxLength: 50,
             unknownSenderLabel: "Unknown",
             agoFallback: nil,
-            onlyUnreadInbound: true
+            onlyUnreadInbound: true,
+            newestDates: newestUnreadDates
         )
 
         for row in rows {
@@ -527,6 +538,7 @@ private struct SummaryRow {
     let chatDisplayName: String?
     let unreadCount: Int
     let oldestUnreadDate: Int64?
+    let newestUnreadDate: Int64?
 }
 
 private struct ParticipantInfo {

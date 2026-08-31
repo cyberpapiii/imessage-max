@@ -95,6 +95,10 @@ enum ChatSummaryQueries {
     ///     (`is_read = 0 AND is_from_me = 0`) are considered, matching
     ///     `get_unread`'s latest-unread selection. Default false preserves
     ///     the newest-message behavior for all existing callers.
+    ///   - newestDates: Each chat's newest qualifying message date, when the
+    ///     caller already computed it under the same filters passed here.
+    ///     Turns the per-chat search into a seek. Ignored unless every chat in
+    ///     `chatIds` has one.
     static func lastMessagesByChat(
         db: Database,
         chatIds: [Int64],
@@ -110,12 +114,12 @@ enum ChatSummaryQueries {
 
         // A caller that already knows each chat's newest qualifying date can
         // hand it over, and the lookup becomes a seek into message(date)
-        // instead of a walk over everything the chat has ever held. Only used
+        // instead of a walk over everything the chat has ever held. Used only
         // when every requested chat has a date, so a single statement covers
-        // the batch, and never for the unread lookup, whose newest inbound
-        // unread message is not the chat's newest message.
+        // the batch. The date must be the newest under the same filters this
+        // call applies, unread ones included.
         let pinnedDates: [Int64]? = {
-            guard !onlyUnreadInbound, let newestDates else { return nil }
+            guard let newestDates else { return nil }
             let pins = chatIds.compactMap { newestDates[$0] }
             return pins.count == chatIds.count ? pins : nil
         }()
@@ -170,7 +174,7 @@ enum ChatSummaryQueries {
                     JOIN message m2 ON m2.ROWID = cmj.message_id
                     WHERE cmj.chat_id = i.chat_id
                       AND m2.associated_message_type = 0
-                      AND m2.date = i.newest_date
+                      AND m2.date = i.newest_date\(unreadClause)
                     ORDER BY m2.ROWID DESC
                     LIMIT 1
                 )
