@@ -107,29 +107,39 @@ enum ChatSummaryQueries {
     ) async throws -> [Int64: LastMessage] {
         guard !chatIds.isEmpty else { return [:] }
 
-        let placeholders = chatIds.map { _ in "?" }.joined(separator: ",")
+        let idRows = chatIds.map { _ in "(?)" }.joined(separator: ",")
         var sinceClause = ""
         var params: [Any] = chatIds.map { $0 as Any }
         if let since = sinceApple {
-            sinceClause = "\n    AND m.date >= ?"
+            sinceClause = "\n                  AND m2.date >= ?"
             params.append(since)
         }
 
         let unreadClause = onlyUnreadInbound
-            ? "\n    AND m.is_read = 0 AND m.is_from_me = 0"
+            ? "\n                  AND m2.is_read = 0 AND m2.is_from_me = 0"
             : ""
 
+        // One correlated LIMIT 1 per requested chat. The previous form ranked
+        // every message in every requested chat with ROW_NUMBER() and then kept
+        // rank 1, so a caller asking for 20 chats sorted tens of thousands of
+        // rows to return 20. Ordering on m2.date (not the cached
+        // chat_message_join.message_date) keeps message.date as the single
+        // source of truth for recency.
         let sql = """
-            SELECT chat_id, text, attributedBody, is_from_me, sender_handle, date, message_id FROM (
-                SELECT cmj.chat_id as chat_id, m.text, m.attributedBody, m.is_from_me,
-                       h.id as sender_handle, m.date, m.ROWID as message_id,
-                       ROW_NUMBER() OVER (PARTITION BY cmj.chat_id ORDER BY m.date DESC) as rn
-                FROM message m
-                JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
-                LEFT JOIN handle h ON m.handle_id = h.ROWID
-                WHERE cmj.chat_id IN (\(placeholders))\(sinceClause)\(unreadClause)
-                AND m.associated_message_type = 0
-            ) WHERE rn = 1
+            WITH ids(chat_id) AS (VALUES \(idRows))
+            SELECT i.chat_id, m.text, m.attributedBody, m.is_from_me,
+                   h.id as sender_handle, m.date, m.ROWID as message_id
+            FROM ids i
+            JOIN message m ON m.ROWID = (
+                SELECT cmj.message_id
+                FROM chat_message_join cmj
+                JOIN message m2 ON m2.ROWID = cmj.message_id
+                WHERE cmj.chat_id = i.chat_id
+                  AND m2.associated_message_type = 0\(sinceClause)\(unreadClause)
+                ORDER BY m2.date DESC, m2.ROWID DESC
+                LIMIT 1
+            )
+            LEFT JOIN handle h ON m.handle_id = h.ROWID
             """
 
         struct RawRow {
