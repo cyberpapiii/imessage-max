@@ -274,11 +274,18 @@ final class ListAttachments {
         let hasMore = supportsCursor && messageRows.count > limit
         let pageRows = Array(messageRows.prefix(limit))
 
+        // One lookup for the whole page. Asking per message opened a fresh
+        // SQLite connection for each of the twenty rows a default page holds.
+        let attachmentsByMessage = try attachmentsForMessages(
+            messageIds: pageRows.map(\.msgId),
+            typeFilter: typeFilter
+        )
+
         var chatNameCache: [Int64: String] = [:]
         var results: [SharedMessageItem] = []
 
         for row in pageRows {
-            let attachments = try attachmentsForMessage(messageId: row.msgId, typeFilter: typeFilter)
+            let attachments = attachmentsByMessage[row.msgId] ?? []
             guard !attachments.isEmpty else { continue }
 
             let senderName: String
@@ -349,6 +356,70 @@ final class ListAttachments {
         sort: AttachmentSort,
         cursor: TimelineCursor?
     ) -> (String, [Any]) {
+        var params: [Any] = []
+
+        let typeClause = AttachmentType.sqlPredicate(for: typeFilter, alias: "a")
+            .map { " AND (\($0))" } ?? ""
+
+        // The two sort families want different shapes. largest_first has to
+        // rank every attachment message before it knows which page to return,
+        // so it reads the attachment tables in one pass and collapses the rows
+        // that join produces with GROUP BY m.ROWID. The date sorts can walk
+        // message_idx_date and stop at LIMIT, but only if nothing forces a
+        // GROUP BY first, so they resolve the chat and the attachments with
+        // subqueries that keep the result one row per message on their own.
+        let ranksBySize = sort == .largestFirst
+
+        let sizeSelect: String
+        let fromClause: String
+        var whereClause = "WHERE m.associated_message_type = 0"
+
+        if ranksBySize {
+            sizeSelect = "MAX(COALESCE(a.total_bytes, 0)) as max_attachment_size"
+            fromClause = """
+                FROM message m
+                JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
+                JOIN chat c ON cmj.chat_id = c.ROWID
+                LEFT JOIN handle h ON m.handle_id = h.ROWID
+                JOIN message_attachment_join maj ON m.ROWID = maj.message_id
+                JOIN attachment a ON maj.attachment_id = a.ROWID
+                """
+            if let chatId {
+                whereClause += " AND c.ROWID = ?"
+                params.append(chatId)
+            }
+            whereClause += typeClause
+        } else {
+            sizeSelect = """
+                (SELECT MAX(COALESCE(a.total_bytes, 0))
+                 FROM message_attachment_join maj
+                 JOIN attachment a ON maj.attachment_id = a.ROWID
+                 WHERE maj.message_id = m.ROWID\(typeClause)) as max_attachment_size
+                """
+            // A message can belong to more than one chat, so picking the chat
+            // with a subquery keeps the result one row per message without the
+            // GROUP BY that joining chat_message_join would require.
+            var chatPick = "SELECT cmj.chat_id FROM chat_message_join cmj"
+                + " WHERE cmj.message_id = m.ROWID"
+            if let chatId {
+                chatPick += " AND cmj.chat_id = ?"
+                params.append(chatId)
+            }
+            chatPick += " ORDER BY cmj.chat_id LIMIT 1"
+
+            fromClause = """
+                FROM message m
+                JOIN chat c ON c.ROWID = (\(chatPick))
+                LEFT JOIN handle h ON m.handle_id = h.ROWID
+                """
+            whereClause += """
+                 AND EXISTS (SELECT 1
+                             FROM message_attachment_join maj
+                             JOIN attachment a ON maj.attachment_id = a.ROWID
+                             WHERE maj.message_id = m.ROWID\(typeClause))
+                """
+        }
+
         var sql = """
             SELECT
                 m.ROWID as msg_id,
@@ -359,22 +430,10 @@ final class ListAttachments {
                 h.id as sender_handle,
                 c.ROWID as chat_id,
                 c.display_name as chat_name,
-                MAX(COALESCE(a.total_bytes, 0)) as max_attachment_size
-            FROM message m
-            JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
-            JOIN chat c ON cmj.chat_id = c.ROWID
-            LEFT JOIN handle h ON m.handle_id = h.ROWID
-            JOIN message_attachment_join maj ON m.ROWID = maj.message_id
-            JOIN attachment a ON maj.attachment_id = a.ROWID
-            WHERE m.associated_message_type = 0
+                \(sizeSelect)
+            \(fromClause)
+            \(whereClause)
             """
-
-        var params: [Any] = []
-
-        if let chatId {
-            sql += " AND c.ROWID = ?"
-            params.append(chatId)
-        }
 
         if let fromPerson {
             if fromPerson.lowercased() == "me" {
@@ -395,10 +454,6 @@ final class ListAttachments {
             params.append(beforeTs)
         }
 
-        if let predicate = AttachmentType.sqlPredicate(for: typeFilter, alias: "a") {
-            sql += " AND (\(predicate))"
-        }
-
         if let cursor {
             switch sort {
             case .recentFirst:
@@ -412,7 +467,9 @@ final class ListAttachments {
             }
         }
 
-        sql += " GROUP BY m.ROWID"
+        if ranksBySize {
+            sql += " GROUP BY m.ROWID"
+        }
 
         switch sort {
         case .recentFirst:
@@ -428,38 +485,47 @@ final class ListAttachments {
         return (sql, params)
     }
 
-    func attachmentsForMessage(
-        messageId: Int64,
+    typealias AttachmentSummary = (
+        id: Int64, type: AttachmentType, name: String?, available: Bool, sizeHuman: String?
+    )
+
+    func attachmentsForMessages(
+        messageIds: [Int64],
         typeFilter: String?,
         allowedRoots: [String] = AttachmentPathPolicy.defaultRoots
-    ) throws -> [(id: Int64, type: AttachmentType, name: String?, available: Bool, sizeHuman: String?)] {
+    ) throws -> [Int64: [AttachmentSummary]] {
+        guard !messageIds.isEmpty else { return [:] }
+
+        let placeholders = messageIds.map { _ in "?" }.joined(separator: ", ")
         var sql = """
-            SELECT a.ROWID, a.filename, a.mime_type, a.uti, a.total_bytes
+            SELECT maj.message_id, a.ROWID, a.filename, a.mime_type, a.uti, a.total_bytes
             FROM attachment a
             JOIN message_attachment_join maj ON a.ROWID = maj.attachment_id
-            WHERE maj.message_id = ?
+            WHERE maj.message_id IN (\(placeholders))
             """
         if let predicate = AttachmentType.sqlPredicate(for: typeFilter, alias: "a") {
             sql += " AND (\(predicate))"
         }
-        sql += " ORDER BY a.ROWID ASC"
+        sql += " ORDER BY maj.message_id ASC, a.ROWID ASC"
 
-        return try db.query(sql, params: [messageId]) { row in
-            let path = row.string(1)
+        var byMessage: [Int64: [AttachmentSummary]] = [:]
+        _ = try db.query(sql, params: messageIds.map { $0 as Any }) { row in
+            let path = row.string(2)
             // Route through policy: paths outside allowed roots are treated as unavailable,
             // identical to a missing file. List output stays total (no error thrown).
             let validatedPath = path.flatMap { AttachmentPathPolicy.validatedPath($0, allowedRoots: allowedRoots) }
             let available = validatedPath.map { FileManager.default.fileExists(atPath: $0) } ?? false
             let name = path.map { ($0 as NSString).lastPathComponent }
-            let bytes = row.optionalInt(4).map { Int($0) }
-            return (
-                id: row.int(0),
-                type: AttachmentType.from(mimeType: row.string(2), uti: row.string(3)),
+            let bytes = row.optionalInt(5).map { Int($0) }
+            byMessage[row.int(0), default: []].append((
+                id: row.int(1),
+                type: AttachmentType.from(mimeType: row.string(3), uti: row.string(4)),
                 name: name,
                 available: available,
                 sizeHuman: bytes.map { FormatUtils.fileSize($0) }
-            )
+            ))
         }
+        return byMessage
     }
 
     func resolveChatName(

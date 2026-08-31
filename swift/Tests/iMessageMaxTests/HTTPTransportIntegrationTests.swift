@@ -184,6 +184,62 @@ final class HTTPTransportIntegrationTests: XCTestCase {
         }
     }
 
+    func testLegacyToolCallEnvelopeSurvivesTheDirectDispatch() async throws {
+        // tools/call no longer travels through the session's SDK Server, so
+        // the three envelope shapes it used to produce are pinned here: a
+        // failing tool, an unknown tool, and a preserved string id.
+        let transport = HTTPTransport(
+            host: "127.0.0.1",
+            port: 0,
+            database: Database(),
+            resolver: ContactResolver(seedCache: [:]),
+            requestTimeout: .seconds(5)
+        )
+        let app = await transport.makeApplicationForTesting()
+
+        try await app.test(TestingSetup.router) { client in
+            let sessionId = try await initializeSession(using: client, protocolVersion: "2025-11-25")
+
+            // A tool that rejects its arguments answers with a result, not a
+            // JSON-RPC error: isError true, no structuredContent.
+            let failing = try await client.executeRequest(
+                uri: "/",
+                method: HTTPRequest.Method.post,
+                headers: jsonHeaders(sessionId: sessionId, protocolVersion: "2025-11-25"),
+                body: byteBuffer(for: """
+                    {"jsonrpc":"2.0","id":"str-id","method":"tools/call","params":{"name":"find_chat","arguments":{}}}
+                    """)
+            )
+            XCTAssertEqual(failing.head.status, .ok)
+            let failingBody = try decodeJSON(from: failing.body)
+            XCTAssertEqual(failingBody["id"] as? String, "str-id", "string ids must come back unchanged")
+            let failingResult = try XCTUnwrap(failingBody["result"] as? [String: Any])
+            XCTAssertEqual(failingResult["isError"] as? Bool, true)
+            XCTAssertNil(failingResult["structuredContent"])
+            let failingContent = try XCTUnwrap(failingResult["content"] as? [[String: Any]])
+            XCTAssertEqual(failingContent.first?["type"] as? String, "text")
+
+            // An unknown tool stays a method-not-found error.
+            let unknown = try await client.executeRequest(
+                uri: "/",
+                method: HTTPRequest.Method.post,
+                headers: jsonHeaders(sessionId: sessionId, protocolVersion: "2025-11-25"),
+                body: byteBuffer(for: """
+                    {"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"no_such_tool","arguments":{}}}
+                    """)
+            )
+            XCTAssertEqual(unknown.head.status, .ok)
+            let unknownBody = try decodeJSON(from: unknown.body)
+            XCTAssertNil(unknownBody["result"])
+            let error = try XCTUnwrap(unknownBody["error"] as? [String: Any])
+            XCTAssertEqual(error["code"] as? Int, -32601)
+            let message = try XCTUnwrap(error["message"] as? String)
+            XCTAssertTrue(message.contains("Unknown tool: no_such_tool"), message)
+            let data = try XCTUnwrap(error["data"] as? [String: Any])
+            XCTAssertEqual(data["detail"] as? String, "Unknown tool: no_such_tool")
+        }
+    }
+
     func testInvalidSessionReturnsNotFound() async throws {
         let transport = HTTPTransport(
             host: "127.0.0.1",

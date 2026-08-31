@@ -309,4 +309,136 @@ final class ChatSummaryQueriesTests: XCTestCase {
         )
         XCTAssertNil(lastMsgs[5], "Chat with no messages must be absent from lastMessagesByChat")
     }
+
+    // MARK: - Pinned newest dates
+
+    /// The pinned lookup states the newest date instead of sorting to find it.
+    /// It has to pick the same message as the search does, including when two
+    /// messages in a chat carry the identical date and the highest ROWID wins.
+    func testPinnedNewestDateSelectsTheSameMessageAsTheSearch() async throws {
+        let fixture = try ToolTestDatabase(name: "csq-pinned")
+        let resolver = makeSeededResolver()
+        let newest: Int64 = 700_000_000_000_000_000
+
+        try fixture.insertHandle(rowId: 1, handle: "+15550000001")
+        try fixture.insertChat(rowId: 10, guid: "chat-10-guid")
+        try fixture.joinChatHandle(chatId: 10, handleId: 1)
+
+        let messages: [(Int, String, Int64)] = [
+            (1, "older", newest - 86_400_000_000_000),
+            (2, "tied loser", newest),
+            (3, "tied winner", newest),
+        ]
+        for (rowId, text, date) in messages {
+            try fixture.insertMessage(
+                rowId: rowId,
+                guid: "msg-\(rowId)",
+                text: text,
+                date: date,
+                isFromMe: false,
+                handleId: 1
+            )
+            try fixture.joinChatMessage(chatId: 10, messageId: rowId)
+        }
+
+        let searched = try await ChatSummaryQueries.lastMessagesByChat(
+            db: fixture.database(),
+            chatIds: [10],
+            resolver: resolver
+        )
+        let pinned = try await ChatSummaryQueries.lastMessagesByChat(
+            db: fixture.database(),
+            chatIds: [10],
+            resolver: resolver,
+            newestDates: [10: newest]
+        )
+
+        XCTAssertEqual(searched[10]?.info.text, "tied winner")
+        XCTAssertEqual(pinned[10]?.info.text, searched[10]?.info.text)
+        XCTAssertEqual(pinned[10]?.info.ts, searched[10]?.info.ts)
+        XCTAssertEqual(pinned[10]?.awaitingReply, searched[10]?.awaitingReply)
+    }
+
+    /// A partially covered batch has to keep the search: dropping the chats
+    /// without a pinned date would silently drop their previews.
+    func testPartiallyPinnedBatchStillReturnsEveryChat() async throws {
+        let fixture = try ToolTestDatabase(name: "csq-pinned-partial")
+        let resolver = makeSeededResolver()
+
+        try fixture.insertHandle(rowId: 1, handle: "+15550000001")
+        for (index, chatId) in [10, 20].enumerated() {
+            try fixture.insertChat(rowId: chatId, guid: "chat-\(chatId)-guid")
+            try fixture.joinChatHandle(chatId: chatId, handleId: 1)
+            let rowId = index + 1
+            try fixture.insertMessage(
+                rowId: rowId,
+                guid: "msg-\(rowId)",
+                text: "hello \(chatId)",
+                date: Int64(700_000_000 + index) * 1_000_000_000,
+                isFromMe: false,
+                handleId: 1
+            )
+            try fixture.joinChatMessage(chatId: chatId, messageId: rowId)
+        }
+
+        let result = try await ChatSummaryQueries.lastMessagesByChat(
+            db: fixture.database(),
+            chatIds: [10, 20],
+            resolver: resolver,
+            newestDates: [10: 700_000_000_000_000_000]
+        )
+
+        XCTAssertEqual(result[10]?.info.text, "hello 10")
+        XCTAssertEqual(result[20]?.info.text, "hello 20")
+    }
+
+    /// get_unread pins the newest *unread inbound* date, which is not the
+    /// chat's newest message. The pinned lookup has to keep the unread filter,
+    /// or it hands back a message that is not unread.
+    func testPinnedUnreadLookupSkipsNewerReadMessages() async throws {
+        let fixture = try ToolTestDatabase(name: "csq-pinned-unread")
+        let resolver = makeSeededResolver()
+        let unreadDate: Int64 = 700_000_000_000_000_000
+
+        try fixture.insertHandle(rowId: 1, handle: "+15550000001")
+        try fixture.insertChat(rowId: 10, guid: "chat-10-guid")
+        try fixture.joinChatHandle(chatId: 10, handleId: 1)
+
+        let messages: [(Int, String, Int64, Bool)] = [
+            (1, "old unread", unreadDate - 86_400_000_000_000, false),
+            (2, "newest unread", unreadDate, false),
+            // Same instant, higher ROWID: a pinned lookup that dropped the
+            // unread filter would tie-break straight onto this one.
+            (3, "read reply", unreadDate, true),
+        ]
+        for (rowId, text, date, isRead) in messages {
+            try fixture.insertMessage(
+                rowId: rowId,
+                guid: "msg-\(rowId)",
+                text: text,
+                date: date,
+                isFromMe: false,
+                isRead: isRead,
+                handleId: 1
+            )
+            try fixture.joinChatMessage(chatId: 10, messageId: rowId)
+        }
+
+        let searched = try await ChatSummaryQueries.lastMessagesByChat(
+            db: fixture.database(),
+            chatIds: [10],
+            resolver: resolver,
+            onlyUnreadInbound: true
+        )
+        let pinned = try await ChatSummaryQueries.lastMessagesByChat(
+            db: fixture.database(),
+            chatIds: [10],
+            resolver: resolver,
+            onlyUnreadInbound: true,
+            newestDates: [10: unreadDate]
+        )
+
+        XCTAssertEqual(searched[10]?.info.text, "newest unread")
+        XCTAssertEqual(pinned[10]?.info.text, searched[10]?.info.text)
+    }
 }

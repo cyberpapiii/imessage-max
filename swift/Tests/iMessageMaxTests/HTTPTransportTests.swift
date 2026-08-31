@@ -227,6 +227,62 @@ final class SessionManagerLifecycleTests: XCTestCase {
         XCTAssertEqual(count, 1)
     }
 
+    func testFreshSessionIsNotReclaimedWhenAtCapacity() async {
+        let manager = SessionManager(
+            database: Database(),
+            resolver: ContactResolver(seedCache: [:]),
+            maxSessions: 1,
+            reclaimableIdle: 60
+        )
+
+        let first = await manager.createSession()
+        guard case .created = first else {
+            return XCTFail("First session should be created, got \(first)")
+        }
+
+        // The one session is live, so the cap is real backpressure and the
+        // refusal must stand rather than evicting a client that is in use.
+        let second = await manager.createSession()
+        guard case .atCapacity = second else {
+            return XCTFail("Second session should be refused as .atCapacity, got \(second)")
+        }
+    }
+
+    func testAbandonedSessionIsReclaimedToAdmitANewClient() async {
+        // Session capacity used to be a one-way door: a client that went away
+        // without sending DELETE held its slot for the full one-hour TTL, and
+        // the sweep that reclaims it only runs every five minutes. A hundred
+        // such sessions refused every new client until the service restarted.
+        let manager = SessionManager(
+            database: Database(),
+            resolver: ContactResolver(seedCache: [:]),
+            maxSessions: 1,
+            reclaimableIdle: 0.05
+        )
+
+        let first = await manager.createSession()
+        guard case .created(let abandoned) = first else {
+            return XCTFail("First session should be created, got \(first)")
+        }
+
+        await AsyncTimeout.sleep(.milliseconds(100))
+
+        let second = await manager.createSession()
+        guard case .created(let admitted) = second else {
+            return XCTFail("An idle session should be reclaimed to admit a client, got \(second)")
+        }
+        XCTAssertNotEqual(admitted.id, abandoned.id)
+
+        let count = await manager.sessionCount
+        XCTAssertEqual(count, 1, "Reclaiming must not push the table over its cap")
+
+        let routedToAbandoned = await manager.routeMessage(sessionId: abandoned.id, data: Data())
+        XCTAssertFalse(
+            routedToAbandoned,
+            "The reclaimed session should be gone, so its client re-initialises"
+        )
+    }
+
     func testExpiredSessionIsCleanedUp() async {
         let manager = SessionManager(
             database: Database(),

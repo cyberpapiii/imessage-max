@@ -95,6 +95,10 @@ enum ChatSummaryQueries {
     ///     (`is_read = 0 AND is_from_me = 0`) are considered, matching
     ///     `get_unread`'s latest-unread selection. Default false preserves
     ///     the newest-message behavior for all existing callers.
+    ///   - newestDates: Each chat's newest qualifying message date, when the
+    ///     caller already computed it under the same filters passed here.
+    ///     Turns the per-chat search into a seek. Ignored unless every chat in
+    ///     `chatIds` has one.
     static func lastMessagesByChat(
         db: Database,
         chatIds: [Int64],
@@ -103,34 +107,97 @@ enum ChatSummaryQueries {
         previewMaxLength: Int = 50,
         unknownSenderLabel: String = "unknown",
         agoFallback: String? = "unknown",
-        onlyUnreadInbound: Bool = false
+        onlyUnreadInbound: Bool = false,
+        newestDates: [Int64: Int64]? = nil
     ) async throws -> [Int64: LastMessage] {
         guard !chatIds.isEmpty else { return [:] }
 
-        let placeholders = chatIds.map { _ in "?" }.joined(separator: ",")
+        // A caller that already knows each chat's newest qualifying date can
+        // hand it over, and the lookup becomes a seek into message(date)
+        // instead of a walk over everything the chat has ever held. Used only
+        // when every requested chat has a date, so a single statement covers
+        // the batch. The date must be the newest under the same filters this
+        // call applies, unread ones included.
+        let pinnedDates: [Int64]? = {
+            guard let newestDates else { return nil }
+            let pins = chatIds.compactMap { newestDates[$0] }
+            return pins.count == chatIds.count ? pins : nil
+        }()
+
+        var params: [Any] = []
+        let idRows: String
+        if let pinnedDates {
+            idRows = chatIds.map { _ in "(?,?)" }.joined(separator: ",")
+            for (chatId, date) in zip(chatIds, pinnedDates) {
+                params.append(chatId)
+                params.append(date)
+            }
+        } else {
+            idRows = chatIds.map { _ in "(?)" }.joined(separator: ",")
+            params.append(contentsOf: chatIds.map { $0 as Any })
+        }
+
         var sinceClause = ""
-        var params: [Any] = chatIds.map { $0 as Any }
-        if let since = sinceApple {
-            sinceClause = "\n    AND m.date >= ?"
+        if let since = sinceApple, pinnedDates == nil {
+            // A pinned date is already at or after any `since` the caller
+            // applied when it computed the date, so repeating the bound would
+            // only cost another term.
+            sinceClause = "\n                  AND m2.date >= ?"
             params.append(since)
         }
 
         let unreadClause = onlyUnreadInbound
-            ? "\n    AND m.is_read = 0 AND m.is_from_me = 0"
+            ? "\n                  AND m2.is_read = 0 AND m2.is_from_me = 0"
             : ""
 
-        let sql = """
-            SELECT chat_id, text, attributedBody, is_from_me, sender_handle, date, message_id FROM (
-                SELECT cmj.chat_id as chat_id, m.text, m.attributedBody, m.is_from_me,
-                       h.id as sender_handle, m.date, m.ROWID as message_id,
-                       ROW_NUMBER() OVER (PARTITION BY cmj.chat_id ORDER BY m.date DESC) as rn
-                FROM message m
-                JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
+        // One correlated LIMIT 1 per requested chat. The previous form ranked
+        // every message in every requested chat with ROW_NUMBER() and then kept
+        // rank 1, so a caller asking for 20 chats sorted tens of thousands of
+        // rows to return 20. Ordering on m2.date (not the cached
+        // chat_message_join.message_date) keeps message.date as the single
+        // source of truth for recency.
+        // Both forms pick the same row: newest date first, highest ROWID to
+        // break a tie. The pinned form states the date instead of sorting to
+        // find it, which lets the message(date) index do the work; ordering
+        // still runs on message.date rather than the cached copy in
+        // chat_message_join, so message.date stays the source of truth.
+        let sql: String
+        if pinnedDates != nil {
+            sql = """
+                WITH ids(chat_id, newest_date) AS (VALUES \(idRows))
+                SELECT i.chat_id, m.text, m.attributedBody, m.is_from_me,
+                       h.id as sender_handle, m.date, m.ROWID as message_id
+                FROM ids i
+                JOIN message m ON m.ROWID = (
+                    SELECT cmj.message_id
+                    FROM chat_message_join cmj
+                    JOIN message m2 ON m2.ROWID = cmj.message_id
+                    WHERE cmj.chat_id = i.chat_id
+                      AND m2.associated_message_type = 0
+                      AND m2.date = i.newest_date\(unreadClause)
+                    ORDER BY m2.ROWID DESC
+                    LIMIT 1
+                )
                 LEFT JOIN handle h ON m.handle_id = h.ROWID
-                WHERE cmj.chat_id IN (\(placeholders))\(sinceClause)\(unreadClause)
-                AND m.associated_message_type = 0
-            ) WHERE rn = 1
-            """
+                """
+        } else {
+            sql = """
+                WITH ids(chat_id) AS (VALUES \(idRows))
+                SELECT i.chat_id, m.text, m.attributedBody, m.is_from_me,
+                       h.id as sender_handle, m.date, m.ROWID as message_id
+                FROM ids i
+                JOIN message m ON m.ROWID = (
+                    SELECT cmj.message_id
+                    FROM chat_message_join cmj
+                    JOIN message m2 ON m2.ROWID = cmj.message_id
+                    WHERE cmj.chat_id = i.chat_id
+                      AND m2.associated_message_type = 0\(sinceClause)\(unreadClause)
+                    ORDER BY m2.date DESC, m2.ROWID DESC
+                    LIMIT 1
+                )
+                LEFT JOIN handle h ON m.handle_id = h.ROWID
+                """
+        }
 
         struct RawRow {
             let chatId: Int64

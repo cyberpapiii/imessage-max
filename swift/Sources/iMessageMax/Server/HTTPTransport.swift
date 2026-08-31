@@ -66,7 +66,7 @@ public actor HTTPTransport: Transport {
         resolver: ContactResolver,
         logger: Logger? = nil,
         requestTimeout: Duration = .seconds(300),
-        maxSessions: Int = 100
+        maxSessions: Int = 512
     ) {
         self.host = host
         self.port = port
@@ -307,6 +307,26 @@ public actor HTTPTransport: Transport {
             )
         }
 
+        // A `tools/call` needs nothing that the session's own Server holds:
+        // handlers live in the process-wide registry and the result fields are
+        // identical in both eras. Answering it here skips routing the request
+        // into the SDK, which re-encodes the whole response through Codable
+        // `Value` on the way out. That round-trip cost about 9 ms of the 26 ms
+        // a 12 kB list_chats reply took on this lane. Anything malformed falls
+        // through to the SDK, which owns the error wording.
+        if messageType == .request,
+            (json["method"] as? String) == "tools/call",
+            let params = json["params"] as? [String: Any],
+            let toolName = params["name"] as? String
+        {
+            return await legacyToolCallResponse(
+                id: json["id"] ?? NSNull(),
+                name: toolName,
+                arguments: ToolCallDispatch.decodeArguments(params["arguments"]),
+                headers: responseHeaders
+            )
+        }
+
         // Handle based on message type
         switch messageType {
         case .request:
@@ -382,6 +402,59 @@ public actor HTTPTransport: Transport {
             )
 
         }
+    }
+
+
+    /// Legacy-era `tools/call`, answered without the session's Server.
+    ///
+    /// The envelope mirrors what the SDK's CallTool handler produced: `content`
+    /// always, `structuredContent` only for a single JSON-object text block,
+    /// `isError` only when the tool failed, and an unknown tool as a
+    /// method-not-found error rather than a result.
+    private func legacyToolCallResponse(
+        id: Any,
+        name: String,
+        arguments: [String: Value]?,
+        headers: HTTPFields
+    ) async -> Response {
+        let outcome = await ToolCallDispatch.perform(name: name, arguments: arguments)
+
+        let envelope: [String: Any]
+        switch outcome {
+        case .unknownTool:
+            let detail = "Unknown tool: \(name)"
+            envelope = [
+                "jsonrpc": "2.0",
+                "id": id,
+                "error": [
+                    "code": -32601,
+                    "message": "Method not found: \(detail)",
+                    "data": ["detail": detail],
+                ],
+            ]
+        case .completed(let outcome):
+            envelope = [
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": ToolCallDispatch.resultJSON(outcome),
+            ]
+        }
+
+        guard let data = try? JSONSerialization.data(withJSONObject: envelope) else {
+            FileHandle.standardError.write(
+                Data("[iMessage Max] legacy tools/call serialization failed for \(name)\n".utf8)
+            )
+            return errorResponse(
+                status: .internalServerError,
+                message: ClientErrorMessages.internalError
+            )
+        }
+
+        return Response(
+            status: .ok,
+            headers: headers,
+            body: .init(byteBuffer: ByteBuffer(data: data))
+        )
     }
 
     // MARK: - Modern era (2026-07-28)

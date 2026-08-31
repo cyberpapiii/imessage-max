@@ -226,36 +226,21 @@ enum ModernDispatcher {
             )
         }
 
-        guard let handler = ToolHandlerRegistry.shared.getHandler(for: name) else {
+        let arguments = ToolCallDispatch.decodeArguments(params["arguments"])
+
+        switch await ToolCallDispatch.perform(name: name, arguments: arguments) {
+        case .unknownTool:
             return errorResult(
                 id: id,
                 code: ErrorCode.invalidParams,
                 message: "Unknown tool: \(name)",
                 httpStatus: 400
             )
+        case .completed(let outcome):
+            var result = completeResult()
+            result.merge(ToolCallDispatch.resultJSON(outcome)) { _, new in new }
+            return successResult(id: id, result: result)
         }
-
-        let arguments = decodeArguments(params["arguments"])
-
-        var result = completeResult()
-        do {
-            let content = try await handler(arguments)
-            result["content"] = contentJSON(content)
-            if let structured = structuredContentJSON(from: content) {
-                result["structuredContent"] = structured
-            }
-        } catch let error as ToolError {
-            result["content"] = contentJSON(error.content)
-            result["isError"] = true
-        } catch {
-            result["content"] = contentJSON([
-                .plainText(
-                    "Error: \(ClientErrorMessages.internalDetail(error, context: "Tool execution"))"
-                )
-            ])
-            result["isError"] = true
-        }
-        return successResult(id: id, result: result)
     }
 
     // MARK: - Serialization helpers
@@ -308,39 +293,6 @@ enum ModernDispatcher {
         }
         catalogCache.store(tools: json, version: currentVersion)
         return json
-    }
-
-    private static func contentJSON(_ content: [Tool.Content]) -> [[String: Any]] {
-        guard let data = try? JSONEncoder().encode(content),
-            let json = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
-        else {
-            // Shape safety still demands an array, but never silently: an
-            // empty content array turns a successful tool call into an
-            // empty-content success.
-            FileHandle.standardError.write(
-                Data("[iMessage Max] modern contentJSON encode failed; returning empty content\n".utf8)
-            )
-            return []
-        }
-        return json
-    }
-
-    /// Mirrors the legacy CallTool handler: a single JSON-object text content
-    /// doubles as structuredContent.
-    private static func structuredContentJSON(from content: [Tool.Content]) -> Any? {
-        guard content.count == 1,
-            case .text(let text, _, _) = content[0],
-            let json = try? JSONSerialization.jsonObject(with: Data(text.utf8))
-        else { return nil }
-        return json
-    }
-
-    private static func decodeArguments(_ raw: Any?) -> [String: Value]? {
-        guard let raw = raw as? [String: Any] else { return nil }
-        guard let data = try? JSONSerialization.data(withJSONObject: raw),
-            let decoded = try? JSONDecoder().decode([String: Value].self, from: data)
-        else { return nil }
-        return decoded
     }
 
     private static func successResult(id: Any, result: [String: Any]) -> ModernDispatchResult {
