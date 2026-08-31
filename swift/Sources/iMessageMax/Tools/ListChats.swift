@@ -381,10 +381,21 @@ enum ListChatsTool {
                 chatIds: chatIds,
                 resolver: resolver
             )
+            // The page query already found each chat's newest message date, so
+            // the preview lookup can seek straight to it instead of searching
+            // the chat's history again. Sorts that skip the aggregate have no
+            // dates to give and fall back to the search.
+            var newestDates: [Int64: Int64] = [:]
+            for chatRow in chatRows {
+                if let date = chatRow.lastMessageDate {
+                    newestDates[chatRow.id] = date
+                }
+            }
             let lastMessagesByChat = try await ChatSummaryQueries.lastMessagesByChat(
                 db: db,
                 chatIds: chatIds,
-                resolver: resolver
+                resolver: resolver,
+                newestDates: newestDates
             )
 
             var chats: [ChatInfo] = []

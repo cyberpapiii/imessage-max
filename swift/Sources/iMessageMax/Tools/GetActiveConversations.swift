@@ -235,6 +235,15 @@ enum GetActiveConversations {
             chatIds: chatIds,
             resolver: resolver
         )
+        // last_in_window is the newest qualifying date the activity query
+        // already computed for each chat, which is exactly the message this
+        // preview is looking for.
+        var newestInWindow: [Int64: Int64] = [:]
+        for row in includedRows {
+            if let last = row.lastInWindow {
+                newestInWindow[row.chatId] = last
+            }
+        }
         let lastMessagesByChat = try await ChatSummaryQueries.lastMessagesByChat(
             db: database,
             chatIds: chatIds,
@@ -242,7 +251,8 @@ enum GetActiveConversations {
             sinceApple: windowStartApple,
             previewMaxLength: 80,
             unknownSenderLabel: "Unknown",
-            agoFallback: nil
+            agoFallback: nil,
+            newestDates: newestInWindow
         )
 
         var conversations: [ActiveConversation] = []

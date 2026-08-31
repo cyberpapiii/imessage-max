@@ -103,14 +103,41 @@ enum ChatSummaryQueries {
         previewMaxLength: Int = 50,
         unknownSenderLabel: String = "unknown",
         agoFallback: String? = "unknown",
-        onlyUnreadInbound: Bool = false
+        onlyUnreadInbound: Bool = false,
+        newestDates: [Int64: Int64]? = nil
     ) async throws -> [Int64: LastMessage] {
         guard !chatIds.isEmpty else { return [:] }
 
-        let idRows = chatIds.map { _ in "(?)" }.joined(separator: ",")
+        // A caller that already knows each chat's newest qualifying date can
+        // hand it over, and the lookup becomes a seek into message(date)
+        // instead of a walk over everything the chat has ever held. Only used
+        // when every requested chat has a date, so a single statement covers
+        // the batch, and never for the unread lookup, whose newest inbound
+        // unread message is not the chat's newest message.
+        let pinnedDates: [Int64]? = {
+            guard !onlyUnreadInbound, let newestDates else { return nil }
+            let pins = chatIds.compactMap { newestDates[$0] }
+            return pins.count == chatIds.count ? pins : nil
+        }()
+
+        var params: [Any] = []
+        let idRows: String
+        if let pinnedDates {
+            idRows = chatIds.map { _ in "(?,?)" }.joined(separator: ",")
+            for (chatId, date) in zip(chatIds, pinnedDates) {
+                params.append(chatId)
+                params.append(date)
+            }
+        } else {
+            idRows = chatIds.map { _ in "(?)" }.joined(separator: ",")
+            params.append(contentsOf: chatIds.map { $0 as Any })
+        }
+
         var sinceClause = ""
-        var params: [Any] = chatIds.map { $0 as Any }
-        if let since = sinceApple {
+        if let since = sinceApple, pinnedDates == nil {
+            // A pinned date is already at or after any `since` the caller
+            // applied when it computed the date, so repeating the bound would
+            // only cost another term.
             sinceClause = "\n                  AND m2.date >= ?"
             params.append(since)
         }
@@ -125,22 +152,48 @@ enum ChatSummaryQueries {
         // rows to return 20. Ordering on m2.date (not the cached
         // chat_message_join.message_date) keeps message.date as the single
         // source of truth for recency.
-        let sql = """
-            WITH ids(chat_id) AS (VALUES \(idRows))
-            SELECT i.chat_id, m.text, m.attributedBody, m.is_from_me,
-                   h.id as sender_handle, m.date, m.ROWID as message_id
-            FROM ids i
-            JOIN message m ON m.ROWID = (
-                SELECT cmj.message_id
-                FROM chat_message_join cmj
-                JOIN message m2 ON m2.ROWID = cmj.message_id
-                WHERE cmj.chat_id = i.chat_id
-                  AND m2.associated_message_type = 0\(sinceClause)\(unreadClause)
-                ORDER BY m2.date DESC, m2.ROWID DESC
-                LIMIT 1
-            )
-            LEFT JOIN handle h ON m.handle_id = h.ROWID
-            """
+        // Both forms pick the same row: newest date first, highest ROWID to
+        // break a tie. The pinned form states the date instead of sorting to
+        // find it, which lets the message(date) index do the work; ordering
+        // still runs on message.date rather than the cached copy in
+        // chat_message_join, so message.date stays the source of truth.
+        let sql: String
+        if pinnedDates != nil {
+            sql = """
+                WITH ids(chat_id, newest_date) AS (VALUES \(idRows))
+                SELECT i.chat_id, m.text, m.attributedBody, m.is_from_me,
+                       h.id as sender_handle, m.date, m.ROWID as message_id
+                FROM ids i
+                JOIN message m ON m.ROWID = (
+                    SELECT cmj.message_id
+                    FROM chat_message_join cmj
+                    JOIN message m2 ON m2.ROWID = cmj.message_id
+                    WHERE cmj.chat_id = i.chat_id
+                      AND m2.associated_message_type = 0
+                      AND m2.date = i.newest_date
+                    ORDER BY m2.ROWID DESC
+                    LIMIT 1
+                )
+                LEFT JOIN handle h ON m.handle_id = h.ROWID
+                """
+        } else {
+            sql = """
+                WITH ids(chat_id) AS (VALUES \(idRows))
+                SELECT i.chat_id, m.text, m.attributedBody, m.is_from_me,
+                       h.id as sender_handle, m.date, m.ROWID as message_id
+                FROM ids i
+                JOIN message m ON m.ROWID = (
+                    SELECT cmj.message_id
+                    FROM chat_message_join cmj
+                    JOIN message m2 ON m2.ROWID = cmj.message_id
+                    WHERE cmj.chat_id = i.chat_id
+                      AND m2.associated_message_type = 0\(sinceClause)\(unreadClause)
+                    ORDER BY m2.date DESC, m2.ROWID DESC
+                    LIMIT 1
+                )
+                LEFT JOIN handle h ON m.handle_id = h.ROWID
+                """
+        }
 
         struct RawRow {
             let chatId: Int64
