@@ -92,7 +92,12 @@ final class DatabaseErrorHandlingTests: XCTestCase {
         }
 
         let before = liveMallocBytes()
-        let calls = 200
+        // malloc_zone_statistics is process-wide, so other tests running in the
+        // same process contribute ~150 KiB of ambient growth over this test's
+        // lifetime. 200 calls put the leak signal (~285 KiB) too close to that
+        // noise floor and the assertion flaked in full-suite runs. 2000 calls
+        // raise the signal to ~2.8 MiB while the noise floor is unchanged.
+        let calls = 2000
         var deniedCount = 0
         for _ in 0..<calls {
             // Plain do/catch inside an autoreleasepool: XCTAssert* helpers
@@ -110,11 +115,11 @@ final class DatabaseErrorHandlingTests: XCTestCase {
         let growth = liveMallocBytes() - before
         XCTAssertEqual(deniedCount, calls, "expected every query to fail permission_denied")
 
-        // Pre-fix this retained ~1.4 KiB per failed open (~285 KB across the
-        // measured calls; post-fix delta is 0). The threshold leaves room for
-        // allocator noise while still catching any per-call retention.
+        // Pre-fix this retained ~1.4 KiB per failed open (~2.8 MiB across the
+        // measured calls; post-fix delta is 0). The threshold sits well above
+        // the observed ambient noise and well below the leak signal.
         XCTAssertLessThan(
-            growth, 64 * 1024,
+            growth, 1024 * 1024,
             "live malloc bytes grew \(growth) across \(calls) failed opens; "
                 + "failed sqlite3_open_v2 handles are not being closed"
         )
