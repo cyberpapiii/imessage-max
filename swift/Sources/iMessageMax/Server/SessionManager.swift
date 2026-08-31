@@ -48,6 +48,10 @@ actor SessionManager {
     /// Maximum number of concurrent sessions
     private let maxSessions: Int
 
+    /// Idle span after which a session is reclaimed to admit a new client
+    /// when the table is full.
+    private let reclaimableIdle: TimeInterval
+
     /// Task for periodic cleanup
     private var cleanupTask: Task<Void, Never>?
 
@@ -67,16 +71,21 @@ actor SessionManager {
     ///   - sessionTimeout: idle TTL before a session is reaped. Production
     ///     uses the 3600s default; tests shrink it to exercise cleanup.
     ///   - maxSessions: concurrent-session cap. Production uses the default.
+    ///   - reclaimableIdle: idle span after which a session may be reclaimed
+    ///     to admit a new client once the cap is reached. Production uses the
+    ///     default; tests shrink it to reach the reclaim path.
     init(
         database: Database,
         resolver: ContactResolver,
         sessionTimeout: TimeInterval = 3600,
-        maxSessions: Int = 100
+        maxSessions: Int = 100,
+        reclaimableIdle: TimeInterval = 300
     ) {
         self.database = database
         self.resolver = resolver
         self.sessionTimeout = sessionTimeout
         self.maxSessions = maxSessions
+        self.reclaimableIdle = reclaimableIdle
     }
 
     deinit {
@@ -99,6 +108,10 @@ actor SessionManager {
     func createSession(
         protocolVersion: String = MCPProtocolVersion.defaultAssumed
     ) async -> SessionCreationResult {
+        if sessions.count >= maxSessions {
+            reclaimIdleSessions()
+        }
+
         guard sessions.count < maxSessions else {
             return .atCapacity  // Caller returns 503 Service Unavailable
         }
@@ -248,6 +261,27 @@ actor SessionManager {
                 await AsyncTimeout.sleep(.seconds(300))  // Run every 5 minutes
                 await self?.cleanupExpiredSessions()
             }
+        }
+    }
+
+    /// Removes sessions idle long enough to be presumed abandoned.
+    ///
+    /// A client that disappears without sending DELETE leaves its session
+    /// behind for the full `sessionTimeout`, and the sweep that removes it
+    /// only runs every five minutes. Without this, a table full of abandoned
+    /// sessions refuses every new client for up to an hour, and the only
+    /// recovery is restarting the service. A live client touches its session
+    /// far more often than the reclaim window, so anything staler is a client
+    /// that went away. This runs only under capacity pressure, so a quiet but
+    /// live session is left alone while there is room.
+    private func reclaimIdleSessions() {
+        let now = Date()
+        let idleIds = sessions.filter { _, session in
+            now.timeIntervalSince(session.lastActivity) > reclaimableIdle
+        }.map(\.key)
+
+        for id in idleIds {
+            terminateSession(sessionId: id)
         }
     }
 
