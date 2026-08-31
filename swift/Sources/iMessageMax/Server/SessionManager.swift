@@ -71,6 +71,10 @@ actor SessionManager {
     ///   - sessionTimeout: idle TTL before a session is reaped. Production
     ///     uses the 3600s default; tests shrink it to exercise cleanup.
     ///   - maxSessions: concurrent-session cap. Production uses the default.
+    ///     A session costs about half a kilobyte of resident memory (measured
+    ///     across 100 live sessions), so the cap is a guard against runaway
+    ///     clients rather than a resource limit; 100 turned a fleet of agents
+    ///     that each open their own session into 503s within seconds.
     ///   - reclaimableIdle: idle span after which a session may be reclaimed
     ///     to admit a new client once the cap is reached. Production uses the
     ///     default; tests shrink it to reach the reclaim path.
@@ -78,7 +82,7 @@ actor SessionManager {
         database: Database,
         resolver: ContactResolver,
         sessionTimeout: TimeInterval = 3600,
-        maxSessions: Int = 100,
+        maxSessions: Int = 512,
         reclaimableIdle: TimeInterval = 300
     ) {
         self.database = database

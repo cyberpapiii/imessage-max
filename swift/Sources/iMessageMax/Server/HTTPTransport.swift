@@ -66,7 +66,7 @@ public actor HTTPTransport: Transport {
         resolver: ContactResolver,
         logger: Logger? = nil,
         requestTimeout: Duration = .seconds(300),
-        maxSessions: Int = 100
+        maxSessions: Int = 512
     ) {
         self.host = host
         self.port = port
