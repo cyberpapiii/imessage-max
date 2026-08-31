@@ -181,22 +181,42 @@ enum ListChatsTool {
         }
 
         do {
+            let sinceApple = since.flatMap(AppleTime.parse)
+
+            // Message totals come from a per-chat aggregate subquery rather than
+            // joining chat_handle_join and message in the same FROM. Joining both
+            // multiplies each chat's rows by its participant count, which both
+            // inflated message_count (and therefore the most_active sort) and
+            // forced SQLite to aggregate participants x messages for every chat.
+            let messageAggregate = """
+                (SELECT cmj.chat_id AS chat_id,
+                        COUNT(*) AS message_count,
+                        MAX(m.date) AS last_message_date
+                 FROM chat_message_join cmj
+                 JOIN message m ON m.ROWID = cmj.message_id
+                 WHERE m.associated_message_type = 0\(sinceApple != nil ? "\n                   AND m.date >= ?" : "")
+                 GROUP BY cmj.chat_id) msg ON msg.chat_id = c.ROWID
+                """
+
             let qb = QueryBuilder()
             qb.select(
                 "c.ROWID as id",
                 "c.guid",
                 "c.display_name",
-                "COUNT(DISTINCT chj.handle_id) as participant_count",
-                "COUNT(m.ROWID) as message_count",
-                "MAX(m.date) as last_message_date"
+                "(SELECT COUNT(DISTINCT chj.handle_id) FROM chat_handle_join chj"
+                    + " WHERE chj.chat_id = c.ROWID) as participant_count",
+                "COALESCE(msg.message_count, 0) as message_count",
+                "msg.last_message_date as last_message_date"
             )
             .from("chat c")
-            .leftJoin("chat_handle_join chj ON c.ROWID = chj.chat_id")
-            .leftJoin("chat_message_join cmj ON c.ROWID = cmj.chat_id")
-            .leftJoin("message m ON cmj.message_id = m.ROWID AND m.associated_message_type = 0")
 
-            if let since = since, let sinceApple = AppleTime.parse(since) {
-                qb.where("m.date >= ?", sinceApple)
+            if let sinceApple {
+                // `since` previously filtered the joined message rows in WHERE,
+                // which dropped chats with no activity in the window. An inner
+                // join keeps that behavior.
+                qb.join(messageAggregate, sinceApple)
+            } else {
+                qb.leftJoin(messageAggregate)
             }
 
             qb.groupBy("c.ROWID")

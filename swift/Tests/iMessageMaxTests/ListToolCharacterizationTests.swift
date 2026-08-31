@@ -316,4 +316,149 @@ final class ListToolCharacterizationTests: XCTestCase {
             "awaiting_reply should be true when last-from-them is more recent than last-from-me"
         )
     }
+
+    // MARK: - Participant fan-out regression
+
+    // Both list tools used to join chat_handle_join alongside the message
+    // tables, which multiplied every chat's message rows by its participant
+    // count. Group chats reported inflated totals; DM fixtures hid it because
+    // one participant multiplies by one. These two fixtures use group chats.
+
+    private func makeFanOutFixture() throws -> ToolTestDatabase {
+        let fixture = try ToolTestDatabase(name: "participant-fan-out")
+
+        try fixture.insertHandle(rowId: 1, handle: "+15550000001")
+        try fixture.insertHandle(rowId: 2, handle: "+15550000002")
+        try fixture.insertHandle(rowId: 3, handle: "+15550000003")
+
+        // Chat 1: DM, 3 messages.
+        try fixture.insertChat(rowId: 1, guid: "iMessage;-;fanout-dm")
+        try fixture.joinChatHandle(chatId: 1, handleId: 1)
+
+        // Chat 2: group of 3, only 2 messages. Fewer messages than chat 1, but
+        // the old query counted 2 x 3 = 6 and ranked it first for most_active.
+        try fixture.insertChat(rowId: 2, guid: "iMessage;+;fanout-group", displayName: "Fan Out")
+        try fixture.joinChatHandle(chatId: 2, handleId: 1)
+        try fixture.joinChatHandle(chatId: 2, handleId: 2)
+        try fixture.joinChatHandle(chatId: 2, handleId: 3)
+
+        let base: Int64 = 6_000_000_000_000
+        let sec: Int64 = 1_000_000_000
+
+        for i in 0..<3 {
+            let id = 300 + i
+            try fixture.insertMessage(
+                rowId: id,
+                guid: "fanout-dm-\(id)",
+                text: "dm \(i)",
+                date: base + Int64(i) * sec,
+                isFromMe: false,
+                handleId: 1
+            )
+            try fixture.joinChatMessage(chatId: 1, messageId: id)
+        }
+
+        for i in 0..<2 {
+            let id = 400 + i
+            try fixture.insertMessage(
+                rowId: id,
+                guid: "fanout-group-\(id)",
+                text: "group \(i)",
+                date: base + Int64(10 + i) * sec,
+                isFromMe: false,
+                handleId: 2
+            )
+            try fixture.joinChatMessage(chatId: 2, messageId: id)
+        }
+
+        return fixture
+    }
+
+    func testListChatsMostActiveIsNotInflatedByParticipantCount() async throws {
+        let fixture = try makeFanOutFixture()
+
+        let result = await ListChatsTool.execute(
+            limit: 10,
+            sort: "most_active",
+            db: fixture.database(),
+            resolver: makeSeededResolver()
+        )
+
+        guard case .success(let response) = result else {
+            return XCTFail("list_chats failed")
+        }
+
+        XCTAssertEqual(
+            response.chats.map(\.id),
+            ["chat1", "chat2"],
+            "The 3-message DM outranks the 2-message group; participant count must not scale message_count"
+        )
+    }
+
+    private func makeGroupActivityFixture() throws -> ToolTestDatabase {
+        let fixture = try ToolTestDatabase(name: "group-activity")
+
+        try fixture.insertHandle(rowId: 1, handle: "+15550000001")
+        try fixture.insertHandle(rowId: 2, handle: "+15550000002")
+        try fixture.insertHandle(rowId: 3, handle: "+15550000003")
+
+        // Group of 3 with 2 messages each direction.
+        try fixture.insertChat(rowId: 20, guid: "iMessage;+;group-activity", displayName: "Group Activity")
+        try fixture.joinChatHandle(chatId: 20, handleId: 1)
+        try fixture.joinChatHandle(chatId: 20, handleId: 2)
+        try fixture.joinChatHandle(chatId: 20, handleId: 3)
+
+        let now = Int64(Date().timeIntervalSinceReferenceDate * 1_000_000_000)
+        let sec: Int64 = 1_000_000_000
+
+        for i in 0..<2 {
+            let id = 500 + i
+            try fixture.insertMessage(
+                rowId: id,
+                guid: "group-me-\(id)",
+                text: "mine \(i)",
+                date: now - Int64(20 - i) * sec,
+                isFromMe: true
+            )
+            try fixture.joinChatMessage(chatId: 20, messageId: id)
+        }
+
+        for i in 0..<2 {
+            let id = 600 + i
+            try fixture.insertMessage(
+                rowId: id,
+                guid: "group-them-\(id)",
+                text: "theirs \(i)",
+                date: now - Int64(10 - i) * sec,
+                isFromMe: false,
+                handleId: 1
+            )
+            try fixture.joinChatMessage(chatId: 20, messageId: id)
+        }
+
+        return fixture
+    }
+
+    func testActiveConversationsCountsAreNotInflatedByParticipantCount() async throws {
+        let fixture = try makeGroupActivityFixture()
+
+        let result = try await GetActiveConversations.execute(
+            hours: 24,
+            minExchanges: 1,
+            isGroup: nil,
+            limit: 10,
+            database: fixture.database(),
+            resolver: makeSeededResolver()
+        )
+
+        let convo = try XCTUnwrap(
+            result.conversations.first(where: { $0.id == "chat20" }),
+            "Expected chat20 in active conversations"
+        )
+
+        XCTAssertEqual(convo.participantCount, 3)
+        XCTAssertEqual(convo.activity.myMsgs, 2, "2 messages from me, not 2 x 3 participants")
+        XCTAssertEqual(convo.activity.theirMsgs, 2, "2 messages from them, not 2 x 3 participants")
+        XCTAssertEqual(convo.activity.exchanges, 2)
+    }
 }

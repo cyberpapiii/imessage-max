@@ -170,7 +170,8 @@ enum GetActiveConversations {
             SELECT
                 c.ROWID as chat_id,
                 c.display_name,
-                COUNT(DISTINCT chj.handle_id) as participant_count,
+                (SELECT COUNT(DISTINCT chj.handle_id) FROM chat_handle_join chj
+                 WHERE chj.chat_id = c.ROWID) as participant_count,
                 SUM(CASE WHEN m.is_from_me = 1 THEN 1 ELSE 0 END) as my_count,
                 SUM(CASE WHEN m.is_from_me = 0 THEN 1 ELSE 0 END) as their_count,
                 MAX(CASE WHEN m.is_from_me = 1 THEN m.date ELSE NULL END) as last_from_me,
@@ -178,7 +179,6 @@ enum GetActiveConversations {
                 MIN(m.date) as first_in_window,
                 MAX(m.date) as last_in_window
             FROM chat c
-            LEFT JOIN chat_handle_join chj ON c.ROWID = chj.chat_id
             JOIN chat_message_join cmj ON c.ROWID = cmj.chat_id
             JOIN message m ON cmj.message_id = m.ROWID
             WHERE m.date >= ?

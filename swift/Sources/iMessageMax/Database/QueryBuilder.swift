@@ -4,7 +4,7 @@ import Foundation
 final class QueryBuilder {
     private var selectCols: [String] = []
     private var fromTable: String = ""
-    private var joins: [String] = []
+    private var joins: [(String, [Any])] = []
     private var conditions: [(String, [Any])] = []
     private var groupByCols: [String] = []
     private var havingConditions: [(String, [Any])] = []
@@ -24,14 +24,14 @@ final class QueryBuilder {
     }
 
     @discardableResult
-    func join(_ clause: String) -> QueryBuilder {
-        joins.append("JOIN \(clause)")
+    func join(_ clause: String, _ params: Any...) -> QueryBuilder {
+        joins.append(("JOIN \(clause)", params))
         return self
     }
 
     @discardableResult
-    func leftJoin(_ clause: String) -> QueryBuilder {
-        joins.append("LEFT JOIN \(clause)")
+    func leftJoin(_ clause: String, _ params: Any...) -> QueryBuilder {
+        joins.append(("LEFT JOIN \(clause)", params))
         return self
     }
 
@@ -71,7 +71,12 @@ final class QueryBuilder {
 
         parts.append("SELECT \(selectCols.joined(separator: ", "))")
         parts.append("FROM \(fromTable)")
-        parts.append(contentsOf: joins)
+        // Join params bind before WHERE params: a join clause may carry a
+        // parameterized subquery, and SQLite binds by position in SQL order.
+        for (clause, params) in joins {
+            parts.append(clause)
+            allParams.append(contentsOf: params)
+        }
 
         if !conditions.isEmpty {
             let whereClauses = conditions.map { $0.0 }
