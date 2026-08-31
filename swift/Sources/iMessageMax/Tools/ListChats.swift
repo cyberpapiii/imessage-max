@@ -188,111 +188,187 @@ enum ListChatsTool {
             // multiplies each chat's rows by its participant count, which both
             // inflated message_count (and therefore the most_active sort) and
             // forced SQLite to aggregate participants x messages for every chat.
-            let messageAggregate = """
-                (SELECT cmj.chat_id AS chat_id,
-                        COUNT(*) AS message_count,
-                        MAX(m.date) AS last_message_date
-                 FROM chat_message_join cmj
-                 JOIN message m ON m.ROWID = cmj.message_id
-                 WHERE m.associated_message_type = 0\(sinceApple != nil ? "\n                   AND m.date >= ?" : "")
-                 GROUP BY cmj.chat_id) msg ON msg.chat_id = c.ROWID
-                """
+            //
+            // The aggregate walks every non-reaction message in the database,
+            // so it is only worth paying for when the answer depends on it.
+            // Neither message_count nor last_message_date reaches the response:
+            // the last-message preview comes from ChatSummaryQueries. They are
+            // ordering and cursor keys, and the alphabetical sort orders and
+            // pages by name, so it needs neither. `since` still does, because
+            // it decides which chats appear at all.
+            let needsMessageAggregate = sinceApple != nil || sortOrder != .alphabetical
 
-            let qb = QueryBuilder()
-            qb.select(
-                "c.ROWID as id",
-                "c.guid",
-                "c.display_name",
-                "(SELECT COUNT(DISTINCT chj.handle_id) FROM chat_handle_join chj"
-                    + " WHERE chj.chat_id = c.ROWID) as participant_count",
-                "COALESCE(msg.message_count, 0) as message_count",
-                "msg.last_message_date as last_message_date"
-            )
-            .from("chat c")
+            let recentCursorDate: Int64? = sortOrder == .recent
+                ? cursor.flatMap(ChatListCursor.decode)?.primary
+                : nil
 
-            if let sinceApple {
-                // `since` previously filtered the joined message rows in WHERE,
-                // which dropped chats with no activity in the window. An inner
-                // join keeps that behavior.
-                qb.join(messageAggregate, sinceApple)
-            } else {
-                qb.leftJoin(messageAggregate)
-            }
-
-            qb.groupBy("c.ROWID")
-
-            if let minP = minParticipants {
-                qb.having("participant_count >= ?", minP)
-            }
-            if let maxP = maxParticipants {
-                qb.having("participant_count <= ?", maxP)
-            }
-            if let isGroup = isGroup {
-                if isGroup {
-                    qb.having("participant_count > 1")
-                } else {
-                    qb.having("participant_count <= 1")
+            /// Builds the page query, optionally bounding the aggregate to the
+            /// newest `candidateWidth` messages.
+            func buildPageQuery(candidateWidth: Int?) -> (String, [Any]) {
+                var innerFilter = "m.associated_message_type = 0"
+                var innerParams: [Any] = []
+                if let sinceApple {
+                    innerFilter += "\n                       AND m.date >= ?"
+                    innerParams.append(sinceApple)
                 }
-            }
 
-            if let cursor, let decoded = ChatListCursor.decode(cursor) {
-                switch sortOrder {
-                case .recent:
-                    qb.having(
-                        "(last_message_date < ? OR (last_message_date = ? AND c.ROWID < ?))",
-                        decoded.primary, decoded.primary, decoded.chatId
-                    )
-                case .mostActive:
-                    // primary = message_count, secondary = last_message_date
-                    let lastDate = decoded.secondary ?? 0
+                let messageAggregate: String
+                if let candidateWidth {
+                    // The inner scan takes a date-ordered prefix, so every chat
+                    // it surfaces has its own newest message inside that prefix
+                    // and MAX(dt) is that chat's true last-message date. The
+                    // recent cursor deliberately does NOT push down into the
+                    // scan: narrowing it to messages at or before the cursor
+                    // would truncate the maximum for any chat with messages on
+                    // both sides of it, and that chat would then re-appear on a
+                    // later page it had already been returned on.
+                    messageAggregate = """
+                        (SELECT chat_id, 0 AS message_count, MAX(dt) AS last_message_date
+                         FROM (SELECT cmj.chat_id AS chat_id, m.date AS dt
+                               FROM chat_message_join cmj
+                               JOIN message m ON m.ROWID = cmj.message_id
+                               WHERE \(innerFilter)
+                               ORDER BY m.date DESC
+                               LIMIT \(candidateWidth))
+                         GROUP BY chat_id) msg ON msg.chat_id = c.ROWID
+                        """
+                } else {
+                    messageAggregate = """
+                        (SELECT cmj.chat_id AS chat_id,
+                                COUNT(*) AS message_count,
+                                MAX(m.date) AS last_message_date
+                         FROM chat_message_join cmj
+                         JOIN message m ON m.ROWID = cmj.message_id
+                         WHERE \(innerFilter)
+                         GROUP BY cmj.chat_id) msg ON msg.chat_id = c.ROWID
+                        """
+                }
+
+                let qb = QueryBuilder()
+                qb.select(
+                    "c.ROWID as id",
+                    "c.guid",
+                    "c.display_name",
+                    "(SELECT COUNT(DISTINCT chj.handle_id) FROM chat_handle_join chj"
+                        + " WHERE chj.chat_id = c.ROWID) as participant_count",
+                    needsMessageAggregate ? "COALESCE(msg.message_count, 0) as message_count" : "0 as message_count",
+                    needsMessageAggregate ? "msg.last_message_date as last_message_date" : "NULL as last_message_date"
+                )
+                .from("chat c")
+
+                if sinceApple != nil || candidateWidth != nil {
+                    // `since` previously filtered the joined message rows in
+                    // WHERE, which dropped chats with no activity in the window.
+                    // An inner join keeps that behavior. A bounded scan also
+                    // joins inward: a chat outside the candidate set has no
+                    // claim on this page, and the escalation below is what
+                    // brings it back when the page cannot be filled without it.
+                    qb.join(messageAggregate, params: innerParams)
+                } else if needsMessageAggregate {
+                    qb.leftJoin(messageAggregate)
+                }
+
+                qb.groupBy("c.ROWID")
+
+                if let minP = minParticipants {
+                    qb.having("participant_count >= ?", minP)
+                }
+                if let maxP = maxParticipants {
+                    qb.having("participant_count <= ?", maxP)
+                }
+                if let isGroup = isGroup {
+                    if isGroup {
+                        qb.having("participant_count > 1")
+                    } else {
+                        qb.having("participant_count <= 1")
+                    }
+                }
+
+                if let cursor, let decoded = ChatListCursor.decode(cursor) {
+                    switch sortOrder {
+                    case .recent:
+                        qb.having(
+                            "(last_message_date < ? OR (last_message_date = ? AND c.ROWID < ?))",
+                            decoded.primary, decoded.primary, decoded.chatId
+                        )
+                    case .mostActive:
+                        // primary = message_count, secondary = last_message_date
+                        let lastDate = decoded.secondary ?? 0
+                        qb.having(
+                            """
+                            (message_count < ?
+                             OR (message_count = ? AND last_message_date < ?)
+                             OR (message_count = ? AND last_message_date = ? AND c.ROWID < ?))
+                            """,
+                            decoded.primary, decoded.primary, lastDate,
+                            decoded.primary, lastDate, decoded.chatId
+                        )
+                    case .alphabetical:
+                        // primary unused; secondary unused — lexicographic via chat id only is unsafe.
+                        // Alphabetical cursor encodes name hash in primary as 0 and uses chatId with name HAVING.
+                        break
+                    }
+                }
+
+                // Alphabetical keyset: "name\\0chatId" stored as opaque string via ChatListCursor.name form.
+                if sortOrder == .alphabetical, let cursor, let nameCursor = ChatListCursor.decodeName(cursor) {
                     qb.having(
                         """
-                        (message_count < ?
-                         OR (message_count = ? AND last_message_date < ?)
-                         OR (message_count = ? AND last_message_date = ? AND c.ROWID < ?))
+                        (COALESCE(c.display_name, '') > ?
+                         OR (COALESCE(c.display_name, '') = ? AND c.ROWID > ?))
                         """,
-                        decoded.primary, decoded.primary, lastDate,
-                        decoded.primary, lastDate, decoded.chatId
+                        nameCursor.name, nameCursor.name, nameCursor.chatId
                     )
+                }
+
+                switch sortOrder {
+                case .recent:
+                    qb.orderBy("last_message_date DESC NULLS LAST", "c.ROWID DESC")
+                case .mostActive:
+                    qb.orderBy("message_count DESC", "last_message_date DESC NULLS LAST", "c.ROWID DESC")
                 case .alphabetical:
-                    // primary unused; secondary unused — lexicographic via chat id only is unsafe.
-                    // Alphabetical cursor encodes name hash in primary as 0 and uses chatId with name HAVING.
+                    qb.orderBy("COALESCE(c.display_name, '') ASC", "c.ROWID ASC")
+                }
+
+                qb.limit(clampedLimit + 1)
+
+                return qb.build()
+            }
+
+            // The recent sort orders chats by their newest message, so the
+            // newest K messages in the database name every chat that can lead
+            // the list. Grouping them gives candidates whose last-message dates
+            // are all at least as new as the K-th newest message, so any chat
+            // left out is older than every candidate: a full page drawn from
+            // them is exactly the page the unbounded aggregate would return.
+            // A short page means the participant filters thinned the candidates
+            // below a full page, and only then is a wider scan worth paying for.
+            // Every other sort needs the true aggregate and takes the last,
+            // unbounded entry directly.
+            // Paging is excluded because the cursor cannot narrow the scan
+            // (see buildPageQuery) while it does thin the page, so every deep
+            // page would climb the whole ladder before landing on the same
+            // unbounded query it starts from today.
+            let candidateWidths: [Int?] = sortOrder == .recent && recentCursorDate == nil
+                ? [2_000, 20_000, 200_000, nil]
+                : [nil]
+
+            var fetchedRows: [ChatRow] = []
+            for candidateWidth in candidateWidths {
+                let (sql, params) = buildPageQuery(candidateWidth: candidateWidth)
+                fetchedRows = try db.query(sql, params: params) { row in
+                    ChatRow(
+                        id: row.int(0),
+                        guid: row.string(1),
+                        displayName: row.string(2),
+                        participantCount: Int(row.int(3)),
+                        messageCount: row.int(4),
+                        lastMessageDate: row.optionalInt(5)
+                    )
+                }
+                if candidateWidth == nil || fetchedRows.count > clampedLimit {
                     break
                 }
-            }
-
-            // Alphabetical keyset: "name\\0chatId" stored as opaque string via ChatListCursor.name form.
-            if sortOrder == .alphabetical, let cursor, let nameCursor = ChatListCursor.decodeName(cursor) {
-                qb.having(
-                    """
-                    (COALESCE(c.display_name, '') > ?
-                     OR (COALESCE(c.display_name, '') = ? AND c.ROWID > ?))
-                    """,
-                    nameCursor.name, nameCursor.name, nameCursor.chatId
-                )
-            }
-
-            switch sortOrder {
-            case .recent:
-                qb.orderBy("last_message_date DESC NULLS LAST", "c.ROWID DESC")
-            case .mostActive:
-                qb.orderBy("message_count DESC", "last_message_date DESC NULLS LAST", "c.ROWID DESC")
-            case .alphabetical:
-                qb.orderBy("COALESCE(c.display_name, '') ASC", "c.ROWID ASC")
-            }
-
-            qb.limit(clampedLimit + 1)
-
-            let (sql, params) = qb.build()
-            let fetchedRows = try db.query(sql, params: params) { row in
-                ChatRow(
-                    id: row.int(0),
-                    guid: row.string(1),
-                    displayName: row.string(2),
-                    participantCount: Int(row.int(3)),
-                    messageCount: row.int(4),
-                    lastMessageDate: row.optionalInt(5)
-                )
             }
 
             let hasMore = fetchedRows.count > clampedLimit

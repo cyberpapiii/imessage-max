@@ -25,6 +25,13 @@ final class QueryBuilder {
 
     @discardableResult
     func join(_ clause: String, _ params: Any...) -> QueryBuilder {
+        join(clause, params: params)
+    }
+
+    /// Array form of `join`, for callers that build the join's bindings
+    /// conditionally and so cannot spell them out as variadic arguments.
+    @discardableResult
+    func join(_ clause: String, params: [Any]) -> QueryBuilder {
         joins.append(("JOIN \(clause)", params))
         return self
     }
