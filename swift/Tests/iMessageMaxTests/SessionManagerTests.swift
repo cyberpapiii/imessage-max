@@ -1,4 +1,5 @@
 import XCTest
+import MCP
 @testable import iMessageMax
 
 final class SessionManagerTests: XCTestCase {
@@ -46,5 +47,35 @@ final class SessionManagerTests: XCTestCase {
             2,
             "successes=\(created.count) atCapacity=\(atCapacity) startFailed=\(startFailed)"
         )
+    }
+
+    func testTerminateStopsServer() async {
+        let manager = SessionManager(
+            database: Database(),
+            resolver: ContactResolver(seedCache: [:]),
+            maxSessions: 2
+        )
+
+        let result = await manager.createSession()
+        guard case .created(let session) = result else {
+            return XCTFail("Session should be created, got \(result)")
+        }
+
+        await manager.terminateSession(sessionId: session.id)
+
+        do {
+            try await session.server.notify(
+                Message<InitializedNotification>(
+                    method: InitializedNotification.name,
+                    params: Empty()
+                )
+            )
+            XCTFail("Server.stop() should drop the transport so notify fails")
+        } catch {
+            // Expected: swift-sdk Server.stop() nils `connection`, so send throws.
+        }
+
+        let count = await manager.sessionCount
+        XCTAssertEqual(count, 0)
     }
 }

@@ -644,7 +644,8 @@ public actor HTTPTransport: Transport {
             )
         }
 
-        // Terminate session (this also stops its Server instance)
+        // Terminate the session: cancel its task, stop the SDK Server
+        // (2s bound), and drop it from the table. SSE is closed separately.
         await sessionManager.terminateSession(sessionId: sessionId)
         await sseManager.terminateSession(sessionId: sessionId)
 
