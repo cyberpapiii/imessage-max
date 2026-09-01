@@ -85,9 +85,38 @@ final class ChatSummaryQueriesTests: XCTestCase {
 
         let preview = try ChatSummaryBuilder.participantsPreview(db: db, chatId: 10, identity: identity)
 
-        XCTAssertEqual(preview.count, 3)
+        XCTAssertEqual(preview.count, 2)
         XCTAssertTrue(preview.contains("Bob Brown"))
-        XCTAssertEqual(preview.filter { $0.hasPrefix("Alice Smith") }.count, 2)
+        XCTAssertEqual(preview.filter { $0.hasPrefix("Alice Smith") }.count, 1)
+        XCTAssertFalse(preview.contains(where: { $0.contains("(0001)") }))
+    }
+
+    /// Duplicate join rows used to look like two people with the same contact
+    /// name, so the small-chat formatter appended a handle suffix. First handle
+    /// wins; Alice stays "Alice Smith".
+    func testSmallChatNameOmitsSuffixForDuplicateHandle() async throws {
+        let fixture = try ToolTestDatabase(name: "csq-duplicate-suffix")
+
+        try fixture.insertHandle(rowId: 1, handle: "+15550000001")
+        try fixture.insertHandle(rowId: 2, handle: "+15550000002")
+        try fixture.insertChat(rowId: 10, guid: "chat-10-guid")
+        try fixture.joinChatHandle(chatId: 10, handleId: 1)
+        try fixture.joinChatHandle(chatId: 10, handleId: 1)
+        try fixture.joinChatHandle(chatId: 10, handleId: 2)
+
+        let db = fixture.database()
+        let identity = try await makeIdentityFromRawJoinRows(db: db, chatId: 10, explicitName: nil)
+        XCTAssertEqual(identity.participants.map(\.handle), ["+15550000001", "+15550000001", "+15550000002"])
+
+        let preview = try ChatSummaryBuilder.participantsPreview(db: db, chatId: 10, identity: identity)
+        XCTAssertFalse(
+            preview.contains(where: { $0.contains("(0001)") }),
+            "small-chat preview must not suffix a duplicated handle: \(preview)"
+        )
+        XCTAssertEqual(IdentityDisplayFormatter.participants(identity.participants).map(\.name), [
+            "Alice Smith",
+            "Bob Brown",
+        ])
     }
 
     /// Named chats with more than four participants take the recent-sender
@@ -121,9 +150,10 @@ final class ChatSummaryQueriesTests: XCTestCase {
 
         let preview = try ChatSummaryBuilder.participantsPreview(db: db, chatId: 10, identity: identity)
 
-        XCTAssertEqual(preview.count, 4, "three names plus the remainder marker")
+        XCTAssertEqual(preview.count, 3, "unique names plus the remainder marker")
         XCTAssertEqual(preview.first, "Chris Green", "most recent sender leads the preview")
         XCTAssertEqual(preview.last, "+3 more")
+        XCTAssertFalse(preview.contains(where: { $0.contains("(0001)") }))
     }
 
     /// Builds a `ChatIdentity` the way the non-batched tools still do: a

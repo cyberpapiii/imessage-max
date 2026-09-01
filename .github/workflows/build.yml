@@ -42,6 +42,7 @@ jobs:
           xcodebuild -version
           swift --version
 
+      # Version check runs before the build on purpose (fail fast).
       - name: Check version consistency
         working-directory: .
         run: scripts/check-version.sh

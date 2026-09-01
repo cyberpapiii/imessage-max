@@ -23,7 +23,7 @@ enum FindChatTool {
             ]),
             "contains_recent": .object([
                 "type": "string",
-                "description": "Text that appears in recent messages for a targeted chat lookup",
+                "description": "Text that appears in recent messages for a targeted chat lookup. Scans the most recent 200 rows.",
             ]),
             "is_group": .object([
                 "type": "boolean",

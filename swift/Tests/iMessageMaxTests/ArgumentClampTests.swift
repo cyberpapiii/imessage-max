@@ -92,6 +92,22 @@ final class ArgumentClampTests: XCTestCase {
         XCTAssertNotNil(json["results"], "search should answer normally with a clamped window: \(json)")
     }
 
+    func testSearchExecuteWithHugeUnansweredHoursReturns() async throws {
+        let fixture = try makeFixture()
+
+        let result = await SearchTool.execute(
+            query: "hello",
+            unanswered: true,
+            unansweredHours: Int.max,
+            db: fixture.database(),
+            resolver: makeSeededResolver()
+        )
+
+        let json = try decodeSearchResponse(result)
+        XCTAssertNotEqual(json["error"] as? String, "internal_error", "static execute must clamp unanswered_hours: \(json)")
+        XCTAssertNotNil(json["results"], "static execute should answer normally with a clamped window: \(json)")
+    }
+
     // MARK: - get_messages
 
     func testGetMessagesWithNegativeLimitReturns() async throws {
