@@ -29,6 +29,7 @@ Other Makefile targets:
 - `make logs` tails the stderr log
 - `make clean` removes debug artifacts and clears logs
 - `make setup-signing` is one-time setup for a persistent code signing identity
+- `make version` checks the four version sites agree; `make release-check` runs everything that must pass before tagging (see `docs/RELEASING.md`)
 
 The server runs as a launchd service (`local.imessage-max`) on port 8080, configured at `~/Library/LaunchAgents/local.imessage-max.plist`. It auto-starts on login and auto-restarts on crash.
 

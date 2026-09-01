@@ -7,7 +7,7 @@ struct iMessageMax: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "imessage-max",
         abstract: "MCP server for iMessage",
-        version: Version.current
+        version: Version.display
     )
 
     @Flag(name: .long, help: "Run with HTTP transport instead of stdio")
