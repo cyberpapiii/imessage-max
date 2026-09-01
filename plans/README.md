@@ -51,6 +51,9 @@ verification `cd swift && swift build && swift test`.
 | 054 | Consolidate copied chat-id parsers, participant queries, error mappers, cursors, unanswered heuristics | P3 | L | 041, 042, 045, 046, 049, 051 | DONE 2026-09-01, merged to main (`2b4e10c`, branch `advisor/054-consolidate-internals`; 364/0 re-verified). `ChatParticipant` kept (`name`/`handle` vs `ChatIdentity.Participant` `handle`/`display_name`/`contact_name`). COUNT/group-filter `chat_handle_join` left in Tools. `main..HEAD` was 388 insertions / 610 deletions. |
 | 058 | Close 056 leftovers: short-code send fallback, link LIKE ESCAPE, QueryBuilder array `where` | P3 | S | 054, 056 | DONE 2026-09-01, merged to main (`18149db`, branch `advisor/058-followups-2`; 368/0 re-verified) |
 | 059 | Release prep 1.5.0 (version bump, CHANGELOG, Formula version string) | P2 | S | 048, 052, 058 | DONE 2026-09-01, merged to main (`db1ee55`, branch `advisor/059-release-1.5.0`; 368/0 re-verified). Tag and Formula sha256 are the operator's. |
+| 060 | CI hang: `swift test --parallel` on macos-26 stuck in `testFullVariantOversizeFallsBackToVisionSize` | P0 | S | 059 | DONE 2026-09-01, merged to main (`a98c065`, branch `advisor/060-ci-hang`; 368/0 re-verified). Root cause: 24MP noise JPEG + Core Image software encode. Follow-up SOF-spoof landed on 061 so the runner does not encode 50MP either. `timeout-minutes: 15` kept. |
+| 061 | Release findings: Info.plist 15.0 floor, find_chat unnamed DM names, get_attachment resolved chat.name, diagnose docs | P2 | S | 055, 054, 048 | DONE 2026-09-01, merged to main (`9c842d9`, branch `advisor/061-release-findings`; 370/0 re-verified) |
+| 062 | Formula url/sha256 for v1.5.0 after the operator tags | P2 | S | 059, 061 | WAITING for `git tag v1.5.0 && git push --tags`. Formula still points at v1.4.1 artifact. |
 
 ### Dependency notes (2026-08-07 round)
 
