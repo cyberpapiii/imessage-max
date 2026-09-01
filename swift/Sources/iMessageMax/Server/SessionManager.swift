@@ -42,6 +42,11 @@ actor SessionManager {
     /// Active sessions keyed by session ID
     private var sessions: [String: MCPSessionState] = [:]
 
+    /// Slots claimed by in-flight `createSession` calls. The cap is checked
+    /// against `reservedSlots + sessions.count` so two concurrent creates
+    /// cannot both pass the count check, await registration, and both insert.
+    private var reservedSlots = 0
+
     /// Session timeout duration (1 hour by default)
     private let sessionTimeout: TimeInterval
 
@@ -116,9 +121,11 @@ actor SessionManager {
             reclaimIdleSessions()
         }
 
-        guard sessions.count < maxSessions else {
+        guard reservedSlots + sessions.count < maxSessions else {
             return .atCapacity  // Caller returns 503 Service Unavailable
         }
+        reservedSlots += 1
+        defer { reservedSlots -= 1 }
 
         // Start cleanup task on first session creation
         if cleanupTask == nil {
