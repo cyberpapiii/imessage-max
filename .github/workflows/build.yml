@@ -5,26 +5,43 @@ on:
     branches: [main]
     paths:
       - 'swift/**'
+      - 'mcpb/**'
+      - '.codex-plugin/**'
+      - '.mcp.json'
+      - 'assets/**'
       - '.github/workflows/build.yml'
   pull_request:
     branches: [main]
     paths:
       - 'swift/**'
+      - 'mcpb/**'
+      - '.codex-plugin/**'
+      - '.mcp.json'
+      - 'assets/**'
       - '.github/workflows/build.yml'
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
-    runs-on: macos-15
+    runs-on: macos-26
     defaults:
       run:
         working-directory: swift
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          swift --version
 
       - name: Cache Swift build
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: swift/.build
           key: ${{ runner.os }}-swift-build-${{ hashFiles('swift/Package.resolved') }}
