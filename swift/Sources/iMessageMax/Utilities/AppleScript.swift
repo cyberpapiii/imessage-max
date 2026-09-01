@@ -399,9 +399,24 @@ enum AppleScriptRunner {
         }
 
         if sawPending {
+            scheduleDeferredStagedRemoval(preparedFile, after: .seconds(30))
             return .failure(.transferPending(preparedFile.trackingName))
         }
+        scheduleDeferredStagedRemoval(preparedFile, after: .seconds(30))
         return .failure(.transferStatusUnknown(preparedFile.trackingName))
+    }
+
+    /// Messages may still be reading the staged copy for a few seconds after
+    /// a timed-out poll. Delete after a grace delay, not 48 hours later.
+    static func scheduleDeferredStagedRemoval(
+        _ preparedFile: PreparedOutgoingFile,
+        after delay: Duration
+    ) {
+        DispatchQueue.global(qos: .utility).asyncAfter(
+            deadline: .now() + AsyncTimeout.dispatchInterval(for: delay)
+        ) {
+            removeStagedDirectory(for: preparedFile)
+        }
     }
 
     /// Removes one per-send staging directory. Safe only at terminal
@@ -424,7 +439,7 @@ enum AppleScriptRunner {
         return picturesDirectory.appendingPathComponent("imessage-max-staging", isDirectory: true)
     }
 
-    private static func cleanupOldStagedFilesIfPossible() {
+    static func cleanupOldStagedFilesIfPossible() {
         let root = stagingRootDirectory()
         let fm = FileManager.default
 
@@ -436,7 +451,7 @@ enum AppleScriptRunner {
             return
         }
 
-        let cutoff = Date().addingTimeInterval(-48 * 60 * 60)
+        let cutoff = Date().addingTimeInterval(-1 * 60 * 60)
         for url in contents {
             let values = try? url.resourceValues(forKeys: [.contentModificationDateKey])
             if let modified = values?.contentModificationDate, modified < cutoff {

@@ -42,6 +42,11 @@ actor SessionManager {
     /// Active sessions keyed by session ID
     private var sessions: [String: MCPSessionState] = [:]
 
+    /// Slots claimed by in-flight `createSession` calls. The cap is checked
+    /// against `reservedSlots + sessions.count` so two concurrent creates
+    /// cannot both pass the count check, await registration, and both insert.
+    private var reservedSlots = 0
+
     /// Session timeout duration (1 hour by default)
     private let sessionTimeout: TimeInterval
 
@@ -113,12 +118,14 @@ actor SessionManager {
         protocolVersion: String = MCPProtocolVersion.defaultAssumed
     ) async -> SessionCreationResult {
         if sessions.count >= maxSessions {
-            reclaimIdleSessions()
+            await reclaimIdleSessions()
         }
 
-        guard sessions.count < maxSessions else {
+        guard reservedSlots + sessions.count < maxSessions else {
             return .atCapacity  // Caller returns 503 Service Unavailable
         }
+        reservedSlots += 1
+        defer { reservedSlots -= 1 }
 
         // Start cleanup task on first session creation
         if cleanupTask == nil {
@@ -194,14 +201,14 @@ actor SessionManager {
     }
 
     /// Validates a session ID and returns the session if valid
-    func validate(sessionId: String) -> MCPSessionState? {
+    func validate(sessionId: String) async -> MCPSessionState? {
         guard let session = sessions[sessionId] else {
             return nil
         }
 
         // Check if session has expired
         if Date().timeIntervalSince(session.lastActivity) > sessionTimeout {
-            terminateSession(sessionId: sessionId)
+            await terminateSession(sessionId: sessionId)
             return nil
         }
 
@@ -219,8 +226,11 @@ actor SessionManager {
         sessions[sessionId]?.protocolVersion
     }
 
-    /// Terminates a session and cleans up its Server
-    func terminateSession(sessionId: String) {
+    /// Terminates a session and stops its SDK Server.
+    ///
+    /// `Server.stop()` can hang on a wedged transport, so the wait is bounded
+    /// to 2 seconds by racing against `AsyncTimeout.sleep`. Never `Task.sleep`.
+    func terminateSession(sessionId: String) async {
         guard let session = sessions[sessionId] else { return }
 
         // Cancel server task
@@ -228,6 +238,17 @@ actor SessionManager {
 
         // Complete the message stream
         session.messageContinuation.finish()
+
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask {
+                await session.server.stop()
+            }
+            group.addTask {
+                await AsyncTimeout.sleep(.seconds(2))
+            }
+            await group.next()
+            group.cancelAll()
+        }
 
         // Remove from active sessions
         sessions.removeValue(forKey: sessionId)
@@ -278,14 +299,14 @@ actor SessionManager {
     /// far more often than the reclaim window, so anything staler is a client
     /// that went away. This runs only under capacity pressure, so a quiet but
     /// live session is left alone while there is room.
-    private func reclaimIdleSessions() {
+    private func reclaimIdleSessions() async {
         let now = Date()
         let idleIds = sessions.filter { _, session in
             now.timeIntervalSince(session.lastActivity) > reclaimableIdle
         }.map(\.key)
 
         for id in idleIds {
-            terminateSession(sessionId: id)
+            await terminateSession(sessionId: id)
         }
     }
 
@@ -293,14 +314,14 @@ actor SessionManager {
     ///
     /// Driven by the 5-minute timer loop above; also callable directly by
     /// tests, which inject a short `sessionTimeout` rather than waiting.
-    func cleanupExpiredSessions() {
+    func cleanupExpiredSessions() async {
         let now = Date()
         let expiredIds = sessions.filter { _, session in
             now.timeIntervalSince(session.lastActivity) > sessionTimeout
         }.map(\.key)
 
         for id in expiredIds {
-            terminateSession(sessionId: id)
+            await terminateSession(sessionId: id)
         }
     }
 }
