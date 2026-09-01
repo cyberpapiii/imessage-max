@@ -435,23 +435,8 @@ enum GetContext {
             return .success(response)
 
         } catch let error as DatabaseError {
-            switch error {
-            case .notFound:
-                return .failure(GetContextError(
-                    error: "database_not_found",
-                    message: ClientErrorMessages.databaseNotFound
-                ))
-            case .permissionDenied:
-                return .failure(GetContextError(
-                    error: "permission_denied",
-                    message: ClientErrorMessages.permissionDenied
-                ))
-            default:
-                return .failure(GetContextError(
-                    error: "internal_error",
-                    message: ClientErrorMessages.sanitized(error)
-                ))
-            }
+            let mapped = ToolErrorMapping.map(error, context: "get_context")
+            return .failure(GetContextError(error: mapped.code, message: mapped.message))
         } catch {
             return .failure(GetContextError(
                 error: "internal_error",

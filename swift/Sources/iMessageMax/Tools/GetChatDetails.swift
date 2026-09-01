@@ -133,17 +133,8 @@ enum GetChatDetailsTool {
         } catch let error as ToolError {
             throw error
         } catch let error as DatabaseError {
-            let payload: GetChatDetailsError
-            switch error {
-            case .notFound:
-                payload = GetChatDetailsError(error: "database_not_found", message: ClientErrorMessages.databaseNotFound)
-            case .permissionDenied:
-                payload = GetChatDetailsError(error: "permission_denied", message: ClientErrorMessages.permissionDenied)
-            case .queryFailed(let message):
-                payload = GetChatDetailsError(error: "query_failed", message: message)
-            case .invalidData(let message):
-                payload = GetChatDetailsError(error: "invalid_data", message: message)
-            }
+            let mapped = ToolErrorMapping.map(error, context: "get_chat_details")
+            let payload = GetChatDetailsError(error: mapped.code, message: mapped.message)
             throw ToolError(content: [.plainText(try FormatUtils.encodeJSON(payload))])
         } catch {
             let payload = GetChatDetailsError(error: "internal_error", message: ClientErrorMessages.sanitized(error))

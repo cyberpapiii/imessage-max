@@ -191,28 +191,8 @@ final class ListAttachments {
             ))
 
         } catch let error as DatabaseError {
-            switch error {
-            case .notFound:
-                return .failure(ListAttachmentsError(
-                    error: "database_not_found",
-                    message: ClientErrorMessages.databaseNotFound
-                ))
-            case .permissionDenied:
-                return .failure(ListAttachmentsError(
-                    error: "permission_denied",
-                    message: ClientErrorMessages.permissionDenied
-                ))
-            case .queryFailed(let msg):
-                return .failure(ListAttachmentsError(
-                    error: "query_failed",
-                    message: msg
-                ))
-            case .invalidData(let msg):
-                return .failure(ListAttachmentsError(
-                    error: "invalid_data",
-                    message: msg
-                ))
-            }
+            let mapped = ToolErrorMapping.map(error, context: "list_attachments")
+            return .failure(ListAttachmentsError(error: mapped.code, message: mapped.message))
         } catch {
             return .failure(ListAttachmentsError(
                 error: "internal_error",

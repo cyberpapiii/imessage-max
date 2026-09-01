@@ -507,28 +507,8 @@ enum ListChatsTool {
             ))
 
         } catch let error as DatabaseError {
-            switch error {
-            case .notFound:
-                return .failure(ListChatsError(
-                    error: "database_not_found",
-                    message: ClientErrorMessages.databaseNotFound
-                ))
-            case .permissionDenied:
-                return .failure(ListChatsError(
-                    error: "permission_denied",
-                    message: ClientErrorMessages.permissionDenied
-                ))
-            case .queryFailed(let msg):
-                return .failure(ListChatsError(
-                    error: "query_failed",
-                    message: msg
-                ))
-            case .invalidData(let msg):
-                return .failure(ListChatsError(
-                    error: "invalid_data",
-                    message: msg
-                ))
-            }
+            let mapped = ToolErrorMapping.map(error, context: "list_chats")
+            return .failure(ListChatsError(error: mapped.code, message: mapped.message))
         } catch {
             return .failure(ListChatsError(
                 error: "internal_error",

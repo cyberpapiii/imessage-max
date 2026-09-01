@@ -134,17 +134,8 @@ final class GetUnread {
             } catch let error as ToolError {
                 throw error
             } catch let error as DatabaseError {
-                let payload: UnreadError
-                switch error {
-                case .notFound:
-                    payload = UnreadError(error: "database_not_found", message: ClientErrorMessages.databaseNotFound)
-                case .permissionDenied:
-                    payload = UnreadError(error: "permission_denied", message: ClientErrorMessages.permissionDenied)
-                case .queryFailed(let msg):
-                    payload = UnreadError(error: "query_failed", message: msg)
-                case .invalidData(let msg):
-                    payload = UnreadError(error: "invalid_data", message: msg)
-                }
+                let mapped = ToolErrorMapping.map(error, context: "get_unread")
+                let payload = UnreadError(error: mapped.code, message: mapped.message)
                 throw ToolError(content: [.plainText(try FormatUtils.encodeJSON(payload))])
             } catch {
                 let payload = UnreadError(error: "internal_error", message: ClientErrorMessages.sanitized(error))

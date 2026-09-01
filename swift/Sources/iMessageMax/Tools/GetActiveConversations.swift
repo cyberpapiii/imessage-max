@@ -120,23 +120,8 @@ enum GetActiveConversations {
 
                 return [.plainText(try FormatUtils.encodeJSON(result))]
             } catch let error as DatabaseError {
-                let payload: ActiveConversationsError
-                switch error {
-                case .notFound:
-                    payload = ActiveConversationsError(
-                        error: "database_not_found",
-                        message: ClientErrorMessages.databaseNotFound
-                    )
-                case .permissionDenied:
-                    payload = ActiveConversationsError(
-                        error: "permission_denied",
-                        message: ClientErrorMessages.permissionDenied
-                    )
-                case .queryFailed(let msg):
-                    payload = ActiveConversationsError(error: "query_failed", message: msg)
-                case .invalidData(let msg):
-                    payload = ActiveConversationsError(error: "invalid_data", message: msg)
-                }
+                let mapped = ToolErrorMapping.map(error, context: "get_active_conversations")
+                let payload = ActiveConversationsError(error: mapped.code, message: mapped.message)
                 throw ToolError(content: [.plainText(try FormatUtils.encodeJSON(payload))])
             } catch {
                 let payload = ActiveConversationsError(
