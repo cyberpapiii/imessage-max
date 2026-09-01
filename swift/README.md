@@ -41,7 +41,7 @@ default HTTP port is `8080`.
 
 ## Requirements
 
-- macOS 14+ (Sonoma)
+- macOS 15+ (Sequoia or later)
 - Xcode Command Line Tools or full Xcode
 
 ## Architecture
