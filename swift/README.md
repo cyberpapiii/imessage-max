@@ -50,7 +50,7 @@ default HTTP port is `8080`.
 
 ```
 Sources/iMessageMax/
-├── main.swift                  # Entry point, CLI parsing
+├── iMessageMaxCommand.swift    # Entry point, CLI parsing
 ├── Server/
 │   ├── MCPServer.swift         # Server lifecycle (stdio mode)
 │   ├── HTTPTransport.swift     # HTTP Streamable transport (dual-era)

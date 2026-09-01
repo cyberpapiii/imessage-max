@@ -22,10 +22,7 @@ let package = Package(
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
                 .product(name: "Hummingbird", package: "hummingbird"),
             ],
-            path: "Sources/iMessageMax",
-            swiftSettings: [
-                .unsafeFlags(["-parse-as-library"])
-            ]
+            path: "Sources/iMessageMax"
         ),
         .testTarget(
             name: "iMessageMaxTests",

@@ -98,7 +98,7 @@ curl -X POST http://localhost:8080 \
 ```
 swift/
 ├── Sources/iMessageMax/
-│   ├── main.swift              # Entry point
+│   ├── iMessageMaxCommand.swift # Entry point
 │   ├── Server/
 │   │   ├── MCPServer.swift     # Server lifecycle (stdio)
 │   │   ├── HTTPTransport.swift # HTTP Streamable transport (dual-era)
