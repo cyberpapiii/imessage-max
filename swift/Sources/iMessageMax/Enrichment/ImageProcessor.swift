@@ -46,6 +46,12 @@ struct ImageProcessor {
     /// originals fall back to the vision-sized render.
     private static let maxFullVariantBytes = 8 * 1024 * 1024
 
+    /// Memory bound for the full variant. `CIImage(contentsOf:)` decodes the
+    /// whole bitmap before `maxFullVariantBytes` can be checked, so originals
+    /// above this pixel count skip straight to the vision-sized render.
+    /// Unknown dimensions (no readable properties) are treated as "proceed".
+    static let maxFullVariantPixels = 50_000_000
+
     /// Get metadata without full processing (fast path)
     func getMetadata(at path: String) -> ImageMetadata? {
         let url = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
@@ -88,7 +94,12 @@ struct ImageProcessor {
             return ImageResult(data: jpegData, format: "jpeg", width: cgImage.width, height: cgImage.height)
         }
 
-        // full variant: original CIImage decode path (unbounded dimensions).
+        // full variant: check the pixel count from the header before the
+        // unbounded CIImage decode. Zero or oversized dimensions fall back to
+        // the vision-sized render (which never recurses).
+        if Self.exceedsFullVariantPixels(at: url) {
+            return process(at: path, variant: .vision)
+        }
         guard let ciImage = CIImage(contentsOf: url) else { return nil }
 
         let originalSize = ciImage.extent.size
@@ -112,5 +123,19 @@ struct ImageProcessor {
             width: Int(originalSize.width),
             height: Int(originalSize.height)
         )
+    }
+
+    /// True when the image header reports a zero dimension or more than
+    /// `maxFullVariantPixels`. Missing properties (some HEIC sources) return
+    /// false so the full path proceeds as before.
+    private static func exceedsFullVariantPixels(at url: URL) -> Bool {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = props[kCGImagePropertyPixelWidth] as? Int,
+              let height = props[kCGImagePropertyPixelHeight] as? Int
+        else { return false }
+        if width <= 0 || height <= 0 { return true }
+        let (pixels, overflow) = width.multipliedReportingOverflow(by: height)
+        return overflow || pixels > maxFullVariantPixels
     }
 }
