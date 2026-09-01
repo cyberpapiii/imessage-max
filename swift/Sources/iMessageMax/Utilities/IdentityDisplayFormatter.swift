@@ -19,8 +19,9 @@ enum IdentityDisplayFormatter {
     }
 
     static func participants(_ participants: [ChatIdentity.Participant]) -> [ChatParticipant] {
-        let names = disambiguatedNames(for: participants)
-        return zip(participants, names).map { participant, name in
+        let unique = uniqueByHandle(participants)
+        let names = disambiguatedNames(for: unique)
+        return zip(unique, names).map { participant, name in
             ChatParticipant(name: name, handle: participant.handle)
         }
     }
@@ -29,16 +30,26 @@ enum IdentityDisplayFormatter {
         selected: [ChatIdentity.Participant],
         allParticipants: [ChatIdentity.Participant]
     ) -> [String] {
-        let allNames = disambiguatedNames(for: allParticipants)
+        let uniqueAll = uniqueByHandle(allParticipants)
+        let uniqueSelected = uniqueByHandle(selected)
+        let allNames = disambiguatedNames(for: uniqueAll)
         // Participant lists come from chat_handle_join, which can carry the
         // same handle twice; the first entry is the one callers ordered for.
-        let nameByHandle = Dictionary(zip(allParticipants.map(\.handle), allNames), uniquingKeysWith: { first, _ in first })
-        return selected.map { nameByHandle[$0.handle] ?? $0.displayName }
+        let nameByHandle = Dictionary(zip(uniqueAll.map(\.handle), allNames), uniquingKeysWith: { first, _ in first })
+        return uniqueSelected.map { nameByHandle[$0.handle] ?? $0.displayName }
+    }
+
+    private static func uniqueByHandle(
+        _ participants: [ChatIdentity.Participant]
+    ) -> [ChatIdentity.Participant] {
+        var seen: Set<String> = []
+        return participants.filter { seen.insert($0.handle).inserted }
     }
 
     private static func disambiguatedNames(for participants: [ChatIdentity.Participant]) -> [String] {
-        let counts = Dictionary(grouping: participants, by: \.displayName).mapValues(\.count)
-        return participants.map { participant in
+        let unique = uniqueByHandle(participants)
+        let counts = Dictionary(grouping: unique, by: \.displayName).mapValues(\.count)
+        return unique.map { participant in
             guard (counts[participant.displayName] ?? 0) > 1 else {
                 return participant.displayName
             }
