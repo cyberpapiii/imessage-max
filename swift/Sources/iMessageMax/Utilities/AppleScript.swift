@@ -601,6 +601,14 @@ enum AppleScriptRunner {
             let result = semaphore.wait(timeout: .now() + .seconds(timeoutSeconds))
             if result == .timedOut {
                 process.terminate()
+                // Give SIGTERM a moment, then SIGKILL so the pipes close and the
+                // drain threads can exit. osascript ignores SIGTERM while blocked
+                // in a Messages Apple event; without this the readers block on an
+                // open pipe forever, one pair per timed-out send.
+                if drainGroup.wait(timeout: .now() + .seconds(2)) == .timedOut {
+                    kill(process.processIdentifier, SIGKILL)
+                    _ = drainGroup.wait(timeout: .now() + .seconds(2))
+                }
                 return .failure(.timeout)
             }
             drainGroup.wait()
