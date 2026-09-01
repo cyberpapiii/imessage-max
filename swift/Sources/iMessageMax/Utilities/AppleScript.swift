@@ -512,11 +512,12 @@ enum AppleScriptRunner {
         }
 
         // Untrusted, unbounded osascript stderr: keep the first line, clamped.
-        // Absolute paths (home, staging) never go to the client.
+        // Absolute paths (home, staging) never go to the client. `stderr` is
+        // lowercased above, so every literal here must be lowercase too.
         let firstLine = String(
             (stderr.split(separator: "\n", maxSplits: 1).first ?? "").prefix(300)
         )
-        if firstLine.contains("/Users/")
+        if firstLine.contains("/users/")
             || firstLine.contains("/private/")
             || firstLine.contains("/var/")
             || firstLine.contains("imessage-max-staging")

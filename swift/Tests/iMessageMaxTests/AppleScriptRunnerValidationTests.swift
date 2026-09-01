@@ -111,6 +111,28 @@ final class AppleScriptRunnerValidationTests: XCTestCase {
         XCTAssertFalse(error.localizedDescription.contains("second line"))
     }
 
+    // Plan 049: the classifier lowercases stderr before matching, so the scrub
+    // literal must be lowercase too. A mixed-case "/Users/" literal never
+    // matched and the operator's home directory reached the client verbatim.
+    func testHomeDirectoryPathInStderrClassifiesAsPathRejected() {
+        let stderr = "execution error: Messages got an error: Can\u{2019}t get file "
+            + "\"/Users/alice/Desktop/x.jpg\". (-1728)"
+
+        let error = AppleScriptRunner.classifySendStderr(
+            stderr,
+            sentFileName: "x.jpg",
+            missingTargetError: .chatNotFound("chat1")
+        )
+
+        XCTAssertEqual(
+            error.localizedDescription,
+            "Send failed: Send failed. Check the server log for details."
+        )
+        XCTAssertFalse(error.localizedDescription.lowercased().contains("/users/"))
+        XCTAssertFalse(error.localizedDescription.contains("alice"))
+        XCTAssertFalse(error.localizedDescription.contains("imessage-max-staging"))
+    }
+
     func testSendTextToParticipantRejectsOverlongMessage() {
         let longMessage = String(repeating: "a", count: 20_001)
         let result = AppleScriptRunner.sendTextToParticipant(
