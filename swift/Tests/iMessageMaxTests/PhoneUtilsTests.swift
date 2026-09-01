@@ -22,13 +22,19 @@ final class PhoneUtilsTests: XCTestCase {
         XCTAssertEqual(PhoneUtils.normalizeToE164("+447911123456"), "+447911123456")
     }
 
-    // Known bug: a 10-digit number after an explicit "+" hits the US branch
-    // before the hasPlus branch and is rewritten to +1. Plan 043 fixes this;
-    // its executor must remove the strict expected-failure wrapper.
+    // A 10-digit number after an explicit "+" is a foreign subscriber, not a
+    // US number missing its +1. Rewriting it to +1 would send to a stranger.
     func testShortInternationalWithPlusIsNotRewrittenToUS() {
-        XCTExpectFailure("10 digits after '+' are rewritten to +1; fixed by plan 043", strict: true)
         XCTAssertEqual(PhoneUtils.normalizeToE164("+4512345678"), "+4512345678", "Denmark")
         XCTAssertEqual(PhoneUtils.normalizeToE164("+6591234567"), "+6591234567", "Singapore")
+    }
+
+    func testOverlongInputReturnsNil() {
+        XCTAssertNil(PhoneUtils.normalizeToE164("+" + String(repeating: "5", count: 16)), "16 digits exceeds E.164")
+    }
+
+    func testWhitespaceIsIgnored() {
+        XCTAssertEqual(PhoneUtils.normalizeToE164("  +4512345678 "), "+4512345678")
     }
 
     func testEmptyOrNoDigitsReturnsNil() {
@@ -48,6 +54,18 @@ final class PhoneUtilsTests: XCTestCase {
         XCTAssertFalse(PhoneUtils.isPhoneNumber(String(repeating: "5", count: 9)), "9 digits")
         XCTAssertFalse(PhoneUtils.isPhoneNumber(String(repeating: "5", count: 16)), "16 digits")
         XCTAssertFalse(PhoneUtils.isPhoneNumber("alice@example.com"), "email")
+    }
+
+    func testShortCodesArePhoneNumbersButDoNotNormalize() {
+        XCTAssertTrue(PhoneUtils.isPhoneNumber("55555"), "5-digit short code")
+        XCTAssertFalse(PhoneUtils.isPhoneNumber("+5555"), "short code with + is not a handle")
+        XCTAssertFalse(PhoneUtils.isPhoneNumber("5555"), "4 digits is too short")
+        XCTAssertNil(PhoneUtils.normalizeToE164("55555"), "short codes have no E.164 form")
+    }
+
+    func testLettersAreNotPhoneNumbers() {
+        XCTAssertFalse(PhoneUtils.isPhoneNumber("call 5551234567 now"), "letters present")
+        XCTAssertTrue(PhoneUtils.isPhoneNumber("(555) 123-4567"), "punctuation only")
     }
 
     func testIsEmail() {
