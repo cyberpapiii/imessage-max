@@ -6,6 +6,15 @@ import XCTest
 /// session, which bumped the registry's catalog version twelve times per
 /// `initialize` and invalidated the modern lane's encoded-catalog cache.
 final class ToolRegistryBindingTests: XCTestCase {
+    override func setUp() {
+        super.setUp()
+        ToolHandlerRegistry.shared.resetForTesting()
+    }
+
+    override func tearDown() {
+        ToolHandlerRegistry.shared.resetForTesting()
+        super.tearDown()
+    }
 
     private func makeServer() -> Server {
         Server(

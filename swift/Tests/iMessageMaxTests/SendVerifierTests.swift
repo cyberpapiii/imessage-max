@@ -135,16 +135,14 @@ final class SendVerifierTests: XCTestCase {
         XCTAssertEqual(actualChatId, 2, "Mismatch should report chat 2 as the actual destination")
     }
 
-    // Row stored with text = nil (attributedBody-only path, §3 finding 2).
-    // The ToolTestDatabase fixture inserts attributedBody = NULL, so
-    // MessageTextExtractor cannot parse real typedstream blobs here. This test
-    // verifies the text-column path; the attributedBody extraction path is
-    // exercised by the live chat.db (noted as fixture gap).
+    // Row stored with text = nil and no attributedBody: extractor returns nil,
+    // so the verifier cannot match. The attributedBody-only path is covered by
+    // testAttributedBodyOnlyRowIsConfirmed below.
     func testTextColumnNilRowIsNotConfirmedWithoutAttributedBody() async throws {
         let fixture = try makeFixture()
         let date = nowNs()
 
-        // Insert with text = nil AND attributedBody = NULL (fixture limitation).
+        // Insert with text = nil AND attributedBody = NULL.
         // MessageTextExtractor.extract returns nil → no match → notFound.
         try fixture.insertMessage(
             rowId: 5, guid: "msg-guid-nil-text", text: nil,
@@ -162,8 +160,45 @@ final class SendVerifierTests: XCTestCase {
 
         // With both text and attributedBody nil, extractor returns nil → notFound.
         XCTAssertEqual(result, .notFound,
-            "Row with nil text and nil attributedBody cannot be matched; " +
-            "attributedBody-only matching is tested against the live DB")
+            "Row with nil text and no attributedBody cannot be matched")
+    }
+
+    // Row stored with text = nil and the text carried only in attributedBody
+    // (the common real-world shape on modern macOS): the verifier must extract
+    // the typedstream text and confirm.
+    func testAttributedBodyOnlyRowIsConfirmed() async throws {
+        let fixture = try makeFixture()
+        let date = nowNs()
+        let blob = typedstreamBlob(lengthField: [11], payload: Array("Hello Alice".utf8))
+
+        try fixture.insertMessage(
+            rowId: 7, guid: "msg-guid-attributed", text: nil,
+            date: date, isFromMe: true, error: 0, attributedBody: blob
+        )
+        try fixture.joinChatMessage(chatId: 1, messageId: 7)
+
+        let verifier = makeVerifier(fixture: fixture)
+        let result = try await verifier.verify(
+            intendedChatId: 1,
+            handle: nil,
+            sendTime: Date(),
+            expectedText: "Hello Alice"
+        )
+
+        guard case .confirmed = result else {
+            return XCTFail("Expected .confirmed from an attributedBody-only row, got \(result)")
+        }
+    }
+
+    /// Builds: <prefix junk> + marker + 5 filler bytes + length field + payload.
+    /// Copied from MessageTextExtractorTests (private there).
+    private func typedstreamBlob(marker: String = "NSString", lengthField: [UInt8], payload: [UInt8]) -> Data {
+        var bytes: [UInt8] = [0x04, 0x0B]                 // arbitrary prefix junk
+        bytes += Array(marker.utf8)
+        bytes += [0x01, 0x94, 0x84, 0x01, 0x2B]           // 5 filler bytes (skipped)
+        bytes += lengthField
+        bytes += payload
+        return Data(bytes)
     }
 
     // Multi-attempt polling: with a pre-inserted matching row the verifier
