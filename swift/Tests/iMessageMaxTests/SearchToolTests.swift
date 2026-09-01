@@ -110,6 +110,66 @@ final class SearchToolTests: XCTestCase {
         XCTAssertEqual(firstResult["id"] as? String, "msg_201")
     }
 
+    func testHasLinkDoesNotMatchLiteralPercentOrUnderscore() async throws {
+        let fixture = try ToolTestDatabase(name: "search-link-escape")
+        try fixture.insertHandle(rowId: 1, handle: "+15550000001")
+        try fixture.insertChat(rowId: 1, guid: "chat-link-guid", displayName: "Links")
+        try fixture.joinChatHandle(chatId: 1, handleId: 1)
+        try fixture.insertMessage(
+            rowId: 1,
+            guid: "g-percent",
+            text: "sale 50%_off today",
+            date: 1_000,
+            isFromMe: false,
+            handleId: 1
+        )
+        try fixture.joinChatMessage(chatId: 1, messageId: 1)
+        try fixture.insertMessage(
+            rowId: 2,
+            guid: "g-http",
+            text: "see http://example.com",
+            date: 2_000,
+            isFromMe: false,
+            handleId: 1
+        )
+        try fixture.joinChatMessage(chatId: 1, messageId: 2)
+
+        let response = try await decodeSearchResponse(
+            SearchTool.execute(
+                has: "link",
+                cursor: nil,
+                limit: 10,
+                sort: "recent_first",
+                format: "flat",
+                includeContext: false,
+                unanswered: false,
+                unansweredHours: 24,
+                matchAll: false,
+                fuzzy: false,
+                db: fixture.database(),
+                resolver: makeSeededResolver()
+            )
+        )
+        let results = try decodeJSONArray(try XCTUnwrap(response["results"]))
+        XCTAssertEqual(results.compactMap { $0["id"] as? String }, ["msg_2"])
+
+        let (sql, params) = SearchTool.buildQuery(
+            query: nil,
+            fromPerson: nil,
+            inChat: nil,
+            isGroup: nil,
+            has: "link",
+            since: nil,
+            before: nil,
+            cursor: nil,
+            limit: 10,
+            sort: .recentFirst,
+            unanswered: false
+        )
+        XCTAssertTrue(sql.contains("m.text LIKE ? ESCAPE '\\'"), "link LIKE missing ESCAPE: \(sql)")
+        XCTAssertEqual(params.last as? String, "%http%")
+    }
+
     func testFromPersonGroupedResponseUsesStablePeopleKeysAndGeneratedChatNames() async throws {
         let fixture = try makeSearchFixture()
         let resolver = makeSeededResolver()

@@ -157,7 +157,7 @@ extension SearchTool {
         if let hasType = has {
             switch hasType {
             case "link":
-                builder.where("m.text LIKE ?", "%http%")
+                builder.where("m.text LIKE ? ESCAPE '\\'", "%http%")
             case "attachment":
                 builder.where("""
                     EXISTS (
