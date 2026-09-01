@@ -388,11 +388,14 @@ enum SearchTool {
 
             // Filter for unanswered if requested
             if unanswered {
-                rows = try filterUnanswered(
+                rows = try UnansweredHeuristics.filterUnanswered(
                     db: db,
                     rows: rows,
+                    hours: clampedUnansweredHours,
                     limit: clampedLimit,
-                    hours: clampedUnansweredHours
+                    text: { MessageTextExtractor.extract(text: $0.text, attributedBody: $0.attributedBody) },
+                    date: \.date,
+                    chatId: \.chatId
                 )
             }
 
