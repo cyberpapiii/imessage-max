@@ -387,7 +387,9 @@ extension GetMessagesTool {
     }
 
     func hasReplyWithinWindow(chatId: Int, messageDate: Int64, hours: Int) throws -> Bool {
-        let windowNs = Int64(hours) * 60 * 60 * 1_000_000_000
+        // Defensive clamp: one year of hours times 3.6e12 stays far inside Int64.
+        let boundedHours = Int64(max(1, min(hours, 24 * 365)))
+        let windowNs = boundedHours * 3_600_000_000_000
 
         let rows = try db.query("""
             SELECT 1 FROM message m

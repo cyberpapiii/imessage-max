@@ -234,7 +234,7 @@ enum SearchTool {
             let format = arguments?["format"]?.stringValue ?? "flat"
             let includeContext = arguments?["include_context"]?.boolValue ?? false
             let unanswered = arguments?["unanswered"]?.boolValue ?? false
-            let unansweredHours = arguments?["unanswered_hours"]?.intValue ?? 24
+            let unansweredHours = max(1, min(arguments?["unanswered_hours"]?.intValue ?? 24, 24 * 365))
             let matchAll = arguments?["match_all"]?.boolValue ?? false
             let fuzzy = arguments?["fuzzy"]?.boolValue ?? false
 
