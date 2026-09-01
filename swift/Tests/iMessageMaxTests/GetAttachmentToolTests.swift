@@ -25,17 +25,27 @@ final class GetAttachmentToolTests: XCTestCase {
     }
 
     func testFullVariantOversizeFallsBackToVisionSize() throws {
-        // Random-pixel noise resists JPEG compression, so a 6000x4000 source
-        // reliably encodes past the 8MB full-variant cap (confirmed empirically
-        // during test development: ~1MB at 3000x2000, well over the cap here).
-        let noisyURL = try makeNoiseImage(width: 6000, height: 4000, filename: "full-oversize-\(UUID().uuidString).jpg")
-        defer { try? FileManager.default.removeItem(at: noisyURL) }
+        // Hit the pixel-count short-circuit, not the 8MB re-encode check.
+        // A 6000x4000 noise JPEG (under the 50M-pixel cap) made CI
+        // `--parallel` stall for minutes: Core Image on the macos-26 runner
+        // has no GPU and encodes that bitmap on CPU. A solid image just
+        // over `maxFullVariantPixels` is a tiny JPEG and never enters that
+        // path. Same fallback, cheap enough for a runner.
+        let width = 8000
+        let height = ImageProcessor.maxFullVariantPixels / width + 1
+        XCTAssertGreaterThan(width * height, ImageProcessor.maxFullVariantPixels)
+
+        let oversizedURL = try makeTestImage(
+            width: width,
+            height: height,
+            filename: "full-oversize-\(UUID().uuidString).jpg"
+        )
+        defer { try? FileManager.default.removeItem(at: oversizedURL) }
 
         let processor = ImageProcessor()
-        let result = try XCTUnwrap(processor.process(at: noisyURL.path, variant: .full))
+        let result = try XCTUnwrap(processor.process(at: oversizedURL.path, variant: .full))
 
         // Falling back to .vision means neither dimension can exceed its 1568px cap.
-        // The unbounded full path would otherwise report the original 6000x4000.
         XCTAssertLessThanOrEqual(result.width, 1568, "Oversized full variant should fall back to vision-sized dimensions")
         XCTAssertLessThanOrEqual(result.height, 1568, "Oversized full variant should fall back to vision-sized dimensions")
         XCTAssertLessThanOrEqual(result.data.count, 8 * 1024 * 1024, "Fallback output should be well under the full-variant cap")
@@ -193,52 +203,6 @@ private func makeTestImage(width: Int, height: Int, filename: String) throws -> 
     }
 
     CGImageDestinationAddImage(destination, image, nil)
-    guard CGImageDestinationFinalize(destination) else {
-        throw NSError(domain: "TestImage", code: 3)
-    }
-
-    return url
-}
-
-/// High-entropy (random-pixel) image. Unlike a solid fill, noise resists JPEG
-/// compression, letting a modest pixel count still produce a multi-megabyte
-/// encoded file. Used to exercise the full-variant size cap.
-private func makeNoiseImage(width: Int, height: Int, filename: String) throws -> URL {
-    let url = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
-    let colorSpace = CGColorSpaceCreateDeviceRGB()
-    let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue
-    let bytesPerRow = width * 4
-    var buffer = [UInt8](repeating: 0, count: bytesPerRow * height)
-    buffer.withUnsafeMutableBytes { ptr in
-        arc4random_buf(ptr.baseAddress, ptr.count)
-    }
-    // Force alpha fully opaque so premultiplication doesn't darken (and thus
-    // compress) the random color channels.
-    for row in 0..<height {
-        for col in 0..<width {
-            buffer[row * bytesPerRow + col * 4 + 3] = 255
-        }
-    }
-
-    guard let context = CGContext(
-        data: &buffer,
-        width: width,
-        height: height,
-        bitsPerComponent: 8,
-        bytesPerRow: bytesPerRow,
-        space: colorSpace,
-        bitmapInfo: bitmapInfo
-    ) else {
-        throw NSError(domain: "TestImage", code: 1)
-    }
-
-    guard let image = context.makeImage(),
-          let destination = CGImageDestinationCreateWithURL(url as CFURL, UTType.jpeg.identifier as CFString, 1, nil) else {
-        throw NSError(domain: "TestImage", code: 2)
-    }
-
-    let options: [CFString: Any] = [kCGImageDestinationLossyCompressionQuality: 1.0]
-    CGImageDestinationAddImage(destination, image, options as CFDictionary)
     guard CGImageDestinationFinalize(destination) else {
         throw NSError(domain: "TestImage", code: 3)
     }

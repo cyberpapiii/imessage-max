@@ -21,6 +21,7 @@ on:
       - '.mcp.json'
       - 'assets/**'
       - '.github/workflows/build.yml'
+  workflow_dispatch:
 
 concurrency:
   group: build-${{ github.ref }}
@@ -29,6 +30,7 @@ concurrency:
 jobs:
   build:
     runs-on: macos-26
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: swift
