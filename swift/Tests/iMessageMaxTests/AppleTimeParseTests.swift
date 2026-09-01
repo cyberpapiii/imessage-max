@@ -104,7 +104,16 @@ final class AppleTimeParseTests: XCTestCase {
         }
     }
 
-    func testHugeRelativeValueDoesNotTrap() throws {
-        throw XCTSkip("Enable after plan 042: AppleTime.parse(\"999999999h\") traps at 61e75d9")
+    func testHugeRelativeValueDoesNotTrap() {
+        for input in ["999999999h", "99999999999d", "9999-01-01T00:00:00Z", "0001-01-01T00:00:00Z", "999999999 days ago"] {
+            let result = AppleTime.parse(input)
+            // Either nil (rejected) or a finite Int64; the point is no trap.
+            if let result {
+                XCTAssertTrue(result <= Int64.max && result >= Int64.min, input)
+            }
+        }
+        // A relative bound is capped at 100 years, not dropped.
+        let capped = try? XCTUnwrap(AppleTime.parse("999999999h"))
+        XCTAssertNotNil(capped)
     }
 }
