@@ -36,11 +36,13 @@ struct UnreadSummaryResponse: Codable {
     let chats: [UnreadChatSummary]
     let totalUnread: Int
     let chatsWithUnread: Int
+    let more: Bool
 
     enum CodingKeys: String, CodingKey {
         case chats
         case totalUnread = "total_unread"
         case chatsWithUnread = "chats_with_unread"
+        case more
     }
 }
 
@@ -191,7 +193,8 @@ final class GetUnread {
         case .summary:
             return try await getUnreadSummary(
                 chatId: numericChatId,
-                sinceApple: sinceApple
+                sinceApple: sinceApple,
+                limit: params.limit
             )
         case .messages:
             return try await getUnreadMessages(
@@ -258,11 +261,11 @@ final class GetUnread {
 
         queryBuilder = queryBuilder
             .orderBy("m.date ASC")
-            .limit(limit)
+            .limit(limit + 1)
 
         let (sql, params) = queryBuilder.build()
 
-        let rows: [UnreadMessageRow] = try database.query(sql, params: params) { row in
+        var rows: [UnreadMessageRow] = try database.query(sql, params: params) { row in
             UnreadMessageRow(
                 id: row.int(0),
                 text: row.string(1),
@@ -272,6 +275,10 @@ final class GetUnread {
                 chatId: row.int(5),
                 chatDisplayName: row.string(6)
             )
+        }
+        let more = rows.count > limit
+        if more {
+            rows = Array(rows.prefix(limit))
         }
 
         let (totalUnread, chatsWithUnread) = try getUnreadCounts(
@@ -323,15 +330,16 @@ final class GetUnread {
             messages: unreadMessages,
             totalUnread: totalUnread,
             chatsWithUnread: chatsWithUnread,
-            // Cursor pagination not implemented; never advertise more pages.
-            more: false,
+            // Pagination is by limit only (no cursor); more reports truncation honestly.
+            more: more,
             cursor: nil
         )
     }
 
     private func getUnreadSummary(
         chatId: Int64?,
-        sinceApple: Int64?
+        sinceApple: Int64?,
+        limit: Int
     ) async throws -> UnreadSummaryResponse {
         var queryBuilder = QueryBuilder()
             .select(
@@ -361,10 +369,11 @@ final class GetUnread {
         queryBuilder = queryBuilder
             .groupBy("cmj.chat_id")
             .orderBy("unread_count DESC")
+            .limit(limit + 1)
 
         let (sql, params) = queryBuilder.build()
 
-        let rows: [SummaryRow] = try database.query(sql, params: params) { row in
+        var rows: [SummaryRow] = try database.query(sql, params: params) { row in
             SummaryRow(
                 chatId: row.int(0),
                 chatDisplayName: row.string(1),
@@ -372,6 +381,10 @@ final class GetUnread {
                 oldestUnreadDate: row.optionalInt(3),
                 newestUnreadDate: row.optionalInt(4)
             )
+        }
+        let more = rows.count > limit
+        if more {
+            rows = Array(rows.prefix(limit))
         }
 
         var totalUnread = 0
@@ -438,7 +451,8 @@ final class GetUnread {
         return UnreadSummaryResponse(
             chats: chats,
             totalUnread: totalUnread,
-            chatsWithUnread: chats.count
+            chatsWithUnread: chats.count,
+            more: more
         )
     }
 

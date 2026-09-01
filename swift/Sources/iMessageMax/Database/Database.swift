@@ -50,11 +50,18 @@ final class Database: @unchecked Sendable {
 
     // MARK: - Query Execution
 
+    /// Opt-in query counter for tests. Incremented at the start of `query` when non-nil.
+    nonisolated(unsafe) static var queryCountForTesting: Int?
+
     func query<T>(
         _ sql: String,
         params: [Any] = [],
         map: (SQLiteRow) throws -> T
     ) throws -> [T] {
+        if Database.queryCountForTesting != nil {
+            Database.queryCountForTesting! += 1
+        }
+
         let conn = try openReadOnly()
         defer { sqlite3_close(conn) }
 

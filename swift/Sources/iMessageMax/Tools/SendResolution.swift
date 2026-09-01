@@ -204,10 +204,11 @@ actor SendResolver {
             }
         }
 
+        let capped = Array(matches.prefix(50))
+        let lastTimes = (try? getLastContactTimes(handles: capped.map(\.handle))) ?? [:]
         var candidates: [(handle: String, name: String, lastContact: Date?)] = []
-        for match in matches {
-            let lastTime = try? getLastContactTime(handle: match.handle)
-            candidates.append((match.handle, match.name, lastTime))
+        for match in capped {
+            candidates.append((match.handle, match.name, lastTimes[match.handle]))
         }
 
         candidates.sort { lhs, rhs in
@@ -280,23 +281,29 @@ actor SendResolver {
         return participants
     }
 
-    private func getLastContactTime(handle: String) throws -> Date? {
-        let dates: [Int64?] = try db.query(
+    private func getLastContactTimes(handles: [String]) throws -> [String: Date] {
+        guard !handles.isEmpty else { return [:] }
+        let placeholders = handles.map { _ in "?" }.joined(separator: ", ")
+        let rows: [(String, Int64?)] = try db.query(
             """
-            SELECT m.date
+            SELECT h.id, MAX(m.date)
             FROM message m
             JOIN handle h ON m.handle_id = h.ROWID
-            WHERE h.id = ?
-            ORDER BY m.date DESC
-            LIMIT 1
+            WHERE h.id IN (\(placeholders))
+            GROUP BY h.id
             """,
-            params: [handle]
+            params: handles
         ) { row in
-            row.optionalInt(0)
+            (row.string(0) ?? "", row.optionalInt(1))
         }
 
-        guard let timestamp = dates.first, let ts = timestamp else { return nil }
-        return AppleTime.toDate(ts)
+        var result: [String: Date] = [:]
+        for (handle, timestamp) in rows {
+            if let timestamp {
+                result[handle] = AppleTime.toDate(timestamp)
+            }
+        }
+        return result
     }
 
     private func chatReference(chatId: Int) throws -> ChatReference? {

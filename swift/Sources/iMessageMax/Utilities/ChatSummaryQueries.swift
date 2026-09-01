@@ -80,6 +80,62 @@ enum ChatSummaryQueries {
         return result
     }
 
+    /// Participant-row counts keyed by chat ID. One `COUNT(*)` over the
+    /// candidate set; callers that historically added 1 for "me" still do so.
+    static func participantCountsByChat(
+        db: Database,
+        chatIds: [Int64]
+    ) throws -> [Int64: Int] {
+        guard !chatIds.isEmpty else { return [:] }
+
+        let placeholders = chatIds.map { _ in "?" }.joined(separator: ",")
+        let sql = """
+            SELECT chat_id, COUNT(*)
+            FROM chat_handle_join
+            WHERE chat_id IN (\(placeholders))
+            GROUP BY chat_id
+            """
+
+        var result: [Int64: Int] = [:]
+        for chatId in chatIds {
+            result[chatId] = 0
+        }
+        let rows = try db.query(sql, params: chatIds.map { $0 as Any }) { row in
+            (chatId: row.int(0), count: Int(row.int(1)))
+        }
+        for row in rows {
+            result[row.chatId] = row.count
+        }
+        return result
+    }
+
+    /// Newest `message.date` keyed by chat ID. Same join as the former
+    /// per-chat `MAX(m.date)` lookup: `chat_message_join` to `message`.
+    static func lastMessageDatesByChat(
+        db: Database,
+        chatIds: [Int64]
+    ) throws -> [Int64: Int64] {
+        guard !chatIds.isEmpty else { return [:] }
+
+        let placeholders = chatIds.map { _ in "?" }.joined(separator: ",")
+        let sql = """
+            SELECT cmj.chat_id, MAX(m.date)
+            FROM chat_message_join cmj
+            JOIN message m ON m.ROWID = cmj.message_id
+            WHERE cmj.chat_id IN (\(placeholders))
+            GROUP BY cmj.chat_id
+            """
+
+        var result: [Int64: Int64] = [:]
+        let rows = try db.query(sql, params: chatIds.map { $0 as Any }) { row in
+            (chatId: row.int(0), date: row.optionalInt(1) ?? 0)
+        }
+        for row in rows {
+            result[row.chatId] = row.date
+        }
+        return result
+    }
+
     // MARK: - Last messages
 
     /// Returns the newest non-reaction message per chat, keyed by chat ID.

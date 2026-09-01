@@ -252,6 +252,62 @@ final class SearchToolTests: XCTestCase {
         let chat = try XCTUnwrap(longResult["chat"] as? [String: Any])
         XCTAssertEqual(chat["id"] as? String, "chat40")
     }
+
+    func testIncludeContextQueryCountIsPerChatNotPerRow() async throws {
+        let fixture = try ToolTestDatabase(name: "search-ctx-batch")
+        try fixture.insertHandle(rowId: 1, handle: "+15550000001")
+        try fixture.insertChat(rowId: 1, guid: "chat-one-guid", displayName: "Chat One")
+        try fixture.joinChatHandle(chatId: 1, handleId: 1)
+        try fixture.insertChat(rowId: 2, guid: "chat-two-guid", displayName: "Chat Two")
+        try fixture.joinChatHandle(chatId: 2, handleId: 1)
+
+        for index in 1...10 {
+            try fixture.insertMessage(
+                rowId: index,
+                guid: "g\(index)",
+                text: "batchctx \(index)",
+                date: Int64(index) * 1_000,
+                isFromMe: false,
+                handleId: 1
+            )
+            try fixture.joinChatMessage(chatId: 1, messageId: index)
+        }
+        for index in 11...20 {
+            try fixture.insertMessage(
+                rowId: index,
+                guid: "g\(index)",
+                text: "batchctx \(index)",
+                date: Int64(index) * 1_000,
+                isFromMe: false,
+                handleId: 1
+            )
+            try fixture.joinChatMessage(chatId: 2, messageId: index)
+        }
+
+        Database.queryCountForTesting = 0
+        defer { Database.queryCountForTesting = nil }
+
+        let response = try await decodeSearchResponse(
+            SearchTool.execute(
+                query: "batchctx",
+                cursor: nil,
+                limit: 20,
+                sort: "recent_first",
+                format: "flat",
+                includeContext: true,
+                unanswered: false,
+                unansweredHours: 24,
+                matchAll: false,
+                fuzzy: false,
+                db: fixture.database(),
+                resolver: makeSeededResolver()
+            )
+        )
+        let results = try decodeJSONArray(try XCTUnwrap(response["results"]))
+        XCTAssertEqual(results.count, 20)
+        let queryCount = try XCTUnwrap(Database.queryCountForTesting)
+        XCTAssertLessThanOrEqual(queryCount, 5, "include_context ran \(queryCount) queries")
+    }
 }
 
 func decodeSearchResponse(_ result: Result<String, SearchError>) throws -> [String: Any] {

@@ -118,6 +118,42 @@ final class SendResolverTests: XCTestCase {
             "Unexpected failure message: \(message)"
         )
     }
+
+    func testNameResolutionUsesOneLastContactQuery() async throws {
+        let fixture = try ToolTestDatabase(name: "send-jo")
+        let names = [
+            "Jo Smith", "Joanna Lee", "John Park", "Jordan Kim",
+            "Joyce Wu", "Joel Ray", "Joseph Ng", "Joy Chen",
+        ]
+        var seed: [String: String] = [:]
+        for (index, name) in names.enumerated() {
+            let handle = "+1555100000\(index)"
+            seed[handle] = name
+            try fixture.insertHandle(rowId: index + 1, handle: handle)
+            try fixture.insertMessage(
+                rowId: index + 1,
+                guid: "jo-msg-\(index)",
+                text: "hi",
+                date: Int64(index + 1) * 1_000,
+                isFromMe: false,
+                handleId: index + 1
+            )
+        }
+
+        let contacts = ContactResolver(seedCache: seed)
+        let resolver = SendResolver(db: fixture.database(), resolver: contacts)
+
+        Database.queryCountForTesting = 0
+        defer { Database.queryCountForTesting = nil }
+
+        let result = await resolver.resolve(chatId: nil, to: "Jo")
+        guard case .ambiguous(let candidates) = result else {
+            return XCTFail("Expected ambiguous name resolution")
+        }
+        XCTAssertEqual(candidates.count, 8)
+        let queryCount = try XCTUnwrap(Database.queryCountForTesting)
+        XCTAssertLessThanOrEqual(queryCount, 3, "send-by-name ran \(queryCount) queries")
+    }
 }
 
 private func makeResolverTestDatabase() throws -> String {
