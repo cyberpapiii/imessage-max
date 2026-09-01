@@ -268,7 +268,7 @@ actor GetMessagesTool {
             chatId: numericChatId,
             sinceApple: sinceApple,
             beforeApple: beforeApple,
-            cursor: cursor.flatMap(Self.decodeCursor),
+            cursor: cursor.flatMap(TimelineCursor.decode),
             limit: fetchLimit,
             fromHandle: fromHandle,
             fromMeOnly: fromMeOnly,

@@ -338,7 +338,7 @@ enum SearchTool {
                 has: has,
                 since: since,
                 before: before,
-                cursor: cursor.flatMap(decodeCursor),
+                cursor: cursor.flatMap(TimelineCursor.decode),
                 limit: fetchLimit,
                 sort: sortOrder,
                 unanswered: unanswered,

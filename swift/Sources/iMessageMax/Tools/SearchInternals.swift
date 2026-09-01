@@ -1,10 +1,5 @@
 import Foundation
 
-struct SearchCursor {
-    let date: Int64
-    let messageId: Int64
-}
-
 struct SearchSenderFilter {
     let value: String
     let exact: Bool
@@ -51,7 +46,7 @@ extension SearchTool {
         has: String?,
         since: String?,
         before: String?,
-        cursor: SearchCursor?,
+        cursor: TimelineCursor?,
         limit: Int,
         sort: SearchSort,
         unanswered: Bool,
@@ -121,9 +116,9 @@ extension SearchTool {
         if let cursor {
             switch sort {
             case .recentFirst:
-                builder.where("(m.date < ? OR (m.date = ? AND m.ROWID < ?))", cursor.date, cursor.date, cursor.messageId)
+                builder.where(cursor.olderThanSQL, cursor.date, cursor.date, cursor.messageId)
             case .oldestFirst:
-                builder.where("(m.date > ? OR (m.date = ? AND m.ROWID > ?))", cursor.date, cursor.date, cursor.messageId)
+                builder.where(cursor.newerThanSQL, cursor.date, cursor.date, cursor.messageId)
             }
         }
 
@@ -790,23 +785,8 @@ extension SearchTool {
         return SearchSenderFilter(value: fromPerson, exact: false)
     }
 
-    static func encodeCursor(date: Int64?, messageId: Int64) -> String? {
-        guard let date else { return nil }
-        return "\(date):\(messageId)"
-    }
-
-    static func decodeCursor(_ raw: String) -> SearchCursor? {
-        let parts = raw.split(separator: ":")
-        guard parts.count == 2,
-              let date = Int64(parts[0]),
-              let messageId = Int64(parts[1]) else {
-            return nil
-        }
-        return SearchCursor(date: date, messageId: messageId)
-    }
-
     static func nextCursor(from rows: [SearchRow], limit: Int) -> String? {
         guard rows.count >= limit, let last = rows.last else { return nil }
-        return encodeCursor(date: last.date, messageId: last.msgId)
+        return TimelineCursor.encode(date: last.date, messageId: last.msgId)
     }
 }

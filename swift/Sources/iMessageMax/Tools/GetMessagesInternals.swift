@@ -1,10 +1,5 @@
 import Foundation
 
-struct GetMessagesCursor {
-    let date: Int64
-    let messageId: Int
-}
-
 struct MessageRow {
     let id: Int
     let guid: String
@@ -222,7 +217,7 @@ extension GetMessagesTool {
         chatId: Int,
         sinceApple: Int64?,
         beforeApple: Int64?,
-        cursor: GetMessagesCursor?,
+        cursor: TimelineCursor?,
         limit: Int,
         fromHandle: String?,
         fromMeOnly: Bool,
@@ -254,7 +249,7 @@ extension GetMessagesTool {
         }
 
         if let cursor {
-            query.where("(m.date < ? OR (m.date = ? AND m.ROWID < ?))", cursor.date, cursor.date, cursor.messageId)
+            query.where(cursor.olderThanSQL, cursor.date, cursor.date, cursor.messageId)
         }
 
         if fromMeOnly {
@@ -540,23 +535,8 @@ extension GetMessagesTool {
         return (updatedMessages, sessions)
     }
 
-    static func decodeCursor(_ raw: String) -> GetMessagesCursor? {
-        let parts = raw.split(separator: ":")
-        guard parts.count == 2,
-              let date = Int64(parts[0]),
-              let messageId = Int(parts[1]) else {
-            return nil
-        }
-        return GetMessagesCursor(date: date, messageId: messageId)
-    }
-
-    static func encodeCursor(date: Int64?, messageId: Int) -> String? {
-        guard let date else { return nil }
-        return "\(date):\(messageId)"
-    }
-
     static func nextCursor(from rows: [MessageRow], limit: Int) -> String? {
         guard rows.count >= limit, let last = rows.last else { return nil }
-        return encodeCursor(date: last.date, messageId: last.id)
+        return TimelineCursor.encode(date: last.date, messageId: Int64(last.id))
     }
 }
