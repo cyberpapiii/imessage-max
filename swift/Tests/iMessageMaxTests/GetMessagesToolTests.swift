@@ -203,6 +203,40 @@ final class GetMessagesToolTests: XCTestCase {
         XCTAssertFalse(attachments.isEmpty)
         XCTAssertNotNil(attachments.first?["id"] as? String)
     }
+
+    // Plan 049: the GUID-substring fallback binds the caller's text into a
+    // LIKE pattern. Without escaping, "%" (or "_", or "") matches every chat
+    // and hands back the first row's messages.
+    func testChatIdWildcardDoesNotMatchEveryChat() async throws {
+        let fixture = try makeGetMessagesFixture()
+        let tool = GetMessagesTool(db: fixture.database(), resolver: makeSeededResolver())
+
+        for wildcard in ["%", "_", "", "   "] {
+            do {
+                _ = try await tool.execute(args: ["chat_id": .string(wildcard)])
+                XCTFail("chat_id \(wildcard.debugDescription) must not resolve to a chat")
+            } catch let error as ToolError {
+                let payload = try decodeJSONDictionary(from: error.content)
+                XCTAssertEqual(
+                    payload["error"] as? String, "chat_not_found",
+                    "chat_id \(wildcard.debugDescription) should be a chat_not_found error"
+                )
+            }
+        }
+    }
+
+    func testChatIdLiteralPercentInGuidStillMatches() async throws {
+        let fixture = try makeGetMessagesFixture()
+        try fixture.insertChat(rowId: 50, guid: "iMessage;-;50%_off", displayName: "Percent Chat")
+        let tool = GetMessagesTool(db: fixture.database(), resolver: makeSeededResolver())
+
+        let response = try await decodeGetMessagesResponse(
+            await tool.execute(args: ["chat_id": .string("50%_off")])
+        )
+
+        let chat = try XCTUnwrap(response["chat"] as? [String: Any])
+        XCTAssertEqual(chat["id"] as? String, "chat50")
+    }
 }
 
 private func decodeGetMessagesResponse(_ contents: [Tool.Content]) async throws -> [String: Any] {
