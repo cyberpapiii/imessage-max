@@ -9,6 +9,8 @@
 #   make logs          Tail stderr log
 #   make clean         Remove debug build artifacts
 #   make setup-signing Create persistent code signing identity (one-time)
+#   make version       Print the version and check all copies agree
+#   make release-check Everything that must pass before tagging a release
 #
 # The signing identity lets Full Disk Access persist across rebuilds.
 # Without it, you'd need to re-grant FDA in System Settings every build.
@@ -36,7 +38,7 @@ VERIFY_ATTEMPTS := 45
 SIGN_HASH = $(shell security find-identity -v -p codesigning 2>/dev/null | \
 	grep -F '"$(CERT_CN)"' | head -1 | awk '{print $$2}')
 
-.PHONY: build test sign install restart status logs clean setup-signing verify help
+.PHONY: build test sign install restart status logs clean setup-signing verify help version release-check
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
@@ -52,6 +54,14 @@ build: ## Build release binary
 
 test: ## Run the full test suite
 	@swift test
+
+version: ## Print the version and check all copies agree
+	@../scripts/check-version.sh
+
+release-check: build test version ## Everything that must pass before tagging
+	@../scripts/check-version.sh --tag || echo "Not on a matching tag yet (expected before tagging)."
+	@ruby -c Formula/imessage-max.rb
+	@echo "Release checks passed. Next: git tag v$$(sed -nE 's/^ *static let current = \"([^\"]+)\"/\1/p' Sources/iMessageMax/Server/Version.swift) && git push --tags"
 
 sign: build ## Build and sign with persistent identity
 	@HASH="$(SIGN_HASH)"; \
