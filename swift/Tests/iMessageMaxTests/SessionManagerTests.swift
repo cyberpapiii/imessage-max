@@ -8,7 +8,8 @@ final class SessionManagerTests: XCTestCase {
         let manager = SessionManager(
             database: Database(),
             resolver: ContactResolver(seedCache: [:]),
-            maxSessions: 2
+            maxSessions: 2,
+            cleanupInterval: .milliseconds(20)
         )
 
         let outcomes = try await withThrowingTaskGroup(of: SessionCreationResult.self) { group in
@@ -53,7 +54,8 @@ final class SessionManagerTests: XCTestCase {
         let manager = SessionManager(
             database: Database(),
             resolver: ContactResolver(seedCache: [:]),
-            maxSessions: 2
+            maxSessions: 2,
+            cleanupInterval: .milliseconds(20)
         )
 
         let result = await manager.createSession()

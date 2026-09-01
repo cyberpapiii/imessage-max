@@ -363,7 +363,8 @@ private func makeModernTestTransport() -> HTTPTransport {
         port: 0,
         database: Database(),
         resolver: ContactResolver(seedCache: [:]),
-        requestTimeout: .seconds(5)
+        requestTimeout: .seconds(5),
+        cleanupInterval: .milliseconds(20)
     )
 }
 

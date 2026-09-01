@@ -208,7 +208,8 @@ final class SessionManagerLifecycleTests: XCTestCase {
         let manager = SessionManager(
             database: Database(),
             resolver: ContactResolver(seedCache: [:]),
-            maxSessions: 1
+            maxSessions: 1,
+            cleanupInterval: .milliseconds(20)
         )
 
         let first = await manager.createSession()
@@ -232,7 +233,8 @@ final class SessionManagerLifecycleTests: XCTestCase {
             database: Database(),
             resolver: ContactResolver(seedCache: [:]),
             maxSessions: 1,
-            reclaimableIdle: 60
+            reclaimableIdle: 60,
+            cleanupInterval: .milliseconds(20)
         )
 
         let first = await manager.createSession()
@@ -257,7 +259,8 @@ final class SessionManagerLifecycleTests: XCTestCase {
             database: Database(),
             resolver: ContactResolver(seedCache: [:]),
             maxSessions: 1,
-            reclaimableIdle: 0.05
+            reclaimableIdle: 0.05,
+            cleanupInterval: .milliseconds(20)
         )
 
         let first = await manager.createSession()
@@ -287,7 +290,8 @@ final class SessionManagerLifecycleTests: XCTestCase {
         let manager = SessionManager(
             database: Database(),
             resolver: ContactResolver(seedCache: [:]),
-            sessionTimeout: 0.01
+            sessionTimeout: 0.01,
+            cleanupInterval: .milliseconds(20)
         )
 
         let result = await manager.createSession()
