@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 enum AsyncTimeout {
     /// Dispatch-backed sleep. NEVER sleep Swift tasks inside the launchd service
@@ -56,48 +57,49 @@ enum AsyncTimeout {
     /// can run before `arm`; it must not claim the resume in that case, or the
     /// continuation that `arm` later delivers is never resumed.
     private final class ResumeGate: @unchecked Sendable {
-        private let lock = NSLock()
+        private let state = Mutex(())
         private var work: DispatchWorkItem?
         private var continuation: CheckedContinuation<Void, Never>?
         private var resumed = false
         private var cancelled = false
 
         func arm(work: DispatchWorkItem, continuation: CheckedContinuation<Void, Never>) {
-            lock.lock()
-            defer { lock.unlock() }
-            if cancelled || resumed {
-                if !resumed {
-                    resumed = true
-                    continuation.resume()
+            state.withLock { _ in
+                if cancelled || resumed {
+                    if !resumed {
+                        resumed = true
+                        continuation.resume()
+                    }
+                    return
                 }
-                return
+                self.work = work
+                self.continuation = continuation
             }
-            self.work = work
-            self.continuation = continuation
         }
 
         func resume(_ continuation: CheckedContinuation<Void, Never>) {
-            lock.lock()
-            defer { lock.unlock() }
-            guard !resumed else { return }
-            resumed = true
-            self.continuation = nil
-            continuation.resume()
+            state.withLock { _ in
+                guard !resumed else { return }
+                resumed = true
+                self.continuation = nil
+                continuation.resume()
+            }
         }
 
         func cancelAndResume() {
-            lock.lock()
-            cancelled = true
-            let item = work
-            let cont = continuation
-            let already = resumed
-            // Only claim the resume if we actually hold the continuation. If arm()
-            // has not run yet, leave `resumed` false so arm() resumes on arrival.
-            if !already, cont != nil {
-                resumed = true
-                continuation = nil
+            let (item, cont, already) = state.withLock { _ in
+                cancelled = true
+                let item = work
+                let cont = continuation
+                let already = resumed
+                // Only claim the resume if we actually hold the continuation. If arm()
+                // has not run yet, leave `resumed` false so arm() resumes on arrival.
+                if !already, cont != nil {
+                    resumed = true
+                    continuation = nil
+                }
+                return (item, cont, already)
             }
-            lock.unlock()
             item?.cancel()
             if !already, let cont {
                 cont.resume()

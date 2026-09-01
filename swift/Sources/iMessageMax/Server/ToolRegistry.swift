@@ -1,6 +1,7 @@
 // Sources/iMessageMax/Server/ToolRegistry.swift
 import Foundation
 import MCP
+import Synchronization
 
 enum ToolRegistry {
     /// The database and resolver the catalog's handlers are bound to. The
@@ -8,9 +9,11 @@ enum ToolRegistry {
     /// for every new session only rebuilt identical schemas and bumped the
     /// registry's catalog version twelve times, which invalidated the modern
     /// lane's encoded-catalog cache on every `initialize`.
-    private static let boundLock = NSLock()
-    nonisolated(unsafe) private static var boundDatabase: Database?
-    nonisolated(unsafe) private static var boundResolver: ContactResolver?
+    private struct Bound {
+        var database: Database?
+        var resolver: ContactResolver?
+    }
+    private static let bound = Mutex(Bound())
 
     /// Registers the per-server method handlers, and the process-wide tool
     /// catalog if it is not already bound to this database and resolver.
@@ -24,14 +27,14 @@ enum ToolRegistry {
     /// Claiming the binding and reading it happen under one lock, so two
     /// sessions starting at once cannot both decide to register.
     private static func claimCatalogBinding(db: Database, resolver: ContactResolver) -> Bool {
-        boundLock.lock()
-        defer { boundLock.unlock() }
-        if boundDatabase === db && boundResolver === resolver {
-            return true
+        bound.withLock { state in
+            if state.database === db && state.resolver === resolver {
+                return true
+            }
+            state.database = db
+            state.resolver = resolver
+            return false
         }
-        boundDatabase = db
-        boundResolver = resolver
-        return false
     }
 
     static func registerAll(on server: Server, db: Database, resolver: ContactResolver) async {

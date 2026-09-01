@@ -41,7 +41,7 @@ default HTTP port is `8080`.
 
 ## Requirements
 
-- macOS 14+ (Sonoma)
+- macOS 15+ (Sequoia or later)
 - Xcode Command Line Tools or full Xcode
 
 ## Architecture
@@ -50,7 +50,7 @@ default HTTP port is `8080`.
 
 ```
 Sources/iMessageMax/
-├── main.swift                  # Entry point, CLI parsing
+├── iMessageMaxCommand.swift    # Entry point, CLI parsing
 ├── Server/
 │   ├── MCPServer.swift         # Server lifecycle (stdio mode)
 │   ├── HTTPTransport.swift     # HTTP Streamable transport (dual-era)

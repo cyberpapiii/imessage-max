@@ -1,6 +1,7 @@
 // Sources/iMessageMax/Server/ServerExtensions.swift
 import Foundation
 import MCP
+import Synchronization
 
 // MARK: - Tool Schema Types
 
@@ -91,14 +92,16 @@ enum OutputSchema {
 // MARK: - Tool Handler Registry
 
 /// Registry to hold tool handlers and definitions
-final class ToolHandlerRegistry: @unchecked Sendable {
+final class ToolHandlerRegistry: Sendable {
     static let shared = ToolHandlerRegistry()
 
-    private var tools: [String: Tool] = [:]
-    private var registrationOrder: [String] = []
-    private var handlers: [String: @Sendable ([String: Value]?) async throws -> [Tool.Content]] = [:]
-    private let lock = NSLock()
-    private var version: Int = 0
+    private struct State: Sendable {
+        var tools: [String: Tool] = [:]
+        var registrationOrder: [String] = []
+        var handlers: [String: @Sendable ([String: Value]?) async throws -> [Tool.Content]] = [:]
+        var version: Int = 0
+    }
+    private let state = Mutex(State())
 
     private init() {}
 
@@ -109,47 +112,43 @@ final class ToolHandlerRegistry: @unchecked Sendable {
     /// of tool state bumps `version` under the lock**. Any future
     /// unregister/replace must do the same.
     var catalogVersion: Int {
-        lock.lock()
-        defer { lock.unlock() }
-        return version
+        state.withLock { $0.version }
     }
 
     func register(
         tool: Tool,
         handler: @escaping @Sendable ([String: Value]?) async throws -> [Tool.Content]
     ) {
-        lock.lock()
-        defer { lock.unlock() }
-        if tools[tool.name] == nil {
-            registrationOrder.append(tool.name)
+        state.withLock { state in
+            if state.tools[tool.name] == nil {
+                state.registrationOrder.append(tool.name)
+            }
+            state.tools[tool.name] = tool
+            state.handlers[tool.name] = handler
+            state.version += 1
         }
-        tools[tool.name] = tool
-        handlers[tool.name] = handler
-        version += 1
     }
 
     /// Returns tools in registration order. The MCP 2026-07-28 spec asks for
     /// deterministic `tools/list` ordering so clients can cache catalogs and
     /// LLM prompt caches stay warm.
     func getTools() -> [Tool] {
-        lock.lock()
-        defer { lock.unlock() }
-        return registrationOrder.compactMap { tools[$0] }
+        state.withLock { state in
+            state.registrationOrder.compactMap { state.tools[$0] }
+        }
     }
 
     func getHandler(for name: String) -> (@Sendable ([String: Value]?) async throws -> [Tool.Content])? {
-        lock.lock()
-        defer { lock.unlock() }
-        return handlers[name]
+        state.withLock { $0.handlers[name] }
     }
 
     func resetForTesting() {
-        lock.lock()
-        defer { lock.unlock() }
-        tools.removeAll()
-        registrationOrder.removeAll()
-        handlers.removeAll()
-        version += 1
+        state.withLock { state in
+            state.tools.removeAll()
+            state.registrationOrder.removeAll()
+            state.handlers.removeAll()
+            state.version += 1
+        }
     }
 }
 

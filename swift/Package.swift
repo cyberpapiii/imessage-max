@@ -1,16 +1,18 @@
-// swift-tools-version: 6.1
+// swift-tools-version: 6.3
 import PackageDescription
 
 let package = Package(
     name: "imessage-max",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS(.v15)],
     products: [
         .executable(name: "imessage-max", targets: ["iMessageMax"])
     ],
     dependencies: [
-        .package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", from: "0.12.0"),
-        .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.3.0"),
-        .package(url: "https://github.com/hummingbird-project/hummingbird.git", from: "2.19.0"),
+        // Upstream is stalled at 0.12.1; an exact-minor pin keeps `swift package update`
+        // from pulling a breaking 0.13 unreviewed.
+        .package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", .upToNextMinor(from: "0.12.1")),
+        .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.8.2"),
+        .package(url: "https://github.com/hummingbird-project/hummingbird.git", from: "2.26.0"),
     ],
     targets: [
         .executableTarget(
@@ -20,10 +22,7 @@ let package = Package(
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
                 .product(name: "Hummingbird", package: "hummingbird"),
             ],
-            path: "Sources/iMessageMax",
-            swiftSettings: [
-                .unsafeFlags(["-parse-as-library"])
-            ]
+            path: "Sources/iMessageMax"
         ),
         .testTarget(
             name: "iMessageMaxTests",

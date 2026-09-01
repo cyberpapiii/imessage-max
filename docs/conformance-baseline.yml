@@ -1,14 +1,14 @@
-# MCP conformance expected-failures baseline for iMessage Max.
+# MCP conformance@0.2.0-alpha.11 expected-failures baseline for iMessage Max.
 #
 # Usage (official suite: github.com/modelcontextprotocol/conformance):
-#   npx @modelcontextprotocol/conformance server --url http://127.0.0.1:8080 \
+#   npx @modelcontextprotocol/conformance@0.2.0-alpha.11 server --url http://127.0.0.1:8080 \
 #     --suite draft  --expected-failures docs/conformance-baseline.yml
-#   npx @modelcontextprotocol/conformance server --url http://127.0.0.1:8080 \
+#   npx @modelcontextprotocol/conformance@0.2.0-alpha.11 server --url http://127.0.0.1:8080 \
 #     --suite active --expected-failures docs/conformance-baseline.yml
 #
 # Every entry below is a feature the server intentionally does not implement,
 # or a check that requires the suite's purpose-built diagnostic tools
-# (test_* tools only conformance example servers expose). Rationale for each
+# (test_* tools only the suite's example servers expose). Rationale for each
 # group is recorded in plans/018-mcp-2026-07-28-dual-era.md.
 server:
   # --- draft suite (MCP 2026-07-28, stateless lane) ---

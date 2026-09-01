@@ -98,7 +98,7 @@ curl -X POST http://localhost:8080 \
 ```
 swift/
 ├── Sources/iMessageMax/
-│   ├── main.swift              # Entry point
+│   ├── iMessageMaxCommand.swift # Entry point
 │   ├── Server/
 │   │   ├── MCPServer.swift     # Server lifecycle (stdio)
 │   │   ├── HTTPTransport.swift # HTTP Streamable transport (dual-era)
@@ -150,13 +150,13 @@ logging capability, subscriptions/listen, MRTR (input-required results),
 requestState, Tasks, MCP Apps, OAuth (loopback-only posture), and
 `x-mcp-header` tool annotations.
 
-Conformance (official suite, both eras) runs with a documented
-expected-failures baseline:
+Conformance (official suite @0.2.0-alpha.11, both eras) runs with a documented
+expected-failures baseline. The suite is pinned to that alpha tag because it tracks the 2026-07-28 draft the modern lane implements; npm `latest` (0.1.16) does not.
 
 ```bash
-npx @modelcontextprotocol/conformance server --url http://127.0.0.1:8080 \
+npx @modelcontextprotocol/conformance@0.2.0-alpha.11 server --url http://127.0.0.1:8080 \
   --suite draft  --expected-failures docs/conformance-baseline.yml
-npx @modelcontextprotocol/conformance server --url http://127.0.0.1:8080 \
+npx @modelcontextprotocol/conformance@0.2.0-alpha.11 server --url http://127.0.0.1:8080 \
   --suite active --expected-failures docs/conformance-baseline.yml
 ```
 
