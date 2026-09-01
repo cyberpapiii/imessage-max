@@ -21,6 +21,7 @@ on:
       - '.mcp.json'
       - 'assets/**'
       - '.github/workflows/build.yml'
+  workflow_dispatch:
 
 concurrency:
   group: build-${{ github.ref }}
@@ -29,6 +30,7 @@ concurrency:
 jobs:
   build:
     runs-on: macos-26
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: swift
@@ -61,4 +63,4 @@ jobs:
         run: swift build --build-tests
 
       - name: Run tests
-        run: swift test --skip-build --parallel
+        run: swift test --skip-build --parallel --verbose 2>&1 | tee "${RUNNER_TEMP}/swift-test-verbose.log"
