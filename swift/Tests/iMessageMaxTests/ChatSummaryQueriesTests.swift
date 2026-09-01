@@ -150,9 +150,10 @@ final class ChatSummaryQueriesTests: XCTestCase {
 
         let preview = try ChatSummaryBuilder.participantsPreview(db: db, chatId: 10, identity: identity)
 
-        XCTAssertEqual(preview.count, 4, "three names plus the remainder marker")
+        XCTAssertEqual(preview.count, 3, "unique names plus the remainder marker")
         XCTAssertEqual(preview.first, "Chris Green", "most recent sender leads the preview")
         XCTAssertEqual(preview.last, "+3 more")
+        XCTAssertFalse(preview.contains(where: { $0.contains("(0001)") }))
     }
 
     /// Builds a `ChatIdentity` the way the non-batched tools still do: a
