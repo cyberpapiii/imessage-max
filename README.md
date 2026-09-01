@@ -327,6 +327,15 @@ Rules:
 - At least one of `text` or `file_paths`
 - If both are provided, files are sent first and text is sent last
 
+### diagnose
+Troubleshoot configuration and permission issues.
+
+```text
+diagnose()  # Returns: database status, contacts count, permissions, capabilities
+```
+
+`capabilities.verified_send` is `supported` when chat.db is readable and Messages Automation is OK, `degraded` when the database is readable but Automation is not OK, and `permission-gated` when the database is not readable.
+
 ## Release checks
 
 Before a release, work through:
@@ -357,13 +366,6 @@ Notes:
 Examples:
 - `{"status":"confirmed","verified_message_guid":"...",...}` means delivery was verified in chat.db
 - `{"status":"pending_confirmation","success":false,...}` means Messages accepted the attachment, but the MCP could not yet confirm final completion
-
-### diagnose
-Troubleshoot configuration and permission issues.
-
-```text
-diagnose()  # Returns: database status, contacts count, permissions, capabilities
-```
 
 ## Troubleshooting
 
