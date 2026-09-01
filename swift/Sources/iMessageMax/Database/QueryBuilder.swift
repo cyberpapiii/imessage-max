@@ -44,6 +44,13 @@ final class QueryBuilder {
 
     @discardableResult
     func `where`(_ condition: String, _ params: Any...) -> QueryBuilder {
+        `where`(condition, params: params)
+    }
+
+    /// Array form of `where`, for callers that build bindings in a loop
+    /// and so cannot spell them out as variadic arguments.
+    @discardableResult
+    func `where`(_ condition: String, params: [Any]) -> QueryBuilder {
         conditions.append((condition, params))
         return self
     }
