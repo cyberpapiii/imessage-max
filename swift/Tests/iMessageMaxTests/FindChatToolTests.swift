@@ -18,6 +18,41 @@ final class FindChatToolTests: XCTestCase {
         XCTAssertEqual(chats.count, 1)
         XCTAssertEqual(chats.first?["id"] as? String, "chat1")
     }
+
+    func testEnrichmentUsesBoundedQueryCount() async throws {
+        let fixture = try ToolTestDatabase(name: "find-chat-batch")
+        try fixture.insertHandle(rowId: 1, handle: "+15550000001")
+        for chatId in 1...30 {
+            try fixture.insertChat(rowId: chatId, guid: "chat-\(chatId)", displayName: "Chat \(chatId)")
+            try fixture.joinChatHandle(chatId: chatId, handleId: 1)
+            try fixture.insertMessage(
+                rowId: chatId,
+                guid: "msg-\(chatId)",
+                text: "hello \(chatId)",
+                date: Int64(chatId) * 1_000_000_000,
+                isFromMe: false,
+                handleId: 1
+            )
+            try fixture.joinChatMessage(chatId: chatId, messageId: chatId)
+        }
+
+        Database.queryCountForTesting = 0
+        defer { Database.queryCountForTesting = nil }
+
+        let contents = try await FindChatTool.execute(
+            arguments: [
+                "participants": .array([.string("+15550000001")]),
+                "limit": .int(5),
+            ],
+            database: fixture.database(),
+            resolver: makeSeededResolver()
+        )
+        let payload = try decodeJSONDictionary(from: contents)
+        let chats = try decodeJSONArray(try XCTUnwrap(payload["chats"]))
+        XCTAssertEqual(chats.count, 5)
+        let queryCount = try XCTUnwrap(Database.queryCountForTesting)
+        XCTAssertLessThanOrEqual(queryCount, 6, "find_chat ran \(queryCount) queries")
+    }
 }
 
 private func makeContainsRecentRichFixture() throws -> ToolTestDatabase {

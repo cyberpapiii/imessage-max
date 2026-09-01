@@ -138,20 +138,19 @@ enum FindChatTool {
             if let participants = params.participants, !participants.isEmpty {
                 let handleGroups = await buildHandleGroups(participants: participants, resolver: resolver)
                 if !handleGroups.isEmpty {
-                    let chats = try findChatsByHandleGroups(
-                        database: database,
-                        handleGroups: handleGroups,
-                        isGroup: params.isGroup,
-                        limit: params.limit
-                    )
-                    for chat in chats {
-                        results.append(try await buildChatResult(
-                            database: database,
-                            chat: chat,
-                            resolver: resolver,
-                            matchType: "participants"
-                        ))
-                    }
+                let chats = try await findChatsByHandleGroups(
+                    database: database,
+                    handleGroups: handleGroups,
+                    isGroup: params.isGroup,
+                    limit: params.limit,
+                    resolver: resolver
+                )
+                results.append(contentsOf: try await buildChatResults(
+                    database: database,
+                    chats: chats,
+                    resolver: resolver,
+                    matchType: "participants"
+                ))
                 }
             }
 
@@ -162,14 +161,12 @@ enum FindChatTool {
                     limit: params.limit,
                     isGroup: params.isGroup
                 )
-                for chat in chats {
-                    results.append(try await buildChatResult(
-                        database: database,
-                        chat: chat,
-                        resolver: resolver,
-                        matchType: "name"
-                    ))
-                }
+                results.append(contentsOf: try await buildChatResults(
+                    database: database,
+                    chats: chats,
+                    resolver: resolver,
+                    matchType: "name"
+                ))
             }
 
             if let containsRecent = params.containsRecent, results.isEmpty {
@@ -179,14 +176,12 @@ enum FindChatTool {
                     limit: params.limit,
                     isGroup: params.isGroup
                 )
-                for chat in chats {
-                    results.append(try await buildChatResult(
-                        database: database,
-                        chat: chat,
-                        resolver: resolver,
-                        matchType: "content"
-                    ))
-                }
+                results.append(contentsOf: try await buildChatResults(
+                    database: database,
+                    chats: chats,
+                    resolver: resolver,
+                    matchType: "content"
+                ))
             }
 
             var seen = Set<String>()
@@ -276,8 +271,9 @@ enum FindChatTool {
         database: Database,
         handleGroups: [[String]],
         isGroup: Bool?,
-        limit: Int
-    ) throws -> [ChatRow] {
+        limit: Int,
+        resolver: ContactResolver
+    ) async throws -> [ChatRow] {
         guard !handleGroups.isEmpty else { return [] }
 
         // Flatten all handles for initial query
@@ -293,6 +289,8 @@ enum FindChatTool {
             JOIN handle h ON chj.handle_id = h.ROWID
             WHERE h.id IN (\(placeholders))
             \(groupSQL)
+            ORDER BY c.ROWID DESC
+            LIMIT 500
             """
 
         let candidates = try database.query(sql, params: allHandles) { row in
@@ -309,10 +307,15 @@ enum FindChatTool {
             sorted = try enrichAndSortChats(database: database, chats: candidates, targetCount: 2)
         } else {
             // For multiple groups, filter to chats that have at least one handle from each group
+            let handlesByChat = try await ChatSummaryQueries.participantsByChat(
+                db: database,
+                chatIds: candidates.map(\.id),
+                resolver: resolver
+            )
             var matchingChats: [ChatRow] = []
 
             for chat in candidates {
-                let chatHandles = try getChatHandles(database: database, chatId: chat.id)
+                let chatHandles = Set((handlesByChat[chat.id] ?? []).map(\.handle))
 
                 var hasAllGroups = true
                 for group in handleGroups {
@@ -334,48 +337,19 @@ enum FindChatTool {
         return Array(sorted.prefix(limit))
     }
 
-    private static func getChatHandles(database: Database, chatId: Int64) throws -> Set<String> {
-        let sql = """
-            SELECT h.id
-            FROM chat_handle_join chj
-            JOIN handle h ON chj.handle_id = h.ROWID
-            WHERE chj.chat_id = ?
-            """
-
-        let handles = try database.query(sql, params: [chatId]) { row in
-            row.string(0) ?? ""
-        }
-
-        return Set(handles.filter { !$0.isEmpty })
-    }
-
     private static func enrichAndSortChats(
         database: Database,
         chats: [ChatRow],
         targetCount: Int
     ) throws -> [ChatRow] {
+        let chatIds = chats.map(\.id)
+        let countsByChat = try ChatSummaryQueries.participantCountsByChat(db: database, chatIds: chatIds)
+        let datesByChat = try ChatSummaryQueries.lastMessageDatesByChat(db: database, chatIds: chatIds)
+
         var enriched: [(chat: ChatRow, participantCount: Int, lastMessageDate: Int64)] = []
-
         for chat in chats {
-            // Get participant count
-            let countSql = "SELECT COUNT(*) as cnt FROM chat_handle_join WHERE chat_id = ?"
-            let counts = try database.query(countSql, params: [chat.id]) { row in
-                Int(row.int(0)) + 1  // +1 for "me"
-            }
-            let participantCount = counts.first ?? 1
-
-            // Get last message date
-            let dateSql = """
-                SELECT MAX(m.date) as last_date
-                FROM message m
-                JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
-                WHERE cmj.chat_id = ?
-                """
-            let dates = try database.query(dateSql, params: [chat.id]) { row in
-                row.optionalInt(0) ?? 0
-            }
-            let lastDate = dates.first ?? 0
-
+            let participantCount = (countsByChat[chat.id] ?? 0) + 1  // +1 for "me"
+            let lastDate = datesByChat[chat.id] ?? 0
             enriched.append((chat, participantCount, lastDate))
         }
 
@@ -466,111 +440,67 @@ enum FindChatTool {
         return chats
     }
 
-    private static func buildChatResult(
+    private static func buildChatResults(
         database: Database,
-        chat: ChatRow,
+        chats: [ChatRow],
         resolver: ContactResolver,
         matchType: String
-    ) async throws -> ChatResult {
-        // Get participants
-        let participantSql = """
-            SELECT h.id, h.service
-            FROM chat_handle_join chj
-            JOIN handle h ON chj.handle_id = h.ROWID
-            WHERE chj.chat_id = ?
-            ORDER BY h.id ASC
-            """
-
-        let participantRows = try database.query(participantSql, params: [chat.id]) { row in
-            (handle: row.string(0) ?? "", service: row.string(1))
-        }
-
-        var participants: [ChatParticipant] = []
-        var identityParticipants: [ChatIdentity.Participant] = []
-        for p in participantRows {
-            let resolvedName = await resolver.resolve(p.handle)
-            let identityParticipant = ChatIdentity.makeParticipant(
-                handle: p.handle,
-                contactName: resolvedName
-            )
-            participants.append(ChatParticipant(name: identityParticipant.displayName, handle: p.handle))
-            identityParticipants.append(identityParticipant)
-        }
-
-        let isGroup = participants.count > 1
-
-        let identity = ChatIdentity(
-            mcpId: "chat\(chat.id)",
-            guid: chat.guid,
-            explicitName: chat.displayName,
-            participants: identityParticipants
+    ) async throws -> [ChatResult] {
+        let chatIds = chats.map(\.id)
+        let participantsByChat = try await ChatSummaryQueries.participantsByChat(
+            db: database,
+            chatIds: chatIds,
+            resolver: resolver
+        )
+        let lastByChat = try await ChatSummaryQueries.lastMessagesByChat(
+            db: database,
+            chatIds: chatIds,
+            resolver: resolver,
+            agoFallback: nil
         )
 
-        // Get last message
-        let lastMsgSql = """
-            SELECT m.ROWID, m.text, m.attributedBody, m.date, m.is_from_me, h.id as sender_handle
-            FROM message m
-            JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
-            LEFT JOIN handle h ON m.handle_id = h.ROWID
-            WHERE cmj.chat_id = ?
-            AND m.associated_message_type = 0
-            ORDER BY m.date DESC
-            LIMIT 1
-            """
+        var results: [ChatResult] = []
+        for chat in chats {
+            let participantRows = (participantsByChat[chat.id] ?? []).sorted { $0.handle < $1.handle }
 
-        let lastMsgRows = try database.query(lastMsgSql, params: [chat.id]) { row in
-            (
-                messageId: row.int(0),
-                text: row.string(1),
-                attributedBody: row.blob(2),
-                date: row.optionalInt(3),
-                isFromMe: row.int(4) == 1,
-                senderHandle: row.string(5)
-            )
-        }
-
-        var lastMessage: LastMessageSummary? = nil
-        if let lastMsg = lastMsgRows.first {
-            let sender: String
-            if lastMsg.isFromMe {
-                sender = "Me"
-            } else if let handle = lastMsg.senderHandle {
-                sender = await IdentityDisplayFormatter.displayName(handle: handle, resolver: resolver)
-            } else {
-                sender = "unknown"
+            var participants: [ChatParticipant] = []
+            var identityParticipants: [ChatIdentity.Participant] = []
+            for p in participantRows {
+                let identityParticipant = ChatIdentity.makeParticipant(
+                    handle: p.handle,
+                    contactName: p.name
+                )
+                participants.append(ChatParticipant(name: identityParticipant.displayName, handle: p.handle))
+                identityParticipants.append(identityParticipant)
             }
 
-            let date = AppleTime.toDate(lastMsg.date)
+            let isGroup = participants.count > 1
+            let identity = ChatIdentity(
+                mcpId: "chat\(chat.id)",
+                guid: chat.guid,
+                explicitName: chat.displayName,
+                participants: identityParticipants
+            )
 
-            lastMessage = LastMessageSummary(
-                from: sender,
-                text: try MessagePreviewResolver.messageSummary(
-                    db: database,
-                    messageId: lastMsg.messageId,
-                    text: lastMsg.text,
-                    attributedBody: lastMsg.attributedBody,
-                    maxLength: 50
-                ),
-                ago: TimeUtils.formatCompactRelative(date),
-                ts: TimeUtils.formatISO(date)
+            results.append(
+                ChatResult(
+                    id: identity.mcpId,
+                    name: identity.displayName,
+                    group: isGroup ? true : nil,
+                    participantCount: identity.participantCount,
+                    participantsPreview: try ChatSummaryBuilder.participantsPreview(
+                        db: database,
+                        chatId: chat.id,
+                        identity: identity
+                    ),
+                    lastMessage: lastByChat[chat.id]?.info,
+                    participants: participants,
+                    match: MatchInfo(type: matchType),
+                    identity: identity
+                )
             )
         }
-
-        return ChatResult(
-            id: identity.mcpId,
-            name: identity.displayName,
-            group: isGroup ? true : nil,
-            participantCount: identity.participantCount,
-            participantsPreview: try ChatSummaryBuilder.participantsPreview(
-                db: database,
-                chatId: chat.id,
-                identity: identity
-            ),
-            lastMessage: lastMessage,
-            participants: participants,
-            match: MatchInfo(type: matchType),
-            identity: identity
-        )
+        return results
     }
 
 
