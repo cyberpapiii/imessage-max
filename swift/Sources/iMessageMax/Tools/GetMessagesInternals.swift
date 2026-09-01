@@ -134,9 +134,15 @@ extension GetMessagesTool {
             return numId
         }
 
+        // GUID substring fallback. The caller's text is bound into a LIKE
+        // pattern, so escape its wildcards: an unescaped "%" or "_" (or an
+        // empty string) would match every chat and return the first row.
+        let trimmed = chatId.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return nil }
+
         let rows = try? db.query(
-            "SELECT ROWID FROM chat WHERE guid LIKE ?",
-            params: ["%\(chatId)%"]
+            "SELECT ROWID FROM chat WHERE guid LIKE ? ESCAPE '\\'",
+            params: ["%\(QueryBuilder.escapeLike(trimmed))%"]
         ) { row in
             Int(row.int(0))
         }
