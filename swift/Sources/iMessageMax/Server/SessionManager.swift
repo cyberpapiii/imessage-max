@@ -57,6 +57,11 @@ actor SessionManager {
     /// when the table is full.
     private let reclaimableIdle: TimeInterval
 
+    /// How often the expired-session sweep runs. Production uses 300s.
+    /// Tests pass a short interval so a leftover cleanup `Task` cannot pin
+    /// a `swift test --parallel` worker for five minutes.
+    private let cleanupInterval: Duration
+
     /// Task for periodic cleanup
     private var cleanupTask: Task<Void, Never>?
 
@@ -83,18 +88,23 @@ actor SessionManager {
     ///   - reclaimableIdle: idle span after which a session may be reclaimed
     ///     to admit a new client once the cap is reached. Production uses the
     ///     default; tests shrink it to reach the reclaim path.
+    ///   - cleanupInterval: sweep period. Production uses 300s; tests shrink
+    ///     it so cancelled `asyncAfter` work does not occupy a parallel
+    ///     worker until the five-minute deadline.
     init(
         database: Database,
         resolver: ContactResolver,
         sessionTimeout: TimeInterval = 3600,
         maxSessions: Int = 512,
-        reclaimableIdle: TimeInterval = 300
+        reclaimableIdle: TimeInterval = 300,
+        cleanupInterval: Duration = .seconds(300)
     ) {
         self.database = database
         self.resolver = resolver
         self.sessionTimeout = sessionTimeout
         self.maxSessions = maxSessions
         self.reclaimableIdle = reclaimableIdle
+        self.cleanupInterval = cleanupInterval
     }
 
     deinit {
@@ -279,9 +289,10 @@ actor SessionManager {
 
     /// Starts the background cleanup task
     private func startCleanupTask() {
+        let interval = cleanupInterval
         cleanupTask = Task { [weak self] in
             while !Task.isCancelled {
-                await AsyncTimeout.sleep(.seconds(300))  // Run every 5 minutes
+                await AsyncTimeout.sleep(interval)
                 await self?.cleanupExpiredSessions()
             }
         }

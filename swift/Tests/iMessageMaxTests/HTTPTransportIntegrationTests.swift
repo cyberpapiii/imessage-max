@@ -15,7 +15,8 @@ final class HTTPTransportIntegrationTests: XCTestCase {
             port: 0,
             database: Database(),
             resolver: ContactResolver(seedCache: [:]),
-            requestTimeout: .seconds(5)
+            requestTimeout: .seconds(5),
+            cleanupInterval: .milliseconds(20)
         )
         let app = await transport.makeApplicationForTesting()
 
@@ -76,7 +77,8 @@ final class HTTPTransportIntegrationTests: XCTestCase {
             port: 0,
             database: Database(),
             resolver: ContactResolver(),
-            requestTimeout: .seconds(5)
+            requestTimeout: .seconds(5),
+            cleanupInterval: .milliseconds(20)
         )
         let app = await transport.makeApplicationForTesting()
 
@@ -103,7 +105,8 @@ final class HTTPTransportIntegrationTests: XCTestCase {
             port: 0,
             database: Database(),
             resolver: ContactResolver(),
-            requestTimeout: .seconds(5)
+            requestTimeout: .seconds(5),
+            cleanupInterval: .milliseconds(20)
         )
         let app = await transport.makeApplicationForTesting()
 
@@ -135,7 +138,8 @@ final class HTTPTransportIntegrationTests: XCTestCase {
             port: 0,
             database: Database(),
             resolver: ContactResolver(),
-            requestTimeout: .seconds(5)
+            requestTimeout: .seconds(5),
+            cleanupInterval: .milliseconds(20)
         )
         let app = await transport.makeApplicationForTesting()
 
@@ -160,7 +164,8 @@ final class HTTPTransportIntegrationTests: XCTestCase {
             port: 0,
             database: Database(),
             resolver: ContactResolver(seedCache: [:]),
-            requestTimeout: .seconds(5)
+            requestTimeout: .seconds(5),
+            cleanupInterval: .milliseconds(20)
         )
         let app = await transport.makeApplicationForTesting()
 
@@ -193,7 +198,8 @@ final class HTTPTransportIntegrationTests: XCTestCase {
             port: 0,
             database: Database(),
             resolver: ContactResolver(seedCache: [:]),
-            requestTimeout: .seconds(5)
+            requestTimeout: .seconds(5),
+            cleanupInterval: .milliseconds(20)
         )
         let app = await transport.makeApplicationForTesting()
 
@@ -246,7 +252,8 @@ final class HTTPTransportIntegrationTests: XCTestCase {
             port: 0,
             database: Database(),
             resolver: ContactResolver(),
-            requestTimeout: .seconds(5)
+            requestTimeout: .seconds(5),
+            cleanupInterval: .milliseconds(20)
         )
         let app = await transport.makeApplicationForTesting()
 
@@ -270,7 +277,8 @@ final class HTTPTransportIntegrationTests: XCTestCase {
             port: 0,
             database: Database(),
             resolver: ContactResolver(),
-            requestTimeout: .seconds(2)
+            requestTimeout: .seconds(2),
+            cleanupInterval: .milliseconds(20)
         )
         let app = await transport.makeApplicationForTesting()
 
@@ -318,7 +326,8 @@ final class HTTPTransportIntegrationTests: XCTestCase {
             port: 0,
             database: Database(),
             resolver: ContactResolver(),
-            requestTimeout: .milliseconds(200)
+            requestTimeout: .milliseconds(200),
+            cleanupInterval: .milliseconds(20)
         )
         let app = await transport.makeApplicationForTesting()
 
@@ -353,7 +362,8 @@ final class HTTPTransportIntegrationTests: XCTestCase {
             port: 0,
             database: Database(),
             resolver: ContactResolver(seedCache: [:]),
-            requestTimeout: .milliseconds(200)
+            requestTimeout: .milliseconds(200),
+            cleanupInterval: .milliseconds(20)
         )
         let app = await transport.makeApplicationForTesting()
 
@@ -386,7 +396,8 @@ final class HTTPTransportIntegrationTests: XCTestCase {
             port: 0,
             database: Database(),
             resolver: ContactResolver(seedCache: [:]),
-            requestTimeout: .seconds(2)
+            requestTimeout: .seconds(2),
+            cleanupInterval: .milliseconds(20)
         )
         let app = await transport.makeApplicationForTesting()
 
@@ -429,7 +440,8 @@ final class HTTPTransportIntegrationTests: XCTestCase {
             port: 0,
             database: Database(),
             resolver: ContactResolver(seedCache: [:]),
-            requestTimeout: .seconds(2)
+            requestTimeout: .seconds(2),
+            cleanupInterval: .milliseconds(20)
         )
         let app = await transport.makeApplicationForTesting()
 
@@ -538,7 +550,8 @@ final class HTTPTransportIntegrationTests: XCTestCase {
             port: 0,
             database: Database(),
             resolver: ContactResolver(seedCache: [:]),
-            requestTimeout: .seconds(5)
+            requestTimeout: .seconds(5),
+            cleanupInterval: .milliseconds(20)
         )
         let app = await transport.makeApplicationForTesting()
 
@@ -562,7 +575,8 @@ final class HTTPTransportIntegrationTests: XCTestCase {
             port: 0,
             database: Database(),
             resolver: ContactResolver(seedCache: [:]),
-            requestTimeout: .seconds(5)
+            requestTimeout: .seconds(5),
+            cleanupInterval: .milliseconds(20)
         )
         let app = await transport.makeApplicationForTesting()
 
@@ -586,7 +600,8 @@ final class HTTPTransportIntegrationTests: XCTestCase {
             port: 0,
             database: Database(),
             resolver: ContactResolver(seedCache: [:]),
-            requestTimeout: .seconds(5)
+            requestTimeout: .seconds(5),
+            cleanupInterval: .milliseconds(20)
         )
         let app = await transport.makeApplicationForTesting()
 
@@ -629,7 +644,8 @@ final class HTTPTransportIntegrationTests: XCTestCase {
             port: 0,
             database: Database(),
             resolver: ContactResolver(seedCache: [:]),
-            requestTimeout: .seconds(5)
+            requestTimeout: .seconds(5),
+            cleanupInterval: .milliseconds(20)
         )
         let app = await transport.makeApplicationForTesting()
 
@@ -676,7 +692,8 @@ final class HTTPTransportIntegrationTests: XCTestCase {
             database: Database(),
             resolver: ContactResolver(seedCache: [:]),
             requestTimeout: .seconds(5),
-            maxSessions: 1
+            maxSessions: 1,
+            cleanupInterval: .milliseconds(20)
         )
         let app = await transport.makeApplicationForTesting()
 

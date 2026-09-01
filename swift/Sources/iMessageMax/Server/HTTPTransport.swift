@@ -66,7 +66,8 @@ public actor HTTPTransport: Transport {
         resolver: ContactResolver,
         logger: Logger? = nil,
         requestTimeout: Duration = .seconds(300),
-        maxSessions: Int = 512
+        maxSessions: Int = 512,
+        cleanupInterval: Duration = .seconds(300)
     ) {
         self.host = host
         self.port = port
@@ -82,7 +83,8 @@ public actor HTTPTransport: Transport {
         self.sessionManager = SessionManager(
             database: database,
             resolver: resolver,
-            maxSessions: maxSessions
+            maxSessions: maxSessions,
+            cleanupInterval: cleanupInterval
         )
     }
 
