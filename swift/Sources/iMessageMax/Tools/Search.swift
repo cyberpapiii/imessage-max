@@ -234,7 +234,7 @@ enum SearchTool {
             let format = arguments?["format"]?.stringValue ?? "flat"
             let includeContext = arguments?["include_context"]?.boolValue ?? false
             let unanswered = arguments?["unanswered"]?.boolValue ?? false
-            let unansweredHours = max(1, min(arguments?["unanswered_hours"]?.intValue ?? 24, 24 * 365))
+            let unansweredHours = arguments?["unanswered_hours"]?.intValue ?? 24
             let matchAll = arguments?["match_all"]?.boolValue ?? false
             let fuzzy = arguments?["fuzzy"]?.boolValue ?? false
 
@@ -304,6 +304,7 @@ enum SearchTool {
 
         // Clamp limit
         let clampedLimit = max(1, min(limit, 100))
+        let clampedUnansweredHours = max(1, min(unansweredHours, 24 * 365))
         let sortOrder = SearchSort(rawValue: sort) ?? .recentFirst
         let responseFormat = SearchFormat(rawValue: format) ?? .flat
 
@@ -391,7 +392,7 @@ enum SearchTool {
                     db: db,
                     rows: rows,
                     limit: clampedLimit,
-                    hours: unansweredHours
+                    hours: clampedUnansweredHours
                 )
             }
 
