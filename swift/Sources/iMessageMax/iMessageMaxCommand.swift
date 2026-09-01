@@ -41,12 +41,6 @@ struct iMessageMax: AsyncParsableCommand {
                 )
             }
 
-            let (contactsOk, contactsStatus) = ContactResolver.authorizationStatus()
-            if !contactsOk && contactsStatus == "not_determined" {
-                _ = try? await resolver.requestAccess()
-            }
-            try? await resolver.initialize()
-
             // Warn if binding to a non-loopback address (only reachable when --allow-external-bind is set)
             if !HostBindingPolicy.isLoopback(host) {
                 FileHandle.standardError.write(
@@ -62,6 +56,17 @@ struct iMessageMax: AsyncParsableCommand {
             )
 
             try await transport.connect()
+            Task {
+                let (contactsOk, contactsStatus) = ContactResolver.authorizationStatus()
+                if !contactsOk && contactsStatus == "not_determined" {
+                    _ = try? await resolver.requestAccess()
+                }
+                try? await resolver.initialize()
+                let stats = await resolver.getStats()
+                FileHandle.standardError.write(
+                    Data("[iMessage Max] Contacts: initialized=\(stats.initialized) handles=\(stats.handleCount)\n".utf8)
+                )
+            }
             try await transport.waitForTermination()
         } else {
             let server = MCPServerWrapper()

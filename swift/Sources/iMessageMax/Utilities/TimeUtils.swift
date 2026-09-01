@@ -2,6 +2,21 @@
 import Foundation
 
 enum TimeUtils {
+    private static let monthDayFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = .current
+        f.dateFormat = "MMM d"
+        return f
+    }()
+
+    nonisolated(unsafe) private static let isoFormatter: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        f.timeZone = TimeZone(secondsFromGMT: 0)
+        return f
+    }()
+
     /// Format date as compact relative string for AI consumption
     static func formatCompactRelative(_ date: Date?) -> String? {
         guard let date = date else { return nil }
@@ -21,17 +36,13 @@ enum TimeUtils {
             let days = Int(interval / 86400)
             return "\(days)d ago"
         } else {
-            let formatter = DateFormatter()
-            formatter.dateFormat = "MMM d"
-            return formatter.string(from: date)
+            return monthDayFormatter.string(from: date)
         }
     }
 
     /// Format date as ISO 8601 for precise timestamps
     static func formatISO(_ date: Date?) -> String? {
         guard let date = date else { return nil }
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime]
-        return formatter.string(from: date)
+        return isoFormatter.string(from: date)
     }
 }
