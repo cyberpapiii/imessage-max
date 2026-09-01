@@ -96,7 +96,11 @@ actor SendResolver {
     }
 
     private func resolveRecipient(_ to: String) async -> SendResolution.Result {
-        if PhoneUtils.isPhoneNumber(to) || to.hasPrefix("+") {
+        if to.hasPrefix("+") {
+            return await resolvePhoneNumber(to)
+        }
+
+        if PhoneUtils.isPhoneNumber(to), PhoneUtils.normalizeToE164(to) != nil {
             return await resolvePhoneNumber(to)
         }
 

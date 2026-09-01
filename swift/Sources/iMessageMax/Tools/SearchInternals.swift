@@ -77,31 +77,13 @@ extension SearchTool {
             } else {
                 // Cheap SQL prefilter on the text column. Rows whose text lives only in
                 // attributedBody still pass (text IS NULL) and are filtered in Swift.
-                // QueryBuilder.where is variadic-only; cap the bound list at 8 and leave
-                // leftover terms to the Swift word filter.
+                // Cap the bound list at 8 and leave leftover terms to the Swift word filter.
                 let capped = Array(terms.prefix(8))
                 let likeClauses = capped.map { _ in "m.text LIKE ? ESCAPE '\\'" }
                 let joiner = matchAll ? " AND " : " OR "
                 let condition = "((\(likeClauses.joined(separator: joiner))) OR (m.text IS NULL AND m.attributedBody IS NOT NULL))"
-                let bindings = capped.map { "%\(QueryBuilder.escapeLike($0))%" }
-                switch bindings.count {
-                case 1:
-                    builder.where(condition, bindings[0])
-                case 2:
-                    builder.where(condition, bindings[0], bindings[1])
-                case 3:
-                    builder.where(condition, bindings[0], bindings[1], bindings[2])
-                case 4:
-                    builder.where(condition, bindings[0], bindings[1], bindings[2], bindings[3])
-                case 5:
-                    builder.where(condition, bindings[0], bindings[1], bindings[2], bindings[3], bindings[4])
-                case 6:
-                    builder.where(condition, bindings[0], bindings[1], bindings[2], bindings[3], bindings[4], bindings[5])
-                case 7:
-                    builder.where(condition, bindings[0], bindings[1], bindings[2], bindings[3], bindings[4], bindings[5], bindings[6])
-                default:
-                    builder.where(condition, bindings[0], bindings[1], bindings[2], bindings[3], bindings[4], bindings[5], bindings[6], bindings[7])
-                }
+                let bindings: [Any] = capped.map { "%\(QueryBuilder.escapeLike($0))%" }
+                builder.where(condition, params: bindings)
             }
         }
 
@@ -157,7 +139,7 @@ extension SearchTool {
         if let hasType = has {
             switch hasType {
             case "link":
-                builder.where("m.text LIKE ?", "%http%")
+                builder.where("m.text LIKE ? ESCAPE '\\'", "%http%")
             case "attachment":
                 builder.where("""
                     EXISTS (

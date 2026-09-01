@@ -98,6 +98,68 @@ final class SendResolverTests: XCTestCase {
         }
     }
 
+    func testResolveShortNumericDestinationFallsThroughToContactLookup() async throws {
+        let dbPath = try makeResolverTestDatabase()
+        defer { try? FileManager.default.removeItem(atPath: dbPath) }
+
+        let contacts = ContactResolver(seedCache: ["+15555550123": "Nick Jones"])
+        let resolver = SendResolver(db: Database(path: dbPath), resolver: contacts)
+        let result = await resolver.resolve(chatId: nil, to: "55555")
+
+        guard case .failure(let message) = result else {
+            return XCTFail("Expected failure for unmatched short code")
+        }
+        XCTAssertFalse(
+            message.contains("Invalid phone number format"),
+            "Short numeric destination should not die as a phone parse: \(message)"
+        )
+        XCTAssertTrue(
+            message.contains("No contact found matching '55555'")
+                || message.contains("Cannot search by name without contacts access"),
+            "Unexpected failure message: \(message)"
+        )
+    }
+
+    func testResolvePlusPrefixedShortCodeStaysOnPhonePath() async throws {
+        let dbPath = try makeResolverTestDatabase()
+        defer { try? FileManager.default.removeItem(atPath: dbPath) }
+
+        let resolver = SendResolver(db: Database(path: dbPath), resolver: ContactResolver())
+        let result = await resolver.resolve(chatId: nil, to: "+55555")
+
+        guard case .failure(let message) = result else {
+            return XCTFail("Expected failure for + prefixed short code")
+        }
+        XCTAssertTrue(
+            message.contains("Invalid phone number format")
+                || message.contains("No conversation found"),
+            "Unexpected failure message: \(message)"
+        )
+    }
+
+    func testResolveDigitOnlyContactName() async throws {
+        let dbPath = try makeResolverTestDatabase()
+        defer { try? FileManager.default.removeItem(atPath: dbPath) }
+
+        let contacts = ContactResolver(seedCache: ["+15555550123": "55555"])
+        let resolver = SendResolver(db: Database(path: dbPath), resolver: contacts)
+        let result = await resolver.resolve(chatId: nil, to: "55555")
+
+        switch result {
+        case .failure(let message):
+            XCTFail("Unexpected failure: \(message)")
+        case .ambiguous:
+            XCTFail("Unexpected ambiguity")
+        case .success(let resolved):
+            guard case .participant(let handle, let chatId) = resolved.target else {
+                return XCTFail("Expected participant target")
+            }
+            XCTAssertEqual(handle, "+15555550123")
+            XCTAssertEqual(chatId, 11)
+            XCTAssertEqual(resolved.deliveredTo, ["55555"])
+        }
+    }
+
     func testResolveNameNoMatchFails() async throws {
         let dbPath = try makeResolverTestDatabase()
         defer { try? FileManager.default.removeItem(atPath: dbPath) }
