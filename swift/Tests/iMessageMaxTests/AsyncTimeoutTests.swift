@@ -6,26 +6,16 @@ final class AsyncTimeoutTests: XCTestCase {
     /// A task that is already cancelled when it enters sleep must still return.
     /// At 61e75d9 this hangs: the cancellation handler runs before the
     /// continuation is armed and marks the gate resumed with nothing to resume.
-    func testSleepReturnsWhenTaskIsCancelledBeforeEntry() async throws {
-        let task = Task {
+    func testSleepReturnsWhenTaskIsCancelledBeforeEntry() {
+        let finished = expectation(description: "sleep returns after pre-cancellation")
+        let task = Task.detached {
             // Wait until cancellation has been requested before sleeping.
             while !Task.isCancelled { await Task.yield() }
             await AsyncTimeout.sleep(.seconds(30))
-            return true
+            finished.fulfill()
         }
         task.cancel()
-
-        let finished = await withTaskGroup(of: Bool?.self) { group -> Bool? in
-            group.addTask { await task.value }
-            group.addTask {
-                try? await Task.sleep(for: .seconds(2))
-                return nil
-            }
-            let first = await group.next() ?? nil
-            group.cancelAll()
-            return first
-        }
-        XCTAssertEqual(finished, true, "sleep did not return within 2 s after pre-cancellation")
+        wait(for: [finished], timeout: 2)
     }
 
     /// Cancellation after arming returns promptly (well before the 30 s timer).
