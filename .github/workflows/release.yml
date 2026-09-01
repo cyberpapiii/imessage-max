@@ -4,10 +4,11 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
 
 jobs:
   build-and-release:
-    runs-on: macos-15
+    runs-on: macos-26
     permissions:
       contents: write
     defaults:
@@ -16,11 +17,21 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
-      - name: Build universal binary with embedded Info.plist
+      - name: Show toolchain
         run: |
-          swift build -c release --arch arm64 --arch x86_64 \
+          xcodebuild -version
+          swift --version
+
+      - name: Build and run tests
+        run: |
+          swift build --build-tests
+          swift test --skip-build --parallel
+
+      - name: Build release binary (arm64) with embedded Info.plist
+        run: |
+          swift build -c release --arch arm64 \
             -Xlinker -sectcreate \
             -Xlinker __TEXT \
             -Xlinker __info_plist \
@@ -28,20 +39,35 @@ jobs:
 
       - name: Re-sign binary with bundle identifier
         run: |
-          BINARY=".build/apple/Products/Release/imessage-max"
+          BINARY=".build/arm64-apple-macosx/release/imessage-max"
           BUNDLE_ID="com.cyberpapiii.imessage-max"
           codesign --force --sign - --identifier "$BUNDLE_ID" "$BINARY"
           echo "Verifying code signature..."
           codesign -dvvv "$BINARY" 2>&1 | grep -E "(Identifier|Info.plist)"
 
+      - name: Assert architecture, identifier, and version
+        run: |
+          BINARY=".build/arm64-apple-macosx/release/imessage-max"
+          lipo -info "$BINARY" | grep -q "arm64" || { echo "not arm64"; exit 1; }
+          codesign -dvv "$BINARY" 2>&1 | grep -q "Identifier=com.cyberpapiii.imessage-max" || { echo "wrong identifier"; exit 1; }
+          echo "Binary reports version: $("$BINARY" --version)"
+
       - name: Create tarball
         run: |
-          cd .build/apple/Products/Release
+          cd .build/arm64-apple-macosx/release
           tar -czvf imessage-max-macos.tar.gz imessage-max
+          shasum -a 256 imessage-max-macos.tar.gz
           mv imessage-max-macos.tar.gz $GITHUB_WORKSPACE/
 
+      - name: Upload tarball as workflow artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: imessage-max-macos
+          path: imessage-max-macos.tar.gz
+
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v3
         with:
           files: imessage-max-macos.tar.gz
           generate_release_notes: true
