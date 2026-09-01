@@ -319,6 +319,16 @@ enum SearchTool {
 
             let senderFilter = await resolveFromPersonFilter(fromPerson, resolver: resolver)
 
+            // Split query into words (minimum 2 chars each to avoid noise)
+            let searchWords: [String]
+            if hasQuery, let searchQuery = query?.trimmingCharacters(in: .whitespaces).lowercased(), !searchQuery.isEmpty {
+                searchWords = searchQuery.split(separator: " ")
+                    .map(String.init)
+                    .filter { $0.count >= 2 }
+            } else {
+                searchWords = []
+            }
+
             let (sql, params) = buildQuery(
                 query: query,
                 fromPerson: senderFilter,
@@ -330,7 +340,10 @@ enum SearchTool {
                 cursor: cursor.flatMap(decodeCursor),
                 limit: fetchLimit,
                 sort: sortOrder,
-                unanswered: unanswered
+                unanswered: unanswered,
+                terms: searchWords,
+                matchAll: matchAll,
+                fuzzy: fuzzy
             )
 
             var rows = try db.query(sql, params: params) { row in
@@ -349,31 +362,24 @@ enum SearchTool {
             // Filter by search query in Swift (since we can't search attributedBody in SQL)
             // Supports multi-word search: OR (any word) by default, AND (all words) with matchAll=true
             // With fuzzy=true, also matches words within 1-2 edits (handles typos)
-            if hasQuery, let searchQuery = query?.trimmingCharacters(in: .whitespaces).lowercased(), !searchQuery.isEmpty {
-                // Split query into words (minimum 2 chars each to avoid noise)
-                let searchWords = searchQuery.split(separator: " ")
-                    .map(String.init)
-                    .filter { $0.count >= 2 }
+            if hasQuery, !searchWords.isEmpty {
+                rows = rows.filter { row in
+                    let extractedText = MessageTextExtractor.extract(text: row.text, attributedBody: row.attributedBody)
+                    guard let text = extractedText?.lowercased() else { return false }
 
-                if !searchWords.isEmpty {
-                    rows = rows.filter { row in
-                        let extractedText = MessageTextExtractor.extract(text: row.text, attributedBody: row.attributedBody)
-                        guard let text = extractedText?.lowercased() else { return false }
+                    // Split message text into words for fuzzy matching
+                    let textWords = text.split(whereSeparator: { !$0.isLetter && !$0.isNumber })
+                        .map(String.init)
 
-                        // Split message text into words for fuzzy matching
-                        let textWords = text.split(whereSeparator: { !$0.isLetter && !$0.isNumber })
-                            .map(String.init)
-
-                        if matchAll {
-                            // AND logic: all search words must be present
-                            return searchWords.allSatisfy { searchWord in
-                                wordMatches(searchWord: searchWord, in: text, textWords: textWords, fuzzy: fuzzy)
-                            }
-                        } else {
-                            // OR logic: any word matches
-                            return searchWords.contains { searchWord in
-                                wordMatches(searchWord: searchWord, in: text, textWords: textWords, fuzzy: fuzzy)
-                            }
+                    if matchAll {
+                        // AND logic: all search words must be present
+                        return searchWords.allSatisfy { searchWord in
+                            wordMatches(searchWord: searchWord, in: text, textWords: textWords, fuzzy: fuzzy)
+                        }
+                    } else {
+                        // OR logic: any word matches
+                        return searchWords.contains { searchWord in
+                            wordMatches(searchWord: searchWord, in: text, textWords: textWords, fuzzy: fuzzy)
                         }
                     }
                 }

@@ -435,7 +435,7 @@ enum FindChatTool {
             WHERE m.associated_message_type = 0
               AND (
                 m.text LIKE ? ESCAPE '\\'
-                OR m.attributedBody IS NOT NULL
+                OR (m.text IS NULL AND m.attributedBody IS NOT NULL)
               )
               \(groupSQL)
             ORDER BY m.date DESC
