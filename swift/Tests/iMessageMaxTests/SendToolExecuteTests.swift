@@ -239,6 +239,86 @@ final class SendToolExecuteTests: XCTestCase {
         XCTAssertNotNil(json["verified_at"], "verified_at should be present for confirmed sends")
     }
 
+    // Same setup as testStubSendWithMatchingRowConfirms, but the matching row lands
+    // in the GROUP (chat 2) while the send targets Alice's DM (chat 1). The verifier
+    // finds the row through Alice's handle, sees it is not in the intended chat, and
+    // the tool must surface "mismatch" as a ToolError so an agent never treats it as
+    // confirmed. Pins the response envelope that plans 045 and 049 will touch.
+    func testRowInDifferentChatProducesMismatchStatus() async throws {
+        let fixture = try makeSendFixture()  // DM chat 1 (Alice) + group chat 2 (Alice+Bob)
+        let stub = StubScriptRunner()
+        stub.nextResult = .success(())
+
+        let rowDate = AppleTime.fromDate(Date())
+        try fixture.insertMessage(
+            rowId: 103, guid: "msg-guid-mismatch", text: "Hello Alice",
+            date: rowDate, isFromMe: true, error: 0, isSent: 0
+        )
+        try fixture.joinChatMessage(chatId: 2, messageId: 103)
+
+        let tool = SendTool(
+            db: fixture.database(),
+            resolver: makeSeededResolver(),
+            runner: stub,
+            verifier: fastVerifier(fixture: fixture)
+        )
+
+        do {
+            _ = try await tool.execute(args: [
+                "to": .string("+15550000001"),
+                "text": .string("Hello Alice"),
+            ])
+            XCTFail("Expected ToolError for a routing mismatch")
+        } catch let error as ToolError {
+            let json = try decodeJSONDictionary(from: error.content)
+            XCTAssertEqual(json["status"] as? String, "mismatch",
+                "A matching row in a chat other than the intended one is a routing mismatch")
+            let message = json["message"] as? String ?? ""
+            XCTAssertTrue(message.contains("routing mismatch"),
+                "The message must say it is a routing mismatch; got: \(message)")
+            XCTAssertEqual(json["actual_chat_id"] as? String, "chat2",
+                "actual_chat_id names the chat the row was actually found in")
+            XCTAssertNil(json["chat_id"], "chat_id is nil for a mismatch so it cannot be mistaken for the delivered chat")
+            XCTAssertNil(json["verified_message_guid"], "a mismatch is not a verified send")
+        }
+
+        XCTAssertEqual(stub.invocations.count, 1, "The send itself was dispatched exactly once")
+    }
+
+    // A file-only send has no text payload to verify against chat.db, so the tool
+    // skips verification and reports the transport-only "sent" status. This is the
+    // one reachable path to "sent" via the stub: verification also falls back to
+    // "sent" when the DB is unreadable, which the fixture cannot simulate.
+    func testFileSendWithoutVerificationRowReportsPendingOrSent() async throws {
+        let fixture = try makeSendFixture()
+        let stub = StubScriptRunner()
+        stub.nextResult = .success(())
+
+        let tool = SendTool(
+            db: fixture.database(),
+            resolver: makeSeededResolver(),
+            runner: stub,
+            verifier: fastVerifier(fixture: fixture)
+        )
+
+        let contents = try await tool.execute(args: [
+            "to": .string("+15550000001"),
+            "file_paths": .array([.string("/tmp/a.jpg")]),
+        ])
+
+        let json = try decodeJSONDictionary(from: contents)
+        XCTAssertEqual(json["status"] as? String, "sent",
+            "A file-only send skips DB verification and reports the transport-only 'sent'")
+        XCTAssertEqual(json["chat_id"] as? String, "chat1", "The resolved DM is reported as chat_id")
+        XCTAssertNil(json["verified_message_guid"], "'sent' carries no verification proof")
+        XCTAssertEqual(stub.invocations.count, 1)
+        guard case .fileToParticipant(let handle, let filePath) = stub.invocations.first else {
+            return XCTFail("Expected fileToParticipant call, got \(String(describing: stub.invocations.first))")
+        }
+        XCTAssertEqual(handle, "+15550000001")
+        XCTAssertEqual(filePath, "/tmp/a.jpg")
+    }
+
     // End-to-end variant of the previously false-mismatch scenario: the stub runner's
     // side effect inserts the matching row into the DM during the send call (simulating
     // Messages.app writing chat.db), then verification runs and must confirm.
