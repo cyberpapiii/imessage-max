@@ -30,7 +30,9 @@ enum IdentityDisplayFormatter {
         allParticipants: [ChatIdentity.Participant]
     ) -> [String] {
         let allNames = disambiguatedNames(for: allParticipants)
-        let nameByHandle = Dictionary(uniqueKeysWithValues: zip(allParticipants.map(\.handle), allNames))
+        // Participant lists come from chat_handle_join, which can carry the
+        // same handle twice; the first entry is the one callers ordered for.
+        let nameByHandle = Dictionary(zip(allParticipants.map(\.handle), allNames), uniquingKeysWith: { first, _ in first })
         return selected.map { nameByHandle[$0.handle] ?? $0.displayName }
     }
 

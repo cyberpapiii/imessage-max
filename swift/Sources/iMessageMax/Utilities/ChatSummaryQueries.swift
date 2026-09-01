@@ -34,7 +34,7 @@ enum ChatSummaryQueries {
 
         let placeholders = chatIds.map { _ in "?" }.joined(separator: ",")
         let sql = """
-            SELECT chj.chat_id, h.id as handle, h.service
+            SELECT DISTINCT chj.chat_id, h.id as handle, h.service
             FROM chat_handle_join chj
             JOIN handle h ON chj.handle_id = h.ROWID
             WHERE chj.chat_id IN (\(placeholders))
@@ -55,12 +55,20 @@ enum ChatSummaryQueries {
             }
         }
 
-        // Group by chat id.
+        // Group by chat id. chat_handle_join has no unique constraint, and the
+        // same handle can be joined to one chat more than once (iCloud sync
+        // merges, SMS and iMessage handles that normalize to the same string).
+        // DISTINCT above collapses exact duplicate rows; this collapses the
+        // rest by handle, keeping the first row seen so order stays stable.
         var result: [Int64: [Participant]] = [:]
+        var seenHandlesByChat: [Int64: Set<String>] = [:]
         for chatId in chatIds {
             result[chatId] = []
         }
         for row in rows {
+            guard seenHandlesByChat[row.chatId, default: []].insert(row.handle).inserted else {
+                continue
+            }
             let participant = Participant(
                 handle: row.handle,
                 name: resolvedNames[row.handle],

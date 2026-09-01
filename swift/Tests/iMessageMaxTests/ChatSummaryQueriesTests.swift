@@ -42,6 +42,122 @@ final class ChatSummaryQueriesTests: XCTestCase {
         XCTAssertTrue(names20.contains("Bob Brown"), "Bob's resolved name expected")
     }
 
+    /// chat_handle_join has no unique constraint, and iCloud sync merges do
+    /// leave the same handle joined twice. One participant per handle must
+    /// come back, or every dictionary keyed by handle downstream traps.
+    func testDuplicateJoinRowsYieldOneParticipantPerHandle() async throws {
+        let fixture = try ToolTestDatabase(name: "csq-duplicate-join")
+        let resolver = makeSeededResolver()
+
+        try fixture.insertHandle(rowId: 1, handle: "+15550000001")
+        try fixture.insertChat(rowId: 10, guid: "chat-10-guid")
+        try fixture.joinChatHandle(chatId: 10, handleId: 1)
+        try fixture.joinChatHandle(chatId: 10, handleId: 1)
+
+        let result = try await ChatSummaryQueries.participantsByChat(
+            db: fixture.database(),
+            chatIds: [10],
+            resolver: resolver
+        )
+
+        let chat10 = try XCTUnwrap(result[10], "Expected participants for chatId 10")
+        XCTAssertEqual(chat10.count, 1, "Duplicate join rows must collapse to one participant")
+        XCTAssertEqual(chat10.first?.handle, "+15550000001")
+        XCTAssertEqual(chat10.first?.name, "Alice Smith")
+    }
+
+    /// The other participant queries still read chat_handle_join without
+    /// DISTINCT, so the preview formatter has to survive a duplicate handle in
+    /// the participant list it is handed. Small chat: only `previewNames` runs.
+    func testDisplayNameWithDuplicateParticipantsDoesNotTrap() async throws {
+        let fixture = try ToolTestDatabase(name: "csq-duplicate-preview")
+
+        try fixture.insertHandle(rowId: 1, handle: "+15550000001")
+        try fixture.insertHandle(rowId: 2, handle: "+15550000002")
+        try fixture.insertChat(rowId: 10, guid: "chat-10-guid")
+        try fixture.joinChatHandle(chatId: 10, handleId: 1)
+        try fixture.joinChatHandle(chatId: 10, handleId: 1)
+        try fixture.joinChatHandle(chatId: 10, handleId: 2)
+
+        let db = fixture.database()
+        let identity = try await makeIdentityFromRawJoinRows(db: db, chatId: 10, explicitName: nil)
+        XCTAssertEqual(identity.participants.map(\.handle), ["+15550000001", "+15550000001", "+15550000002"])
+
+        let preview = try ChatSummaryBuilder.participantsPreview(db: db, chatId: 10, identity: identity)
+
+        XCTAssertEqual(preview.count, 3)
+        XCTAssertTrue(preview.contains("Bob Brown"))
+        XCTAssertEqual(preview.filter { $0.hasPrefix("Alice Smith") }.count, 2)
+    }
+
+    /// Named chats with more than four participants take the recent-sender
+    /// path, which builds its own handle-keyed dictionary. Same duplicate,
+    /// different trap.
+    func testLargeNamedChatWithDuplicateParticipantsDoesNotTrap() async throws {
+        let fixture = try ToolTestDatabase(name: "csq-duplicate-preview-large")
+
+        for rowId in 1...5 {
+            try fixture.insertHandle(rowId: rowId, handle: "+1555000000\(rowId)")
+        }
+        try fixture.insertChat(rowId: 10, guid: "chat-10-guid", displayName: "Weekend Plans")
+        try fixture.joinChatHandle(chatId: 10, handleId: 1)
+        for rowId in 1...5 {
+            try fixture.joinChatHandle(chatId: 10, handleId: rowId)
+        }
+        try fixture.insertMessage(
+            rowId: 100,
+            guid: "msg-100",
+            text: "who is in?",
+            date: 700_000_000_000_000_000,
+            isFromMe: false,
+            handleId: 3
+        )
+        try fixture.joinChatMessage(chatId: 10, messageId: 100)
+
+        let db = fixture.database()
+        let identity = try await makeIdentityFromRawJoinRows(db: db, chatId: 10, explicitName: "Weekend Plans")
+        XCTAssertEqual(identity.participants.count, 6)
+        XCTAssertTrue(identity.isNamed)
+
+        let preview = try ChatSummaryBuilder.participantsPreview(db: db, chatId: 10, identity: identity)
+
+        XCTAssertEqual(preview.count, 4, "three names plus the remainder marker")
+        XCTAssertEqual(preview.first, "Chris Green", "most recent sender leads the preview")
+        XCTAssertEqual(preview.last, "+3 more")
+    }
+
+    /// Builds a `ChatIdentity` the way the non-batched tools still do: a
+    /// plain join over chat_handle_join with no de-duplication.
+    private func makeIdentityFromRawJoinRows(
+        db: Database,
+        chatId: Int64,
+        explicitName: String?
+    ) async throws -> ChatIdentity {
+        let resolver = makeSeededResolver()
+        let handles = try db.query(
+            """
+            SELECT h.id
+            FROM chat_handle_join chj
+            JOIN handle h ON chj.handle_id = h.ROWID
+            WHERE chj.chat_id = ?
+            ORDER BY chj.rowid
+            """,
+            params: [chatId]
+        ) { row in row.string(0) ?? "" }
+
+        var participants: [ChatIdentity.Participant] = []
+        for handle in handles {
+            let name = await resolver.resolve(handle)
+            participants.append(ChatIdentity.makeParticipant(handle: handle, contactName: name))
+        }
+        return ChatIdentity(
+            mcpId: "chat\(chatId)",
+            guid: "chat-\(chatId)-guid",
+            explicitName: explicitName,
+            participants: participants
+        )
+    }
+
     // MARK: - lastMessagesByChat
 
     /// Each chat has an older message, a newer message, and a reaction that is

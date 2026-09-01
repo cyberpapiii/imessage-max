@@ -85,7 +85,8 @@ enum ChatSummaryBuilder {
         chatId: Int64,
         participants: [ChatIdentity.Participant]
     ) throws -> [ChatIdentity.Participant] {
-        let handleToParticipant = Dictionary(uniqueKeysWithValues: participants.map { ($0.handle, $0) })
+        // Duplicate handles reach here from chat_handle_join; keep the first.
+        let handleToParticipant = Dictionary(participants.map { ($0.handle, $0) }, uniquingKeysWith: { first, _ in first })
         let sql = """
             SELECT h.id as sender_handle
             FROM message m
