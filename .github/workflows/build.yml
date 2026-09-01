@@ -63,4 +63,4 @@ jobs:
         run: swift build --build-tests
 
       - name: Run tests
-        run: swift test --skip-build --parallel --verbose 2>&1 | tee "${RUNNER_TEMP}/swift-test-verbose.log"
+        run: swift test --skip-build --parallel
