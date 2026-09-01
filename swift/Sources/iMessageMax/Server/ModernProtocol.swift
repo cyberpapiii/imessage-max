@@ -7,6 +7,7 @@
 // transport boundary (HTTPTransport.handlePost, DualEraStdioTransport).
 import Foundation
 import MCP
+import Synchronization
 
 /// Protocol versions served by the modern (stateless, per-request-metadata) lane.
 enum ModernProtocolVersion {
@@ -38,26 +39,26 @@ struct ModernDispatchResult {
 /// Lock-guarded memo for the encoded tool catalog, keyed by
 /// `ToolHandlerRegistry.catalogVersion`.
 ///
-/// Uses the same NSLock idiom as `ToolHandlerRegistry` rather than an actor,
-/// because `[[String: Any]]` is not Sendable and the dispatcher's entry points
-/// are synchronous static functions.
+/// Uses `Mutex<Void>` rather than an actor, because `[[String: Any]]` is not
+/// Sendable (so it cannot live inside `Mutex<State>`) and the dispatcher's
+/// entry points are synchronous static functions.
 final class CatalogCache: @unchecked Sendable {
     private var cached: (version: Int, tools: [[String: Any]])?
-    private let lock = NSLock()
+    private let lock = Mutex(())
 
     /// Returns the memoized catalog only if it matches the current registry
     /// version; a stale entry is treated as a miss.
     func tools(forVersion version: Int) -> [[String: Any]]? {
-        lock.lock()
-        defer { lock.unlock() }
-        guard let cached, cached.version == version else { return nil }
-        return cached.tools
+        lock.withLock { _ in
+            guard let cached, cached.version == version else { return nil }
+            return cached.tools
+        }
     }
 
     func store(tools: [[String: Any]], version: Int) {
-        lock.lock()
-        defer { lock.unlock() }
-        cached = (version, tools)
+        lock.withLock { _ in
+            cached = (version, tools)
+        }
     }
 }
 
