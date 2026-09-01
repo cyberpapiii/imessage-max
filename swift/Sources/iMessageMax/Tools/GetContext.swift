@@ -197,7 +197,7 @@ enum GetContext {
                     ))
                 }
 
-                guard let numericChatId = parseChatId(cId) else {
+                guard let numericChatId = ChatIdentifier.parseRowId(cId) else {
                     return .failure(GetContextError(
                         error: "invalid_id",
                         message: "Invalid chat ID format: \(cId)"
@@ -435,23 +435,8 @@ enum GetContext {
             return .success(response)
 
         } catch let error as DatabaseError {
-            switch error {
-            case .notFound:
-                return .failure(GetContextError(
-                    error: "database_not_found",
-                    message: ClientErrorMessages.databaseNotFound
-                ))
-            case .permissionDenied:
-                return .failure(GetContextError(
-                    error: "permission_denied",
-                    message: ClientErrorMessages.permissionDenied
-                ))
-            default:
-                return .failure(GetContextError(
-                    error: "internal_error",
-                    message: ClientErrorMessages.sanitized(error)
-                ))
-            }
+            let mapped = ToolErrorMapping.map(error, context: "get_context")
+            return .failure(GetContextError(error: mapped.code, message: mapped.message))
         } catch {
             return .failure(GetContextError(
                 error: "internal_error",
@@ -472,14 +457,6 @@ enum GetContext {
         return Int64(numStr)
     }
 
-    private static func parseChatId(_ idStr: String) -> Int64? {
-        var numStr = idStr
-        if numStr.hasPrefix("chat") {
-            numStr = String(numStr.dropFirst(4))
-        }
-        return Int64(numStr)
-    }
-
     private static func displayNameForChat(
         chatId: Int64,
         explicitName: String?,
@@ -491,22 +468,14 @@ enum GetContext {
             return trimmed
         }
 
-        let handles = try database.query(
-            """
-            SELECT h.id
-            FROM handle h
-            JOIN chat_handle_join chj ON h.ROWID = chj.handle_id
-            WHERE chj.chat_id = ?
-            ORDER BY h.id ASC
-            """,
-            params: [chatId]
-        ) { row in
-            row.string(0) ?? ""
-        }
+        let rows = try await ChatSummaryQueries.participants(
+            db: database,
+            chatId: chatId,
+            resolver: resolver
+        ).sorted { $0.handle < $1.handle }
 
-        var names: [String] = []
-        for handle in handles {
-            names.append(await IdentityDisplayFormatter.displayName(handle: handle, resolver: resolver))
+        let names = rows.map {
+            IdentityDisplayFormatter.displayName(handle: $0.handle, contactName: $0.name)
         }
         return DisplayNameGenerator.fromNames(names)
     }

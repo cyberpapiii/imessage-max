@@ -308,6 +308,70 @@ final class SearchToolTests: XCTestCase {
         let queryCount = try XCTUnwrap(Database.queryCountForTesting)
         XCTAssertLessThanOrEqual(queryCount, 5, "include_context ran \(queryCount) queries")
     }
+
+    func testUnansweredSkipsReplyWindowQueriesForNonQuestions() async throws {
+        let fixture = try ToolTestDatabase(name: "search-unanswered-count")
+        try fixture.insertHandle(rowId: 1, handle: "+15550000001")
+        try fixture.insertChat(rowId: 1, guid: "chat-status-guid", displayName: "Status")
+        try fixture.joinChatHandle(chatId: 1, handleId: 1)
+        for index in 1...50 {
+            try fixture.insertMessage(
+                rowId: index,
+                guid: "g\(index)",
+                text: "status update \(index)",
+                date: Int64(index) * 1_000,
+                isFromMe: true,
+                handleId: 1
+            )
+            try fixture.joinChatMessage(chatId: 1, messageId: index)
+        }
+
+        Database.queryCountForTesting = 0
+        let baseline = try await decodeSearchResponse(
+            SearchTool.execute(
+                query: "status",
+                cursor: nil,
+                limit: 50,
+                sort: "recent_first",
+                format: "flat",
+                includeContext: false,
+                unanswered: false,
+                unansweredHours: 24,
+                matchAll: false,
+                fuzzy: false,
+                db: fixture.database(),
+                resolver: makeSeededResolver()
+            )
+        )
+        let baseCount = try XCTUnwrap(Database.queryCountForTesting)
+        XCTAssertEqual(try decodeJSONArray(try XCTUnwrap(baseline["results"])).count, 50)
+
+        Database.queryCountForTesting = 0
+        defer { Database.queryCountForTesting = nil }
+
+        let unanswered = try await decodeSearchResponse(
+            SearchTool.execute(
+                cursor: nil,
+                limit: 50,
+                sort: "recent_first",
+                format: "flat",
+                includeContext: false,
+                unanswered: true,
+                unansweredHours: 24,
+                matchAll: false,
+                fuzzy: false,
+                db: fixture.database(),
+                resolver: makeSeededResolver()
+            )
+        )
+        XCTAssertEqual(try decodeJSONArray(try XCTUnwrap(unanswered["results"])).count, 0)
+        let unansweredCount = try XCTUnwrap(Database.queryCountForTesting)
+        XCTAssertLessThanOrEqual(
+            unansweredCount,
+            baseCount,
+            "unanswered over 50 non-questions ran \(unansweredCount) queries vs base \(baseCount)"
+        )
+    }
 }
 
 func decodeSearchResponse(_ result: Result<String, SearchError>) throws -> [String: Any] {

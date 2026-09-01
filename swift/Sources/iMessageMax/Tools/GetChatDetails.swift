@@ -72,7 +72,7 @@ enum GetChatDetailsTool {
         try? await resolver.initialize()
 
         do {
-            guard let numericChatId = try resolveChatId(chatId, database: database) else {
+            guard let numericChatId = ChatIdentifier.parseRowId(chatId) else {
                 let error = GetChatDetailsError(error: "chat_not_found", message: "Chat not found: \(chatId)")
                 throw ToolError(content: [.plainText(try FormatUtils.encodeJSON(error))])
             }
@@ -133,17 +133,8 @@ enum GetChatDetailsTool {
         } catch let error as ToolError {
             throw error
         } catch let error as DatabaseError {
-            let payload: GetChatDetailsError
-            switch error {
-            case .notFound:
-                payload = GetChatDetailsError(error: "database_not_found", message: ClientErrorMessages.databaseNotFound)
-            case .permissionDenied:
-                payload = GetChatDetailsError(error: "permission_denied", message: ClientErrorMessages.permissionDenied)
-            case .queryFailed(let message):
-                payload = GetChatDetailsError(error: "query_failed", message: message)
-            case .invalidData(let message):
-                payload = GetChatDetailsError(error: "invalid_data", message: message)
-            }
+            let mapped = ToolErrorMapping.map(error, context: "get_chat_details")
+            let payload = GetChatDetailsError(error: mapped.code, message: mapped.message)
             throw ToolError(content: [.plainText(try FormatUtils.encodeJSON(payload))])
         } catch {
             let payload = GetChatDetailsError(error: "internal_error", message: ClientErrorMessages.sanitized(error))
@@ -159,21 +150,6 @@ enum GetChatDetailsTool {
     private struct LastMessageResult {
         let summary: LastMessageSummary?
         let awaitingReply: Bool?
-    }
-
-    private static func resolveChatId(_ chatId: String, database: Database) throws -> Int64? {
-        if chatId.hasPrefix("chat"), let numeric = Int64(String(chatId.dropFirst(4))) {
-            return numeric
-        }
-
-        let rows: [Int64] = try database.query(
-            "SELECT ROWID FROM chat WHERE guid LIKE ? ESCAPE '\\' LIMIT 1",
-            params: ["%\(QueryBuilder.escapeLike(chatId))%"]
-        ) { row in
-            row.int(0)
-        }
-
-        return rows.first
     }
 
     private static func loadChatRow(chatId: Int64, database: Database) throws -> ChatRow {
@@ -195,29 +171,14 @@ enum GetChatDetailsTool {
         resolver: ContactResolver,
         database: Database
     ) async throws -> [ChatIdentity.Participant] {
-        let handles: [String] = try database.query(
-            """
-            SELECT h.id
-            FROM handle h
-            JOIN chat_handle_join chj ON h.ROWID = chj.handle_id
-            WHERE chj.chat_id = ?
-            ORDER BY h.id ASC
-            """,
-            params: [chatId]
-        ) { row in
-            row.string(0) ?? ""
+        let rows = try await ChatSummaryQueries.participants(
+            db: database,
+            chatId: chatId,
+            resolver: resolver
+        )
+        return rows.map {
+            ChatIdentity.makeParticipant(handle: $0.handle, contactName: $0.name)
         }
-
-        var participants: [ChatIdentity.Participant] = []
-        for handle in handles {
-            participants.append(
-                ChatIdentity.makeParticipant(
-                    handle: handle,
-                    contactName: await resolver.resolve(handle)
-                )
-            )
-        }
-        return participants
     }
 
     private static func loadLastMessage(

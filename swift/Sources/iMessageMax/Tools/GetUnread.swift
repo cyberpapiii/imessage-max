@@ -134,17 +134,8 @@ final class GetUnread {
             } catch let error as ToolError {
                 throw error
             } catch let error as DatabaseError {
-                let payload: UnreadError
-                switch error {
-                case .notFound:
-                    payload = UnreadError(error: "database_not_found", message: ClientErrorMessages.databaseNotFound)
-                case .permissionDenied:
-                    payload = UnreadError(error: "permission_denied", message: ClientErrorMessages.permissionDenied)
-                case .queryFailed(let msg):
-                    payload = UnreadError(error: "query_failed", message: msg)
-                case .invalidData(let msg):
-                    payload = UnreadError(error: "invalid_data", message: msg)
-                }
+                let mapped = ToolErrorMapping.map(error, context: "get_unread")
+                let payload = UnreadError(error: mapped.code, message: mapped.message)
                 throw ToolError(content: [.plainText(try FormatUtils.encodeJSON(payload))])
             } catch {
                 let payload = UnreadError(error: "internal_error", message: ClientErrorMessages.sanitized(error))
@@ -183,7 +174,7 @@ final class GetUnread {
 
         var numericChatId: Int64?
         if let chatId = params.chatId {
-            numericChatId = try resolveChatId(chatId)
+            numericChatId = ChatIdentifier.parseRowId(chatId)
             if numericChatId == nil {
                 throw ToolError(content: [.plainText("{\"error\":\"chat_not_found\",\"message\":\"Chat not found: \(chatId)\"}")])
             }
@@ -206,25 +197,6 @@ final class GetUnread {
     }
 
     // MARK: - Private Methods
-
-    private func resolveChatId(_ chatId: String) throws -> Int64? {
-        if chatId.hasPrefix("chat") {
-            let numStr = String(chatId.dropFirst(4))
-            if let num = Int64(numStr) {
-                return num
-            }
-        }
-
-        let escapedChatId = QueryBuilder.escapeLike(chatId)
-        let rows: [(Int64, String?)] = try database.query(
-            "SELECT ROWID, guid FROM chat WHERE guid LIKE ? ESCAPE '\\'",
-            params: ["%\(escapedChatId)%"]
-        ) { row in
-            (row.int(0), row.string(1))
-        }
-
-        return rows.first?.0
-    }
 
     private func getUnreadMessages(
         chatId: Int64?,
@@ -286,7 +258,12 @@ final class GetUnread {
             sinceApple: sinceApple
         )
 
-        var chatParticipantsCache: [Int64: [ParticipantInfo]] = [:]
+        let uniqueChatIds = Array(Set(rows.map(\.chatId)))
+        let participantsByChat = try await ChatSummaryQueries.participantsByChat(
+            db: database,
+            chatIds: uniqueChatIds,
+            resolver: contactResolver
+        )
 
         var unreadMessages: [UnreadMessageItem] = []
 
@@ -294,10 +271,7 @@ final class GetUnread {
             let msgChatId = row.chatId
             let senderHandle = row.senderHandle
 
-            if chatParticipantsCache[msgChatId] == nil {
-                chatParticipantsCache[msgChatId] = try await getChatParticipants(chatId: msgChatId)
-            }
-            let participants = chatParticipantsCache[msgChatId] ?? []
+            let participants = participantsByChat[msgChatId] ?? []
             let identity = makeChatIdentity(
                 chatId: msgChatId,
                 explicitName: row.chatDisplayName,
@@ -422,9 +396,7 @@ final class GetUnread {
             totalUnread += unreadCount
 
             let oldestDt = AppleTime.toDate(row.oldestUnreadDate)
-            let participants = (participantsByChat[msgChatId] ?? []).map {
-                ParticipantInfo(handle: $0.handle, name: $0.name, service: $0.service)
-            }
+            let participants = participantsByChat[msgChatId] ?? []
             let identity = makeChatIdentity(
                 chatId: msgChatId,
                 explicitName: row.chatDisplayName,
@@ -459,7 +431,7 @@ final class GetUnread {
     private func makeChatIdentity(
         chatId: Int64,
         explicitName: String?,
-        participants: [ParticipantInfo]
+        participants: [ChatSummaryQueries.Participant]
     ) -> ChatIdentity {
         ChatIdentity(
             mcpId: "chat\(chatId)",
@@ -507,32 +479,6 @@ final class GetUnread {
         return first
     }
 
-    /// Per-chat participant lookup used by the messages (detail) path, which
-    /// caches results per chat. The summary path uses the batched
-    /// `ChatSummaryQueries.participantsByChat` instead.
-    private func getChatParticipants(chatId: Int64) async throws -> [ParticipantInfo] {
-        let rows: [(Int64, String, String?)] = try database.query("""
-            SELECT h.ROWID, h.id as handle, h.service
-            FROM chat_handle_join chj
-            JOIN handle h ON chj.handle_id = h.ROWID
-            WHERE chj.chat_id = ?
-        """, params: [chatId]) { row in
-            (row.int(0), row.string(1) ?? "", row.string(2))
-        }
-
-        var participants: [ParticipantInfo] = []
-        for (_, handle, service) in rows {
-            let name = await contactResolver.resolve(handle)
-            participants.append(ParticipantInfo(
-                handle: handle,
-                name: name,
-                service: service
-            ))
-        }
-
-        return participants
-    }
-
 }
 
 // MARK: - Helper Types
@@ -555,8 +501,3 @@ private struct SummaryRow {
     let newestUnreadDate: Int64?
 }
 
-private struct ParticipantInfo {
-    let handle: String
-    let name: String?
-    let service: String?
-}

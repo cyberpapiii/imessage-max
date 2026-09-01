@@ -1,10 +1,5 @@
 import Foundation
 
-struct SearchCursor {
-    let date: Int64
-    let messageId: Int64
-}
-
 struct SearchSenderFilter {
     let value: String
     let exact: Bool
@@ -51,7 +46,7 @@ extension SearchTool {
         has: String?,
         since: String?,
         before: String?,
-        cursor: SearchCursor?,
+        cursor: TimelineCursor?,
         limit: Int,
         sort: SearchSort,
         unanswered: Bool,
@@ -121,15 +116,14 @@ extension SearchTool {
         if let cursor {
             switch sort {
             case .recentFirst:
-                builder.where("(m.date < ? OR (m.date = ? AND m.ROWID < ?))", cursor.date, cursor.date, cursor.messageId)
+                builder.where(cursor.olderThanSQL, cursor.date, cursor.date, cursor.messageId)
             case .oldestFirst:
-                builder.where("(m.date > ? OR (m.date = ? AND m.ROWID > ?))", cursor.date, cursor.date, cursor.messageId)
+                builder.where(cursor.newerThanSQL, cursor.date, cursor.date, cursor.messageId)
             }
         }
 
         if let chatStr = inChat {
-            let chatIdStr = chatStr.hasPrefix("chat") ? String(chatStr.dropFirst(4)) : chatStr
-            if let chatId = Int64(chatIdStr) {
+            if let chatId = ChatIdentifier.parseRowId(chatStr) {
                 builder.where("c.ROWID = ?", chatId)
             } else {
                 builder.where("c.guid LIKE ? ESCAPE '\\'", "%\(QueryBuilder.escapeLike(chatStr))%")
@@ -197,87 +191,6 @@ extension SearchTool {
         builder.limit(limit)
 
         return builder.build()
-    }
-
-    static func looksLikeQuestion(_ text: String?) -> Bool {
-        guard let text = text, !text.isEmpty else { return false }
-
-        let textLower = text.lowercased().trimmingCharacters(in: .whitespaces)
-
-        if text.contains("?") { return true }
-
-        let questionEndings = [
-            "what do you think",
-            "let me know",
-            "thoughts",
-            "can you",
-            "could you",
-            "would you",
-            "will you",
-            "please",
-            "lmk"
-        ]
-
-        for ending in questionEndings {
-            if textLower.hasSuffix(ending) { return true }
-        }
-
-        return false
-    }
-
-    static func hasReplyWithinWindow(
-        db: Database,
-        chatId: Int64,
-        messageDate: Int64,
-        hours: Int
-    ) throws -> Bool {
-        // Defensive clamp: one year of hours times 3.6e12 stays far inside Int64.
-        let boundedHours = Int64(max(1, min(hours, 24 * 365)))
-        let windowNs = boundedHours * 3_600_000_000_000
-
-        let rows = try db.query("""
-            SELECT 1 FROM message m
-            JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
-            WHERE cmj.chat_id = ?
-            AND m.date > ?
-            AND m.date <= ?
-            AND m.is_from_me = 0
-            AND m.associated_message_type = 0
-            LIMIT 1
-            """,
-            params: [chatId, messageDate, messageDate + windowNs]
-        ) { _ in true }
-
-        return !rows.isEmpty
-    }
-
-    static func filterUnanswered(
-        db: Database,
-        rows: [SearchRow],
-        limit: Int,
-        hours: Int
-    ) throws -> [SearchRow] {
-        var filtered: [SearchRow] = []
-
-        for row in rows {
-            let text = MessageTextExtractor.extract(text: row.text, attributedBody: row.attributedBody)
-            guard let date = row.date else { continue }
-
-            let isQuestion = looksLikeQuestion(text)
-            let hasReply = try hasReplyWithinWindow(
-                db: db,
-                chatId: row.chatId,
-                messageDate: date,
-                hours: hours
-            )
-
-            if isQuestion && !hasReply {
-                filtered.append(row)
-                if filtered.count >= limit { break }
-            }
-        }
-
-        return filtered
     }
 
     static func buildFlatResponse(
@@ -676,32 +589,13 @@ extension SearchTool {
         explicitName: String?,
         resolver: ContactResolver
     ) async throws -> ChatSummary {
-        let participants = try db.query("""
-            SELECT h.id as handle
-            FROM handle h
-            JOIN chat_handle_join chj ON h.ROWID = chj.handle_id
-            WHERE chj.chat_id = ?
-            ORDER BY h.id ASC
-            """,
-            params: [chatId]
-        ) { row in
-            row.string(0) ?? "unknown"
-        }
-
-        let identityParticipants = await withTaskGroup(of: ChatIdentity.Participant.self, returning: [ChatIdentity.Participant].self) { group in
-            for handle in participants {
-                group.addTask { [resolver] in
-                    ChatIdentity.makeParticipant(
-                        handle: handle,
-                        contactName: await resolver.resolve(handle)
-                    )
-                }
-            }
-            var resolved: [ChatIdentity.Participant] = []
-            for await participant in group {
-                resolved.append(participant)
-            }
-            return resolved
+        let participants = try await ChatSummaryQueries.participants(
+            db: db,
+            chatId: chatId,
+            resolver: resolver
+        )
+        let identityParticipants = participants.map {
+            ChatIdentity.makeParticipant(handle: $0.handle, contactName: $0.name)
         }
 
         let identity = ChatIdentity(
@@ -768,27 +662,22 @@ extension SearchTool {
         chatId: Int64,
         resolver: ContactResolver
     ) async throws -> String {
-        let participants = try db.query("""
-            SELECT h.id as handle
-            FROM handle h
-            JOIN chat_handle_join chj ON h.ROWID = chj.handle_id
-            WHERE chj.chat_id = ?
-            """,
-            params: [chatId]
-        ) { row in
-            row.string(0) ?? "unknown"
-        }
+        let participants = try await ChatSummaryQueries.participants(
+            db: db,
+            chatId: chatId,
+            resolver: resolver
+        )
 
         if participants.isEmpty {
             return "Unknown Chat"
         }
 
         var names: [String] = []
-        for handle in participants {
-            if let name = await resolver.resolve(handle) {
+        for participant in participants {
+            if let name = participant.name {
                 names.append(name.split(separator: " ").first.map(String.init) ?? name)
             } else {
-                names.append(PhoneUtils.formatDisplay(handle))
+                names.append(PhoneUtils.formatDisplay(participant.handle))
             }
         }
 
@@ -815,23 +704,8 @@ extension SearchTool {
         return SearchSenderFilter(value: fromPerson, exact: false)
     }
 
-    static func encodeCursor(date: Int64?, messageId: Int64) -> String? {
-        guard let date else { return nil }
-        return "\(date):\(messageId)"
-    }
-
-    static func decodeCursor(_ raw: String) -> SearchCursor? {
-        let parts = raw.split(separator: ":")
-        guard parts.count == 2,
-              let date = Int64(parts[0]),
-              let messageId = Int64(parts[1]) else {
-            return nil
-        }
-        return SearchCursor(date: date, messageId: messageId)
-    }
-
     static func nextCursor(from rows: [SearchRow], limit: Int) -> String? {
         guard rows.count >= limit, let last = rows.last else { return nil }
-        return encodeCursor(date: last.date, messageId: last.msgId)
+        return TimelineCursor.encode(date: last.date, messageId: last.msgId)
     }
 }

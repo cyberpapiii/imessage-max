@@ -160,8 +160,7 @@ final class ListAttachments {
         do {
             let numericChatId: Int64?
             if let chatId {
-                let cidStr = chatId.hasPrefix("chat") ? String(chatId.dropFirst(4)) : chatId
-                guard let cid = Int64(cidStr) else {
+                guard let cid = ChatIdentifier.parseRowId(chatId) else {
                     return .failure(ListAttachmentsError(
                         error: "invalid_id",
                         message: "Invalid chat ID format: \(chatId)"
@@ -192,28 +191,8 @@ final class ListAttachments {
             ))
 
         } catch let error as DatabaseError {
-            switch error {
-            case .notFound:
-                return .failure(ListAttachmentsError(
-                    error: "database_not_found",
-                    message: ClientErrorMessages.databaseNotFound
-                ))
-            case .permissionDenied:
-                return .failure(ListAttachmentsError(
-                    error: "permission_denied",
-                    message: ClientErrorMessages.permissionDenied
-                ))
-            case .queryFailed(let msg):
-                return .failure(ListAttachmentsError(
-                    error: "query_failed",
-                    message: msg
-                ))
-            case .invalidData(let msg):
-                return .failure(ListAttachmentsError(
-                    error: "invalid_data",
-                    message: msg
-                ))
-            }
+            let mapped = ToolErrorMapping.map(error, context: "list_attachments")
+            return .failure(ListAttachmentsError(error: mapped.code, message: mapped.message))
         } catch {
             return .failure(ListAttachmentsError(
                 error: "internal_error",
@@ -543,29 +522,14 @@ final class ListAttachments {
             return cached
         }
 
-        let sql = """
-            SELECT h.id
-            FROM handle h
-            JOIN chat_handle_join chj ON h.ROWID = chj.handle_id
-            WHERE chj.chat_id = ?
-            """
-
-        let handles = try db.query(sql, params: [chatId]) { row in
-            row.string(0) ?? ""
-        }
-
-        let names = await withTaskGroup(of: String.self, returning: [String].self) { group in
-            for handle in handles {
-                group.addTask { [resolver] in
-                    await resolver.resolve(handle) ?? PhoneUtils.formatDisplay(handle)
-                }
-            }
-            var resolved: [String] = []
-            for await name in group {
-                resolved.append(name)
-            }
-            return resolved.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
-        }
+        let rows = try await ChatSummaryQueries.participants(
+            db: db,
+            chatId: chatId,
+            resolver: resolver
+        )
+        let names = rows.map {
+            $0.name ?? PhoneUtils.formatDisplay($0.handle)
+        }.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
 
         let generated = DisplayNameGenerator.fromNames(names)
         cache[chatId] = generated

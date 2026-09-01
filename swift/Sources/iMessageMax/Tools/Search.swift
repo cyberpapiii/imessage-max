@@ -338,7 +338,7 @@ enum SearchTool {
                 has: has,
                 since: since,
                 before: before,
-                cursor: cursor.flatMap(decodeCursor),
+                cursor: cursor.flatMap(TimelineCursor.decode),
                 limit: fetchLimit,
                 sort: sortOrder,
                 unanswered: unanswered,
@@ -388,11 +388,14 @@ enum SearchTool {
 
             // Filter for unanswered if requested
             if unanswered {
-                rows = try filterUnanswered(
+                rows = try UnansweredHeuristics.filterUnanswered(
                     db: db,
                     rows: rows,
+                    hours: clampedUnansweredHours,
                     limit: clampedLimit,
-                    hours: clampedUnansweredHours
+                    text: { MessageTextExtractor.extract(text: $0.text, attributedBody: $0.attributedBody) },
+                    date: \.date,
+                    chatId: \.chatId
                 )
             }
 
@@ -425,16 +428,8 @@ enum SearchTool {
             return .success(jsonString)
 
         } catch let dbError as DatabaseError {
-            switch dbError {
-            case .notFound:
-                return .failure(SearchError(error: "database_not_found", message: ClientErrorMessages.databaseNotFound))
-            case .permissionDenied:
-                return .failure(SearchError(error: "permission_denied", message: ClientErrorMessages.permissionDenied))
-            case .queryFailed(let msg):
-                return .failure(SearchError(error: "query_failed", message: msg))
-            case .invalidData(let msg):
-                return .failure(SearchError(error: "invalid_data", message: msg))
-            }
+            let mapped = ToolErrorMapping.map(dbError, context: "search")
+            return .failure(SearchError(error: mapped.code, message: mapped.message))
         } catch {
             return .failure(SearchError(error: "internal_error", message: ClientErrorMessages.sanitized(error)))
         }

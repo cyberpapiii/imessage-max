@@ -1,10 +1,5 @@
 import Foundation
 
-struct GetMessagesCursor {
-    let date: Int64
-    let messageId: Int
-}
-
 struct MessageRow {
     let id: Int
     let guid: String
@@ -82,8 +77,13 @@ extension GetMessagesTool {
             )
         }
 
-        let exactMatches = try rows.filter { row in
-            let chatHandles = try getHandlesForChat(chatId: row.id)
+        let participantsByChat = try await ChatSummaryQueries.participantsByChat(
+            db: db,
+            chatIds: rows.map { Int64($0.id) },
+            resolver: resolver
+        )
+        let exactMatches = rows.filter { row in
+            let chatHandles = Set((participantsByChat[Int64(row.id)] ?? []).map(\.handle))
             return handleGroups.allSatisfy { !chatHandles.intersection($0).isEmpty }
         }
 
@@ -129,25 +129,7 @@ extension GetMessagesTool {
 
     func parseChatId(_ chatId: String?) -> Int? {
         guard let chatId = chatId else { return nil }
-
-        if chatId.hasPrefix("chat"), let numId = Int(chatId.dropFirst(4)) {
-            return numId
-        }
-
-        // GUID substring fallback. The caller's text is bound into a LIKE
-        // pattern, so escape its wildcards: an unescaped "%" or "_" (or an
-        // empty string) would match every chat and return the first row.
-        let trimmed = chatId.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else { return nil }
-
-        let rows = try? db.query(
-            "SELECT ROWID FROM chat WHERE guid LIKE ? ESCAPE '\\'",
-            params: ["%\(QueryBuilder.escapeLike(trimmed))%"]
-        ) { row in
-            Int(row.int(0))
-        }
-
-        return rows?.first
+        return try? ChatIdentifier.resolve(chatId, db: db).map { Int($0) }
     }
 
     func getChatInfo(chatId: Int) throws -> String? {
@@ -171,16 +153,11 @@ extension GetMessagesTool {
     }
 
     func buildPeopleMap(chatId: Int) async throws -> (people: [String: String], handleToKey: [String: String]) {
-        let sql = """
-            SELECT h.id, h.service
-            FROM handle h
-            JOIN chat_handle_join chj ON h.ROWID = chj.handle_id
-            WHERE chj.chat_id = ?
-            """
-
-        let handles = try db.query(sql, params: [chatId]) { row in
-            (handle: row.string(0) ?? "", service: row.string(1))
-        }
+        let handles = try await ChatSummaryQueries.participants(
+            db: db,
+            chatId: Int64(chatId),
+            resolver: resolver
+        )
 
         var people: [String: String] = ["me": "Me"]
         var handleToKey: [String: String] = [:]
@@ -188,7 +165,7 @@ extension GetMessagesTool {
 
         for (i, h) in handles.enumerated() {
             let handle = h.handle
-            let name = await resolver.resolve(handle)
+            let name = h.name
 
             if let name = name {
                 var key = name.components(separatedBy: " ").first?.lowercased() ?? "person\(i)"
@@ -206,21 +183,6 @@ extension GetMessagesTool {
         }
 
         return (people, handleToKey)
-    }
-
-    func getHandlesForChat(chatId: Int) throws -> Set<String> {
-        let sql = """
-            SELECT h.id
-            FROM handle h
-            JOIN chat_handle_join chj ON h.ROWID = chj.handle_id
-            WHERE chj.chat_id = ?
-            """
-
-        let handles = try db.query(sql, params: [chatId]) { row in
-            row.string(0) ?? ""
-        }
-
-        return Set(handles)
     }
 
     func resolveFromPerson(
@@ -255,7 +217,7 @@ extension GetMessagesTool {
         chatId: Int,
         sinceApple: Int64?,
         beforeApple: Int64?,
-        cursor: GetMessagesCursor?,
+        cursor: TimelineCursor?,
         limit: Int,
         fromHandle: String?,
         fromMeOnly: Bool,
@@ -287,7 +249,7 @@ extension GetMessagesTool {
         }
 
         if let cursor {
-            query.where("(m.date < ? OR (m.date = ? AND m.ROWID < ?))", cursor.date, cursor.date, cursor.messageId)
+            query.where(cursor.olderThanSQL, cursor.date, cursor.date, cursor.messageId)
         }
 
         if fromMeOnly {
@@ -343,74 +305,6 @@ extension GetMessagesTool {
                 senderHandle: row.string(6)
             )
         }
-    }
-
-    func filterUnanswered(
-        messageRows: [MessageRow],
-        chatId: Int,
-        hours: Int,
-        limit: Int
-    ) throws -> [MessageRow] {
-        var filtered: [MessageRow] = []
-
-        for row in messageRows {
-            guard let text = row.text, looksLikeQuestion(text) else { continue }
-            guard let date = row.date else { continue }
-
-            let hasReply = try hasReplyWithinWindow(chatId: chatId, messageDate: date, hours: hours)
-            if !hasReply {
-                filtered.append(row)
-                if filtered.count >= limit {
-                    break
-                }
-            }
-        }
-
-        return filtered
-    }
-
-    func looksLikeQuestion(_ text: String) -> Bool {
-        if text.contains("?") { return true }
-
-        let lower = text.lowercased().trimmingCharacters(in: .whitespaces)
-        let questionEndings = [
-            "what do you think",
-            "let me know",
-            "thoughts",
-            "can you",
-            "could you",
-            "would you",
-            "will you",
-            "please",
-            "lmk"
-        ]
-
-        for ending in questionEndings {
-            if lower.hasSuffix(ending) { return true }
-        }
-
-        return false
-    }
-
-    func hasReplyWithinWindow(chatId: Int, messageDate: Int64, hours: Int) throws -> Bool {
-        // Defensive clamp: one year of hours times 3.6e12 stays far inside Int64.
-        let boundedHours = Int64(max(1, min(hours, 24 * 365)))
-        let windowNs = boundedHours * 3_600_000_000_000
-
-        let rows = try db.query("""
-            SELECT 1 FROM message m
-            JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
-            WHERE cmj.chat_id = ?
-            AND m.date > ?
-            AND m.date <= ?
-            AND m.is_from_me = 0
-            AND m.associated_message_type = 0
-            LIMIT 1
-            """,
-            params: [chatId, messageDate, messageDate + windowNs]
-        ) { _ in true }
-
-        return !rows.isEmpty
     }
 
     func getReactionsMap(messageGuids: [String]) throws -> [String: [(type: Int, fromHandle: String?)]] {
@@ -509,7 +403,7 @@ extension GetMessagesTool {
         var sessionMessageCount = 0
         var sessionStartTs: String? = nil
 
-        let reversedIndices = (0..<messages.count).reversed()
+        let reversedIndices = Array((0..<messages.count).reversed())
 
         for (i, idx) in reversedIndices.enumerated() {
             let row = messageRows[idx]
@@ -519,7 +413,7 @@ extension GetMessagesTool {
             var sessionGapHours: Double? = nil
 
             if i > 0 {
-                let prevIdx = Array(reversedIndices)[i - 1]
+                let prevIdx = reversedIndices[i - 1]
                 let prevDate = messageRows[prevIdx].date ?? 0
                 let gap = msgDate - prevDate
 
@@ -573,23 +467,8 @@ extension GetMessagesTool {
         return (updatedMessages, sessions)
     }
 
-    static func decodeCursor(_ raw: String) -> GetMessagesCursor? {
-        let parts = raw.split(separator: ":")
-        guard parts.count == 2,
-              let date = Int64(parts[0]),
-              let messageId = Int(parts[1]) else {
-            return nil
-        }
-        return GetMessagesCursor(date: date, messageId: messageId)
-    }
-
-    static func encodeCursor(date: Int64?, messageId: Int) -> String? {
-        guard let date else { return nil }
-        return "\(date):\(messageId)"
-    }
-
     static func nextCursor(from rows: [MessageRow], limit: Int) -> String? {
         guard rows.count >= limit, let last = rows.last else { return nil }
-        return encodeCursor(date: last.date, messageId: last.id)
+        return TimelineCursor.encode(date: last.date, messageId: Int64(last.id))
     }
 }

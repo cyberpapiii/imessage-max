@@ -268,7 +268,7 @@ actor GetMessagesTool {
             chatId: numericChatId,
             sinceApple: sinceApple,
             beforeApple: beforeApple,
-            cursor: cursor.flatMap(Self.decodeCursor),
+            cursor: cursor.flatMap(TimelineCursor.decode),
             limit: fetchLimit,
             fromHandle: fromHandle,
             fromMeOnly: fromMeOnly,
@@ -277,11 +277,14 @@ actor GetMessagesTool {
         )
 
         if unanswered {
-            messageRows = try filterUnanswered(
-                messageRows: messageRows,
-                chatId: numericChatId,
+            messageRows = try UnansweredHeuristics.filterUnanswered(
+                db: db,
+                rows: messageRows,
                 hours: unansweredHours,
-                limit: limit
+                limit: limit,
+                text: \.text,
+                date: \.date,
+                chatId: { _ in Int64(numericChatId) }
             )
         }
 

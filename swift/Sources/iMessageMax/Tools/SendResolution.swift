@@ -1,11 +1,6 @@
 import Foundation
 
 enum SendResolution {
-    struct ParticipantInfo {
-        let handle: String
-        let displayName: String
-    }
-
     enum Target {
         case participant(handle: String, chatId: Int?)
         case chat(guid: String, chatId: Int)
@@ -46,8 +41,7 @@ actor SendResolver {
     }
 
     private func resolveChatId(_ chatId: String) async -> SendResolution.Result {
-        let numericString = chatId.replacingOccurrences(of: "chat", with: "")
-        guard let numericId = Int(numericString) else {
+        guard let numericId = ChatIdentifier.parseRowId(chatId).map(Int.init) else {
             return .failure("Invalid chat_id format: \(chatId)")
         }
 
@@ -67,15 +61,23 @@ actor SendResolver {
                 return .failure("Chat has no guid and cannot be targeted exactly: \(chatId)")
             }
 
-            let participants = try await getParticipants(chatId: numericId)
+            let participants = try await ChatSummaryQueries.participants(
+                db: db,
+                chatId: Int64(numericId),
+                resolver: resolver
+            ).sorted { $0.handle < $1.handle }
             guard !participants.isEmpty else {
                 return .failure("No participants found for chat: \(chatId)")
+            }
+
+            let displayNames = participants.map {
+                IdentityDisplayFormatter.displayName(handle: $0.handle, contactName: $0.name)
             }
 
             return .success(
                 SendResolution.ResolvedTarget(
                     target: .chat(guid: guid, chatId: numericId),
-                    deliveredTo: participants.map(\.displayName),
+                    deliveredTo: displayNames,
                     chat: ChatReference(
                         id: "chat\(numericId)",
                         name: {
@@ -83,7 +85,7 @@ actor SendResolver {
                             if let trimmed, !trimmed.isEmpty {
                                 return trimmed
                             }
-                            return DisplayNameGenerator.fromNames(participants.map(\.displayName))
+                            return DisplayNameGenerator.fromNames(displayNames)
                         }()
                     )
                 )
@@ -256,29 +258,6 @@ actor SendResolver {
         }
 
         return oneOnOneChats.first.map(Int.init)
-    }
-
-    private func getParticipants(chatId: Int) async throws -> [SendResolution.ParticipantInfo] {
-        let handles: [String] = try db.query(
-            """
-            SELECT h.id
-            FROM handle h
-            JOIN chat_handle_join chj ON h.ROWID = chj.handle_id
-            WHERE chj.chat_id = ?
-            ORDER BY h.id ASC
-            """,
-            params: [chatId]
-        ) { row in
-            row.string(0) ?? ""
-        }
-
-        var participants: [SendResolution.ParticipantInfo] = []
-        for handle in handles {
-            let name = await IdentityDisplayFormatter.displayName(handle: handle, resolver: resolver)
-            participants.append(.init(handle: handle, displayName: name))
-        }
-
-        return participants
     }
 
     private func getLastContactTimes(handles: [String]) throws -> [String: Date] {

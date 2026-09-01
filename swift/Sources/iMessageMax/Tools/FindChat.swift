@@ -205,17 +205,8 @@ enum FindChatTool {
             return [.plainText(try FormatUtils.encodeJSON(response))]
 
         } catch let dbError as DatabaseError {
-            let error: ErrorResponse
-            switch dbError {
-            case .notFound:
-                error = ErrorResponse(error: "database_not_found", message: ClientErrorMessages.databaseNotFound)
-            case .permissionDenied:
-                error = ErrorResponse(error: "permission_denied", message: ClientErrorMessages.permissionDenied)
-            case .queryFailed(let msg):
-                error = ErrorResponse(error: "query_failed", message: msg)
-            case .invalidData(let msg):
-                error = ErrorResponse(error: "invalid_data", message: msg)
-            }
+            let mapped = ToolErrorMapping.map(dbError, context: "find_chat")
+            let error = ErrorResponse(error: mapped.code, message: mapped.message)
             throw ToolError(content: [.plainText(try FormatUtils.encodeJSON(error))])
         } catch {
             let errorResp = ErrorResponse(error: "internal_error", message: ClientErrorMessages.sanitized(error))

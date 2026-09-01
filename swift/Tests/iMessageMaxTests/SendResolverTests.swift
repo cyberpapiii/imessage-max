@@ -169,7 +169,7 @@ private func makeResolverTestDatabase() throws -> String {
 
     let statements = [
         "CREATE TABLE chat (ROWID INTEGER PRIMARY KEY, guid TEXT, display_name TEXT);",
-        "CREATE TABLE handle (ROWID INTEGER PRIMARY KEY, id TEXT);",
+        "CREATE TABLE handle (ROWID INTEGER PRIMARY KEY, id TEXT, service TEXT);",
         "CREATE TABLE chat_handle_join (chat_id INTEGER, handle_id INTEGER);",
         "CREATE TABLE message (ROWID INTEGER PRIMARY KEY, handle_id INTEGER, date INTEGER);",
         "INSERT INTO handle (ROWID, id) VALUES (1, '+15555550123');",
