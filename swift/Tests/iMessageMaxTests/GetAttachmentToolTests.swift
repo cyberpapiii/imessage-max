@@ -110,6 +110,59 @@ final class GetAttachmentToolTests: XCTestCase {
         }
     }
 
+    func testUnnamedDMChatNameUsesResolvedParticipant() async throws {
+        let imageURL = try makeTestImage(
+            width: 200,
+            height: 100,
+            filename: "unnamed-dm-\(UUID().uuidString).jpg"
+        )
+        defer { try? FileManager.default.removeItem(at: imageURL) }
+
+        let fixture = try ToolTestDatabase(name: "get-attachment-unnamed-dm")
+        try fixture.insertHandle(rowId: 1, handle: "+15550000022")
+        try fixture.insertChat(rowId: 22, guid: "imessage-sukhmani", displayName: nil)
+        try fixture.joinChatHandle(chatId: 22, handleId: 1)
+        try fixture.insertMessage(
+            rowId: 1,
+            guid: "msg-1",
+            text: nil,
+            date: 1_000_000_000,
+            isFromMe: false,
+            handleId: 1
+        )
+        try fixture.joinChatMessage(chatId: 22, messageId: 1)
+        try fixture.insertAttachment(
+            rowId: 7,
+            filename: imageURL.path,
+            mimeType: "image/jpeg",
+            uti: "public.jpeg",
+            transferName: "photo.jpg"
+        )
+        try fixture.joinMessageAttachment(messageId: 1, attachmentId: 7)
+
+        let tool = GetAttachment(
+            db: fixture.database(),
+            resolver: ContactResolver(seedCache: ["+15550000022": "Sukhmani Kular"])
+        )
+        let result = await tool.execute(
+            attachmentId: "att7",
+            variant: "thumb",
+            allowedRoots: [FileManager.default.temporaryDirectory.path]
+        )
+
+        switch result {
+        case .success(let metadata, _, _):
+            XCTAssertEqual(metadata.chat?.id, "chat22")
+            XCTAssertEqual(
+                metadata.chat?.name,
+                "Sukhmani Kular",
+                "Unnamed DM should use the resolved participant name, not chat{rowid}"
+            )
+        case .error(let type, let message, _):
+            XCTFail("Expected image success, got \(type): \(message)")
+        }
+    }
+
     func testExecuteReturnsOffloadedErrorWhenImageFileIsMissing() async throws {
         let missingPath = FileManager.default.temporaryDirectory
             .appendingPathComponent("definitely-missing-attachment.jpg").path
