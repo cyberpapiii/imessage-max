@@ -59,9 +59,7 @@ struct iMessageMax: AsyncParsableCommand {
                 }
                 try? await resolver.initialize()
                 let stats = await resolver.getStats()
-                FileHandle.standardError.write(
-                    Data("[iMessage Max] Contacts: initialized=\(stats.initialized) handles=\(stats.handleCount)\n".utf8)
-                )
+                Log.info("Contacts: initialized=\(stats.initialized) handles=\(stats.handleCount)")
             }
             try await transport.waitForTermination()
         } else {
