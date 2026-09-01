@@ -257,9 +257,7 @@ public actor HTTPTransport: Transport {
                 sessionId = session.id
                 responseHeaders[.mcpSessionId] = sessionId
                 logger.info("Created new session with dedicated Server: \(sessionId)")
-                FileHandle.standardError.write(
-                    Data("[iMessage Max] era=legacy transport=http version=\(requestedProtocolVersion ?? MCPProtocolVersion.latest) method=initialize session=\(sessionId.prefix(8))\n".utf8)
-                )
+                Log.info("era=legacy transport=http version=\(requestedProtocolVersion ?? MCPProtocolVersion.latest) method=initialize session=\(sessionId.prefix(8))")
             case .atCapacity:
                 return errorResponse(
                     status: .serviceUnavailable,
@@ -299,12 +297,7 @@ public actor HTTPTransport: Transport {
             let method = (json["method"] as? String)
                 ?? (messageType == .notification ? "notification" : "response")
             let version = request.headers[.mcpProtocolVersion] ?? "legacy"
-            FileHandle.standardError.write(
-                Data(
-                    "[iMessage Max] era=legacy transport=http version=\(ModernDispatcher.sanitizedLogField(version)) method=\(ModernDispatcher.sanitizedLogField(method)) session=\(sessionId.prefix(8))\n"
-                        .utf8
-                )
-            )
+            Log.info("era=legacy transport=http version=\(ModernDispatcher.sanitizedLogField(version)) method=\(ModernDispatcher.sanitizedLogField(method)) session=\(sessionId.prefix(8))")
         }
 
         // A `tools/call` needs nothing that the session's own Server holds:
@@ -378,9 +371,7 @@ public actor HTTPTransport: Transport {
                     body: .init(byteBuffer: ByteBuffer(data: responseData))
                 )
             } catch {
-                FileHandle.standardError.write(
-                    Data("[iMessage Max] Request handling failed: \(error)\n".utf8)
-                )
+                Log.error("Request handling failed: \(error)")
                 return errorResponse(
                     status: .internalServerError,
                     message: ClientErrorMessages.internalError
@@ -441,9 +432,7 @@ public actor HTTPTransport: Transport {
         }
 
         guard let data = try? JSONSerialization.data(withJSONObject: envelope) else {
-            FileHandle.standardError.write(
-                Data("[iMessage Max] legacy tools/call serialization failed for \(name)\n".utf8)
-            )
+            Log.error("legacy tools/call serialization failed for \(name)")
             return errorResponse(
                 status: .internalServerError,
                 message: ClientErrorMessages.internalError

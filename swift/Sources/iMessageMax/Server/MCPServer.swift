@@ -43,9 +43,7 @@ actor MCPServerWrapper {
         // Check database access
         let (dbOk, dbStatus) = Database.checkAccess()
         if !dbOk {
-            FileHandle.standardError.write(
-                Data("[iMessage Max] Database: \(dbStatus)\n".utf8)
-            )
+            Log.info("Database: \(dbStatus)")
         }
 
         // Initialize contacts (this may show permission dialog)

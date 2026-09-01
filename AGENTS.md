@@ -1,6 +1,6 @@
 # AGENTS.md
 
-This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
+This file provides guidance to coding agents (Claude Code, Codex) and contributors.
 
 ## Project overview
 
@@ -24,14 +24,15 @@ make install    # builds, signs, restarts launchd service, verifies health
 Always run `make install` after code changes. It signs the binary, which is what keeps Full Disk Access from being revoked on every rebuild.
 
 Other Makefile targets:
-- `make test` runs the full test suite
+- `make test` runs the full test suite (`FILTER=ClassOrMethod` for a subset)
 - `make status` checks process, version, signature, health
 - `make logs` tails the stderr log
 - `make clean` removes debug artifacts and clears logs
 - `make setup-signing` is one-time setup for a persistent code signing identity
 - `make version` checks the four version sites agree; `make release-check` runs everything that must pass before tagging (see `docs/RELEASING.md`)
+- `make install-agent` copies `swift/launchd/local.imessage-max.plist` into `~/Library/LaunchAgents/` (do not hand-write the plist)
 
-The server runs as a launchd service (`local.imessage-max`) on port 8080, configured at `~/Library/LaunchAgents/local.imessage-max.plist`. It auto-starts on login and auto-restarts on crash.
+The server runs as a launchd service (`local.imessage-max`) on port 8080, configured at `~/Library/LaunchAgents/local.imessage-max.plist`. Install that agent with `make install-agent`. It auto-starts on login and auto-restarts on crash.
 
 Connected via MCP Router as `remote-streamable` at `http://127.0.0.1:8080`. After restarting the service, MCP Router clients may need to reconnect (e.g. `/mcp` in Codex).
 
@@ -55,6 +56,7 @@ cd swift
 swift test                              # full suite
 swift test --filter HTTPTransportTests  # one test class
 make test                               # same as `swift test`
+make test FILTER=HTTPTransportTests     # same filter via the Makefile
 ```
 
 `swift test --filter` takes a substring of the test class or method name, so
@@ -111,9 +113,10 @@ swift/
 │   ├── Database/               # SQLite wrapper, query builder
 │   ├── Tools/                  # 12 MCP tools
 │   ├── Contacts/               # CNContactStore resolver
-│   ├── Enrichment/             # Image/video/audio processors
-│   └── Utilities/              # Time, phone formatting
+│   ├── Enrichment/             # Image processors (thumbnail, vision, full variants)
+│   └── Utilities/              # Time, phone formatting, Log.swift
 ├── Tests/
+├── launchd/                    # launchd plist template (local.imessage-max)
 └── Package.swift
 ```
 

@@ -287,9 +287,7 @@ enum ModernDispatcher {
             let json = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
         else {
             // Deliberately not cached: an empty catalog must not become sticky.
-            FileHandle.standardError.write(
-                Data("[iMessage Max] modern toolsJSON encode failed; returning empty catalog\n".utf8)
-            )
+            Log.error("modern toolsJSON encode failed; returning empty catalog")
             return []
         }
         catalogCache.store(tools: json, version: currentVersion)
@@ -348,9 +346,7 @@ enum ModernDispatcher {
         do {
             return try JSONSerialization.data(withJSONObject: object)
         } catch {
-            FileHandle.standardError.write(
-                Data("[iMessage Max] modern serialize failed: \(error)\n".utf8)
-            )
+            Log.error("modern serialize failed: \(error)")
             let fallback: [String: Any] = [
                 "jsonrpc": "2.0",
                 "id": fallbackEnvelopeId(for: object["id"]),
@@ -384,8 +380,6 @@ enum ModernDispatcher {
         }
         // `transport` and `version` are server-constrained (version passes the
         // supported-versions guard before reaching here); `method` is not.
-        FileHandle.standardError.write(
-            Data("[iMessage Max] era=modern transport=\(transport) version=\(version) method=\(sanitizedLogField(method)) client=\(client)\n".utf8)
-        )
+        Log.info("era=modern transport=\(transport) version=\(version) method=\(sanitizedLogField(method)) client=\(client)")
     }
 }

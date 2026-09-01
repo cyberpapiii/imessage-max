@@ -344,9 +344,7 @@ enum AppleScriptRunner {
                     || firstLine.contains("/var/")
                     || firstLine.contains("imessage-max-staging")
                 {
-                    FileHandle.standardError.write(
-                        Data("[imessage-max] transfer status stderr (scrubbed): \(firstLine)\n".utf8)
-                    )
+                    Log.error("transfer status stderr (scrubbed): \(firstLine)")
                     throw SendError.failed(
                         "Transfer status query failed. Check the server log for details."
                     )
@@ -537,9 +535,7 @@ enum AppleScriptRunner {
             || firstLine.contains("/var/")
             || firstLine.contains("imessage-max-staging")
         {
-            FileHandle.standardError.write(
-                Data("[imessage-max] osascript stderr (scrubbed for client): \(firstLine)\n".utf8)
-            )
+            Log.error("osascript stderr (scrubbed for client): \(firstLine)")
             return .failed("Send failed. Check the server log for details.")
         }
         return .failed(firstLine)

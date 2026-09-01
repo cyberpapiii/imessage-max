@@ -170,9 +170,7 @@ actor SessionManager {
             try await server.start(transport: adapter)
         } catch {
             session.messageContinuation.finish()
-            FileHandle.standardError.write(
-                Data("[iMessage Max] session Server.start failed: \(error)\n".utf8)
-            )
+            Log.error("session Server.start failed: \(error)")
             return .startFailed(error)
         }
 

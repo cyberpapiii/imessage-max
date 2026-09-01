@@ -91,9 +91,9 @@ final class SSEChannel: @unchecked Sendable {
                         downstream.finish()
                     }
 
-                    // Keep-alive task. AsyncTimeout.sleep is launchd-safe but
-                    // non-cancellable, so cancellation lands at the next
-                    // interval boundary. That is the accepted plan-019 trade.
+                    // Keep-alive task. AsyncTimeout.sleep is launchd-safe and
+                    // cancellable; the loop checks Task.isCancelled and exits
+                    // when the task is cancelled.
                     group.addTask {
                         while !Task.isCancelled {
                             await AsyncTimeout.sleep(keepAliveInterval)
