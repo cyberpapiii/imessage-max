@@ -290,6 +290,14 @@ extension SearchTool {
     ) async throws -> String {
         var results: [SearchResult] = []
         var chatNamesCache: [Int64: String] = [:]
+        var contextByAnchor: [String: (before: [SearchContextMessage], after: [SearchContextMessage])] = [:]
+        if includeContext {
+            let anchors = rows.compactMap { row -> (chatId: Int64, date: Int64)? in
+                guard let date = row.date else { return nil }
+                return (row.chatId, date)
+            }
+            contextByAnchor = try await getContextBatch(db: db, anchors: anchors, resolver: resolver)
+        }
 
         for row in rows {
             let text = MessageTextExtractor.extract(text: row.text, attributedBody: row.attributedBody)
@@ -325,14 +333,10 @@ extension SearchTool {
             )
 
             if includeContext, let msgDate = row.date {
-                let (before, after) = try await getContext(
-                    db: db,
-                    chatId: row.chatId,
-                    msgDate: msgDate,
-                    resolver: resolver
-                )
-                result.contextBefore = before.isEmpty ? nil : before
-                result.contextAfter = after.isEmpty ? nil : after
+                if let ctx = contextByAnchor["\(row.chatId):\(msgDate)"] {
+                    result.contextBefore = ctx.before.isEmpty ? nil : ctx.before
+                    result.contextAfter = ctx.after.isEmpty ? nil : ctx.after
+                }
             }
 
             results.append(result)
@@ -461,6 +465,79 @@ extension SearchTool {
             cursor: nextCursor(from: rows, limit: limit)
         )
         return try FormatUtils.encodeJSON(response)
+    }
+
+    /// One windowed query per distinct chat, then slice 2-before / 2-after
+    /// per anchor in Swift. `getContext` stays for the get_context tool.
+    static func getContextBatch(
+        db: Database,
+        anchors: [(chatId: Int64, date: Int64)],
+        resolver: ContactResolver
+    ) async throws -> [String: (before: [SearchContextMessage], after: [SearchContextMessage])] {
+        guard !anchors.isEmpty else { return [:] }
+
+        var datesByChat: [Int64: [Int64]] = [:]
+        for anchor in anchors {
+            datesByChat[anchor.chatId, default: []].append(anchor.date)
+        }
+
+        var formattedByChat: [Int64: [(date: Int64, message: SearchContextMessage)]] = [:]
+        for (chatId, dates) in datesByChat {
+            guard let minDate = dates.min(), let maxDate = dates.max() else { continue }
+            let rows = try db.query(
+                """
+                SELECT m.ROWID as msg_id, m.text, m.attributedBody, m.date, m.is_from_me, h.id as sender_handle
+                FROM message m
+                JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
+                LEFT JOIN handle h ON m.handle_id = h.ROWID
+                WHERE cmj.chat_id = ?
+                  AND m.associated_message_type = 0
+                  AND (
+                    m.ROWID IN (
+                      SELECT m2.ROWID
+                      FROM message m2
+                      JOIN chat_message_join cmj2 ON m2.ROWID = cmj2.message_id
+                      WHERE cmj2.chat_id = ? AND m2.date < ? AND m2.associated_message_type = 0
+                      ORDER BY m2.date DESC LIMIT 2
+                    )
+                    OR (m.date >= ? AND m.date <= ?)
+                    OR m.ROWID IN (
+                      SELECT m3.ROWID
+                      FROM message m3
+                      JOIN chat_message_join cmj3 ON m3.ROWID = cmj3.message_id
+                      WHERE cmj3.chat_id = ? AND m3.date > ? AND m3.associated_message_type = 0
+                      ORDER BY m3.date ASC LIMIT 2
+                    )
+                  )
+                ORDER BY m.date
+                """,
+                params: [chatId, chatId, minDate, minDate, maxDate, chatId, maxDate]
+            ) { row in
+                ContextRow(
+                    msgId: row.int(0),
+                    text: row.string(1),
+                    attributedBody: row.blob(2),
+                    date: row.optionalInt(3),
+                    isFromMe: row.int(4) != 0,
+                    senderHandle: row.string(5)
+                )
+            }
+
+            var formatted: [(date: Int64, message: SearchContextMessage)] = []
+            for row in rows {
+                formatted.append((row.date ?? 0, await formatContextMessage(row: row, resolver: resolver)))
+            }
+            formattedByChat[chatId] = formatted
+        }
+
+        var result: [String: (before: [SearchContextMessage], after: [SearchContextMessage])] = [:]
+        for anchor in anchors {
+            let messages = formattedByChat[anchor.chatId] ?? []
+            let before = Array(messages.filter { $0.date < anchor.date }.suffix(2).map(\.message))
+            let after = Array(messages.filter { $0.date > anchor.date }.prefix(2).map(\.message))
+            result["\(anchor.chatId):\(anchor.date)"] = (before, after)
+        }
+        return result
     }
 
     static func getContext(
