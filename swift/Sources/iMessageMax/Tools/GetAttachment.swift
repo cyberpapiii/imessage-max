@@ -18,15 +18,21 @@ struct AttachmentMetadataSummary: Codable {
 struct GetAttachment {
     private let db: Database
     private let imageProcessor: ImageProcessor
+    private let resolver: ContactResolver
 
-    init(db: Database = Database(), imageProcessor: ImageProcessor = ImageProcessor()) {
+    init(
+        db: Database = Database(),
+        imageProcessor: ImageProcessor = ImageProcessor(),
+        resolver: ContactResolver = ContactResolver()
+    ) {
         self.db = db
         self.imageProcessor = imageProcessor
+        self.resolver = resolver
     }
 
     // MARK: - Tool Registration
 
-    static func register(on server: Server, db: Database) {
+    static func register(on server: Server, db: Database, resolver: ContactResolver) {
         let inputSchema: Value = .object([
             "type": "object",
             "properties": .object([
@@ -63,7 +69,7 @@ struct GetAttachment {
             }
 
             let variant = arguments?["variant"]?.stringValue ?? "vision"
-            let tool = GetAttachment(db: db)
+            let tool = GetAttachment(db: db, resolver: resolver)
             let result = await tool.execute(attachmentId: attachmentId, variant: variant)
 
             switch result {
@@ -196,7 +202,7 @@ struct GetAttachment {
             )
             let attType = attachmentType.rawValue
             let displayName = attachment.transferName ?? (expandedPath as NSString).lastPathComponent
-            let chat = try resolveAttachmentChat(rowId: rowId)
+            let chat = try await resolveAttachmentChat(rowId: rowId)
 
             switch attachmentType {
             case .image:
@@ -263,7 +269,7 @@ struct GetAttachment {
 
     // MARK: - Private Helpers
 
-    private func resolveAttachmentChat(rowId: Int) throws -> ChatReference? {
+    private func resolveAttachmentChat(rowId: Int) async throws -> ChatReference? {
         let rows: [(Int64, String?)]
         do {
             rows = try db.query(
@@ -290,7 +296,20 @@ struct GetAttachment {
         if let displayName, !displayName.isEmpty {
             name = displayName
         } else {
-            name = "chat\(row.0)"
+            let participants = try await ChatSummaryQueries.participants(
+                db: db,
+                chatId: row.0,
+                resolver: resolver
+            )
+            let identity = ChatIdentity(
+                mcpId: "chat\(row.0)",
+                guid: nil,
+                explicitName: nil,
+                participants: participants.map {
+                    ChatIdentity.makeParticipant(handle: $0.handle, contactName: $0.name)
+                }
+            )
+            name = identity.displayName
         }
         return ChatReference(
             id: "chat\(row.0)",

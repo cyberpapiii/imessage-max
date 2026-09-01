@@ -25,19 +25,21 @@ final class GetAttachmentToolTests: XCTestCase {
     }
 
     func testFullVariantOversizeFallsBackToVisionSize() throws {
-        // Hit the pixel-count short-circuit, not the 8MB re-encode check.
-        // A 6000x4000 noise JPEG (under the 50M-pixel cap) made CI
-        // `--parallel` stall for minutes: Core Image on the macos-26 runner
-        // has no GPU and encodes that bitmap on CPU. A solid image just
-        // over `maxFullVariantPixels` is a tiny JPEG and never enters that
-        // path. Same fallback, cheap enough for a runner.
-        let width = 8000
-        let height = ImageProcessor.maxFullVariantPixels / width + 1
-        XCTAssertGreaterThan(width * height, ImageProcessor.maxFullVariantPixels)
+        // Header-only oversize. A real 50MP encode (or the old 24MP noise
+        // JPEG) starves macos-26 CI `--parallel`: no GPU, software JPEG of
+        // tens of megapixels holds a worker until the job timeout. ImageIO
+        // reads SOF dimensions without decoding, so a 200x100 JPEG that
+        // *declares* more than `maxFullVariantPixels` hits the same
+        // short-circuit.
+        let declaredWidth = 8000
+        let declaredHeight = ImageProcessor.maxFullVariantPixels / declaredWidth + 1
+        XCTAssertGreaterThan(declaredWidth * declaredHeight, ImageProcessor.maxFullVariantPixels)
 
-        let oversizedURL = try makeTestImage(
-            width: width,
-            height: height,
+        let oversizedURL = try makeJPEGDeclaringDimensions(
+            pixelWidth: 200,
+            pixelHeight: 100,
+            declaredWidth: declaredWidth,
+            declaredHeight: declaredHeight,
             filename: "full-oversize-\(UUID().uuidString).jpg"
         )
         defer { try? FileManager.default.removeItem(at: oversizedURL) }
@@ -107,6 +109,59 @@ final class GetAttachmentToolTests: XCTestCase {
             XCTAssertEqual(type, "unsupported_type")
             XCTAssertTrue(message.contains("Video attachments are not yet supported"))
             XCTAssertEqual(details?["type"] as? String, "video")
+        }
+    }
+
+    func testUnnamedDMChatNameUsesResolvedParticipant() async throws {
+        let imageURL = try makeTestImage(
+            width: 200,
+            height: 100,
+            filename: "unnamed-dm-\(UUID().uuidString).jpg"
+        )
+        defer { try? FileManager.default.removeItem(at: imageURL) }
+
+        let fixture = try ToolTestDatabase(name: "get-attachment-unnamed-dm")
+        try fixture.insertHandle(rowId: 1, handle: "+15550000022")
+        try fixture.insertChat(rowId: 22, guid: "imessage-sukhmani", displayName: nil)
+        try fixture.joinChatHandle(chatId: 22, handleId: 1)
+        try fixture.insertMessage(
+            rowId: 1,
+            guid: "msg-1",
+            text: nil,
+            date: 1_000_000_000,
+            isFromMe: false,
+            handleId: 1
+        )
+        try fixture.joinChatMessage(chatId: 22, messageId: 1)
+        try fixture.insertAttachment(
+            rowId: 7,
+            filename: imageURL.path,
+            mimeType: "image/jpeg",
+            uti: "public.jpeg",
+            transferName: "photo.jpg"
+        )
+        try fixture.joinMessageAttachment(messageId: 1, attachmentId: 7)
+
+        let tool = GetAttachment(
+            db: fixture.database(),
+            resolver: ContactResolver(seedCache: ["+15550000022": "Sukhmani Kular"])
+        )
+        let result = await tool.execute(
+            attachmentId: "att7",
+            variant: "thumb",
+            allowedRoots: [FileManager.default.temporaryDirectory.path]
+        )
+
+        switch result {
+        case .success(let metadata, _, _):
+            XCTAssertEqual(metadata.chat?.id, "chat22")
+            XCTAssertEqual(
+                metadata.chat?.name,
+                "Sukhmani Kular",
+                "Unnamed DM should use the resolved participant name, not chat{rowid}"
+            )
+        case .error(let type, let message, _):
+            XCTFail("Expected image success, got \(type): \(message)")
         }
     }
 
@@ -208,4 +263,45 @@ private func makeTestImage(width: Int, height: Int, filename: String) throws -> 
     }
 
     return url
+}
+
+/// Tiny JPEG whose SOF width/height are patched so ImageIO reports an
+/// oversize pixel count without encoding that many pixels.
+private func makeJPEGDeclaringDimensions(
+    pixelWidth: Int,
+    pixelHeight: Int,
+    declaredWidth: Int,
+    declaredHeight: Int,
+    filename: String
+) throws -> URL {
+    let url = try makeTestImage(width: pixelWidth, height: pixelHeight, filename: filename)
+    let data = try Data(contentsOf: url)
+    let bytes = [UInt8](data)
+    var i = 0
+    while i + 8 < bytes.count {
+        guard bytes[i] == 0xFF else {
+            i += 1
+            continue
+        }
+        let marker = bytes[i + 1]
+        if marker == 0xC0 || marker == 0xC1 || marker == 0xC2 {
+            var patched = [UInt8](data)
+            patched[i + 5] = UInt8((declaredHeight >> 8) & 0xFF)
+            patched[i + 6] = UInt8(declaredHeight & 0xFF)
+            patched[i + 7] = UInt8((declaredWidth >> 8) & 0xFF)
+            patched[i + 8] = UInt8(declaredWidth & 0xFF)
+            try Data(patched).write(to: url)
+            return url
+        }
+        if marker == 0xD8 || marker == 0xD9 || (0xD0...0xD7).contains(marker) {
+            i += 2
+            continue
+        }
+        if i + 3 >= bytes.count { break }
+        let length = Int(bytes[i + 2]) << 8 | Int(bytes[i + 3])
+        i += 2 + length
+    }
+    throw NSError(domain: "TestImage", code: 4, userInfo: [
+        NSLocalizedDescriptionKey: "JPEG SOF marker not found"
+    ])
 }

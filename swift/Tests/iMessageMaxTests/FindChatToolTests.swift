@@ -53,6 +53,36 @@ final class FindChatToolTests: XCTestCase {
         let queryCount = try XCTUnwrap(Database.queryCountForTesting)
         XCTAssertLessThanOrEqual(queryCount, 6, "find_chat ran \(queryCount) queries")
     }
+
+    func testNameMatchesUnnamedDMByResolvedParticipantContact() async throws {
+        let fixture = try ToolTestDatabase(name: "find-chat-unnamed-dm")
+        try fixture.insertHandle(rowId: 1, handle: "+15550000022")
+        try fixture.insertChat(rowId: 22, guid: "imessage-sukhmani", displayName: nil)
+        try fixture.joinChatHandle(chatId: 22, handleId: 1)
+        try fixture.insertMessage(
+            rowId: 1,
+            guid: "msg-1",
+            text: "hello",
+            date: 1_000_000_000,
+            isFromMe: false,
+            handleId: 1
+        )
+        try fixture.joinChatMessage(chatId: 22, messageId: 1)
+
+        let contents = try await FindChatTool.execute(
+            arguments: [
+                "name": .string("Sukhmani"),
+                "is_group": .bool(false),
+            ],
+            database: fixture.database(),
+            resolver: ContactResolver(seedCache: ["+15550000022": "Sukhmani Kular"])
+        )
+        let payload = try decodeJSONDictionary(from: contents)
+        let chats = try decodeJSONArray(try XCTUnwrap(payload["chats"]))
+        XCTAssertEqual(chats.count, 1)
+        XCTAssertEqual(chats.first?["id"] as? String, "chat22")
+        XCTAssertEqual(chats.first?["name"] as? String, "Sukhmani Kular")
+    }
 }
 
 private func makeContainsRecentRichFixture() throws -> ToolTestDatabase {

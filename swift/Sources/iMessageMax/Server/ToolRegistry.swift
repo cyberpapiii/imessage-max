@@ -51,7 +51,7 @@ enum ToolRegistry {
         SearchTool.register(on: server, db: db, resolver: resolver)
         GetUnread.register(on: server, db: db, resolver: resolver)
         ListAttachments.register(on: server, db: db, resolver: resolver)
-        GetAttachment.register(on: server, db: db)
+        GetAttachment.register(on: server, db: db, resolver: resolver)
         SendTool.register(on: server, resolver: resolver)
         DiagnoseTool.register(on: server, resolver: resolver)
     }
