@@ -49,6 +49,12 @@ enum AsyncTimeout {
     }
 
     /// Single-resume gate for Dispatch sleep + cancellation.
+    ///
+    /// Invariant: `resumed` is true only after a continuation has actually
+    /// been resumed. `withTaskCancellationHandler` runs `onCancel` before the
+    /// body when the task is already cancelled on entry, so `cancelAndResume`
+    /// can run before `arm`; it must not claim the resume in that case, or the
+    /// continuation that `arm` later delivers is never resumed.
     private final class ResumeGate: @unchecked Sendable {
         private let lock = NSLock()
         private var work: DispatchWorkItem?
@@ -85,7 +91,9 @@ enum AsyncTimeout {
             let item = work
             let cont = continuation
             let already = resumed
-            if !already {
+            // Only claim the resume if we actually hold the continuation. If arm()
+            // has not run yet, leave `resumed` false so arm() resumes on arrival.
+            if !already, cont != nil {
                 resumed = true
                 continuation = nil
             }
