@@ -76,7 +76,7 @@ restart: ## Restart the launchd service
 
 verify: ## Verify server is healthy
 	@echo "Waiting for server..."
-	@BINARY_VERSION=$$($(BINARY) --version 2>/dev/null); \
+	@BINARY_VERSION=$$($(BINARY) --version 2>/dev/null | grep -o '[0-9.]*$$'); \
 	i=1; \
 	while [ $$i -le $(VERIFY_ATTEMPTS) ]; do \
 		sleep 1; \
