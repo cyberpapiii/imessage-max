@@ -139,7 +139,11 @@ enum DiagnoseTool {
                 contactsLoaded = stats.handleCount
             } catch {
                 contactsStatus = "\(authorizationStatus)_load_failed"
-                contactsFix = "Contacts permission is granted, but contacts could not be loaded: \(error.localizedDescription)"
+                // CNContactStore errors routinely embed local paths and the
+                // username; the detail goes to stderr, the client gets a
+                // fixed string.
+                contactsFix = "Contacts permission is granted, but "
+                    + ClientErrorMessages.internalDetail(error, context: "loading contacts")
             }
         } else {
             contactsFix = "Grant Contacts access: System Settings -> Privacy & Security -> " +
@@ -292,7 +296,9 @@ enum DiagnoseTool {
             database: .init(
                 accessible: dbOk,
                 status: dbStatus,
-                path: databasePath,
+                // Keep the path actionable for the operator without echoing
+                // their username to the client.
+                path: (databasePath as NSString).abbreviatingWithTildeInPath,
                 fix: databaseFix
             ),
             contacts: .init(
