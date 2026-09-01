@@ -32,7 +32,7 @@ verification `cd swift && swift build && swift test`.
 
 | Plan | Title | Priority | Effort | Depends on | Status |
 |------|-------|----------|--------|------------|--------|
-| 040 | CI and release green on `macos-26` (runner, action majors, arm64-only release, Formula arch) | P0 | S | none | DONE 2026-09-01, merged to main (`0aac6bf`, branch `advisor/040-ci-macos-26`; 278/0 re-verified; CI observation on push still pending, operator step) |
+| 040 | CI and release green on `macos-26` (runner, action majors, arm64-only release, Formula arch) | P0 | S | none | DONE 2026-09-01, merged to main (`0aac6bf`, branch `advisor/040-ci-macos-26`; 278/0 re-verified). Step 5 watch: https://github.com/cyberpapiii/imessage-max/actions/runs/33564306870 (in progress at report time). |
 | 041 | Characterization tests for untested hot paths (AppleTime, PhoneUtils, cursors, origin parsing, send mismatch, attributedBody-only verify) | P1 | M | none | DONE 2026-09-01, merged to main (`27c7ae5`, branch `advisor/041-characterization-tests`; 313/0 re-verified, 1 skipped by design until 042) |
 | 044 | Fix the AsyncTimeout gate that never resumes when cancellation precedes arming | P1 | S | none | DONE 2026-09-01, merged to main (`35de66d`, branch `advisor/044-asynctimeout-gate`; 316/0 re-verified) |
 | 046 | Stop trapping on duplicate handles in participant dictionaries (+ DISTINCT at the source) | P1 | S | none | DONE 2026-09-01, merged to main (`bf77d82`, branch `advisor/046-duplicate-handles`; 281/0 re-verified) |
@@ -47,8 +47,10 @@ verification `cd swift && swift build && swift test`.
 | 052 | One source of truth for the version; `--version` the Formula test can match; `make release-check` | P2 | S | 040 | DONE 2026-09-01, merged to main (`e4499d3`, branch `advisor/052-version-dx`; 321/0 re-verified) |
 | 053 | One `Log` helper, honest Makefile `verify`, shipped launchd plist, docs/gitignore drift | P3 | S | 048 | DONE 2026-09-01, merged to main (`af8f94f`, branch `advisor/053-logging-and-docs`; 353/0 re-verified). 055's contacts startup line still uses FileHandle; 056 routes it through Log. |
 | 055 | Word-boundary contact search, pinned date formatter, transport before contacts enumeration | P3 | S | 048, 051 | DONE 2026-09-01, merged to main (`8429b88`, branch `advisor/055-resolver-dates-startup`; 352/0 re-verified) |
-| 056 | Round follow-ups: bounded gate test, short-code send fallback, formatter dedupe, static clamps, LIKE ESCAPE, QueryBuilder array params, contains_recent bound | P3 | S | 048, 053, 055 | DONE 2026-09-01, merged to main (`c769ba9`, branch `advisor/056-round-followups`; 355/0 re-verified). Skipped items 2/5/6 (054 Step 2 files). |
+| 056 | Round follow-ups: bounded gate test, short-code send fallback, formatter dedupe, static clamps, LIKE ESCAPE, QueryBuilder array params, contains_recent bound | P3 | S | 048, 053, 055 | DONE 2026-09-01, merged to main (`c769ba9`, branch `advisor/056-round-followups`; 355/0 re-verified). Items 2/5/6 skipped then; closed by 058. |
 | 054 | Consolidate copied chat-id parsers, participant queries, error mappers, cursors, unanswered heuristics | P3 | L | 041, 042, 045, 046, 049, 051 | DONE 2026-09-01, merged to main (`2b4e10c`, branch `advisor/054-consolidate-internals`; 364/0 re-verified). `ChatParticipant` kept (`name`/`handle` vs `ChatIdentity.Participant` `handle`/`display_name`/`contact_name`). COUNT/group-filter `chat_handle_join` left in Tools. `main..HEAD` was 388 insertions / 610 deletions. |
+| 058 | Close 056 leftovers: short-code send fallback, link LIKE ESCAPE, QueryBuilder array `where` | P3 | S | 054, 056 | DONE 2026-09-01, merged to main (`18149db`, branch `advisor/058-followups-2`; 368/0 re-verified) |
+| 059 | Release prep 1.5.0 (version bump, CHANGELOG, Formula version string) | P2 | S | 048, 052, 058 | DONE 2026-09-01, merged to main (`db1ee55`, branch `advisor/059-release-1.5.0`; 368/0 re-verified). Tag and Formula sha256 are the operator's. |
 
 ### Dependency notes (2026-08-07 round)
 
