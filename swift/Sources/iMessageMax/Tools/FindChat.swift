@@ -155,11 +155,12 @@ enum FindChatTool {
             }
 
             if let name = params.name, results.isEmpty {
-                let chats = try findChatsByName(
+                let chats = try await findChatsByName(
                     database: database,
                     name: name,
                     limit: params.limit,
-                    isGroup: params.isGroup
+                    isGroup: params.isGroup,
+                    resolver: resolver
                 )
                 results.append(contentsOf: try await buildChatResults(
                     database: database,
@@ -361,6 +362,36 @@ enum FindChatTool {
         database: Database,
         name: String,
         limit: Int,
+        isGroup: Bool?,
+        resolver: ContactResolver
+    ) async throws -> [ChatRow] {
+        var chats = try findChatsByDisplayName(
+            database: database,
+            name: name,
+            limit: limit,
+            isGroup: isGroup
+        )
+        // Unnamed DMs have no display_name. Match the resolved participant
+        // contact with the same word-prefix rule searchByName uses.
+        if chats.count < limit, isGroup != true {
+            let unnamed = try await findUnnamedDMsByParticipantName(
+                database: database,
+                name: name,
+                limit: limit - chats.count,
+                resolver: resolver
+            )
+            var seen = Set(chats.map(\.id))
+            for chat in unnamed where seen.insert(chat.id).inserted {
+                chats.append(chat)
+            }
+        }
+        return chats
+    }
+
+    private static func findChatsByDisplayName(
+        database: Database,
+        name: String,
+        limit: Int,
         isGroup: Bool?
     ) throws -> [ChatRow] {
         let escaped = QueryBuilder.escapeLike(name)
@@ -374,6 +405,39 @@ enum FindChatTool {
             """
 
         return try database.query(sql, params: ["%\(escaped)%", limit]) { row in
+            ChatRow(
+                id: row.int(0),
+                guid: row.string(1),
+                displayName: row.string(2)
+            )
+        }
+    }
+
+    private static func findUnnamedDMsByParticipantName(
+        database: Database,
+        name: String,
+        limit: Int,
+        resolver: ContactResolver
+    ) async throws -> [ChatRow] {
+        let matches = await resolver.searchByName(name)
+        guard !matches.isEmpty, limit > 0 else { return [] }
+
+        let handles = Array(Set(matches.map(\.handle)))
+        let placeholders = handles.map { _ in "?" }.joined(separator: ",")
+        let sql = """
+            SELECT c.ROWID as id, c.guid, c.display_name
+            FROM chat c
+            JOIN chat_handle_join chj ON chj.chat_id = c.ROWID
+            JOIN handle h ON h.ROWID = chj.handle_id
+            WHERE (c.display_name IS NULL OR TRIM(c.display_name) = '')
+              AND h.id IN (\(placeholders))
+              AND (SELECT COUNT(*) FROM chat_handle_join chj_g WHERE chj_g.chat_id = c.ROWID) <= 1
+            LIMIT ?
+            """
+        var params: [Any] = handles.map { $0 as Any }
+        params.append(limit)
+
+        return try database.query(sql, params: params) { row in
             ChatRow(
                 id: row.int(0),
                 guid: row.string(1),
