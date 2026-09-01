@@ -18,6 +18,12 @@ for pair in "Info.plist short:$plist_short" "Info.plist build:$plist_build" "mcp
   fi
 done
 
+floor=$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' swift/Sources/Resources/Info.plist)
+if [[ "$floor" != "15.0" ]]; then
+  echo "MISMATCH Info.plist LSMinimumSystemVersion = $floor (expected 15.0)" >&2
+  status=1
+fi
+
 if [[ -n "${1:-}" && "$1" == "--tag" ]]; then
   tag=$(git describe --tags --exact-match 2>/dev/null || true)
   if [[ "$tag" != "v$swift_v" ]]; then
