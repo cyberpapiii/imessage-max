@@ -13,9 +13,7 @@ enum ClientErrorMessages {
         guard let dbError = error as? DatabaseError else {
             return error.localizedDescription
         }
-        FileHandle.standardError.write(
-            Data("[imessage-max] database error: \(dbError.localizedDescription)\n".utf8)
-        )
+        Log.error("database error: \(dbError.localizedDescription)")
         switch dbError {
         case .permissionDenied: return permissionDenied
         case .notFound: return databaseNotFound
@@ -33,9 +31,7 @@ enum ClientErrorMessages {
     /// or AppleScript execution. Use `sanitized` when the error may be a
     /// `DatabaseError` and its guidance strings are what the client needs.
     static func internalDetail(_ error: Error, context: String) -> String {
-        FileHandle.standardError.write(
-            Data("[imessage-max] \(context): \(error.localizedDescription)\n".utf8)
-        )
+        Log.error("\(context): \(error.localizedDescription)")
         return "\(context) failed. Check the server log for details."
     }
 }

@@ -36,16 +36,12 @@ struct iMessageMax: AsyncParsableCommand {
 
             let (dbOk, dbStatus) = Database.checkAccess()
             if !dbOk {
-                FileHandle.standardError.write(
-                    Data("[iMessage Max] Database: \(dbStatus)\n".utf8)
-                )
+                Log.info("Database: \(dbStatus)")
             }
 
             // Warn if binding to a non-loopback address (only reachable when --allow-external-bind is set)
             if !HostBindingPolicy.isLoopback(host) {
-                FileHandle.standardError.write(
-                    Data("[WARNING] Binding to '\(host)' exposes iMessage data to the network. Use 127.0.0.1 for local-only access.\n".utf8)
-                )
+                Log.warning("Binding to '\(host)' exposes iMessage data to the network. Use 127.0.0.1 for local-only access.")
             }
 
             let transport = HTTPTransport(

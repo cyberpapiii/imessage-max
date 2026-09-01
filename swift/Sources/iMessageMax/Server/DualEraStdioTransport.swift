@@ -62,9 +62,7 @@ actor DualEraStdioTransport: Transport {
                                     do {
                                         try await base.send(responseData)
                                     } catch {
-                                        FileHandle.standardError.write(
-                                            Data("[iMessage Max] stdio write failed; response dropped: \(error)\n".utf8)
-                                        )
+                                        Log.error("stdio write failed; response dropped: \(error)")
                                     }
                                 }
                             }
@@ -74,12 +72,7 @@ actor DualEraStdioTransport: Transport {
                             ?? (json?["id"] != nil ? "response" : "unknown")
                         let version = (json?["params"] as? [String: Any])?["protocolVersion"] as? String
                             ?? "legacy"
-                        FileHandle.standardError.write(
-                            Data(
-                                "[iMessage Max] era=legacy transport=stdio version=\(ModernDispatcher.sanitizedLogField(version)) method=\(ModernDispatcher.sanitizedLogField(method))\n"
-                                    .utf8
-                            )
-                        )
+                        Log.info("era=legacy transport=stdio version=\(ModernDispatcher.sanitizedLogField(version)) method=\(ModernDispatcher.sanitizedLogField(method))")
                         continuation.yield(data)
                     }
                     continuation.finish()

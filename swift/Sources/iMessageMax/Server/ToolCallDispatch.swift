@@ -64,9 +64,7 @@ enum ToolCallDispatch {
             // Shape safety still demands an array, but never silently: an
             // empty content array turns a successful tool call into an
             // empty-content success.
-            FileHandle.standardError.write(
-                Data("[iMessage Max] contentJSON encode failed; returning empty content\n".utf8)
-            )
+            Log.error("contentJSON encode failed; returning empty content")
             return []
         }
         return json
