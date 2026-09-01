@@ -82,8 +82,13 @@ extension GetMessagesTool {
             )
         }
 
-        let exactMatches = try rows.filter { row in
-            let chatHandles = try getHandlesForChat(chatId: row.id)
+        let participantsByChat = try await ChatSummaryQueries.participantsByChat(
+            db: db,
+            chatIds: rows.map { Int64($0.id) },
+            resolver: resolver
+        )
+        let exactMatches = rows.filter { row in
+            let chatHandles = Set((participantsByChat[Int64(row.id)] ?? []).map(\.handle))
             return handleGroups.allSatisfy { !chatHandles.intersection($0).isEmpty }
         }
 
@@ -153,16 +158,11 @@ extension GetMessagesTool {
     }
 
     func buildPeopleMap(chatId: Int) async throws -> (people: [String: String], handleToKey: [String: String]) {
-        let sql = """
-            SELECT h.id, h.service
-            FROM handle h
-            JOIN chat_handle_join chj ON h.ROWID = chj.handle_id
-            WHERE chj.chat_id = ?
-            """
-
-        let handles = try db.query(sql, params: [chatId]) { row in
-            (handle: row.string(0) ?? "", service: row.string(1))
-        }
+        let handles = try await ChatSummaryQueries.participants(
+            db: db,
+            chatId: Int64(chatId),
+            resolver: resolver
+        )
 
         var people: [String: String] = ["me": "Me"]
         var handleToKey: [String: String] = [:]
@@ -170,7 +170,7 @@ extension GetMessagesTool {
 
         for (i, h) in handles.enumerated() {
             let handle = h.handle
-            let name = await resolver.resolve(handle)
+            let name = h.name
 
             if let name = name {
                 var key = name.components(separatedBy: " ").first?.lowercased() ?? "person\(i)"
@@ -188,21 +188,6 @@ extension GetMessagesTool {
         }
 
         return (people, handleToKey)
-    }
-
-    func getHandlesForChat(chatId: Int) throws -> Set<String> {
-        let sql = """
-            SELECT h.id
-            FROM handle h
-            JOIN chat_handle_join chj ON h.ROWID = chj.handle_id
-            WHERE chj.chat_id = ?
-            """
-
-        let handles = try db.query(sql, params: [chatId]) { row in
-            row.string(0) ?? ""
-        }
-
-        return Set(handles)
     }
 
     func resolveFromPerson(

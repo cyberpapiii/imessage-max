@@ -80,6 +80,15 @@ enum ChatSummaryQueries {
         return result
     }
 
+    /// Single-chat wrapper around `participantsByChat`.
+    static func participants(
+        db: Database,
+        chatId: Int64,
+        resolver: ContactResolver
+    ) async throws -> [Participant] {
+        try await participantsByChat(db: db, chatIds: [chatId], resolver: resolver)[chatId] ?? []
+    }
+
     /// Participant-row counts keyed by chat ID. One `COUNT(*)` over the
     /// candidate set; callers that historically added 1 for "me" still do so.
     static func participantCountsByChat(

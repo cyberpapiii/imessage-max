@@ -483,22 +483,14 @@ enum GetContext {
             return trimmed
         }
 
-        let handles = try database.query(
-            """
-            SELECT h.id
-            FROM handle h
-            JOIN chat_handle_join chj ON h.ROWID = chj.handle_id
-            WHERE chj.chat_id = ?
-            ORDER BY h.id ASC
-            """,
-            params: [chatId]
-        ) { row in
-            row.string(0) ?? ""
-        }
+        let rows = try await ChatSummaryQueries.participants(
+            db: database,
+            chatId: chatId,
+            resolver: resolver
+        ).sorted { $0.handle < $1.handle }
 
-        var names: [String] = []
-        for handle in handles {
-            names.append(await IdentityDisplayFormatter.displayName(handle: handle, resolver: resolver))
+        let names = rows.map {
+            IdentityDisplayFormatter.displayName(handle: $0.handle, contactName: $0.name)
         }
         return DisplayNameGenerator.fromNames(names)
     }

@@ -542,29 +542,14 @@ final class ListAttachments {
             return cached
         }
 
-        let sql = """
-            SELECT h.id
-            FROM handle h
-            JOIN chat_handle_join chj ON h.ROWID = chj.handle_id
-            WHERE chj.chat_id = ?
-            """
-
-        let handles = try db.query(sql, params: [chatId]) { row in
-            row.string(0) ?? ""
-        }
-
-        let names = await withTaskGroup(of: String.self, returning: [String].self) { group in
-            for handle in handles {
-                group.addTask { [resolver] in
-                    await resolver.resolve(handle) ?? PhoneUtils.formatDisplay(handle)
-                }
-            }
-            var resolved: [String] = []
-            for await name in group {
-                resolved.append(name)
-            }
-            return resolved.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
-        }
+        let rows = try await ChatSummaryQueries.participants(
+            db: db,
+            chatId: chatId,
+            resolver: resolver
+        )
+        let names = rows.map {
+            $0.name ?? PhoneUtils.formatDisplay($0.handle)
+        }.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
 
         let generated = DisplayNameGenerator.fromNames(names)
         cache[chatId] = generated

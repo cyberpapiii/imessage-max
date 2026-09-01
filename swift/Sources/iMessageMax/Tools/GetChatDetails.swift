@@ -180,29 +180,14 @@ enum GetChatDetailsTool {
         resolver: ContactResolver,
         database: Database
     ) async throws -> [ChatIdentity.Participant] {
-        let handles: [String] = try database.query(
-            """
-            SELECT h.id
-            FROM handle h
-            JOIN chat_handle_join chj ON h.ROWID = chj.handle_id
-            WHERE chj.chat_id = ?
-            ORDER BY h.id ASC
-            """,
-            params: [chatId]
-        ) { row in
-            row.string(0) ?? ""
+        let rows = try await ChatSummaryQueries.participants(
+            db: database,
+            chatId: chatId,
+            resolver: resolver
+        )
+        return rows.map {
+            ChatIdentity.makeParticipant(handle: $0.handle, contactName: $0.name)
         }
-
-        var participants: [ChatIdentity.Participant] = []
-        for handle in handles {
-            participants.append(
-                ChatIdentity.makeParticipant(
-                    handle: handle,
-                    contactName: await resolver.resolve(handle)
-                )
-            )
-        }
-        return participants
     }
 
     private static func loadLastMessage(

@@ -675,32 +675,13 @@ extension SearchTool {
         explicitName: String?,
         resolver: ContactResolver
     ) async throws -> ChatSummary {
-        let participants = try db.query("""
-            SELECT h.id as handle
-            FROM handle h
-            JOIN chat_handle_join chj ON h.ROWID = chj.handle_id
-            WHERE chj.chat_id = ?
-            ORDER BY h.id ASC
-            """,
-            params: [chatId]
-        ) { row in
-            row.string(0) ?? "unknown"
-        }
-
-        let identityParticipants = await withTaskGroup(of: ChatIdentity.Participant.self, returning: [ChatIdentity.Participant].self) { group in
-            for handle in participants {
-                group.addTask { [resolver] in
-                    ChatIdentity.makeParticipant(
-                        handle: handle,
-                        contactName: await resolver.resolve(handle)
-                    )
-                }
-            }
-            var resolved: [ChatIdentity.Participant] = []
-            for await participant in group {
-                resolved.append(participant)
-            }
-            return resolved
+        let participants = try await ChatSummaryQueries.participants(
+            db: db,
+            chatId: chatId,
+            resolver: resolver
+        )
+        let identityParticipants = participants.map {
+            ChatIdentity.makeParticipant(handle: $0.handle, contactName: $0.name)
         }
 
         let identity = ChatIdentity(
@@ -767,27 +748,22 @@ extension SearchTool {
         chatId: Int64,
         resolver: ContactResolver
     ) async throws -> String {
-        let participants = try db.query("""
-            SELECT h.id as handle
-            FROM handle h
-            JOIN chat_handle_join chj ON h.ROWID = chj.handle_id
-            WHERE chj.chat_id = ?
-            """,
-            params: [chatId]
-        ) { row in
-            row.string(0) ?? "unknown"
-        }
+        let participants = try await ChatSummaryQueries.participants(
+            db: db,
+            chatId: chatId,
+            resolver: resolver
+        )
 
         if participants.isEmpty {
             return "Unknown Chat"
         }
 
         var names: [String] = []
-        for handle in participants {
-            if let name = await resolver.resolve(handle) {
+        for participant in participants {
+            if let name = participant.name {
                 names.append(name.split(separator: " ").first.map(String.init) ?? name)
             } else {
-                names.append(PhoneUtils.formatDisplay(handle))
+                names.append(PhoneUtils.formatDisplay(participant.handle))
             }
         }
 

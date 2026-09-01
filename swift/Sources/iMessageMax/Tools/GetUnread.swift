@@ -267,7 +267,12 @@ final class GetUnread {
             sinceApple: sinceApple
         )
 
-        var chatParticipantsCache: [Int64: [ParticipantInfo]] = [:]
+        let uniqueChatIds = Array(Set(rows.map(\.chatId)))
+        let participantsByChat = try await ChatSummaryQueries.participantsByChat(
+            db: database,
+            chatIds: uniqueChatIds,
+            resolver: contactResolver
+        )
 
         var unreadMessages: [UnreadMessageItem] = []
 
@@ -275,10 +280,7 @@ final class GetUnread {
             let msgChatId = row.chatId
             let senderHandle = row.senderHandle
 
-            if chatParticipantsCache[msgChatId] == nil {
-                chatParticipantsCache[msgChatId] = try await getChatParticipants(chatId: msgChatId)
-            }
-            let participants = chatParticipantsCache[msgChatId] ?? []
+            let participants = participantsByChat[msgChatId] ?? []
             let identity = makeChatIdentity(
                 chatId: msgChatId,
                 explicitName: row.chatDisplayName,
@@ -403,9 +405,7 @@ final class GetUnread {
             totalUnread += unreadCount
 
             let oldestDt = AppleTime.toDate(row.oldestUnreadDate)
-            let participants = (participantsByChat[msgChatId] ?? []).map {
-                ParticipantInfo(handle: $0.handle, name: $0.name, service: $0.service)
-            }
+            let participants = participantsByChat[msgChatId] ?? []
             let identity = makeChatIdentity(
                 chatId: msgChatId,
                 explicitName: row.chatDisplayName,
@@ -440,7 +440,7 @@ final class GetUnread {
     private func makeChatIdentity(
         chatId: Int64,
         explicitName: String?,
-        participants: [ParticipantInfo]
+        participants: [ChatSummaryQueries.Participant]
     ) -> ChatIdentity {
         ChatIdentity(
             mcpId: "chat\(chatId)",
@@ -488,32 +488,6 @@ final class GetUnread {
         return first
     }
 
-    /// Per-chat participant lookup used by the messages (detail) path, which
-    /// caches results per chat. The summary path uses the batched
-    /// `ChatSummaryQueries.participantsByChat` instead.
-    private func getChatParticipants(chatId: Int64) async throws -> [ParticipantInfo] {
-        let rows: [(Int64, String, String?)] = try database.query("""
-            SELECT h.ROWID, h.id as handle, h.service
-            FROM chat_handle_join chj
-            JOIN handle h ON chj.handle_id = h.ROWID
-            WHERE chj.chat_id = ?
-        """, params: [chatId]) { row in
-            (row.int(0), row.string(1) ?? "", row.string(2))
-        }
-
-        var participants: [ParticipantInfo] = []
-        for (_, handle, service) in rows {
-            let name = await contactResolver.resolve(handle)
-            participants.append(ParticipantInfo(
-                handle: handle,
-                name: name,
-                service: service
-            ))
-        }
-
-        return participants
-    }
-
 }
 
 // MARK: - Helper Types
@@ -536,8 +510,3 @@ private struct SummaryRow {
     let newestUnreadDate: Int64?
 }
 
-private struct ParticipantInfo {
-    let handle: String
-    let name: String?
-    let service: String?
-}
