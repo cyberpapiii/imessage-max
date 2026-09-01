@@ -91,9 +91,9 @@ Thumbs.db
 mcp-publisher
 
 # Swift
+# Package.resolved is tracked on purpose for reproducible release builds.
 swift/.build/
 swift/.swiftpm/
-swift/Package.resolved
 *.xcodeproj
 *.xcworkspace
 xcuserdata/
