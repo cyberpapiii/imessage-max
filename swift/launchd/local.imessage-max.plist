@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>local.imessage-max</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>__BIN__</string>
+		<string>--http</string>
+		<string>--port</string>
+		<string>8080</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<dict>
+		<key>Crashed</key>
+		<true/>
+		<key>SuccessfulExit</key>
+		<false/>
+	</dict>
+	<key>ThrottleInterval</key>
+	<integer>30</integer>
+	<key>StandardOutPath</key>
+	<string>~/Library/Logs/imessage-max.stdout.log</string>
+	<key>StandardErrorPath</key>
+	<string>~/Library/Logs/imessage-max.stderr.log</string>
+	<key>ProcessType</key>
+	<string>Standard</string>
+</dict>
+</plist>

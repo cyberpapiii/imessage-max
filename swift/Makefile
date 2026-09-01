@@ -3,8 +3,9 @@
 # Usage:
 #   make install       Build, sign, restart service, verify health
 #   make build         Build release binary only
-#   make test          Run the full test suite
+#   make test          Run the full test suite (FILTER=ClassOrMethod for a subset)
 #   make restart       Restart the launchd service
+#   make install-agent Install the launchd plist from swift/launchd/
 #   make status        Show service health and version
 #   make logs          Tail stderr log
 #   make clean         Remove debug build artifacts
@@ -18,6 +19,7 @@
 
 BINARY       := .build/release/imessage-max
 LAUNCHD_LABEL := local.imessage-max
+PLIST        := $(HOME)/Library/LaunchAgents/$(LAUNCHD_LABEL).plist
 PORT         := 8080
 CERT_CN      := iMessage Max Dev
 VERIFY_ATTEMPTS := 45
@@ -38,7 +40,7 @@ VERIFY_ATTEMPTS := 45
 SIGN_HASH = $(shell security find-identity -v -p codesigning 2>/dev/null | \
 	grep -F '"$(CERT_CN)"' | head -1 | awk '{print $$2}')
 
-.PHONY: build test sign install restart status logs clean setup-signing verify help version release-check
+.PHONY: build test sign install restart status logs clean setup-signing verify help version release-check install-agent
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
@@ -52,8 +54,8 @@ build: ## Build release binary
 		-Xlinker "$(CURDIR)/Sources/Resources/Info.plist"
 	@echo "✓ Built $(BINARY)"
 
-test: ## Run the full test suite
-	@swift test
+test: ## Run the full test suite (FILTER=ClassOrMethod to run a subset)
+	@swift test $(if $(FILTER),--filter $(FILTER),)
 
 version: ## Print the version and check all copies agree
 	@../scripts/check-version.sh
@@ -80,25 +82,46 @@ sign: build ## Build and sign with persistent identity
 
 restart: ## Restart the launchd service
 	@echo "Restarting service..."
-	@launchctl bootout gui/$$(id -u) ~/Library/LaunchAgents/$(LAUNCHD_LABEL).plist 2>/dev/null || true
-	@launchctl bootstrap gui/$$(id -u) ~/Library/LaunchAgents/$(LAUNCHD_LABEL).plist
+	@test -f $(PLIST) || (echo "Install the launch agent first: make install-agent" && exit 1)
+	@launchctl bootout gui/$$(id -u) $(PLIST) 2>/dev/null || true
+	@launchctl bootstrap gui/$$(id -u) $(PLIST)
 	@echo "✓ Service restarted"
+
+install-agent: ## Install the launchd plist from swift/launchd/
+	@sed "s|__BIN__|$(shell pwd)/.build/release/imessage-max|" launchd/local.imessage-max.plist > $(PLIST)
+	@launchctl bootstrap gui/$$(id -u) $(PLIST)
+	@echo "✓ Installed $(PLIST)"
 
 verify: ## Verify server is healthy
 	@echo "Waiting for server..."
 	@BINARY_VERSION=$$($(BINARY) --version 2>/dev/null | grep -o '[0-9.]*$$'); \
+	URL="http://127.0.0.1:$(PORT)"; \
 	i=1; \
+	LAST_BODY=""; \
+	CURL_OK=0; \
 	while [ $$i -le $(VERIFY_ATTEMPTS) ]; do \
 		sleep 1; \
-		RESULT=$$(curl -sf http://127.0.0.1:$(PORT) -X POST \
+		CURL_STATUS=0; \
+		RESULT=$$(curl -sf "$$URL" -X POST \
 			-H "Content-Type: application/json" \
 			-H "Accept: application/json, text/event-stream" \
-			-d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"verify","version":"1.0"}}}' 2>/dev/null); \
-		if [ -n "$$RESULT" ]; then \
-			SERVER_VERSION=$$(echo "$$RESULT" | python3 -c "import sys,json; print(json.load(sys.stdin)['result']['serverInfo']['version'])"); \
-			if [ "$$SERVER_VERSION" = "$$BINARY_VERSION" ]; then \
-				echo "$$RESULT" | python3 -c "import sys,json; r=json.load(sys.stdin)['result']; print(f'✓ Legacy lane: {r[\"serverInfo\"][\"name\"]} v{r[\"serverInfo\"][\"version\"]} healthy on port $(PORT)')"; \
-				MODERN=$$(curl -sf http://127.0.0.1:$(PORT) -X POST \
+			-d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"verify","version":"1.0"}}}' 2>/dev/null) || CURL_STATUS=$$?; \
+		if [ $$CURL_STATUS -eq 0 ]; then \
+			CURL_OK=1; \
+			LAST_BODY=$$RESULT; \
+			SERVER_VERSION=""; \
+			if command -v python3 >/dev/null 2>&1; then \
+				SERVER_VERSION=$$(echo "$$RESULT" | python3 -c "import sys,json; print(json.load(sys.stdin)['result']['serverInfo']['version'])" 2>/dev/null) || SERVER_VERSION=""; \
+			elif echo "$$RESULT" | grep -q '"result"'; then \
+				SERVER_VERSION=$$BINARY_VERSION; \
+			fi; \
+			if [ -n "$$SERVER_VERSION" ] && [ "$$SERVER_VERSION" = "$$BINARY_VERSION" ]; then \
+				if command -v python3 >/dev/null 2>&1; then \
+					echo "$$RESULT" | python3 -c "import sys,json; r=json.load(sys.stdin)['result']; print(f'✓ Legacy lane: {r[\"serverInfo\"][\"name\"]} v{r[\"serverInfo\"][\"version\"]} healthy on port $(PORT)')"; \
+				else \
+					echo "✓ Legacy lane: v$$SERVER_VERSION healthy on port $(PORT)"; \
+				fi; \
+				MODERN=$$(curl -sf "$$URL" -X POST \
 					-H "Content-Type: application/json" \
 					-H "Accept: application/json, text/event-stream" \
 					-H "MCP-Protocol-Version: 2026-07-28" \
@@ -115,7 +138,13 @@ verify: ## Verify server is healthy
 		fi; \
 		i=$$((i + 1)); \
 	done; \
-	echo "✗ Server not responding on port $(PORT)"; exit 1
+	if [ $$CURL_OK -eq 0 ]; then \
+		echo "✗ Server not responding on $$URL"; \
+		exit 1; \
+	fi; \
+	printf '%s' "$$LAST_BODY" | head -c 200; echo; \
+	echo "✗ Unexpected response (not JSON)"; \
+	exit 1
 
 install: sign restart verify ## Build, sign, restart, verify (the full workflow)
 	@open -R $(BINARY)
@@ -134,12 +163,19 @@ status: ## Show service status and version
 	@codesign -dvv $(BINARY) 2>&1 | grep -E "Signature|Authority|CDHash" || echo "Not signed"
 	@echo ""
 	@echo "=== Health ==="
-	@curl -sf http://127.0.0.1:$(PORT) -X POST \
+	@BODY=$$(curl -sf http://127.0.0.1:$(PORT) -X POST \
 		-H "Content-Type: application/json" \
 		-H "Accept: application/json, text/event-stream" \
-		-d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"status","version":"1.0"}}}' 2>/dev/null \
-		| python3 -c "import sys,json; r=json.load(sys.stdin)['result']; print(f'✓ Responding, v{r[\"serverInfo\"][\"version\"]}')" 2>/dev/null \
-		|| echo "✗ Not responding"
+		-d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"status","version":"1.0"}}}' 2>/dev/null) || { echo "✗ Not responding"; exit 0; }; \
+	if command -v python3 >/dev/null 2>&1; then \
+		echo "$$BODY" | python3 -c "import sys,json; r=json.load(sys.stdin)['result']; print(f'✓ Responding, v{r[\"serverInfo\"][\"version\"]}')" 2>/dev/null \
+			|| { printf '%s' "$$BODY" | head -c 200; echo; echo "✗ Unexpected response (not JSON)"; }; \
+	elif echo "$$BODY" | grep -q '"result"'; then \
+		echo "✓ Responding"; \
+	else \
+		printf '%s' "$$BODY" | head -c 200; echo; \
+		echo "✗ Unexpected response (not JSON)"; \
+	fi
 
 logs: ## Tail the stderr log
 	@tail -f ~/Library/Logs/imessage-max.stderr.log
