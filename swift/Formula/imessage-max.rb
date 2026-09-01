@@ -1,6 +1,7 @@
 class ImessageMax < Formula
   desc "MCP server for iMessage - AI assistant integration"
   homepage "https://github.com/cyberpapiii/imessage-max"
+  version "1.5.0"
   url "https://github.com/cyberpapiii/imessage-max/releases/download/v1.4.1/imessage-max-macos.tar.gz"
   # sha256 of the ad-hoc-signed imessage-max-macos.tar.gz built from v1.4.1.
   # Regenerate with `shasum -a 256 imessage-max-macos.tar.gz` if the asset is
