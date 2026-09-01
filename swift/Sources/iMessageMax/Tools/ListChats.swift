@@ -12,9 +12,9 @@ enum ListChatsSort: String {
 /// Response structure for list_chats tool
 struct ListChatsResponse: Codable {
     let chats: [ChatInfo]
-    let totalChats: Int
-    let totalGroups: Int
-    let totalDms: Int
+    let totalChats: Int?
+    let totalGroups: Int?
+    let totalDms: Int?
     let more: Bool
     let cursor: String?
 
@@ -25,6 +25,42 @@ struct ListChatsResponse: Codable {
         case totalDms = "total_dms"
         case more
         case cursor
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(chats, forKey: .chats)
+        try container.encodeIfPresent(totalChats, forKey: .totalChats)
+        try container.encodeIfPresent(totalGroups, forKey: .totalGroups)
+        try container.encodeIfPresent(totalDms, forKey: .totalDms)
+        try container.encode(more, forKey: .more)
+        try container.encodeIfPresent(cursor, forKey: .cursor)
+    }
+
+    init(
+        chats: [ChatInfo],
+        totalChats: Int?,
+        totalGroups: Int?,
+        totalDms: Int?,
+        more: Bool,
+        cursor: String?
+    ) {
+        self.chats = chats
+        self.totalChats = totalChats
+        self.totalGroups = totalGroups
+        self.totalDms = totalDms
+        self.more = more
+        self.cursor = cursor
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        chats = try container.decode([ChatInfo].self, forKey: .chats)
+        totalChats = try container.decodeIfPresent(Int.self, forKey: .totalChats)
+        totalGroups = try container.decodeIfPresent(Int.self, forKey: .totalGroups)
+        totalDms = try container.decodeIfPresent(Int.self, forKey: .totalDms)
+        more = try container.decode(Bool.self, forKey: .more)
+        cursor = try container.decodeIfPresent(String.self, forKey: .cursor)
     }
 }
 
@@ -109,7 +145,7 @@ enum ListChatsTool {
 
         server.registerTool(
             name: "list_chats",
-            description: "List recent chats with previews. Returns chat ids for follow-up tool calls and chat names for user-facing summaries. When explaining results to the user, refer to chats by name, not by id. Good starting point for broad catch-ups and discovery before drilling deeper.",
+            description: "List recent chats with previews. Returns chat ids for follow-up tool calls and chat names for user-facing summaries. When explaining results to the user, refer to chats by name, not by id. Good starting point for broad catch-ups and discovery before drilling deeper. Totals (total_chats, total_groups, total_dms) appear on the first page only.",
             inputSchema: inputSchema,
             outputSchema: OutputSchema.object,
             annotations: Tool.Annotations(
@@ -434,7 +470,7 @@ enum ListChatsTool {
                 chats.append(chatInfo)
             }
 
-            let totals = try getTotals(db: db)
+            let totals = cursor == nil ? try getTotals(db: db) : nil
 
             let nextCursor: String?
             if hasMore, let last = chatRows.last {
@@ -463,9 +499,9 @@ enum ListChatsTool {
 
             return .success(ListChatsResponse(
                 chats: chats,
-                totalChats: totals.total,
-                totalGroups: totals.groups,
-                totalDms: totals.dms,
+                totalChats: totals?.total,
+                totalGroups: totals?.groups,
+                totalDms: totals?.dms,
                 more: hasMore,
                 cursor: nextCursor
             ))
