@@ -12,9 +12,17 @@ enum AppleTime {
         return epoch.addingTimeInterval(seconds)
     }
 
-    /// Convert Date to Apple nanoseconds timestamp
+    /// Convert Date to Apple nanoseconds timestamp.
+    ///
+    /// Saturates at the Int64 range instead of trapping: `Int64(Double)` crashes
+    /// on values outside ±9.2e18, which a relative bound like "999999999h" or an
+    /// ISO year 9999 reaches easily. A trap here takes down the launchd service.
     static func fromDate(_ date: Date) -> Int64 {
-        Int64(date.timeIntervalSinceReferenceDate * 1_000_000_000)
+        let nanoseconds = date.timeIntervalSinceReferenceDate * 1_000_000_000
+        if nanoseconds >= Double(Int64.max) { return Int64.max }
+        if nanoseconds <= Double(Int64.min) { return Int64.min }
+        if nanoseconds.isNaN { return 0 }
+        return Int64(nanoseconds)
     }
 
     /// Parse various time formats to Apple timestamp
@@ -57,7 +65,11 @@ enum AppleTime {
         default: return nil
         }
 
-        return Date().addingTimeInterval(-seconds)
+        // Cap relative bounds at 100 years so the caller gets "everything"
+        // rather than an overflowing Date arithmetic result.
+        let maxRelativeSeconds: Double = 100 * 365 * 86400
+        let bounded = min(seconds, maxRelativeSeconds)
+        return Date().addingTimeInterval(-bounded)
     }
 
     private static func parseISO(_ input: String) -> Date? {
@@ -110,12 +122,17 @@ enum AppleTime {
            let unitRange = Range(match.range(at: 2), in: lower),
            let num = Int(lower[numRange]) {
             let unit = String(lower[unitRange]).lowercased()
+            // Bound each unit at roughly 100 years; Calendar does not reliably
+            // return nil for absurd offsets, and fromDate must stay in range.
             switch unit {
             case "day", "days":
+                guard num <= 36_500 else { return nil }
                 return calendar.date(byAdding: .day, value: -num, to: now)
             case "week", "weeks":
+                guard num <= 5_200 else { return nil }
                 return calendar.date(byAdding: .weekOfYear, value: -num, to: now)
             case "month", "months":
+                guard num <= 1_200 else { return nil }
                 return calendar.date(byAdding: .month, value: -num, to: now)
             default:
                 break

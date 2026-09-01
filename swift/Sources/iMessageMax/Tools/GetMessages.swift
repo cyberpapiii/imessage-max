@@ -213,14 +213,14 @@ actor GetMessagesTool {
         let participants = args["participants"]?.arrayValue?.compactMap { $0.stringValue }
         let since = args["since"]?.stringValue
         let before = args["before"]?.stringValue
-        let limit = min(args["limit"]?.intValue ?? defaultLimit, maxLimit)
+        let limit = max(1, min(args["limit"]?.intValue ?? defaultLimit, maxLimit))
         let fromPerson = args["from_person"]?.stringValue
         let contains = args["contains"]?.stringValue
         let has = args["has"]?.stringValue
         let includeReactions = args["include_reactions"]?.boolValue ?? true
         let cursor = args["cursor"]?.stringValue
         let unanswered = args["unanswered"]?.boolValue ?? false
-        let unansweredHours = args["unanswered_hours"]?.intValue ?? defaultUnansweredHours
+        let unansweredHours = max(1, min(args["unanswered_hours"]?.intValue ?? defaultUnansweredHours, 24 * 365))
         let sessionFilter = args["session"]?.stringValue
 
         let hasParticipants: Bool

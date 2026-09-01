@@ -52,7 +52,7 @@ enum FindChatTool {
             self.name = arguments?["name"]?.stringValue
             self.containsRecent = arguments?["contains_recent"]?.stringValue
             self.isGroup = arguments?["is_group"]?.boolValue
-            self.limit = arguments?["limit"]?.intValue ?? 5
+            self.limit = max(1, min(arguments?["limit"]?.intValue ?? 5, 50))
         }
     }
 
