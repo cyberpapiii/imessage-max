@@ -92,10 +92,17 @@ actor ContactResolver {
         return nil
     }
 
+    /// Case-insensitive match on word starts ("jo" matches "John Smith" and "Mary Jo",
+    /// not "Major"). Queries under two characters match nothing.
     func searchByName(_ query: String) -> [(handle: String, name: String)] {
-        let q = query.lowercased()
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard q.count >= 2 else { return [] }
+        let queryWords = q.split(separator: " ").map(String.init)
         return cache.compactMap { handle, name in
-            name.lowercased().contains(q) ? (handle, name) : nil
+            let nameWords = name.lowercased().split(whereSeparator: { $0 == " " || $0 == "-" }).map(String.init)
+            // Every query word must prefix some name word.
+            let ok = queryWords.allSatisfy { qw in nameWords.contains { $0.hasPrefix(qw) } }
+            return ok ? (handle, name) : nil
         }
     }
 
