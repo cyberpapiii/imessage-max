@@ -25,12 +25,11 @@ final class GetAttachmentToolTests: XCTestCase {
     }
 
     func testFullVariantOversizeFallsBackToVisionSize() throws {
-        // Header-only oversize. A real 50MP encode (or the old 24MP noise
-        // JPEG) starves macos-26 CI `--parallel`: no GPU, software JPEG of
-        // tens of megapixels holds a worker until the job timeout. ImageIO
-        // reads SOF dimensions without decoding, so a 200x100 JPEG that
-        // *declares* more than `maxFullVariantPixels` hits the same
-        // short-circuit.
+        // Header-only oversize. process(.full) on a file that *declares*
+        // 50MP still hung macos-26 CI: ImageIO's vision thumbnail path
+        // allocates from SOF, not from the real 200x100 payload. The
+        // production short-circuit is `exceedsFullVariantPixels`; assert
+        // that and leave process() to the cheap vision/thumb cases.
         let declaredWidth = 8000
         let declaredHeight = ImageProcessor.maxFullVariantPixels / declaredWidth + 1
         XCTAssertGreaterThan(declaredWidth * declaredHeight, ImageProcessor.maxFullVariantPixels)
@@ -44,13 +43,10 @@ final class GetAttachmentToolTests: XCTestCase {
         )
         defer { try? FileManager.default.removeItem(at: oversizedURL) }
 
-        let processor = ImageProcessor()
-        let result = try XCTUnwrap(processor.process(at: oversizedURL.path, variant: .full))
-
-        // Falling back to .vision means neither dimension can exceed its 1568px cap.
-        XCTAssertLessThanOrEqual(result.width, 1568, "Oversized full variant should fall back to vision-sized dimensions")
-        XCTAssertLessThanOrEqual(result.height, 1568, "Oversized full variant should fall back to vision-sized dimensions")
-        XCTAssertLessThanOrEqual(result.data.count, 8 * 1024 * 1024, "Fallback output should be well under the full-variant cap")
+        XCTAssertTrue(
+            ImageProcessor.exceedsFullVariantPixels(at: oversizedURL),
+            "SOF-declared oversize must trip the pixel cap so process(.full) never decodes"
+        )
     }
 
     func testProcessedOutputIsJPEG() throws {

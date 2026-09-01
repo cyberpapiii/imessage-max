@@ -128,7 +128,7 @@ struct ImageProcessor {
     /// True when the image header reports a zero dimension or more than
     /// `maxFullVariantPixels`. Missing properties (some HEIC sources) return
     /// false so the full path proceeds as before.
-    private static func exceedsFullVariantPixels(at url: URL) -> Bool {
+    static func exceedsFullVariantPixels(at url: URL) -> Bool {
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
               let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
               let width = props[kCGImagePropertyPixelWidth] as? Int,
