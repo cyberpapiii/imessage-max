@@ -128,8 +128,7 @@ extension SearchTool {
         }
 
         if let chatStr = inChat {
-            let chatIdStr = chatStr.hasPrefix("chat") ? String(chatStr.dropFirst(4)) : chatStr
-            if let chatId = Int64(chatIdStr) {
+            if let chatId = ChatIdentifier.parseRowId(chatStr) {
                 builder.where("c.ROWID = ?", chatId)
             } else {
                 builder.where("c.guid LIKE ? ESCAPE '\\'", "%\(QueryBuilder.escapeLike(chatStr))%")

@@ -72,7 +72,7 @@ enum GetChatDetailsTool {
         try? await resolver.initialize()
 
         do {
-            guard let numericChatId = try resolveChatId(chatId, database: database) else {
+            guard let numericChatId = ChatIdentifier.parseRowId(chatId) else {
                 let error = GetChatDetailsError(error: "chat_not_found", message: "Chat not found: \(chatId)")
                 throw ToolError(content: [.plainText(try FormatUtils.encodeJSON(error))])
             }
@@ -159,21 +159,6 @@ enum GetChatDetailsTool {
     private struct LastMessageResult {
         let summary: LastMessageSummary?
         let awaitingReply: Bool?
-    }
-
-    private static func resolveChatId(_ chatId: String, database: Database) throws -> Int64? {
-        if chatId.hasPrefix("chat"), let numeric = Int64(String(chatId.dropFirst(4))) {
-            return numeric
-        }
-
-        let rows: [Int64] = try database.query(
-            "SELECT ROWID FROM chat WHERE guid LIKE ? ESCAPE '\\' LIMIT 1",
-            params: ["%\(QueryBuilder.escapeLike(chatId))%"]
-        ) { row in
-            row.int(0)
-        }
-
-        return rows.first
     }
 
     private static func loadChatRow(chatId: Int64, database: Database) throws -> ChatRow {

@@ -160,8 +160,7 @@ final class ListAttachments {
         do {
             let numericChatId: Int64?
             if let chatId {
-                let cidStr = chatId.hasPrefix("chat") ? String(chatId.dropFirst(4)) : chatId
-                guard let cid = Int64(cidStr) else {
+                guard let cid = ChatIdentifier.parseRowId(chatId) else {
                     return .failure(ListAttachmentsError(
                         error: "invalid_id",
                         message: "Invalid chat ID format: \(chatId)"

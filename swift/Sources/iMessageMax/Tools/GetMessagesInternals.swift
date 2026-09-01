@@ -129,25 +129,7 @@ extension GetMessagesTool {
 
     func parseChatId(_ chatId: String?) -> Int? {
         guard let chatId = chatId else { return nil }
-
-        if chatId.hasPrefix("chat"), let numId = Int(chatId.dropFirst(4)) {
-            return numId
-        }
-
-        // GUID substring fallback. The caller's text is bound into a LIKE
-        // pattern, so escape its wildcards: an unescaped "%" or "_" (or an
-        // empty string) would match every chat and return the first row.
-        let trimmed = chatId.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else { return nil }
-
-        let rows = try? db.query(
-            "SELECT ROWID FROM chat WHERE guid LIKE ? ESCAPE '\\'",
-            params: ["%\(QueryBuilder.escapeLike(trimmed))%"]
-        ) { row in
-            Int(row.int(0))
-        }
-
-        return rows?.first
+        return try? ChatIdentifier.resolve(chatId, db: db).map { Int($0) }
     }
 
     func getChatInfo(chatId: Int) throws -> String? {

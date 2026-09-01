@@ -46,8 +46,7 @@ actor SendResolver {
     }
 
     private func resolveChatId(_ chatId: String) async -> SendResolution.Result {
-        let numericString = chatId.replacingOccurrences(of: "chat", with: "")
-        guard let numericId = Int(numericString) else {
+        guard let numericId = ChatIdentifier.parseRowId(chatId).map(Int.init) else {
             return .failure("Invalid chat_id format: \(chatId)")
         }
 

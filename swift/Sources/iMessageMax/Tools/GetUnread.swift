@@ -183,7 +183,7 @@ final class GetUnread {
 
         var numericChatId: Int64?
         if let chatId = params.chatId {
-            numericChatId = try resolveChatId(chatId)
+            numericChatId = ChatIdentifier.parseRowId(chatId)
             if numericChatId == nil {
                 throw ToolError(content: [.plainText("{\"error\":\"chat_not_found\",\"message\":\"Chat not found: \(chatId)\"}")])
             }
@@ -206,25 +206,6 @@ final class GetUnread {
     }
 
     // MARK: - Private Methods
-
-    private func resolveChatId(_ chatId: String) throws -> Int64? {
-        if chatId.hasPrefix("chat") {
-            let numStr = String(chatId.dropFirst(4))
-            if let num = Int64(numStr) {
-                return num
-            }
-        }
-
-        let escapedChatId = QueryBuilder.escapeLike(chatId)
-        let rows: [(Int64, String?)] = try database.query(
-            "SELECT ROWID, guid FROM chat WHERE guid LIKE ? ESCAPE '\\'",
-            params: ["%\(escapedChatId)%"]
-        ) { row in
-            (row.int(0), row.string(1))
-        }
-
-        return rows.first?.0
-    }
 
     private func getUnreadMessages(
         chatId: Int64?,

@@ -197,7 +197,7 @@ enum GetContext {
                     ))
                 }
 
-                guard let numericChatId = parseChatId(cId) else {
+                guard let numericChatId = ChatIdentifier.parseRowId(cId) else {
                     return .failure(GetContextError(
                         error: "invalid_id",
                         message: "Invalid chat ID format: \(cId)"
@@ -468,14 +468,6 @@ enum GetContext {
             numStr = String(numStr.dropFirst(4))
         } else if numStr.hasPrefix("msg") {
             numStr = String(numStr.dropFirst(3))
-        }
-        return Int64(numStr)
-    }
-
-    private static func parseChatId(_ idStr: String) -> Int64? {
-        var numStr = idStr
-        if numStr.hasPrefix("chat") {
-            numStr = String(numStr.dropFirst(4))
         }
         return Int64(numStr)
     }
