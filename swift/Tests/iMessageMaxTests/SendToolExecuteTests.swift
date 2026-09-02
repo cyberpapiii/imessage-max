@@ -656,31 +656,20 @@ private func decodeJSONDictionary(from error: ToolError) throws -> [String: Any]
 // MARK: - Moved from PlaceholderTests.swift (plan 032)
 
 final class SendToolExecutionTests: XCTestCase {
-    func testExecuteRejectsReplyToBeforeAttemptingSend() async {
-        let tool = SendTool(db: Database(path: "/tmp/nonexistent.sqlite"), resolver: ContactResolver(seedCache: [:]))
+    func testSendSchemaDoesNotAdvertiseReplyTo() async throws {
+        ToolHandlerRegistry.shared.resetForTesting()
 
-        do {
-            _ = try await tool.execute(args: [
-                "to": .string("+15555550123"),
-                "text": .string("Hello"),
-                "reply_to": .string("msg_1"),
-            ])
-            XCTFail("Expected reply_to validation error")
-        } catch let error as ToolError {
-            let payload = decodeToolErrorText(error)
-            XCTAssertTrue(payload.contains("reply_to is not yet implemented"))
-        } catch {
-            XCTFail("Unexpected error: \(error)")
+        let server = Server(name: "test", version: "0")
+        await ToolRegistry.registerAll(on: server, db: Database(), resolver: ContactResolver(seedCache: [:]))
+
+        let tools = Dictionary(
+            uniqueKeysWithValues: ToolHandlerRegistry.shared.getTools().map { ($0.name, $0) }
+        )
+        let send = try XCTUnwrap(tools["send"])
+        guard case .object(let schema) = send.inputSchema,
+              case .object(let properties) = schema["properties"] else {
+            return XCTFail("Expected send inputSchema.properties to be an object")
         }
-    }
-}
-
-private func decodeToolErrorText(_ error: ToolError) -> String {
-    guard let first = error.content.first else { return "" }
-    switch first {
-    case .text(let text, _, _):
-        return text
-    default:
-        return ""
+        XCTAssertNil(properties["reply_to"], "send schema must not advertise reply_to")
     }
 }
