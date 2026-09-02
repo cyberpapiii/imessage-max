@@ -14,6 +14,11 @@ struct SearchRow {
     let senderHandle: String?
     let chatId: Int64
     let chatDisplayName: String?
+    let guid: String
+    let threadOriginatorGuid: String?
+    let dateEdited: Int64
+    let hasReactions: Bool
+    let hasReplies: Bool
 }
 
 struct ContextRow {
@@ -23,6 +28,11 @@ struct ContextRow {
     let date: Int64?
     let isFromMe: Bool
     let senderHandle: String?
+    let guid: String
+    let threadOriginatorGuid: String?
+    let dateEdited: Int64
+    let hasReactions: Bool
+    let hasReplies: Bool
 }
 
 struct GroupedChatData {
@@ -186,7 +196,29 @@ extension SearchTool {
                 "m.is_from_me",
                 "h.id as sender_handle",
                 "c.ROWID as chat_id",
-                "c.display_name as chat_display_name"
+                "c.display_name as chat_display_name",
+                "m.guid",
+                "m.thread_originator_guid",
+                "m.date_edited",
+                """
+                EXISTS (
+                    SELECT 1 FROM message r
+                    WHERE r.associated_message_type >= 2000
+                    AND (
+                        r.associated_message_guid = m.guid
+                        OR (
+                            instr(r.associated_message_guid, '/') > 0
+                            AND substr(r.associated_message_guid, instr(r.associated_message_guid, '/') + 1) = m.guid
+                        )
+                    )
+                ) as has_reactions
+                """,
+                """
+                EXISTS (
+                    SELECT 1 FROM message r
+                    WHERE r.thread_originator_guid = m.guid
+                ) as has_replies
+                """
             )
         applySearchFilters(
             to: builder,
@@ -268,13 +300,57 @@ extension SearchTool {
     ) async throws -> String {
         var results: [SearchResult] = []
         let identityByChat = try await identitiesByChat(db: db, rows: rows, resolver: resolver)
-        var contextByAnchor: [String: (before: [SearchContextMessage], after: [SearchContextMessage])] = [:]
+        var contextRowsByAnchor: [String: (before: [ContextRow], after: [ContextRow])] = [:]
         if includeContext {
             let anchors = rows.compactMap { row -> (chatId: Int64, date: Int64)? in
                 guard let date = row.date else { return nil }
                 return (row.chatId, date)
             }
-            contextByAnchor = try await getContextBatch(db: db, anchors: anchors, resolver: resolver)
+            contextRowsByAnchor = try getContextBatch(db: db, anchors: anchors)
+        }
+
+        let contextRows = contextRowsByAnchor.values.flatMap { $0.before + $0.after }
+        var pageIdByGuid: [String: Int] = [:]
+        for row in rows {
+            pageIdByGuid[row.guid] = Int(row.msgId)
+        }
+        for row in contextRows {
+            pageIdByGuid[row.guid] = Int(row.msgId)
+        }
+        let annotations = try MessageAnnotations.loadIfNeeded(
+            db: db,
+            guids: Array(pageIdByGuid.keys),
+            pageIdByGuid: pageIdByGuid,
+            originatorGuids: rows.compactMap(\.threadOriginatorGuid) + contextRows.compactMap(\.threadOriginatorGuid),
+            fetchReactions: rows.contains(where: \.hasReactions) || contextRows.contains(where: \.hasReactions),
+            fetchReplies: rows.contains(where: { $0.hasReplies || ($0.threadOriginatorGuid?.isEmpty == false) })
+                || contextRows.contains(where: { $0.hasReplies || ($0.threadOriginatorGuid?.isEmpty == false) })
+        )
+        var reactorNames: [String: String] = [:]
+        for recs in annotations.reactions.values {
+            for reaction in recs {
+                guard let handle = reaction.fromHandle, reactorNames[handle] == nil else { continue }
+                reactorNames[handle] = await IdentityDisplayFormatter.displayName(
+                    handle: handle, resolver: resolver
+                )
+            }
+        }
+        let reactorName: (String?) -> String = { handle in
+            guard let handle else { return "Me" }
+            return reactorNames[handle] ?? handle
+        }
+
+        var contextByAnchor: [String: (before: [SearchContextMessage], after: [SearchContextMessage])] = [:]
+        for (key, raw) in contextRowsByAnchor {
+            var before: [SearchContextMessage] = []
+            for row in raw.before {
+                before.append(await formatContextMessage(row: row, annotations: annotations, reactorName: reactorName, resolver: resolver))
+            }
+            var after: [SearchContextMessage] = []
+            for row in raw.after {
+                after.append(await formatContextMessage(row: row, annotations: annotations, reactorName: reactorName, resolver: resolver))
+            }
+            contextByAnchor[key] = (before, after)
         }
 
         for row in rows {
@@ -296,7 +372,14 @@ extension SearchTool {
                 ago: TimeUtils.formatCompactRelative(msgDate),
                 ts: TimeUtils.formatISO(msgDate),
                 contextBefore: nil,
-                contextAfter: nil
+                contextAfter: nil,
+                reactions: MessageAnnotations.render(
+                    annotations.reactions[row.guid] ?? [],
+                    reactorName: reactorName
+                ),
+                replyTo: row.threadOriginatorGuid.flatMap { annotations.replies.originatorIdByGuid[$0] },
+                replyCount: annotations.replies.replyCountByGuid[row.guid],
+                edited: row.dateEdited != 0 ? true : nil
             )
 
             if includeContext, let msgDate = row.date {
@@ -433,9 +516,8 @@ extension SearchTool {
     /// before/after windows. `getContext` stays for the get_context tool.
     static func getContextBatch(
         db: Database,
-        anchors: [(chatId: Int64, date: Int64)],
-        resolver: ContactResolver
-    ) async throws -> [String: (before: [SearchContextMessage], after: [SearchContextMessage])] {
+        anchors: [(chatId: Int64, date: Int64)]
+    ) throws -> [String: (before: [ContextRow], after: [ContextRow])] {
         guard !anchors.isEmpty else { return [:] }
 
         var datesByChat: [Int64: [Int64]] = [:]
@@ -443,9 +525,9 @@ extension SearchTool {
             datesByChat[anchor.chatId, default: []].append(anchor.date)
         }
 
-        var result: [String: (before: [SearchContextMessage], after: [SearchContextMessage])] = [:]
+        var result: [String: (before: [ContextRow], after: [ContextRow])] = [:]
         for (chatId, dates) in datesByChat {
-            var formattedById: [Int64: SearchContextMessage] = [:]
+            var rowsById: [Int64: ContextRow] = [:]
             var beforeIdsByDate: [Int64: [Int64]] = [:]
             var afterIdsByDate: [Int64: [Int64]] = [:]
 
@@ -458,23 +540,13 @@ extension SearchTool {
                     (
                         anchorDate: row.int(0),
                         side: row.string(1) ?? "",
-                        context: ContextRow(
-                            msgId: row.int(2),
-                            text: row.string(3),
-                            attributedBody: row.blob(4),
-                            date: row.optionalInt(5),
-                            isFromMe: row.int(6) != 0,
-                            senderHandle: row.string(7)
-                        )
+                        context: mapContextRow(row, columnOffset: 2)
                     )
                 }
 
                 for item in rows {
-                    if formattedById[item.context.msgId] == nil {
-                        formattedById[item.context.msgId] = await formatContextMessage(
-                            row: item.context,
-                            resolver: resolver
-                        )
+                    if rowsById[item.context.msgId] == nil {
+                        rowsById[item.context.msgId] = item.context
                     }
                     if item.side == "before" {
                         beforeIdsByDate[item.anchorDate, default: []].append(item.context.msgId)
@@ -486,8 +558,8 @@ extension SearchTool {
             }
 
             for date in dates {
-                let before = Array((beforeIdsByDate[date] ?? []).reversed().compactMap { formattedById[$0] })
-                let after = (afterIdsByDate[date] ?? []).compactMap { formattedById[$0] }
+                let before = Array((beforeIdsByDate[date] ?? []).reversed().compactMap { rowsById[$0] })
+                let after = (afterIdsByDate[date] ?? []).compactMap { rowsById[$0] }
                 result["\(chatId):\(date)"] = (before, after)
             }
         }
@@ -500,7 +572,6 @@ extension SearchTool {
         chatId: Int64,
         dates: [Int64]
     ) -> (String, [Any]) {
-        let columns = "m.ROWID AS msg_id, m.text, m.attributedBody, m.date, m.is_from_me, h.id AS sender_handle"
         let fromJoin = """
             FROM message m
             JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
@@ -511,7 +582,7 @@ extension SearchTool {
         for date in dates {
             parts.append("""
                 SELECT * FROM (
-                  SELECT ? AS anchor_date, 'before' AS side, \(columns)
+                  SELECT ? AS anchor_date, 'before' AS side, \(contextSelectColumns)
                   \(fromJoin)
                   WHERE cmj.chat_id = ? AND m.date < ? AND m.associated_message_type = 0
                   ORDER BY m.date DESC LIMIT 2
@@ -520,7 +591,7 @@ extension SearchTool {
             params.append(contentsOf: [date, chatId, date])
             parts.append("""
                 SELECT * FROM (
-                  SELECT ? AS anchor_date, 'after' AS side, \(columns)
+                  SELECT ? AS anchor_date, 'after' AS side, \(contextSelectColumns)
                   \(fromJoin)
                   WHERE cmj.chat_id = ? AND m.date > ? AND m.associated_message_type = 0
                   ORDER BY m.date ASC LIMIT 2
@@ -531,6 +602,42 @@ extension SearchTool {
         return (parts.joined(separator: "\nUNION ALL\n"), params)
     }
 
+    static let contextSelectColumns = """
+        m.ROWID as msg_id, m.text, m.attributedBody, m.date, m.is_from_me, h.id as sender_handle,
+        m.guid, m.thread_originator_guid, m.date_edited,
+        EXISTS (
+            SELECT 1 FROM message r
+            WHERE r.associated_message_type >= 2000
+            AND (
+                r.associated_message_guid = m.guid
+                OR (
+                    instr(r.associated_message_guid, '/') > 0
+                    AND substr(r.associated_message_guid, instr(r.associated_message_guid, '/') + 1) = m.guid
+                )
+            )
+        ) as has_reactions,
+        EXISTS (
+            SELECT 1 FROM message r
+            WHERE r.thread_originator_guid = m.guid
+        ) as has_replies
+        """
+
+    static func mapContextRow(_ row: SQLiteRow, columnOffset: Int = 0) -> ContextRow {
+        ContextRow(
+            msgId: row.int(columnOffset + 0),
+            text: row.string(columnOffset + 1),
+            attributedBody: row.blob(columnOffset + 2),
+            date: row.optionalInt(columnOffset + 3),
+            isFromMe: row.int(columnOffset + 4) != 0,
+            senderHandle: row.string(columnOffset + 5),
+            guid: row.string(columnOffset + 6) ?? "",
+            threadOriginatorGuid: row.string(columnOffset + 7),
+            dateEdited: row.optionalInt(columnOffset + 8) ?? 0,
+            hasReactions: row.int(columnOffset + 9) != 0,
+            hasReplies: row.int(columnOffset + 10) != 0
+        )
+    }
+
     static func getContext(
         db: Database,
         chatId: Int64,
@@ -538,7 +645,7 @@ extension SearchTool {
         resolver: ContactResolver
     ) async throws -> ([SearchContextMessage], [SearchContextMessage]) {
         let beforeRows = try db.query("""
-            SELECT m.ROWID as msg_id, m.text, m.attributedBody, m.date, m.is_from_me, h.id as sender_handle
+            SELECT \(contextSelectColumns)
             FROM message m
             JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
             LEFT JOIN handle h ON m.handle_id = h.ROWID
@@ -546,19 +653,10 @@ extension SearchTool {
             ORDER BY m.date DESC LIMIT 2
             """,
             params: [chatId, msgDate]
-        ) { row in
-            ContextRow(
-                msgId: row.int(0),
-                text: row.string(1),
-                attributedBody: row.blob(2),
-                date: row.optionalInt(3),
-                isFromMe: row.int(4) != 0,
-                senderHandle: row.string(5)
-            )
-        }
+        ) { mapContextRow($0) }
 
         let afterRows = try db.query("""
-            SELECT m.ROWID as msg_id, m.text, m.attributedBody, m.date, m.is_from_me, h.id as sender_handle
+            SELECT \(contextSelectColumns)
             FROM message m
             JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
             LEFT JOIN handle h ON m.handle_id = h.ROWID
@@ -566,15 +664,33 @@ extension SearchTool {
             ORDER BY m.date ASC LIMIT 2
             """,
             params: [chatId, msgDate]
-        ) { row in
-            ContextRow(
-                msgId: row.int(0),
-                text: row.string(1),
-                attributedBody: row.blob(2),
-                date: row.optionalInt(3),
-                isFromMe: row.int(4) != 0,
-                senderHandle: row.string(5)
-            )
+        ) { mapContextRow($0) }
+
+        let allRows = beforeRows + afterRows
+        var pageIdByGuid: [String: Int] = [:]
+        for row in allRows {
+            pageIdByGuid[row.guid] = Int(row.msgId)
+        }
+        let annotations = try MessageAnnotations.loadIfNeeded(
+            db: db,
+            guids: Array(pageIdByGuid.keys),
+            pageIdByGuid: pageIdByGuid,
+            originatorGuids: allRows.compactMap(\.threadOriginatorGuid),
+            fetchReactions: allRows.contains(where: \.hasReactions),
+            fetchReplies: allRows.contains(where: { $0.hasReplies || ($0.threadOriginatorGuid?.isEmpty == false) })
+        )
+        var reactorNames: [String: String] = [:]
+        for recs in annotations.reactions.values {
+            for reaction in recs {
+                guard let handle = reaction.fromHandle, reactorNames[handle] == nil else { continue }
+                reactorNames[handle] = await IdentityDisplayFormatter.displayName(
+                    handle: handle, resolver: resolver
+                )
+            }
+        }
+        let reactorName: (String?) -> String = { handle in
+            guard let handle else { return "Me" }
+            return reactorNames[handle] ?? handle
         }
 
         var contextBefore: [SearchContextMessage] = []
@@ -583,6 +699,8 @@ extension SearchTool {
         for row in beforeRows.reversed() {
             let msg = await formatContextMessage(
                 row: row,
+                annotations: annotations,
+                reactorName: reactorName,
                 resolver: resolver
             )
             contextBefore.append(msg)
@@ -591,6 +709,8 @@ extension SearchTool {
         for row in afterRows {
             let msg = await formatContextMessage(
                 row: row,
+                annotations: annotations,
+                reactorName: reactorName,
                 resolver: resolver
             )
             contextAfter.append(msg)
@@ -601,6 +721,8 @@ extension SearchTool {
 
     static func formatContextMessage(
         row: ContextRow,
+        annotations: MessageAnnotations.Loaded,
+        reactorName: (String?) -> String,
         resolver: ContactResolver
     ) async -> SearchContextMessage {
         let text = MessageTextExtractor.extract(text: row.text, attributedBody: row.attributedBody)
@@ -614,7 +736,14 @@ extension SearchTool {
                 resolver: resolver
             ),
             text: text,
-            ts: TimeUtils.formatISO(msgDate)
+            ts: TimeUtils.formatISO(msgDate),
+            reactions: MessageAnnotations.render(
+                annotations.reactions[row.guid] ?? [],
+                reactorName: reactorName
+            ),
+            replyTo: row.threadOriginatorGuid.flatMap { annotations.replies.originatorIdByGuid[$0] },
+            replyCount: annotations.replies.replyCountByGuid[row.guid],
+            edited: row.dateEdited != 0 ? true : nil
         )
     }
 

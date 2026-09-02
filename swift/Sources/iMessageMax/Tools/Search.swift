@@ -24,11 +24,19 @@ struct SearchResult: Codable {
     let ts: String?
     var contextBefore: [SearchContextMessage]?
     var contextAfter: [SearchContextMessage]?
+    let reactions: [String]?
+    let replyTo: String?
+    let replyCount: Int?
+    let edited: Bool?
 
     enum CodingKeys: String, CodingKey {
         case id, chat, from, excerpt, ago, ts
         case contextBefore = "context_before"
         case contextAfter = "context_after"
+        case reactions
+        case replyTo = "reply_to"
+        case replyCount = "reply_count"
+        case edited
     }
 }
 
@@ -38,6 +46,17 @@ struct SearchContextMessage: Codable {
     let from: String
     let text: String?
     let ts: String?
+    let reactions: [String]?
+    let replyTo: String?
+    let replyCount: Int?
+    let edited: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case id, from, text, ts, reactions
+        case replyTo = "reply_to"
+        case replyCount = "reply_count"
+        case edited
+    }
 }
 
 /// Grouped chat for grouped search response
@@ -412,7 +431,12 @@ enum SearchTool {
                     isFromMe: row.int(4) != 0,
                     senderHandle: row.string(5),
                     chatId: row.int(6),
-                    chatDisplayName: row.string(7)
+                    chatDisplayName: row.string(7),
+                    guid: row.string(8) ?? "",
+                    threadOriginatorGuid: row.string(9),
+                    dateEdited: row.optionalInt(10) ?? 0,
+                    hasReactions: row.int(11) != 0,
+                    hasReplies: row.int(12) != 0
                 )
             }
 

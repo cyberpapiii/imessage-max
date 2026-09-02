@@ -151,6 +151,34 @@ final class ResponseContractTests: XCTestCase {
         )
     }
 
+    func testGetContextMirrorsReactionReplyAndEditFields() async throws {
+        let fixture = try makeGetMessagesFixture()
+        let result = await GetContext.execute(
+            messageId: "msg_202",
+            before: 5,
+            after: 5,
+            database: fixture.database(),
+            resolver: makeSeededResolver()
+        )
+
+        guard case .success(let response) = result else {
+            return XCTFail("Expected get_context success")
+        }
+
+        let encoded = try decodeJSONDictionary(from: try FormatUtils.encodeJSON(response))
+        let message = try XCTUnwrap(encoded["message"] as? [String: Any])
+        XCTAssertEqual(message["edited"] as? Bool, true)
+
+        let before = try decodeJSONArray(try XCTUnwrap(encoded["before"]))
+        let origin = try XCTUnwrap(before.first(where: { $0["id"] as? String == "msg_201" }))
+        XCTAssertEqual(origin["reactions"] as? [String], ["❤️ alice", "🥕 bob", "🩵 sticker me"])
+        XCTAssertEqual(origin["reply_count"] as? Int, 1)
+
+        let after = try decodeJSONArray(try XCTUnwrap(encoded["after"]))
+        let reply = try XCTUnwrap(after.first(where: { $0["id"] as? String == "msg_203" }))
+        XCTAssertEqual(reply["reply_to"] as? String, "msg_201")
+    }
+
     func testSearchFlatUsesExcerptAndNestedChat() async throws {
         let fixture = try makeSearchFixture()
         let resolver = makeSeededResolver()

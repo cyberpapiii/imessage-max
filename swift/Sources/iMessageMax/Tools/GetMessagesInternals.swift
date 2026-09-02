@@ -139,6 +139,41 @@ enum MessageAnnotations {
         )
     }
 
+    struct Loaded {
+        let reactions: [String: [Reaction]]
+        let replies: ReplyLookup
+    }
+
+    static func loadIfNeeded(
+        db: Database,
+        guids: [String],
+        pageIdByGuid: [String: Int],
+        originatorGuids: [String],
+        fetchReactions: Bool,
+        fetchReplies: Bool
+    ) throws -> Loaded {
+        let reactions: [String: [Reaction]]
+        if fetchReactions {
+            reactions = try reactionsMap(db: db, messageGuids: guids)
+        } else {
+            reactions = [:]
+        }
+
+        let replies: ReplyLookup
+        if fetchReplies {
+            replies = try replyLookup(
+                db: db,
+                pageGuids: guids,
+                pageIdByGuid: pageIdByGuid,
+                originatorGuids: originatorGuids
+            )
+        } else {
+            replies = ReplyLookup(originatorIdByGuid: [:], replyCountByGuid: [:])
+        }
+
+        return Loaded(reactions: reactions, replies: replies)
+    }
+
     static func render(
         _ rows: [Reaction],
         reactorName: (String?) -> String
