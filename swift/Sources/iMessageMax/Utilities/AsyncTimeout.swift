@@ -19,7 +19,7 @@ enum AsyncTimeout {
                 let work = DispatchWorkItem {
                     gate.resume(continuation)
                 }
-                gate.arm(work: work, continuation: continuation)
+                guard gate.arm(work: work, continuation: continuation) else { return }
                 enqueuedTimersForTesting += 1
                 DispatchQueue.global(qos: .utility).asyncAfter(
                     deadline: .now() + dispatchInterval(for: duration),
@@ -61,6 +61,10 @@ enum AsyncTimeout {
     /// body when the task is already cancelled on entry, so `cancelAndResume`
     /// can run before `arm`; it must not claim the resume in that case, or the
     /// continuation that `arm` later delivers is never resumed.
+    ///
+    /// `arm` returns true when the caller must schedule `work`, false when
+    /// cancellation already resumed the continuation and nothing should be
+    /// enqueued.
     private final class ResumeGate: @unchecked Sendable {
         private let state = Mutex(())
         private var work: DispatchWorkItem?
@@ -68,17 +72,21 @@ enum AsyncTimeout {
         private var resumed = false
         private var cancelled = false
 
-        func arm(work: DispatchWorkItem, continuation: CheckedContinuation<Void, Never>) {
+        /// Returns true when the gate now holds `work` and `continuation`, i.e. the
+        /// caller must schedule `work`. Returns false when cancellation already
+        /// resumed the continuation; the caller must not enqueue anything.
+        func arm(work: DispatchWorkItem, continuation: CheckedContinuation<Void, Never>) -> Bool {
             state.withLock { _ in
                 if cancelled || resumed {
                     if !resumed {
                         resumed = true
                         continuation.resume()
                     }
-                    return
+                    return false
                 }
                 self.work = work
                 self.continuation = continuation
+                return true
             }
         }
 
