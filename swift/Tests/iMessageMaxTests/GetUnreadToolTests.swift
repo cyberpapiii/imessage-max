@@ -31,4 +31,25 @@ final class GetUnreadToolTests: XCTestCase {
         XCTAssertEqual(response.chats.count, 5)
         XCTAssertTrue(response.more)
     }
+
+    func testChatNotFoundErrorIsValidJSON() async throws {
+        let fixture = try ToolTestDatabase(name: "unread-badid")
+        let tool = GetUnread(database: fixture.database(), contactResolver: makeSeededResolver())
+        let hostile = "abc\"\\def"
+        do {
+            _ = try await tool.execute(
+                params: GetUnread.Parameters(chatId: hostile, since: "all", format: .summary, limit: 5)
+            )
+            XCTFail("expected ToolError")
+        } catch let error as ToolError {
+            guard case .text(let text, _, _)? = error.content.first else {
+                return XCTFail("expected text content")
+            }
+            let object = try XCTUnwrap(
+                JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any]
+            )
+            XCTAssertEqual(object["error"] as? String, "chat_not_found")
+            XCTAssertEqual(object["message"] as? String, "Chat not found: \(hostile)")
+        }
+    }
 }
