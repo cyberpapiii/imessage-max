@@ -5,8 +5,9 @@ actor MCPServerWrapper {
     private let server: Server
     private let database: Database
     private let resolver: ContactResolver
+    private let contactsPolicy: ContactsAccessPolicy.Override
 
-    init() {
+    init(contactsPolicy: ContactsAccessPolicy.Override = .auto) {
         self.server = Server(
             name: Version.name,
             version: Version.current,
@@ -16,6 +17,7 @@ actor MCPServerWrapper {
         )
         self.database = Database()
         self.resolver = ContactResolver()
+        self.contactsPolicy = contactsPolicy
     }
 
     func start(transport: any Transport) async throws {
@@ -46,11 +48,12 @@ actor MCPServerWrapper {
             Log.info("Database: \(dbStatus)")
         }
 
-        // Initialize contacts (this may show permission dialog)
-        let (contactsOk, contactsStatus) = ContactResolver.authorizationStatus()
-        if !contactsOk && contactsStatus == "not_determined" {
-            _ = try? await resolver.requestAccess()
-        }
+        let policy = ContactsAccessPolicy.resolve(
+            flag: contactsPolicy,
+            environment: ProcessInfo.processInfo.environment,
+            isTTY: ContactsAccessPolicy.stdinIsTTY
+        )
+        await resolver.requestAccessIfAllowed(policy: policy)
         try? await resolver.initialize()
     }
 }

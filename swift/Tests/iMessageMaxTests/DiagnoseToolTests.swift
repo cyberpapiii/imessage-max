@@ -136,4 +136,47 @@ final class DiagnoseToolTests: XCTestCase {
         let json = try FormatUtils.encodeJSON(result)
         XCTAssertFalse(json.contains("\"features\""))
     }
+
+    /// A headless process that declined to prompt must say so, and must point
+    /// at the one command that triggers the prompt, instead of the generic
+    /// System Settings advice (the binary is not listed there until it asks).
+    func testHeadlessSkipIsVisibleInDiagnose() async throws {
+        let resolver = ContactResolver(
+            source: ContactResolver.Source(
+                authorization: { (false, "not_determined") },
+                load: { [:] },
+                requestAccess: { XCTFail("must not prompt"); return false }
+            ),
+            refreshInterval: 30,
+            now: { 0 }
+        )
+        await resolver.requestAccessIfAllowed(policy: .skipIfNotDetermined)
+
+        let result = try await DiagnoseTool.execute(
+            resolver: resolver,
+            dbProbe: DiagnoseToolTests.dbAccessible,
+            contactsProbe: { (false, "not_determined") },
+            automationProbe: DiagnoseToolTests.automationGranted
+        )
+
+        XCTAssertEqual(result.contacts.status, "not_requested_headless")
+        XCTAssertFalse(result.contacts.authorized)
+        XCTAssertTrue(result.contacts.fix?.contains("--request-contacts-access") == true)
+        XCTAssertEqual(result.status, "needs_setup")
+        XCTAssertEqual(result.capabilities["perm_contacts"]?.state, "permission-gated")
+        XCTAssertNotNil(result.capabilities["perm_contacts"]?.fix)
+    }
+
+    /// Plain not_determined (interactive process, prompt pending or dismissed)
+    /// keeps today's wording and the `unverified` capability state.
+    func testNotDeterminedWithoutSkipIsUnchanged() async throws {
+        let result = try await DiagnoseTool.execute(
+            resolver: ContactResolver(seedCache: [:]),
+            dbProbe: DiagnoseToolTests.dbAccessible,
+            contactsProbe: { (false, "not_determined") },
+            automationProbe: DiagnoseToolTests.automationGranted
+        )
+        XCTAssertEqual(result.contacts.status, "not_determined")
+        XCTAssertEqual(result.capabilities["perm_contacts"]?.state, "unverified")
+    }
 }
