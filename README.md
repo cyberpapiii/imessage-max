@@ -380,6 +380,8 @@ diagnose()  # Returns: database status, contacts count, permissions, capabilitie
 
 `capabilities.verified_send` is `supported` when chat.db is readable and Messages Automation is OK, `degraded` when the database is readable but Automation is not OK, and `permission-gated` when the database is not readable.
 
+`database.features` lists which optional `chat.db` columns exist on this Mac, keyed `table.column` (for example `message.date_edited`). When one is `false`, the tools that read it degrade instead of failing: no `reply_to` or `reply_count` without `message.thread_originator_guid`, no `edited` without `message.date_edited`, no custom-emoji reaction text without `message.associated_message_emoji`.
+
 ## Release checks
 
 Before a release, work through:
