@@ -368,6 +368,7 @@ final class ListAttachments {
                 .join("message_attachment_join maj ON m.ROWID = maj.message_id")
                 .join("attachment a ON maj.attachment_id = a.ROWID")
                 .where("m.associated_message_type = 0")
+                .where("COALESCE(a.hide_attachment, 0) = 0")
             if let chatId {
                 query.where("c.ROWID = ?", chatId)
             }
@@ -380,7 +381,7 @@ final class ListAttachments {
                 (SELECT MAX(COALESCE(a.total_bytes, 0))
                  FROM message_attachment_join maj
                  JOIN attachment a ON maj.attachment_id = a.ROWID
-                 WHERE maj.message_id = m.ROWID\(typeClause)) as max_attachment_size
+                 WHERE maj.message_id = m.ROWID AND COALESCE(a.hide_attachment, 0) = 0\(typeClause)) as max_attachment_size
                 """
             // A message can belong to more than one chat, so picking the chat
             // with a subquery keeps the result one row per message without the
@@ -414,7 +415,7 @@ final class ListAttachments {
                     EXISTS (SELECT 1
                             FROM message_attachment_join maj
                             JOIN attachment a ON maj.attachment_id = a.ROWID
-                            WHERE maj.message_id = m.ROWID\(typeClause))
+                            WHERE maj.message_id = m.ROWID AND COALESCE(a.hide_attachment, 0) = 0\(typeClause))
                     """)
         }
 
@@ -475,6 +476,7 @@ final class ListAttachments {
             .from("attachment a")
             .join("message_attachment_join maj ON a.ROWID = maj.attachment_id")
             .where("maj.message_id IN (\(placeholders))", params: messageIds.map { $0 as Any })
+            .where("COALESCE(a.hide_attachment, 0) = 0")
         if let predicate = AttachmentType.sqlPredicate(for: typeFilter, alias: "a") {
             query.where("(\(predicate))")
         }
