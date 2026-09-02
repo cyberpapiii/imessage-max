@@ -239,32 +239,21 @@ actor SessionManager {
     /// `Server.stop()` can hang on a wedged transport, so the wait is bounded
     /// to 2 seconds by racing against `AsyncTimeout.sleep`. Never `Task.sleep`.
     func terminateSession(sessionId: String) async {
-        guard let session = sessions[sessionId] else { return }
+        // Remove first: once termination starts, routeMessage and validate
+        // must refuse this id even while server.stop() is still running.
+        guard let session = sessions.removeValue(forKey: sessionId) else { return }
 
-        // Cancel server task
         session.serverTask?.cancel()
-
-        // Complete the message stream
         session.messageContinuation.finish()
 
         await withTaskGroup(of: Void.self) { group in
-            group.addTask {
-                await session.server.stop()
-            }
-            group.addTask {
-                await AsyncTimeout.sleep(.seconds(2))
-            }
+            group.addTask { await session.server.stop() }
+            group.addTask { await AsyncTimeout.sleep(.seconds(2)) }
             await group.next()
             group.cancelAll()
         }
 
-        // Remove from active sessions
-        sessions.removeValue(forKey: sessionId)
-
-        // Notify HTTPTransport to clean up SSE connections
-        Task {
-            await sessionTerminationHandler?(sessionId)
-        }
+        Task { await sessionTerminationHandler?(sessionId) }
     }
 
     /// Returns all active session IDs
