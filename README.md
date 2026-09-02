@@ -344,7 +344,6 @@ Before a release, work through:
 - [docs/validation/2026-03-13-send-manual-validation.md](docs/validation/2026-03-13-send-manual-validation.md)
 
 Additional send note:
-- `reply_to` is currently unsupported
 - Sends execute immediately when the destination is exact; there is no confirmation gate. Ambiguous destinations are refused with `status: "ambiguous"`. The `confirm` parameter is deprecated and ignored (kept only for compatibility). Authorization happens in the user's conversation with the agent and in the client's tool-approval UI, not server-side.
 
 Send result semantics (text sends are verified post-send against chat.db):

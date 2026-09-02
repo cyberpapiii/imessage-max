@@ -108,7 +108,6 @@ Minimum release-level send checks:
 - attachment send to a known chat
 - attachment + text ordering
 - missing-file failure
-- unsupported `reply_to` failure
 
 Go deeper on send only if these checks turn something up.
 
