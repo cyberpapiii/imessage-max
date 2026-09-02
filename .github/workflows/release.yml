@@ -19,11 +19,22 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
+        with:
+          fetch-tags: true
 
       - name: Show toolchain
         run: |
           xcodebuild -version
           swift --version
+
+      - name: Check version consistency (and tag on tag pushes)
+        working-directory: .
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            scripts/check-version.sh --tag
+          else
+            scripts/check-version.sh
+          fi
 
       - name: Build and run tests
         # Same command as build.yml on purpose; see its comment.
@@ -52,7 +63,10 @@ jobs:
           BINARY=".build/arm64-apple-macosx/release/imessage-max"
           lipo -info "$BINARY" | grep -q "arm64" || { echo "not arm64"; exit 1; }
           codesign -dvv "$BINARY" 2>&1 | grep -q "Identifier=com.cyberpapiii.imessage-max" || { echo "wrong identifier"; exit 1; }
-          echo "Binary reports version: $("$BINARY" --version)"
+          EXPECTED=$(sed -nE 's/^ *static let current = "([^"]+)"/\1/p' Sources/iMessageMax/Server/Version.swift)
+          REPORTED=$("$BINARY" --version)
+          echo "Binary reports version: $REPORTED"
+          [[ "$REPORTED" == *"$EXPECTED"* ]] || { echo "version mismatch: binary '$REPORTED' vs Version.swift '$EXPECTED'"; exit 1; }
 
       - name: Create tarball
         run: |
