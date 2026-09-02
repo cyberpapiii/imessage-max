@@ -249,7 +249,10 @@ Retrieve messages with flexible filtering. Returns metadata for media. Explicit 
 get_messages(chat_id="chat123", limit=50)           # Recent messages
 get_messages(chat_id="chat123", since="24h")        # Last 24 hours
 get_messages(chat_id="chat123", from_person="Contact A")  # From specific person
+get_messages(chat_id="chat123", has="links")        # Messages that contain a URL
 ```
+
+`has` filters by content type (`links`, `attachments`, `images`). `links` includes link messages Messages stores as URL preview balloons (the common case on macOS 26).
 
 Group system messages (renames, members added or removed, someone
 leaving) come back with `text: null` and an `event` object:
@@ -329,6 +332,8 @@ Browse shared items grouped by message. Each row includes exact attachment ids f
 list_attachments(type="image", since="7d")
 list_attachments(chat_id="chat123", type="any")
 ```
+
+Attachments Messages hides (`hide_attachment`, e.g. link-preview payloads) are not listed; `get_attachment` still returns them by id.
 
 ### get_unread
 Get unread threads or unread messages. Default is summary by chat.

@@ -52,7 +52,7 @@ Default flow:
 1. Start with `list_attachments` to discover the message where items were shared.
 2. Use `get_attachment` only after you have the exact attachment id.
 
-Do not guess attachment ids or fetch attachments before discovery unless the user already supplied the exact id.
+Do not guess attachment ids or fetch attachments before discovery unless the user already supplied the exact id. Link previews are not attachments; use `get_messages has:"links"` to find those messages.
 
 ### Sending safely
 
