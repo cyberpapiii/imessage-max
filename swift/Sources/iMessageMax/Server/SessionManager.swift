@@ -229,6 +229,21 @@ actor SessionManager {
         session.lastActivity = Date()
     }
 
+    /// Sends `notification` to every live session. Errors are per-session
+    /// and swallowed: a session whose Server has stopped just drops it.
+    func notifyAllSessions<N: MCP.Notification>(_ notification: Message<N>) async -> Int {
+        var delivered = 0
+        for session in sessions.values {
+            do {
+                try await session.server.notify(notification)
+                delivered += 1
+            } catch {
+                Log.warning("notify \(N.name) to session \(session.id.prefix(8)) failed: \(error)")
+            }
+        }
+        return delivered
+    }
+
     /// Returns the negotiated protocol version for a session.
     func protocolVersion(for sessionId: String) -> String? {
         sessions[sessionId]?.protocolVersion

@@ -28,6 +28,9 @@ typealias ContactsProbe = @Sendable () -> (authorized: Bool, status: String)
 /// Probe type for optional chat.db column flags. Injectable so tests stay hermetic.
 typealias SchemaProbe = @Sendable () -> SchemaCapabilities?
 
+/// Probe type for the live-inbox watcher. Injectable so tests stay hermetic.
+typealias LiveInboxProbe = @Sendable () -> Bool
+
 struct DiagnoseResult: Codable {
     struct DatabaseStatus: Codable {
         let accessible: Bool
@@ -89,7 +92,9 @@ enum DiagnoseTool {
         server.registerTool(
             name: "diagnose",
             description: """
-                Use diagnose before attempting any send, attachment, or live-inbox operation. \
+                Use diagnose before attempting any send, attachment, or live inbox \
+                (push notifications when new messages land; `supported` only in \
+                HTTP mode while the watcher runs) operation. \
                 Check capabilities.<key>.state for each feature you plan to use. \
                 "supported" means the feature is available and probed on this install. \
                 "unsupported" means the feature does not exist. Do not attempt it or offer \
@@ -114,7 +119,11 @@ enum DiagnoseTool {
                 openWorldHint: false
             )
         ) { _ in
-            let result = try await execute(resolver: resolver, schemaProbe: { try? db.schema() })
+            let result = try await execute(
+                resolver: resolver,
+                schemaProbe: { try? db.schema() },
+                liveInboxProbe: { LiveInboxState.isRunning }
+            )
             return [.plainText(try FormatUtils.encodeJSON(result))]
         }
     }
@@ -150,7 +159,8 @@ enum DiagnoseTool {
         dbProbe: DatabaseProbe = { Database.checkAccess() },
         contactsProbe: ContactsProbe = { ContactResolver.authorizationStatus() },
         automationProbe: AutomationProbe = { AutomationPermission.checkAutomationPermission() },
-        schemaProbe: SchemaProbe = { nil }
+        schemaProbe: SchemaProbe = { nil },
+        liveInboxProbe: LiveInboxProbe = { LiveInboxState.isRunning }
     ) async throws -> DiagnoseResult {
         let processId = ProcessInfo.processInfo.processIdentifier
         let databasePath = Database.defaultPath
@@ -338,7 +348,10 @@ enum DiagnoseTool {
             "reply_threading":       Capability(state: "unsupported"),
             "tapbacks":              Capability(state: "unsupported"),
             "edit_unsend":           Capability(state: "unsupported"),
-            "live_inbox":            Capability(state: "unavailable"),
+            "live_inbox":            Capability(
+                state: liveInboxProbe() ? "supported" : "unavailable",
+                detail: "notifications/imessage/new_messages over the legacy session SSE stream; stateless clients poll get_messages_since"
+            ),
             "perm_full_disk":        Capability(state: permFullDiskState, fix: permFullDiskFix),
             "perm_contacts":         Capability(state: permContactsState, fix: permContactsFix),
             "perm_automation":       Capability(state: permAutomationState, fix: permAutomationFix),

@@ -151,6 +151,16 @@ public actor HTTPTransport: Transport {
         try await task.value
     }
 
+    @discardableResult
+    func notifyNewMessages(maxRowid: Int64) async -> Int {
+        await sessionManager.notifyAllSessions(
+            Message<NewMessagesNotification>(
+                method: NewMessagesNotification.name,
+                params: .init(max_rowid: maxRowid)
+            )
+        )
+    }
+
     /// Handles POST requests with JSON-RPC messages
     func handlePost(
         request: Request,
