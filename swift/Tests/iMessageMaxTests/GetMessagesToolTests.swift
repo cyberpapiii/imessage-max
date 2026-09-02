@@ -237,6 +237,39 @@ final class GetMessagesToolTests: XCTestCase {
         let chat = try XCTUnwrap(response["chat"] as? [String: Any])
         XCTAssertEqual(chat["id"] as? String, "chat50")
     }
+
+    func testMoreAndCursorAgreeOnNullDatePageBoundary() async throws {
+        let fixture = try ToolTestDatabase(name: "get-messages-null-date")
+        try fixture.insertHandle(rowId: 1, handle: "+15550000001")
+        try fixture.insertChat(rowId: 7, guid: "null-date-chat", displayName: "Null Date")
+        try fixture.joinChatHandle(chatId: 7, handleId: 1)
+
+        let base: Int64 = 1_000_000_000_000
+        for messageId in 1...3 {
+            try fixture.insertMessage(
+                rowId: messageId,
+                guid: "null-date-\(messageId)",
+                text: "msg \(messageId)",
+                date: base + Int64(messageId) * 1_000_000_000,
+                isFromMe: false,
+                handleId: 1
+            )
+            try fixture.joinChatMessage(chatId: 7, messageId: messageId)
+        }
+        try fixture.execute("UPDATE message SET date = NULL WHERE ROWID = 1")
+
+        let tool = GetMessagesTool(db: fixture.database(), resolver: ContactResolver(seedCache: [:]))
+        let response = try await decodeGetMessagesResponse(
+            await tool.execute(args: [
+                "chat_id": .string("chat7"),
+                "limit": .int(3),
+            ])
+        )
+        XCTAssertEqual(
+            response["more"] as? Bool,
+            response["cursor"] != nil && !(response["cursor"] is NSNull)
+        )
+    }
 }
 
 private func decodeGetMessagesResponse(_ contents: [Tool.Content]) async throws -> [String: Any] {
