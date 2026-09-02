@@ -436,6 +436,82 @@ final class SearchToolTests: XCTestCase {
         XCTAssertLessThanOrEqual(queryCount, 5, "include_context ran \(queryCount) queries")
     }
 
+    func testIncludeContextWindowsArePerAnchorAndExact() async throws {
+        let fixture = try ToolTestDatabase(name: "search-ctx-windows")
+        try fixture.insertHandle(rowId: 1, handle: "+15550000001")
+        try fixture.insertChat(rowId: 1, guid: "chat-window-guid", displayName: "Windows")
+        try fixture.joinChatHandle(chatId: 1, handleId: 1)
+
+        let base: Int64 = 1_000_000_000_000
+        let minute: Int64 = 60_000_000_000
+        let anchorIndexes = Set([5, 15, 25])
+
+        for index in 0..<30 {
+            let text = anchorIndexes.contains(index) ? "anchorword \(index)" : "filler \(index)"
+            try fixture.insertMessage(
+                rowId: index + 1,
+                guid: "g\(index)",
+                text: text,
+                date: base + Int64(index) * minute,
+                isFromMe: false,
+                handleId: 1
+            )
+            try fixture.joinChatMessage(chatId: 1, messageId: index + 1)
+        }
+
+        try fixture.insertMessage(
+            rowId: 31,
+            guid: "g-reaction",
+            text: "loved",
+            date: base + 6 * minute,
+            isFromMe: false,
+            handleId: 1,
+            associatedMessageType: 2000
+        )
+        try fixture.joinChatMessage(chatId: 1, messageId: 31)
+
+        try fixture.insertMessage(
+            rowId: 32,
+            guid: "g-twin",
+            text: "twin 15",
+            date: base + 15 * minute,
+            isFromMe: false,
+            handleId: 1
+        )
+        try fixture.joinChatMessage(chatId: 1, messageId: 32)
+
+        let response = try await decodeSearchResponse(
+            SearchTool.execute(
+                query: "anchorword",
+                cursor: nil,
+                limit: 20,
+                sort: "recent_first",
+                format: "flat",
+                includeContext: true,
+                unanswered: false,
+                unansweredHours: 24,
+                matchAll: false,
+                fuzzy: false,
+                db: fixture.database(),
+                resolver: makeSeededResolver()
+            )
+        )
+        let results = try decodeJSONArray(try XCTUnwrap(response["results"]))
+        XCTAssertEqual(results.count, 3)
+
+        for index in [5, 15, 25] {
+            let result = try XCTUnwrap(
+                results.first(where: { ($0["excerpt"] as? String) == "anchorword \(index)" })
+            )
+            let before = try decodeJSONArray(result["context_before"]).compactMap { $0["text"] as? String }
+            let after = try decodeJSONArray(result["context_after"]).compactMap { $0["text"] as? String }
+            XCTAssertEqual(before, ["filler \(index - 2)", "filler \(index - 1)"])
+            XCTAssertEqual(after, ["filler \(index + 1)", "filler \(index + 2)"])
+            XCTAssertFalse(before.contains("loved") || after.contains("loved"))
+            XCTAssertFalse(before.contains("twin 15") || after.contains("twin 15"))
+        }
+    }
+
     func testUnansweredSkipsReplyWindowQueriesForNonQuestions() async throws {
         let fixture = try ToolTestDatabase(name: "search-unanswered-count")
         try fixture.insertHandle(rowId: 1, handle: "+15550000001")
