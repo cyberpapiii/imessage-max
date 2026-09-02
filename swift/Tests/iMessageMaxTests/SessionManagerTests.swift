@@ -80,4 +80,80 @@ final class SessionManagerTests: XCTestCase {
         let count = await manager.sessionCount
         XCTAssertEqual(count, 0)
     }
+
+    func testRouteMessageRefusesAfterTerminateReturns() async {
+        let manager = SessionManager(
+            database: Database(),
+            resolver: ContactResolver(seedCache: [:]),
+            maxSessions: 2,
+            cleanupInterval: .milliseconds(20)
+        )
+        guard case .created(let session) = await manager.createSession() else {
+            return XCTFail("session should be created")
+        }
+
+        await manager.terminateSession(sessionId: session.id)
+
+        let routed = await manager.routeMessage(sessionId: session.id, data: Data("{}".utf8))
+        XCTAssertFalse(routed)
+        let ids = await manager.activeSessionIds()
+        XCTAssertFalse(ids.contains(session.id))
+    }
+
+    func testTerminateSessionTwiceIsIdempotent() async {
+        let manager = SessionManager(
+            database: Database(),
+            resolver: ContactResolver(seedCache: [:]),
+            maxSessions: 2,
+            cleanupInterval: .milliseconds(20)
+        )
+        guard case .created(let session) = await manager.createSession() else {
+            return XCTFail("session should be created")
+        }
+
+        await manager.terminateSession(sessionId: session.id)
+        await manager.terminateSession(sessionId: session.id)
+
+        let count = await manager.sessionCount
+        XCTAssertEqual(count, 0)
+    }
+
+    func testTerminateUnknownIdIsANoOp() async {
+        let manager = SessionManager(
+            database: Database(),
+            resolver: ContactResolver(seedCache: [:]),
+            maxSessions: 2,
+            cleanupInterval: .milliseconds(20)
+        )
+
+        await manager.terminateSession(sessionId: "missing")
+
+        let count = await manager.sessionCount
+        XCTAssertEqual(count, 0)
+    }
+
+    /// Removal now precedes the first `await` in `terminateSession`. The
+    /// actor therefore finishes `sessions.removeValue` before it suspends
+    /// for `server.stop()`. Any later actor message — including this
+    /// `activeSessionIds()` hop — observes the id as gone. No yields or
+    /// sleeps: actor isolation is the only ordering. The old yield-count
+    /// race test is not used; it could not fail deterministically.
+    func testActiveSessionIdsExcludesASessionOnceTerminateStarts() async {
+        let manager = SessionManager(
+            database: Database(),
+            resolver: ContactResolver(seedCache: [:]),
+            maxSessions: 2,
+            cleanupInterval: .milliseconds(20)
+        )
+        guard case .created(let session) = await manager.createSession() else {
+            return XCTFail("session should be created")
+        }
+
+        let terminate = Task.detached {
+            await manager.terminateSession(sessionId: session.id)
+        }
+        let ids = await manager.activeSessionIds()
+        XCTAssertFalse(ids.contains(session.id))
+        await terminate.value
+    }
 }
