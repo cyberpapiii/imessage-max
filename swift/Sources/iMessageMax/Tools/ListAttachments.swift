@@ -335,8 +335,6 @@ final class ListAttachments {
         sort: AttachmentSort,
         cursor: TimelineCursor?
     ) -> (String, [Any]) {
-        var params: [Any] = []
-
         let typeClause = AttachmentType.sqlPredicate(for: typeFilter, alias: "a")
             .map { " AND (\($0))" } ?? ""
 
@@ -348,28 +346,37 @@ final class ListAttachments {
         // GROUP BY first, so they resolve the chat and the attachments with
         // subqueries that keep the result one row per message on their own.
         let ranksBySize = sort == .largestFirst
-
-        let sizeSelect: String
-        let fromClause: String
-        var whereClause = "WHERE m.associated_message_type = 0"
+        let query = QueryBuilder()
 
         if ranksBySize {
-            sizeSelect = "MAX(COALESCE(a.total_bytes, 0)) as max_attachment_size"
-            fromClause = """
-                FROM message m
-                JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
-                JOIN chat c ON cmj.chat_id = c.ROWID
-                LEFT JOIN handle h ON m.handle_id = h.ROWID
-                JOIN message_attachment_join maj ON m.ROWID = maj.message_id
-                JOIN attachment a ON maj.attachment_id = a.ROWID
-                """
+            query
+                .select(
+                    "m.ROWID as msg_id",
+                    "m.text",
+                    "m.attributedBody",
+                    "m.date",
+                    "m.is_from_me",
+                    "h.id as sender_handle",
+                    "c.ROWID as chat_id",
+                    "c.display_name as chat_name",
+                    "MAX(COALESCE(a.total_bytes, 0)) as max_attachment_size"
+                )
+                .from("message m")
+                .join("chat_message_join cmj ON m.ROWID = cmj.message_id")
+                .join("chat c ON cmj.chat_id = c.ROWID")
+                .leftJoin("handle h ON m.handle_id = h.ROWID")
+                .join("message_attachment_join maj ON m.ROWID = maj.message_id")
+                .join("attachment a ON maj.attachment_id = a.ROWID")
+                .where("m.associated_message_type = 0")
             if let chatId {
-                whereClause += " AND c.ROWID = ?"
-                params.append(chatId)
+                query.where("c.ROWID = ?", chatId)
             }
-            whereClause += typeClause
+            if let pred = AttachmentType.sqlPredicate(for: typeFilter, alias: "a") {
+                query.where("(\(pred))")
+            }
+            query.groupBy("m.ROWID")
         } else {
-            sizeSelect = """
+            let sizeSelect = """
                 (SELECT MAX(COALESCE(a.total_bytes, 0))
                  FROM message_attachment_join maj
                  JOIN attachment a ON maj.attachment_id = a.ROWID
@@ -380,88 +387,75 @@ final class ListAttachments {
             // GROUP BY that joining chat_message_join would require.
             var chatPick = "SELECT cmj.chat_id FROM chat_message_join cmj"
                 + " WHERE cmj.message_id = m.ROWID"
+            var chatPickParams: [Any] = []
             if let chatId {
                 chatPick += " AND cmj.chat_id = ?"
-                params.append(chatId)
+                chatPickParams.append(chatId)
             }
             chatPick += " ORDER BY cmj.chat_id LIMIT 1"
 
-            fromClause = """
-                FROM message m
-                JOIN chat c ON c.ROWID = (\(chatPick))
-                LEFT JOIN handle h ON m.handle_id = h.ROWID
-                """
-            whereClause += """
-                 AND EXISTS (SELECT 1
-                             FROM message_attachment_join maj
-                             JOIN attachment a ON maj.attachment_id = a.ROWID
-                             WHERE maj.message_id = m.ROWID\(typeClause))
-                """
+            query
+                .select(
+                    "m.ROWID as msg_id",
+                    "m.text",
+                    "m.attributedBody",
+                    "m.date",
+                    "m.is_from_me",
+                    "h.id as sender_handle",
+                    "c.ROWID as chat_id",
+                    "c.display_name as chat_name",
+                    sizeSelect
+                )
+                .from("message m")
+                .join("chat c ON c.ROWID = (\(chatPick))", params: chatPickParams)
+                .leftJoin("handle h ON m.handle_id = h.ROWID")
+                .where("m.associated_message_type = 0")
+                .where("""
+                    EXISTS (SELECT 1
+                            FROM message_attachment_join maj
+                            JOIN attachment a ON maj.attachment_id = a.ROWID
+                            WHERE maj.message_id = m.ROWID\(typeClause))
+                    """)
         }
-
-        var sql = """
-            SELECT
-                m.ROWID as msg_id,
-                m.text,
-                m.attributedBody,
-                m.date,
-                m.is_from_me,
-                h.id as sender_handle,
-                c.ROWID as chat_id,
-                c.display_name as chat_name,
-                \(sizeSelect)
-            \(fromClause)
-            \(whereClause)
-            """
 
         if let fromPerson {
             if fromPerson.lowercased() == "me" {
-                sql += " AND m.is_from_me = 1"
+                query.where("m.is_from_me = 1")
             } else {
-                sql += " AND h.id LIKE ? ESCAPE '\\'"
-                params.append("%\(QueryBuilder.escapeLike(fromPerson))%")
+                query.where("h.id LIKE ? ESCAPE '\\'", "%\(QueryBuilder.escapeLike(fromPerson))%")
             }
         }
 
         if let since, let sinceTs = AppleTime.parse(since) {
-            sql += " AND m.date >= ?"
-            params.append(sinceTs)
+            query.where("m.date >= ?", sinceTs)
         }
 
         if let before, let beforeTs = AppleTime.parse(before) {
-            sql += " AND m.date <= ?"
-            params.append(beforeTs)
+            query.where("m.date <= ?", beforeTs)
         }
 
         if let cursor {
             switch sort {
             case .recentFirst:
-                sql += " AND \(cursor.olderThanSQL)"
-                params.append(contentsOf: cursor.olderThanParams)
+                query.where(cursor.olderThanSQL, params: cursor.olderThanParams)
             case .oldestFirst:
-                sql += " AND \(cursor.newerThanSQL)"
-                params.append(contentsOf: cursor.newerThanParams)
+                query.where(cursor.newerThanSQL, params: cursor.newerThanParams)
             case .largestFirst:
                 break
             }
         }
 
-        if ranksBySize {
-            sql += " GROUP BY m.ROWID"
-        }
-
         switch sort {
         case .recentFirst:
-            sql += " ORDER BY m.date DESC, m.ROWID DESC"
+            query.orderBy("m.date DESC", "m.ROWID DESC")
         case .oldestFirst:
-            sql += " ORDER BY m.date ASC, m.ROWID ASC"
+            query.orderBy("m.date ASC", "m.ROWID ASC")
         case .largestFirst:
-            sql += " ORDER BY max_attachment_size DESC, m.date DESC, m.ROWID DESC"
+            query.orderBy("max_attachment_size DESC", "m.date DESC", "m.ROWID DESC")
         }
 
-        sql += " LIMIT ?"
-        params.append(limit)
-        return (sql, params)
+        query.limit(limit)
+        return query.build()
     }
 
     typealias AttachmentSummary = (
@@ -476,19 +470,19 @@ final class ListAttachments {
         guard !messageIds.isEmpty else { return [:] }
 
         let placeholders = messageIds.map { _ in "?" }.joined(separator: ", ")
-        var sql = """
-            SELECT maj.message_id, a.ROWID, a.filename, a.mime_type, a.uti, a.total_bytes
-            FROM attachment a
-            JOIN message_attachment_join maj ON a.ROWID = maj.attachment_id
-            WHERE maj.message_id IN (\(placeholders))
-            """
+        let query = QueryBuilder()
+            .select("maj.message_id", "a.ROWID", "a.filename", "a.mime_type", "a.uti", "a.total_bytes")
+            .from("attachment a")
+            .join("message_attachment_join maj ON a.ROWID = maj.attachment_id")
+            .where("maj.message_id IN (\(placeholders))", params: messageIds.map { $0 as Any })
         if let predicate = AttachmentType.sqlPredicate(for: typeFilter, alias: "a") {
-            sql += " AND (\(predicate))"
+            query.where("(\(predicate))")
         }
-        sql += " ORDER BY maj.message_id ASC, a.ROWID ASC"
+        query.orderBy("maj.message_id ASC", "a.ROWID ASC")
+        let (sql, params) = query.build()
 
         var byMessage: [Int64: [AttachmentSummary]] = [:]
-        _ = try db.query(sql, params: messageIds.map { $0 as Any }) { row in
+        _ = try db.query(sql, params: params) { row in
             let path = row.string(2)
             // Route through policy: paths outside allowed roots are treated as unavailable,
             // identical to a missing file. List output stays total (no error thrown).

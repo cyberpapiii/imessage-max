@@ -31,23 +31,12 @@ public actor HTTPTransport: Transport {
     private let resolver: ContactResolver
 
     // Request correlation: maps JSON-RPC id to continuation for response
-    private var pendingRequests: [PendingRequestKey: PendingRequest] = [:]
+    private let pendingRequests: PendingRequestRegistry
     private var routingConfigured = false
     private let requestTimeout: Duration
 
     /// Background task running the Hummingbird server
     private var serverTask: Task<Void, Error>?
-
-    /// Tracks a pending request with its session
-    private struct PendingRequest {
-        let continuation: CheckedContinuation<Data, Error>
-        let timeoutTimer: DispatchSourceTimer
-    }
-
-    private struct PendingRequestKey: Hashable {
-        let sessionId: String
-        let requestId: String
-    }
 
     /// Creates a new HTTP server transport
     ///
@@ -72,6 +61,7 @@ public actor HTTPTransport: Transport {
         self.host = host
         self.port = port
         self.requestTimeout = requestTimeout
+        self.pendingRequests = PendingRequestRegistry(timeout: requestTimeout)
         self.database = database
         self.resolver = resolver
         self.logger =
@@ -331,37 +321,33 @@ public actor HTTPTransport: Transport {
             do {
                 let responseData = try await withCheckedThrowingContinuation {
                     (continuation: CheckedContinuation<Data, Error>) in
-                    let stored = self.storePendingRequest(
-                        sessionId: sessionId,
-                        id: jsonRpcId,
-                        continuation: continuation
-                    )
-
-                    guard stored else {
-                        continuation.resume(
-                            throwing: MCPError.serverError(
-                                code: -32600,
-                                message: "Duplicate in-flight JSON-RPC request id: \(jsonRpcId)"
-                            )
-                        )
-                        return
-                    }
-
-                    // Route message to session's Server
                     Task {
+                        let stored = await self.pendingRequests.store(
+                            sessionId: sessionId,
+                            id: jsonRpcId,
+                            continuation: continuation
+                        )
+
+                        guard stored else {
+                            continuation.resume(
+                                throwing: MCPError.serverError(
+                                    code: -32600,
+                                    message: "Duplicate in-flight JSON-RPC request id: \(jsonRpcId)"
+                                )
+                            )
+                            return
+                        }
+
                         let routed = await self.sessionManager.routeMessage(
                             sessionId: sessionId,
                             data: requestData
                         )
                         if !routed {
-                            // Session was terminated between validation and routing
-                            if let pending = self.removePendingRequest(
+                            if let pending = await self.pendingRequests.remove(
                                 sessionId: sessionId,
                                 id: jsonRpcId
                             ) {
-                                pending.continuation.resume(
-                                    throwing: MCPError.connectionClosed
-                                )
+                                pending.resume(throwing: MCPError.connectionClosed)
                             }
                         }
                     }
@@ -641,7 +627,7 @@ public actor HTTPTransport: Transport {
         await sseManager.terminateSession(sessionId: sessionId)
 
         // Clean up any pending requests for this session
-        cleanupPendingRequests(for: sessionId)
+        await pendingRequests.cleanup(for: sessionId)
 
         logger.info("Session terminated: \(sessionId)")
 
@@ -665,8 +651,8 @@ public actor HTTPTransport: Transport {
         // an armed 300s timer plus a wakeup Task behind for every served
         // request, which is exactly the stray-wakeup churn this runtime is
         // documented to be sensitive to.
-        if let pending = removePendingRequest(sessionId: sessionId, id: jsonRpcId) {
-            pending.continuation.resume(returning: data)
+        if let pending = await pendingRequests.remove(sessionId: sessionId, id: jsonRpcId) {
+            pending.resume(returning: data)
             logger.trace("Routed response for request: \(jsonRpcId)")
         } else {
             // Broadcast via SSE to session's connections
@@ -699,12 +685,7 @@ public actor HTTPTransport: Transport {
             await sessionManager.terminateSession(sessionId: sessionId)
         }
 
-        // Cancel all pending requests
-        for (_, pending) in pendingRequests {
-            pending.timeoutTimer.cancel()
-            pending.continuation.resume(throwing: MCPError.connectionClosed)
-        }
-        pendingRequests.removeAll()
+        await pendingRequests.removeAll()
 
         logger.info("HTTP transport disconnected")
     }
@@ -725,135 +706,25 @@ public actor HTTPTransport: Transport {
 
     // MARK: - Request body collection
 
-    /// Largest request body accepted on POST. Same 512 KB bound the old
-    /// `collect(upTo:)` call enforced.
-    static let maxRequestBodyBytes = 512 * 1024
+    static var maxRequestBodyBytes: Int { HTTPRequestParsing.maxRequestBodyBytes }
+    static var overLimitDrainBytes: Int { HTTPRequestParsing.overLimitDrainBytes }
+    typealias BodyCollection = HTTPRequestParsing.BodyCollection
 
-    /// Upper bound on how many over-limit bytes get read and discarded before
-    /// giving up on leaving the connection cleanly closable.
-    static let overLimitDrainBytes = 32 * 1024 * 1024
-
-    enum BodyCollection {
-        case complete(Data)
-        case tooLarge
-    }
-
-    /// Collects the request body up to `maxBytes`. On overflow, keeps
-    /// consuming the remaining body (bounded by `drainLimit`) before
-    /// reporting `.tooLarge`.
-    ///
-    /// The drain is load-bearing. `collect(upTo:)` threw on overflow and left
-    /// the rest of the body unread. For clients that send `Connection: close`
-    /// (Python urllib does by default), Hummingbird's HTTP1 loop skips its
-    /// own post-response body drain and blocks on the channel's closeFuture.
-    /// With megabytes unread, NIO back-pressure stops socket reads, EOF is
-    /// never seen, and the server-side FD is never closed — each oversized
-    /// request leaked one descriptor (CLOSED / FIN_WAIT_2 / TIME_WAIT under
-    /// the pid in lsof) against a soft limit of 256. Orderly keep-alive
-    /// clients (http.client) were unaffected because the HTTP1 loop drains
-    /// before reading the next request head.
-    ///
-    /// The body is a single-iteration sequence, so draining cannot happen
-    /// after `collect` throws; this helper owns the one iteration and does
-    /// both jobs. Bodies whose declared Content-Length exceeds `drainLimit`
-    /// are rejected without reading; that keeps the work bounded and matches
-    /// the old behavior for absurd sizes.
     nonisolated static func collectBodyDrainingOverflow(
         _ body: RequestBody,
         declaredLength: Int?,
         maxBytes: Int,
         drainLimit: Int
     ) async throws -> BodyCollection {
-        if let declaredLength, declaredLength > drainLimit {
-            return .tooLarge
-        }
-
-        var collected = ByteBuffer()
-        var iterator = body.makeAsyncIterator()
-        while var chunk = try await iterator.next() {
-            guard collected.readableBytes + chunk.readableBytes <= maxBytes else {
-                var drained = chunk.readableBytes
-                while drained <= drainLimit, let more = try await iterator.next() {
-                    drained += more.readableBytes
-                }
-                return .tooLarge
-            }
-            collected.writeBuffer(&chunk)
-        }
-        return .complete(Data(buffer: collected))
+        try await HTTPRequestParsing.collectBodyDrainingOverflow(
+            body,
+            declaredLength: declaredLength,
+            maxBytes: maxBytes,
+            drainLimit: drainLimit
+        )
     }
 
     // MARK: - Private Helpers
-
-    /// Stores a pending request continuation for later response matching
-    private func storePendingRequest(
-        sessionId: String,
-        id: String,
-        continuation: CheckedContinuation<Data, Error>
-    ) -> Bool {
-        let key = PendingRequestKey(sessionId: sessionId, requestId: id)
-        guard pendingRequests[key] == nil else {
-            return false
-        }
-
-        // Use a Dispatch timer instead of Task.sleep here. On this launchd-run
-        // service, sleeping unstructured Swift tasks have repeatedly aborted in
-        // swift_task_dealloc when they wake around the timeout boundary.
-        //
-        // Use a cancellable DispatchSourceTimer, not asyncAfter: a cancelled
-        // asyncAfter work item stays enqueued (timer source, group, blocks,
-        // ~0.65 KiB) until its deadline, so every served request retained its
-        // 300 s timer and sustained load carried tens of MB of dead timers.
-        // Cancelling a timer source releases it immediately.
-        let timeoutTimer = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
-        timeoutTimer.setEventHandler { [weak self] in
-            Task { [weak self] in
-                guard let self else { return }
-                await self.timeoutPendingRequest(sessionId: sessionId, id: id)
-            }
-        }
-        timeoutTimer.schedule(deadline: .now() + AsyncTimeout.dispatchInterval(for: requestTimeout))
-        timeoutTimer.resume()
-
-        pendingRequests[key] = PendingRequest(
-            continuation: continuation,
-            timeoutTimer: timeoutTimer
-        )
-
-        return true
-    }
-
-    private func timeoutPendingRequest(sessionId: String, id: String) {
-        if let pending = removePendingRequest(sessionId: sessionId, id: id) {
-            pending.continuation.resume(
-                throwing: MCPError.serverError(code: -32000, message: "Request timeout")
-            )
-        }
-    }
-
-    /// Removes and returns a pending request, releasing its timeout timer.
-    /// Cancelling after the timer has fired is safe and unregisters the source.
-    private func removePendingRequest(
-        sessionId: String,
-        id: String
-    ) -> PendingRequest? {
-        let key = PendingRequestKey(sessionId: sessionId, requestId: id)
-        let pending = pendingRequests.removeValue(forKey: key)
-        pending?.timeoutTimer.cancel()
-        return pending
-    }
-
-    /// Cleans up all pending requests for a terminated session
-    private func cleanupPendingRequests(for sessionId: String) {
-        let keysToRemove = pendingRequests.keys.filter { $0.sessionId == sessionId }
-        for key in keysToRemove {
-            guard let pending = pendingRequests.removeValue(forKey: key) else { continue }
-            pending.timeoutTimer.cancel()
-            pending.continuation.resume(
-                throwing: MCPError.serverError(code: -32000, message: "Session terminated")
-            )
-        }
-    }
 
     private func configureRoutingIfNeeded() async {
         guard !routingConfigured else { return }
@@ -864,7 +735,7 @@ public actor HTTPTransport: Transport {
 
         await sessionManager.setSessionTerminationHandler { [weak self] sessionId in
             await self?.sseManager.terminateSession(sessionId: sessionId)
-            await self?.cleanupPendingRequests(for: sessionId)
+            await self?.pendingRequests.cleanup(for: sessionId)
         }
 
         routingConfigured = true
@@ -895,8 +766,7 @@ public actor HTTPTransport: Transport {
     }
 
     private nonisolated func acceptsStreamableHTTP(_ accept: String) -> Bool {
-        if accept.contains("*/*") { return true }
-        return accept.contains("application/json") && accept.contains("text/event-stream")
+        HTTPRequestParsing.acceptsStreamableHTTP(accept)
     }
 
     private func validateProtocolVersionHeader(

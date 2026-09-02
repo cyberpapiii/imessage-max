@@ -297,6 +297,9 @@ enum FindChatTool {
         return handleGroups
     }
 
+    // The four queries below stay on raw SQL on purpose: they splice
+    // `IN (?, ?, ...)` placeholder lists whose length is data-dependent,
+    // which QueryBuilder does not model. See plans/071.
     /// SQL fragment filtering chats by handle count before LIMIT (groups > 1, DMs <= 1).
     private static func groupFilterSQL(isGroup: Bool?) -> String {
         guard let isGroup else { return "" }

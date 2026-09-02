@@ -151,43 +151,35 @@ enum GetActiveConversations {
 
         try await resolver.initialize()
 
-        var sql = """
-            SELECT
-                c.ROWID as chat_id,
-                c.display_name,
+        let query = QueryBuilder()
+            .select(
+                "c.ROWID as chat_id",
+                "c.display_name",
+                """
                 (SELECT COUNT(DISTINCT chj.handle_id) FROM chat_handle_join chj
-                 WHERE chj.chat_id = c.ROWID) as participant_count,
-                SUM(CASE WHEN m.is_from_me = 1 THEN 1 ELSE 0 END) as my_count,
-                SUM(CASE WHEN m.is_from_me = 0 THEN 1 ELSE 0 END) as their_count,
-                MAX(CASE WHEN m.is_from_me = 1 THEN m.date ELSE NULL END) as last_from_me,
-                MAX(CASE WHEN m.is_from_me = 0 THEN m.date ELSE NULL END) as last_from_them,
-                MIN(m.date) as first_in_window,
-                MAX(m.date) as last_in_window
-            FROM chat c
-            JOIN chat_message_join cmj ON c.ROWID = cmj.chat_id
-            JOIN message m ON cmj.message_id = m.ROWID
-            WHERE m.date >= ?
-            AND m.associated_message_type = 0
-            GROUP BY c.ROWID
-            HAVING my_count >= 1 AND their_count >= 1
-            """
-
-        var params: [Any] = [windowStartApple]
-
+                 WHERE chj.chat_id = c.ROWID) as participant_count
+                """,
+                "SUM(CASE WHEN m.is_from_me = 1 THEN 1 ELSE 0 END) as my_count",
+                "SUM(CASE WHEN m.is_from_me = 0 THEN 1 ELSE 0 END) as their_count",
+                "MAX(CASE WHEN m.is_from_me = 1 THEN m.date ELSE NULL END) as last_from_me",
+                "MAX(CASE WHEN m.is_from_me = 0 THEN m.date ELSE NULL END) as last_from_them",
+                "MIN(m.date) as first_in_window",
+                "MAX(m.date) as last_in_window"
+            )
+            .from("chat c")
+            .join("chat_message_join cmj ON c.ROWID = cmj.chat_id")
+            .join("message m ON cmj.message_id = m.ROWID")
+            .where("m.date >= ?", windowStartApple)
+            .where("m.associated_message_type = 0")
+            .groupBy("c.ROWID")
+            .having("my_count >= 1 AND their_count >= 1")
         if let filterGroup = isGroup {
-            if filterGroup {
-                sql += " AND participant_count > 1"
-            } else {
-                sql += " AND participant_count <= 1"
-            }
+            query.having(filterGroup ? "participant_count > 1" : "participant_count <= 1")
         }
-
-        sql += " ORDER BY last_in_window DESC"
-
         // Fetch more than limit to account for filtering
         let fetchLimit = clampedLimit * 3
-        sql += " LIMIT ?"
-        params.append(fetchLimit)
+        query.orderBy("last_in_window DESC").limit(fetchLimit)
+        let (sql, params) = query.build()
 
         let chatRows = try database.query(sql, params: params) { row -> ChatActivityRow in
             ChatActivityRow(
