@@ -1,6 +1,12 @@
 import Foundation
 
 enum SummaryPreviewFormatter {
+    private static let linkDetector: NSDataDetector? =
+        try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
+    private static let whitespaceRun = try! NSRegularExpression(pattern: "\\s+")
+    private static let placeholderRun = try! NSRegularExpression(
+        pattern: #"^(?:\[(?:Photo|Video|Audio|PDF|Attachment)\])+$"#)
+
     static func formattedTextPreview(
         text: String?,
         attributedBody: Data?,
@@ -91,7 +97,7 @@ enum SummaryPreviewFormatter {
     }
 
     private static func collapseURLs(in text: String) -> String {
-        guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else {
+        guard let detector = linkDetector else {
             return text
         }
 
@@ -103,8 +109,9 @@ enum SummaryPreviewFormatter {
             output.replaceSubrange(swiftRange, with: "[Link: \(host)]")
         }
 
-        return output
-            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+        let collapsedRange = NSRange(output.startIndex..<output.endIndex, in: output)
+        return whitespaceRun
+            .stringByReplacingMatches(in: output, options: [], range: collapsedRange, withTemplate: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
@@ -117,9 +124,15 @@ enum SummaryPreviewFormatter {
     }
 
     private static func isSyntheticAttachmentPlaceholderText(_ text: String) -> Bool {
-        let normalized = text.replacingOccurrences(of: "\\s+", with: "", options: .regularExpression)
-        let pattern = #"^(?:\[(?:Photo|Video|Audio|PDF|Attachment)\])+$"#
-        return normalized.range(of: pattern, options: .regularExpression) != nil
+        let fullRange = NSRange(text.startIndex..<text.endIndex, in: text)
+        let normalized = whitespaceRun.stringByReplacingMatches(
+            in: text,
+            options: [],
+            range: fullRange,
+            withTemplate: ""
+        )
+        let normalizedRange = NSRange(normalized.startIndex..<normalized.endIndex, in: normalized)
+        return placeholderRun.firstMatch(in: normalized, options: [], range: normalizedRange) != nil
     }
 
     private static func truncate(_ text: String, maxLength: Int) -> String {

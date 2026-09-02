@@ -436,6 +436,82 @@ final class SearchToolTests: XCTestCase {
         XCTAssertLessThanOrEqual(queryCount, 5, "include_context ran \(queryCount) queries")
     }
 
+    func testIncludeContextWindowsArePerAnchorAndExact() async throws {
+        let fixture = try ToolTestDatabase(name: "search-ctx-windows")
+        try fixture.insertHandle(rowId: 1, handle: "+15550000001")
+        try fixture.insertChat(rowId: 1, guid: "chat-window-guid", displayName: "Windows")
+        try fixture.joinChatHandle(chatId: 1, handleId: 1)
+
+        let base: Int64 = 1_000_000_000_000
+        let minute: Int64 = 60_000_000_000
+        let anchorIndexes = Set([5, 15, 25])
+
+        for index in 0..<30 {
+            let text = anchorIndexes.contains(index) ? "anchorword \(index)" : "filler \(index)"
+            try fixture.insertMessage(
+                rowId: index + 1,
+                guid: "g\(index)",
+                text: text,
+                date: base + Int64(index) * minute,
+                isFromMe: false,
+                handleId: 1
+            )
+            try fixture.joinChatMessage(chatId: 1, messageId: index + 1)
+        }
+
+        try fixture.insertMessage(
+            rowId: 31,
+            guid: "g-reaction",
+            text: "loved",
+            date: base + 6 * minute,
+            isFromMe: false,
+            handleId: 1,
+            associatedMessageType: 2000
+        )
+        try fixture.joinChatMessage(chatId: 1, messageId: 31)
+
+        try fixture.insertMessage(
+            rowId: 32,
+            guid: "g-twin",
+            text: "twin 15",
+            date: base + 15 * minute,
+            isFromMe: false,
+            handleId: 1
+        )
+        try fixture.joinChatMessage(chatId: 1, messageId: 32)
+
+        let response = try await decodeSearchResponse(
+            SearchTool.execute(
+                query: "anchorword",
+                cursor: nil,
+                limit: 20,
+                sort: "recent_first",
+                format: "flat",
+                includeContext: true,
+                unanswered: false,
+                unansweredHours: 24,
+                matchAll: false,
+                fuzzy: false,
+                db: fixture.database(),
+                resolver: makeSeededResolver()
+            )
+        )
+        let results = try decodeJSONArray(try XCTUnwrap(response["results"]))
+        XCTAssertEqual(results.count, 3)
+
+        for index in [5, 15, 25] {
+            let result = try XCTUnwrap(
+                results.first(where: { ($0["excerpt"] as? String) == "anchorword \(index)" })
+            )
+            let before = try decodeJSONArray(result["context_before"]).compactMap { $0["text"] as? String }
+            let after = try decodeJSONArray(result["context_after"]).compactMap { $0["text"] as? String }
+            XCTAssertEqual(before, ["filler \(index - 2)", "filler \(index - 1)"])
+            XCTAssertEqual(after, ["filler \(index + 1)", "filler \(index + 2)"])
+            XCTAssertFalse(before.contains("loved") || after.contains("loved"))
+            XCTAssertFalse(before.contains("twin 15") || after.contains("twin 15"))
+        }
+    }
+
     func testUnansweredSkipsReplyWindowQueriesForNonQuestions() async throws {
         let fixture = try ToolTestDatabase(name: "search-unanswered-count")
         try fixture.insertHandle(rowId: 1, handle: "+15550000001")
@@ -606,6 +682,76 @@ final class SearchToolTests: XCTestCase {
             preview,
             ["Alice Smith", "Bob Brown", "Chris Green", "+3 more"]
         )
+    }
+
+    func testIsGroupFilterMatchesCountSemantics() async throws {
+        let fixture = try ToolTestDatabase(name: "search-is-group")
+        try fixture.insertHandle(rowId: 1, handle: "+15550000001")
+        try fixture.insertHandle(rowId: 2, handle: "+15550000002")
+
+        try fixture.insertChat(rowId: 1, guid: "chat-zero-guid", displayName: "Zero")
+        try fixture.insertMessage(
+            rowId: 1,
+            guid: "g-zero",
+            text: "grpword zero",
+            date: 1_000,
+            isFromMe: false,
+            handleId: 1
+        )
+        try fixture.joinChatMessage(chatId: 1, messageId: 1)
+
+        try fixture.insertChat(rowId: 2, guid: "chat-one-guid", displayName: "One")
+        try fixture.joinChatHandle(chatId: 2, handleId: 1)
+        try fixture.insertMessage(
+            rowId: 2,
+            guid: "g-one",
+            text: "grpword one",
+            date: 2_000,
+            isFromMe: false,
+            handleId: 1
+        )
+        try fixture.joinChatMessage(chatId: 2, messageId: 2)
+
+        try fixture.insertChat(rowId: 3, guid: "chat-two-guid", displayName: "Two")
+        try fixture.joinChatHandle(chatId: 3, handleId: 1)
+        try fixture.joinChatHandle(chatId: 3, handleId: 2)
+        try fixture.insertMessage(
+            rowId: 3,
+            guid: "g-two",
+            text: "grpword two",
+            date: 3_000,
+            isFromMe: false,
+            handleId: 1
+        )
+        try fixture.joinChatMessage(chatId: 3, messageId: 3)
+
+        func ids(_ isGroup: Bool?) async throws -> Set<String> {
+            let response = try await decodeSearchResponse(
+                SearchTool.execute(
+                    query: "grpword",
+                    isGroup: isGroup,
+                    cursor: nil,
+                    limit: 20,
+                    sort: "recent_first",
+                    format: "flat",
+                    includeContext: false,
+                    unanswered: false,
+                    unansweredHours: 24,
+                    matchAll: false,
+                    fuzzy: false,
+                    db: fixture.database(),
+                    resolver: makeSeededResolver()
+                )
+            )
+            return Set(try decodeJSONArray(try XCTUnwrap(response["results"])).compactMap { $0["id"] as? String })
+        }
+
+        let groups = try await ids(true)
+        let directs = try await ids(false)
+        let all = try await ids(nil)
+        XCTAssertEqual(groups, Set(["msg_3"]))
+        XCTAssertEqual(directs, Set(["msg_2"]))
+        XCTAssertEqual(all, Set(["msg_1", "msg_2", "msg_3"]))
     }
 }
 
