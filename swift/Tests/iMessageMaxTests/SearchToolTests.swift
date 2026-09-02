@@ -683,6 +683,76 @@ final class SearchToolTests: XCTestCase {
             ["Alice Smith", "Bob Brown", "Chris Green", "+3 more"]
         )
     }
+
+    func testIsGroupFilterMatchesCountSemantics() async throws {
+        let fixture = try ToolTestDatabase(name: "search-is-group")
+        try fixture.insertHandle(rowId: 1, handle: "+15550000001")
+        try fixture.insertHandle(rowId: 2, handle: "+15550000002")
+
+        try fixture.insertChat(rowId: 1, guid: "chat-zero-guid", displayName: "Zero")
+        try fixture.insertMessage(
+            rowId: 1,
+            guid: "g-zero",
+            text: "grpword zero",
+            date: 1_000,
+            isFromMe: false,
+            handleId: 1
+        )
+        try fixture.joinChatMessage(chatId: 1, messageId: 1)
+
+        try fixture.insertChat(rowId: 2, guid: "chat-one-guid", displayName: "One")
+        try fixture.joinChatHandle(chatId: 2, handleId: 1)
+        try fixture.insertMessage(
+            rowId: 2,
+            guid: "g-one",
+            text: "grpword one",
+            date: 2_000,
+            isFromMe: false,
+            handleId: 1
+        )
+        try fixture.joinChatMessage(chatId: 2, messageId: 2)
+
+        try fixture.insertChat(rowId: 3, guid: "chat-two-guid", displayName: "Two")
+        try fixture.joinChatHandle(chatId: 3, handleId: 1)
+        try fixture.joinChatHandle(chatId: 3, handleId: 2)
+        try fixture.insertMessage(
+            rowId: 3,
+            guid: "g-two",
+            text: "grpword two",
+            date: 3_000,
+            isFromMe: false,
+            handleId: 1
+        )
+        try fixture.joinChatMessage(chatId: 3, messageId: 3)
+
+        func ids(_ isGroup: Bool?) async throws -> Set<String> {
+            let response = try await decodeSearchResponse(
+                SearchTool.execute(
+                    query: "grpword",
+                    isGroup: isGroup,
+                    cursor: nil,
+                    limit: 20,
+                    sort: "recent_first",
+                    format: "flat",
+                    includeContext: false,
+                    unanswered: false,
+                    unansweredHours: 24,
+                    matchAll: false,
+                    fuzzy: false,
+                    db: fixture.database(),
+                    resolver: makeSeededResolver()
+                )
+            )
+            return Set(try decodeJSONArray(try XCTUnwrap(response["results"])).compactMap { $0["id"] as? String })
+        }
+
+        let groups = try await ids(true)
+        let directs = try await ids(false)
+        let all = try await ids(nil)
+        XCTAssertEqual(groups, Set(["msg_3"]))
+        XCTAssertEqual(directs, Set(["msg_2"]))
+        XCTAssertEqual(all, Set(["msg_1", "msg_2", "msg_3"]))
+    }
 }
 
 func decodeSearchResponse(_ result: Result<String, SearchError>) throws -> [String: Any] {
