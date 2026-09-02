@@ -433,8 +433,6 @@ final class SearchToolTests: XCTestCase {
         )
     }
 
-    /// Documents the N+1: one participants query per unnamed chat. Step 3
-    /// flips GreaterThan to a constant LessThanOrEqual bound.
     func testGroupedSearchUsesConstantQueriesAcrossUnnamedChats() async throws {
         let fixture = try ToolTestDatabase(name: "search-grouped-batchname")
         try fixture.insertHandle(rowId: 1, handle: "+15550000001")
@@ -481,13 +479,13 @@ final class SearchToolTests: XCTestCase {
             XCTAssertNotEqual(name, "Unknown Chat")
         }
         let queryCount = try XCTUnwrap(Database.queryCountForTesting)
-        XCTAssertGreaterThan(queryCount, 8, "grouped search ran \(queryCount) queries")
+        // 2 queries: search rows, participantsByChat. recentSendersByChat
+        // is skipped because every chat is unnamed.
+        XCTAssertLessThanOrEqual(queryCount, 2, "grouped search ran \(queryCount) queries")
     }
 
     /// Unnamed 6-handle chat. Recency is handles 6, 5, 4; prioritized is
-    /// Alice, Bob, Chris. Current grouped search passes the generated name
-    /// as explicitName, so the preview is recency. Step 4 flips this
-    /// assertion to the prioritized order.
+    /// Alice, Bob, Chris. Generated names must not become explicitName.
     func testGroupedSearchUnnamedChatIsNotNamed() async throws {
         let fixture = try ToolTestDatabase(name: "search-grouped-unnamed-large")
         for rowId in 1...6 {
@@ -538,7 +536,7 @@ final class SearchToolTests: XCTestCase {
         let preview = try XCTUnwrap(chats.first?["participants_preview"] as? [String])
         XCTAssertEqual(
             preview,
-            ["+1 (555) 000-0006", "+1 (555) 000-0005", "+1 (555) 000-0004", "+3 more"]
+            ["Alice Smith", "Bob Brown", "Chris Green", "+3 more"]
         )
     }
 }
