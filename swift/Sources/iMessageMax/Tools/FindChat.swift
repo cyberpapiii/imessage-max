@@ -526,32 +526,18 @@ enum FindChatTool {
 
         var results: [ChatResult] = []
         for chat in chats {
-            let participantRows = (participantsByChat[chat.id] ?? []).sorted { $0.handle < $1.handle }
-
-            var participants: [ChatParticipant] = []
-            var identityParticipants: [ChatIdentity.Participant] = []
-            for p in participantRows {
-                let identityParticipant = ChatIdentity.makeParticipant(
-                    handle: p.handle,
-                    contactName: p.name
-                )
-                participants.append(ChatParticipant(name: identityParticipant.displayName, handle: p.handle))
-                identityParticipants.append(identityParticipant)
-            }
-
-            let isGroup = participants.count > 1
-            let identity = ChatIdentity(
-                mcpId: "chat\(chat.id)",
+            let identity = ChatIdentity.from(
+                chatId: chat.id,
                 guid: chat.guid,
                 explicitName: chat.displayName,
-                participants: identityParticipants
+                rows: participantsByChat[chat.id] ?? []
             )
 
             results.append(
                 ChatResult(
                     id: identity.mcpId,
                     name: identity.displayName,
-                    group: isGroup ? true : nil,
+                    group: identity.participantCount > 1 ? true : nil,
                     participantCount: identity.participantCount,
                     participantsPreview: try ChatSummaryBuilder.participantsPreview(
                         db: database,
@@ -560,7 +546,7 @@ enum FindChatTool {
                         recentSenders: recentSendersByChat[chat.id]
                     ),
                     lastMessage: lastByChat[chat.id]?.info,
-                    participants: participants,
+                    participants: IdentityDisplayFormatter.participants(identity.participants),
                     match: MatchInfo(type: matchType),
                     identity: identity
                 )

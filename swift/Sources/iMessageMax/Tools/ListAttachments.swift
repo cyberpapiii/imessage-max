@@ -512,14 +512,14 @@ final class ListAttachments {
         explicitName: String?,
         cache: inout [Int64: String]
     ) async throws -> String {
+        if let cached = cache[chatId] {
+            return cached
+        }
+
         let trimmed = explicitName?.trimmingCharacters(in: .whitespacesAndNewlines)
         if let trimmed, !trimmed.isEmpty {
             cache[chatId] = trimmed
             return trimmed
-        }
-
-        if let cached = cache[chatId] {
-            return cached
         }
 
         let rows = try await ChatSummaryQueries.participants(
@@ -527,13 +527,14 @@ final class ListAttachments {
             chatId: chatId,
             resolver: resolver
         )
-        let names = rows.map {
-            $0.name ?? PhoneUtils.formatDisplay($0.handle)
-        }.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
-
-        let generated = DisplayNameGenerator.fromNames(names)
-        cache[chatId] = generated
-        return generated
+        let name = ChatIdentity.from(
+            chatId: chatId,
+            guid: nil,
+            explicitName: explicitName,
+            rows: rows
+        ).displayName
+        cache[chatId] = name
+        return name
     }
 
 }

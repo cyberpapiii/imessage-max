@@ -563,13 +563,11 @@ extension SearchTool {
         }
         var result: [Int64: ChatIdentity] = [:]
         for chatId in chatIds {
-            result[chatId] = ChatIdentity(
-                mcpId: "chat\(chatId)",
+            result[chatId] = ChatIdentity.from(
+                chatId: chatId,
                 guid: nil,
                 explicitName: explicitNameByChat[chatId] ?? nil,
-                participants: (participantsByChat[chatId] ?? []).map {
-                    ChatIdentity.makeParticipant(handle: $0.handle, contactName: $0.name)
-                }
+                rows: participantsByChat[chatId] ?? []
             )
         }
         return result

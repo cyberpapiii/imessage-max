@@ -84,7 +84,6 @@ final class FindChatToolTests: XCTestCase {
         XCTAssertEqual(chats.first?["name"] as? String, "Sukhmani Kular")
     }
 
-    // Fails until Step 5.
     func testFindChatDisambiguatesDuplicateDisplayNames() async throws {
         let fixture = try ToolTestDatabase(name: "find-chat-alex-doe")
         try fixture.insertHandle(rowId: 11, handle: "+15550000011")

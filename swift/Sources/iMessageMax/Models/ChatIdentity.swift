@@ -45,6 +45,22 @@ struct ChatIdentity: Codable {
         )
     }
 
+    /// Builds an identity from the batched participant rows so every tool
+    /// produces the same name for the same chat.
+    static func from(
+        chatId: Int64,
+        guid: String?,
+        explicitName: String?,
+        rows: [ChatSummaryQueries.Participant]
+    ) -> ChatIdentity {
+        ChatIdentity(
+            mcpId: "chat\(chatId)",
+            guid: guid,
+            explicitName: explicitName,
+            participants: rows.map { makeParticipant(handle: $0.handle, contactName: $0.name) }
+        )
+    }
+
     static func sortParticipants(_ participants: [Participant]) -> [Participant] {
         participants.sorted {
             let lhsName = $0.displayName.localizedCaseInsensitiveCompare($1.displayName)
