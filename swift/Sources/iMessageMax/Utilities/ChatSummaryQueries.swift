@@ -118,6 +118,49 @@ enum ChatSummaryQueries {
         return result
     }
 
+    /// Most-recent inbound sender handles per chat, newest first, at most
+    /// `perChatLimit` rows per chat. Reactions and outbound rows excluded.
+    static func recentSendersByChat(
+        db: Database,
+        chatIds: [Int64],
+        perChatLimit: Int = 50
+    ) throws -> [Int64: [String]] {
+        guard !chatIds.isEmpty else { return [:] }
+
+        let placeholders = chatIds.map { _ in "?" }.joined(separator: ",")
+        let sql = """
+            SELECT chat_id, sender_handle FROM (
+              SELECT cmj.chat_id AS chat_id,
+                     h.id AS sender_handle,
+                     ROW_NUMBER() OVER (PARTITION BY cmj.chat_id ORDER BY m.date DESC, m.ROWID DESC) AS rn
+              FROM message m
+              JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
+              LEFT JOIN handle h ON m.handle_id = h.ROWID
+              WHERE cmj.chat_id IN (\(placeholders))
+                AND m.associated_message_type = 0
+                AND m.is_from_me = 0
+                AND h.id IS NOT NULL
+            )
+            WHERE rn <= ?
+            ORDER BY chat_id, rn
+            """
+
+        var params: [Any] = chatIds.map { $0 as Any }
+        params.append(perChatLimit)
+
+        var result: [Int64: [String]] = [:]
+        for chatId in chatIds {
+            result[chatId] = []
+        }
+        let rows = try db.query(sql, params: params) { row in
+            (chatId: row.int(0), handle: row.string(1) ?? "")
+        }
+        for row in rows {
+            result[row.chatId, default: []].append(row.handle)
+        }
+        return result
+    }
+
     /// Newest `message.date` keyed by chat ID. Same join as the former
     /// per-chat `MAX(m.date)` lookup: `chat_message_join` to `message`.
     static func lastMessageDatesByChat(
@@ -303,6 +346,11 @@ enum ChatSummaryQueries {
             )
         }
 
+        let typesByMessage = try MessagePreviewResolver.attachmentTypesByMessage(
+            db: db,
+            messageIds: rows.map(\.messageId)
+        )
+
         var result: [Int64: LastMessage] = [:]
         for row in rows {
             // Sender logic shared by both list tools; only the unknown label differs.
@@ -322,12 +370,11 @@ enum ChatSummaryQueries {
 
             let summary = LastMessageSummary(
                 from: sender,
-                text: try MessagePreviewResolver.messageSummary(
-                    db: db,
-                    messageId: row.messageId,
+                text: MessagePreviewResolver.messageSummary(
                     text: row.text,
                     attributedBody: row.attributedBody,
-                    maxLength: previewMaxLength
+                    maxLength: previewMaxLength,
+                    attachmentTypes: typesByMessage[row.messageId] ?? []
                 ),
                 ago: ago,
                 ts: TimeUtils.formatISO(date)

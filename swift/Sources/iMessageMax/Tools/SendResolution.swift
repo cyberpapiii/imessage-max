@@ -61,32 +61,29 @@ actor SendResolver {
                 return .failure("Chat has no guid and cannot be targeted exactly: \(chatId)")
             }
 
-            let participants = try await ChatSummaryQueries.participants(
+            let rows = try await ChatSummaryQueries.participants(
                 db: db,
                 chatId: Int64(numericId),
                 resolver: resolver
-            ).sorted { $0.handle < $1.handle }
-            guard !participants.isEmpty else {
+            )
+            guard !rows.isEmpty else {
                 return .failure("No participants found for chat: \(chatId)")
             }
 
-            let displayNames = participants.map {
-                IdentityDisplayFormatter.displayName(handle: $0.handle, contactName: $0.name)
-            }
+            let identity = ChatIdentity.from(
+                chatId: Int64(numericId),
+                guid: guid,
+                explicitName: chat.displayName,
+                rows: rows
+            )
 
             return .success(
                 SendResolution.ResolvedTarget(
                     target: .chat(guid: guid, chatId: numericId),
-                    deliveredTo: displayNames,
+                    deliveredTo: identity.participants.map(\.displayName),
                     chat: ChatReference(
-                        id: "chat\(numericId)",
-                        name: {
-                            let trimmed = chat.displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
-                            if let trimmed, !trimmed.isEmpty {
-                                return trimmed
-                            }
-                            return DisplayNameGenerator.fromNames(displayNames)
-                        }()
+                        id: identity.mcpId,
+                        name: identity.displayName
                     )
                 )
             )

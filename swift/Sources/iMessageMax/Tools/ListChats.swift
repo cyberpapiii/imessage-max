@@ -433,6 +433,16 @@ enum ListChatsTool {
                 resolver: resolver,
                 newestDates: newestDates
             )
+            let recentSenderChatIds = chatRows.compactMap { row -> Int64? in
+                let trimmed = row.displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
+                let isNamed = trimmed?.isEmpty == false
+                let count = (participantsByChat[row.id] ?? []).count
+                return (isNamed && count > 4) ? row.id : nil
+            }
+            let recentSendersByChat = try ChatSummaryQueries.recentSendersByChat(
+                db: db,
+                chatIds: recentSenderChatIds
+            )
 
             var chats: [ChatInfo] = []
 
@@ -461,7 +471,8 @@ enum ListChatsTool {
                     participantsPreview: try ChatSummaryBuilder.participantsPreview(
                         db: db,
                         chatId: chatRow.id,
-                        identity: identity
+                        identity: identity,
+                        recentSenders: recentSendersByChat[chatRow.id]
                     ),
                     lastMessage: lastMsg?.info,
                     awaitingReply: lastMsg?.awaitingReply

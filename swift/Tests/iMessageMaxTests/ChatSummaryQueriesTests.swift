@@ -156,6 +156,233 @@ final class ChatSummaryQueriesTests: XCTestCase {
         XCTAssertFalse(preview.contains(where: { $0.contains("(0001)") }))
     }
 
+    /// Named chat, six handles. Newest 50 inbound are handles 3, 3, 5, 1;
+    /// an outbound row and a reaction from handle 6 must not change the
+    /// preview. First three distinct inbound senders, then "+3 more".
+    func testRecentSenderPreviewKeepsFirstThreeDistinctInboundThenBackfills() async throws {
+        let fixture = try makeRecentSenderPreviewFixture(displayName: "Big Group")
+        let db = fixture.database()
+        let identity = try await makeIdentityFromParticipants(
+            db: db,
+            chatId: 10,
+            explicitName: "Big Group"
+        )
+        XCTAssertTrue(identity.isNamed)
+        XCTAssertEqual(identity.participantCount, 6)
+
+        let preview = try ChatSummaryBuilder.participantsPreview(db: db, chatId: 10, identity: identity)
+        XCTAssertEqual(
+            preview,
+            ["Chris Green", "+1 (555) 000-0005", "Alice Smith", "+3 more"]
+        )
+    }
+
+    /// Same fixture, unnamed. Preview is contact-named then alphabetical,
+    /// not recency (which would be Chris, +1 (555) 000-0005, Alice).
+    func testUnnamedChatPreviewIgnoresRecency() async throws {
+        let fixture = try makeRecentSenderPreviewFixture(displayName: nil)
+        let db = fixture.database()
+        let identity = try await makeIdentityFromParticipants(
+            db: db,
+            chatId: 10,
+            explicitName: nil
+        )
+        XCTAssertFalse(identity.isNamed)
+        XCTAssertEqual(identity.participantCount, 6)
+
+        let preview = try ChatSummaryBuilder.participantsPreview(db: db, chatId: 10, identity: identity)
+        XCTAssertEqual(
+            preview,
+            ["Alice Smith", "Bob Brown", "Chris Green", "+3 more"]
+        )
+    }
+
+    /// Six handles, inbound recency 3 / 3 / 5 / 1, plus ignored outbound
+    /// and reaction rows. Shared by the named and unnamed preview tests.
+    private func makeRecentSenderPreviewFixture(displayName: String?) throws -> ToolTestDatabase {
+        let fixture = try ToolTestDatabase(name: displayName == nil ? "csq-preview-unnamed" : "csq-preview-named")
+        for rowId in 1...6 {
+            try fixture.insertHandle(rowId: rowId, handle: "+1555000000\(rowId)")
+        }
+        try fixture.insertChat(rowId: 10, guid: "chat-10-guid", displayName: displayName)
+        for rowId in 1...6 {
+            try fixture.joinChatHandle(chatId: 10, handleId: rowId)
+        }
+
+        let base: Int64 = 700_000_000_000_000_000
+        let sec: Int64 = 1_000_000_000
+
+        // Newest first among inbound non-reactions: handle 3, 3, 5, 1.
+        let inbound: [(Int, Int, Int64)] = [
+            (101, 3, base + (4 * sec)),
+            (102, 3, base + (3 * sec)),
+            (103, 5, base + (2 * sec)),
+            (104, 1, base + sec),
+        ]
+        for (rowId, handleId, date) in inbound {
+            try fixture.insertMessage(
+                rowId: rowId,
+                guid: "msg-\(rowId)",
+                text: "inbound \(rowId)",
+                date: date,
+                isFromMe: false,
+                handleId: handleId
+            )
+            try fixture.joinChatMessage(chatId: 10, messageId: rowId)
+        }
+
+        try fixture.insertMessage(
+            rowId: 105,
+            guid: "msg-from-me",
+            text: "outbound",
+            date: base + (5 * sec),
+            isFromMe: true
+        )
+        try fixture.joinChatMessage(chatId: 10, messageId: 105)
+
+        try fixture.insertMessage(
+            rowId: 106,
+            guid: "msg-reaction",
+            text: nil,
+            date: base + (6 * sec),
+            isFromMe: false,
+            handleId: 6,
+            associatedMessageType: 2000,
+            associatedMessageGuid: "msg-101"
+        )
+        try fixture.joinChatMessage(chatId: 10, messageId: 106)
+
+        return fixture
+    }
+
+    private func makeIdentityFromParticipants(
+        db: Database,
+        chatId: Int64,
+        explicitName: String?
+    ) async throws -> ChatIdentity {
+        let rows = try await ChatSummaryQueries.participants(
+            db: db,
+            chatId: chatId,
+            resolver: makeSeededResolver()
+        )
+        return ChatIdentity(
+            mcpId: "chat\(chatId)",
+            guid: "chat-\(chatId)-guid",
+            explicitName: explicitName,
+            participants: rows.map {
+                ChatIdentity.makeParticipant(handle: $0.handle, contactName: $0.name)
+            }
+        )
+    }
+
+    /// Two chats, interleaved inbound dates. Newest handle wins per chat;
+    /// a reaction row is excluded. Same-date tie breaks on higher ROWID.
+    func testRecentSendersByChatOrdersNewestFirstPerChat() throws {
+        let fixture = try ToolTestDatabase(name: "csq-recent-senders")
+        try fixture.insertHandle(rowId: 1, handle: "+15550000001")
+        try fixture.insertHandle(rowId: 2, handle: "+15550000002")
+        try fixture.insertHandle(rowId: 3, handle: "+15550000003")
+        try fixture.insertChat(rowId: 10, guid: "chat-10-guid")
+        try fixture.insertChat(rowId: 20, guid: "chat-20-guid")
+        try fixture.joinChatHandle(chatId: 10, handleId: 1)
+        try fixture.joinChatHandle(chatId: 10, handleId: 2)
+        try fixture.joinChatHandle(chatId: 20, handleId: 3)
+
+        let base: Int64 = 700_000_000_000_000_000
+        let sec: Int64 = 1_000_000_000
+
+        // Chat 10: handle 2 newest, then handle 1. Same-date pair: higher ROWID wins.
+        try fixture.insertMessage(
+            rowId: 101,
+            guid: "c10-old",
+            text: "alice older",
+            date: base,
+            isFromMe: false,
+            handleId: 1
+        )
+        try fixture.joinChatMessage(chatId: 10, messageId: 101)
+        try fixture.insertMessage(
+            rowId: 102,
+            guid: "c10-tie-loser",
+            text: "alice tie",
+            date: base + sec,
+            isFromMe: false,
+            handleId: 1
+        )
+        try fixture.joinChatMessage(chatId: 10, messageId: 102)
+        try fixture.insertMessage(
+            rowId: 103,
+            guid: "c10-tie-winner",
+            text: "bob tie",
+            date: base + sec,
+            isFromMe: false,
+            handleId: 2
+        )
+        try fixture.joinChatMessage(chatId: 10, messageId: 103)
+        try fixture.insertMessage(
+            rowId: 104,
+            guid: "c10-reaction",
+            text: nil,
+            date: base + (2 * sec),
+            isFromMe: false,
+            handleId: 1,
+            associatedMessageType: 2000,
+            associatedMessageGuid: "c10-tie-winner"
+        )
+        try fixture.joinChatMessage(chatId: 10, messageId: 104)
+
+        // Chat 20 interleaved later than chat 10's newest inbound.
+        try fixture.insertMessage(
+            rowId: 201,
+            guid: "c20-chris",
+            text: "chris",
+            date: base + (3 * sec),
+            isFromMe: false,
+            handleId: 3
+        )
+        try fixture.joinChatMessage(chatId: 20, messageId: 201)
+
+        let result = try ChatSummaryQueries.recentSendersByChat(
+            db: fixture.database(),
+            chatIds: [10, 20]
+        )
+        XCTAssertEqual(result[10], ["+15550000002", "+15550000001", "+15550000001"])
+        XCTAssertEqual(result[20], ["+15550000003"])
+        XCTAssertEqual(result[10]?.count, 3, "reaction must not add a fourth inbound handle")
+    }
+
+    /// Attachment-only newest message: no text, one image. Preview is [Photo].
+    func testLastMessagesByChatUsesAttachmentPlaceholderWhenTextMissing() async throws {
+        let fixture = try ToolTestDatabase(name: "csq-last-photo")
+        let resolver = makeSeededResolver()
+        try fixture.insertHandle(rowId: 1, handle: "+15550000001")
+        try fixture.insertChat(rowId: 10, guid: "chat-10-guid")
+        try fixture.joinChatHandle(chatId: 10, handleId: 1)
+        try fixture.insertMessage(
+            rowId: 100,
+            guid: "photo-msg",
+            text: nil,
+            date: 700_000_000_000_000_000,
+            isFromMe: false,
+            handleId: 1
+        )
+        try fixture.joinChatMessage(chatId: 10, messageId: 100)
+        try fixture.insertAttachment(
+            rowId: 1,
+            filename: "photo.jpg",
+            mimeType: "image/jpeg",
+            uti: "public.jpeg"
+        )
+        try fixture.joinMessageAttachment(messageId: 100, attachmentId: 1)
+
+        let result = try await ChatSummaryQueries.lastMessagesByChat(
+            db: fixture.database(),
+            chatIds: [10],
+            resolver: resolver
+        )
+        XCTAssertEqual(result[10]?.info.text, "[Photo]")
+    }
+
     /// Builds a `ChatIdentity` the way the non-batched tools still do: a
     /// plain join over chat_handle_join with no de-duplication.
     private func makeIdentityFromRawJoinRows(

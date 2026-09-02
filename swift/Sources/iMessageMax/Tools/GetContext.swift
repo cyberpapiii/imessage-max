@@ -463,21 +463,17 @@ enum GetContext {
         database: Database,
         resolver: ContactResolver
     ) async throws -> String {
-        let trimmed = explicitName?.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let trimmed, !trimmed.isEmpty {
-            return trimmed
-        }
-
         let rows = try await ChatSummaryQueries.participants(
             db: database,
             chatId: chatId,
             resolver: resolver
-        ).sorted { $0.handle < $1.handle }
-
-        let names = rows.map {
-            IdentityDisplayFormatter.displayName(handle: $0.handle, contactName: $0.name)
-        }
-        return DisplayNameGenerator.fromNames(names)
+        )
+        return ChatIdentity.from(
+            chatId: chatId,
+            guid: nil,
+            explicitName: explicitName,
+            rows: rows
+        ).displayName
     }
 
 }

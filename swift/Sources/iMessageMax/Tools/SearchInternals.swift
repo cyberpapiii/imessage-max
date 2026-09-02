@@ -184,7 +184,7 @@ extension SearchTool {
         resolver: ContactResolver
     ) async throws -> String {
         var results: [SearchResult] = []
-        var chatNamesCache: [Int64: String] = [:]
+        let identityByChat = try await identitiesByChat(db: db, rows: rows, resolver: resolver)
         var contextByAnchor: [String: (before: [SearchContextMessage], after: [SearchContextMessage])] = [:]
         if includeContext {
             let anchors = rows.compactMap { row -> (chatId: Int64, date: Int64)? in
@@ -203,22 +203,11 @@ extension SearchTool {
                 resolver: resolver
             )
 
-            var chatName = row.chatDisplayName
-            if chatName == nil || chatName?.isEmpty == true {
-                if let cached = chatNamesCache[row.chatId] {
-                    chatName = cached
-                } else {
-                    let generatedName = try await generateChatDisplayName(
-                        db: db, chatId: row.chatId, resolver: resolver
-                    )
-                    chatNamesCache[row.chatId] = generatedName
-                    chatName = generatedName
-                }
-            }
+            let chatName = identityByChat[row.chatId]?.displayName ?? "Unknown Chat"
 
             var result = SearchResult(
                 id: "msg_\(row.msgId)",
-                chat: ChatReference(id: "chat\(row.chatId)", name: chatName ?? "Unknown Chat"),
+                chat: ChatReference(id: "chat\(row.chatId)", name: chatName),
                 from: senderName,
                 excerpt: makeExcerpt(text: text, query: query),
                 ago: TimeUtils.formatCompactRelative(msgDate),
@@ -255,8 +244,23 @@ extension SearchTool {
         resolver: ContactResolver
     ) async throws -> String {
         var chatsData: [Int64: GroupedChatData] = [:]
-        var chatNamesCache: [Int64: String] = [:]
-        var chatSummaryCache: [Int64: ChatSummary] = [:]
+        let identityByChat = try await identitiesByChat(db: db, rows: rows, resolver: resolver)
+        let recentSenderChatIds = identityByChat.compactMap { chatId, identity -> Int64? in
+            (identity.isNamed && identity.participantCount > 4) ? chatId : nil
+        }
+        let recentSendersByChat = try ChatSummaryQueries.recentSendersByChat(
+            db: db,
+            chatIds: recentSenderChatIds
+        )
+        var summaryByChat: [Int64: ChatSummary] = [:]
+        for (chatId, identity) in identityByChat {
+            summaryByChat[chatId] = try ChatSummaryBuilder.buildSummary(
+                db: db,
+                chatId: chatId,
+                identity: identity,
+                recentSenders: recentSendersByChat[chatId]
+            )
+        }
 
         for row in rows {
             let chatId = row.chatId
@@ -268,32 +272,7 @@ extension SearchTool {
             let text = MessageTextExtractor.extract(text: row.text, attributedBody: row.attributedBody)
             let msgDate = AppleTime.toDate(row.date)
 
-            var chatName = row.chatDisplayName
-            if chatName == nil || chatName?.isEmpty == true {
-                if let cached = chatNamesCache[chatId] {
-                    chatName = cached
-                } else {
-                    let generatedName = try await generateChatDisplayName(
-                        db: db, chatId: chatId, resolver: resolver
-                    )
-                    chatNamesCache[chatId] = generatedName
-                    chatName = generatedName
-                }
-            }
-
-            let chatSummary: ChatSummary
-            if let cached = chatSummaryCache[chatId] {
-                chatSummary = cached
-            } else {
-                let summary = try await buildChatSummary(
-                    db: db,
-                    chatId: chatId,
-                    explicitName: chatName,
-                    resolver: resolver
-                )
-                chatSummaryCache[chatId] = summary
-                chatSummary = summary
-            }
+            guard let chatSummary = summaryByChat[chatId] else { continue }
 
             if chatsData[chatId] == nil {
                 chatsData[chatId] = GroupedChatData(
@@ -567,28 +546,31 @@ extension SearchTool {
         return await IdentityDisplayFormatter.displayName(handle: handle, resolver: resolver)
     }
 
-    static func buildChatSummary(
+    static func identitiesByChat(
         db: Database,
-        chatId: Int64,
-        explicitName: String?,
+        rows: [SearchRow],
         resolver: ContactResolver
-    ) async throws -> ChatSummary {
-        let participants = try await ChatSummaryQueries.participants(
+    ) async throws -> [Int64: ChatIdentity] {
+        let chatIds = Array(Set(rows.map(\.chatId)))
+        let participantsByChat = try await ChatSummaryQueries.participantsByChat(
             db: db,
-            chatId: chatId,
+            chatIds: chatIds,
             resolver: resolver
         )
-        let identityParticipants = participants.map {
-            ChatIdentity.makeParticipant(handle: $0.handle, contactName: $0.name)
+        var explicitNameByChat: [Int64: String?] = [:]
+        for row in rows where explicitNameByChat[row.chatId] == nil {
+            explicitNameByChat[row.chatId] = row.chatDisplayName
         }
-
-        let identity = ChatIdentity(
-            mcpId: "chat\(chatId)",
-            guid: nil,
-            explicitName: explicitName,
-            participants: identityParticipants
-        )
-        return try ChatSummaryBuilder.buildSummary(db: db, chatId: chatId, identity: identity)
+        var result: [Int64: ChatIdentity] = [:]
+        for chatId in chatIds {
+            result[chatId] = ChatIdentity.from(
+                chatId: chatId,
+                guid: nil,
+                explicitName: explicitNameByChat[chatId] ?? nil,
+                rows: participantsByChat[chatId] ?? []
+            )
+        }
+        return result
     }
 
     static func wordMatches(searchWord: String, in text: String, textWords: [String], fuzzy: Bool) -> Bool {
@@ -639,33 +621,6 @@ extension SearchTool {
         }
 
         return prevRow[n]
-    }
-
-    static func generateChatDisplayName(
-        db: Database,
-        chatId: Int64,
-        resolver: ContactResolver
-    ) async throws -> String {
-        let participants = try await ChatSummaryQueries.participants(
-            db: db,
-            chatId: chatId,
-            resolver: resolver
-        )
-
-        if participants.isEmpty {
-            return "Unknown Chat"
-        }
-
-        var names: [String] = []
-        for participant in participants {
-            if let name = participant.name {
-                names.append(name.split(separator: " ").first.map(String.init) ?? name)
-            } else {
-                names.append(PhoneUtils.formatDisplay(participant.handle))
-            }
-        }
-
-        return DisplayNameGenerator.fromNames(names)
     }
 
     static func resolveFromPersonFilter(
