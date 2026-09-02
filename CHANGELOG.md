@@ -1,5 +1,40 @@
 # Changelog
 
+## 1.6.0
+
+### Added
+
+- `get_messages` renders group system messages (renames, member adds and removes) as a typed `event` object instead of null-text rows; previews describe them too.
+- Messages carry `reply_to`, `reply_count`, and `edited`, mirrored onto `search` and `get_context` results.
+- Custom emoji and sticker reactions are surfaced, and reaction removals are applied.
+- `list_chats`, `search`, `get_unread`, and `find_chat` hide Apple-flagged filtered chats by default, report the hidden count as `filtered_hidden`, and accept `include_filtered`.
+- `get_context contains` searches past the newest 500 messages and reports `not_found_in_window` at the cap.
+
+### Removed
+
+- The `reply_to` parameter on `send`. It was never implemented; the Messages scripting interface has no reply primitive.
+
+### Fixes
+
+- Paginated tools derive `more` from the cursor, so `more:true` with a null cursor no longer appears on a no-message tail.
+- `ChatIdentifier` rejects sign-prefixed row ids; `get_unread chat_not_found` is valid JSON; `queryFailed` and `invalidData` map to the fixed internal-error text.
+- `Database.prepare` checks every `sqlite3_bind_*` return code.
+- `terminateSession` removes the session before stopping its server; `ResumeGate.arm` no longer enqueues a timer for an already-resumed task.
+- HTTP request body reads are bounded by a 408 deadline; the Hummingbird idle timeout is enabled on the HTTP1 channel.
+- `diagnose` reports contacts as `skipped_ci` when the CI guard is active.
+
+### Performance
+
+- Recent senders and attachment types are prefetched once per page in `list_chats`, `find_chat`, `get_active_conversations`, and `get_unread`.
+- Search bounds context windows per anchor, builds the link detector and preview regexes once, and produces one `ChatIdentity` per chat.
+
+### Internals and DX
+
+- `ChatIdentity` is the only chat display-name producer.
+- `PendingRequestRegistry` and request parsing are extracted from `HTTPTransport`; `list_attachments` and `get_active_conversations` use `QueryBuilder`.
+- Release workflow times out, checks the tag, asserts the version, and publishes the tarball sha256; actions are SHA-pinned with Dependabot; the Formula is part of the version check.
+- Spike findings for a one-call catch-up sweep and send delivery semantics live under `docs/plans/`.
+
 ## 1.5.0
 
 Breaking for the install base: the deployment floor is **macOS 15** (Homebrew `:sequoia`), Swift tools-version 6.3, and dependencies were bumped (hummingbird 2.26, swift-sdk 0.12.1, argument-parser 1.8.2).
