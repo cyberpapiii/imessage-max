@@ -88,4 +88,22 @@ final class DiagnoseToolTests: XCTestCase {
         XCTAssertEqual(second.capabilities["perm_full_disk"]?.state, "supported")
         XCTAssertEqual(counter.calls, 2)
     }
+
+    /// The fix must say which process to grant, what to do about a stale
+    /// entry, that the grant only applies to newly launched processes, and
+    /// how to bisect between "this user lacks FDA" and "this process lacks FDA".
+    func testPermissionDeniedFixIsActionable() async throws {
+        let (result, json) = try await encodedResponse(dbProbe: DiagnoseToolTests.dbDenied)
+        let fix = try XCTUnwrap(result.database.fix)
+
+        XCTAssertTrue(fix.contains("Full Disk Access"), fix)
+        XCTAssertTrue(fix.contains("toggle it off and on"), fix)
+        XCTAssertTrue(fix.contains("launchctl kickstart -k gui/$(id -u)/local.imessage-max"), fix)
+        XCTAssertTrue(fix.contains("pragma quick_check"), fix)
+        XCTAssertTrue(fix.contains("newly launched"), fix)
+        XCTAssertEqual(result.capabilities["perm_full_disk"]?.fix, fix,
+                       "perm_full_disk.fix must carry the same remediation")
+
+        XCTAssertFalse(json.contains(NSHomeDirectory()), "fix must not leak the home directory: \(json)")
+    }
 }

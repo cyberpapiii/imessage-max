@@ -101,6 +101,29 @@ enum DiagnoseTool {
         }
     }
 
+    /// The process that opens chat.db is the one that needs the grant. For
+    /// the launchd service that is the release binary; for stdio it is the
+    /// binary the MCP client spawned. Tilde-abbreviated: diagnose must not
+    /// echo the username (DiagnoseToolTests.testResponseDoesNotContainHomeDirectory).
+    static var executableForGrant: String {
+        let raw = Bundle.main.executablePath ?? CommandLine.arguments.first ?? "imessage-max"
+        return (raw as NSString).abbreviatingWithTildeInPath
+    }
+
+    static func fullDiskAccessFix(executable: String = executableForGrant) -> String {
+        "Full Disk Access is missing for the process reading chat.db (\(executable)). "
+            + "1) System Settings -> Privacy & Security -> Full Disk Access -> add that executable "
+            + "(or the app that launches it, such as Terminal). "
+            + "2) If it is already listed, toggle it off and on: a grant bound to an older "
+            + "code signature looks present but does not work. "
+            + "3) The grant applies only to newly launched processes; relaunch this server: "
+            + "launchctl kickstart -k gui/$(id -u)/local.imessage-max (or `make restart` in swift/), "
+            + "or reconnect the MCP client for stdio. "
+            + "4) To bisect, run sqlite3 -readonly ~/Library/Messages/chat.db 'pragma quick_check;' "
+            + "from a terminal: 'ok' means the terminal has access and this process does not; "
+            + "'unable to open database file' means the user lacks it everywhere."
+    }
+
     /// All three probes are injectable for testability. CI runners return
     /// "not_determined" for automation and may lack Full Disk Access, so tests
     /// MUST inject rather than call the real probes.
@@ -118,8 +141,7 @@ enum DiagnoseTool {
         var databaseFix: String? = nil
         if !dbOk {
             if dbStatus == "permission_denied" {
-                databaseFix = "Grant Full Disk Access: System Settings -> Privacy & Security -> " +
-                    "Full Disk Access -> Add your terminal app or the imessage-max executable"
+                databaseFix = fullDiskAccessFix()
             } else if dbStatus == "database_not_found" {
                 databaseFix = "iMessage database not found. Ensure iMessage is set up and " +
                     "has sent/received at least one message."
