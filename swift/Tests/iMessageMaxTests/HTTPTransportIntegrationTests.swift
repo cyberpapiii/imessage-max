@@ -76,7 +76,7 @@ final class HTTPTransportIntegrationTests: XCTestCase {
             host: "127.0.0.1",
             port: 0,
             database: Database(),
-            resolver: ContactResolver(),
+            resolver: ContactResolver(seedCache: [:]),
             requestTimeout: .seconds(5),
             cleanupInterval: .milliseconds(20)
         )
@@ -104,7 +104,7 @@ final class HTTPTransportIntegrationTests: XCTestCase {
             host: "127.0.0.1",
             port: 0,
             database: Database(),
-            resolver: ContactResolver(),
+            resolver: ContactResolver(seedCache: [:]),
             requestTimeout: .seconds(5),
             cleanupInterval: .milliseconds(20)
         )
@@ -137,7 +137,7 @@ final class HTTPTransportIntegrationTests: XCTestCase {
             host: "127.0.0.1",
             port: 0,
             database: Database(),
-            resolver: ContactResolver(),
+            resolver: ContactResolver(seedCache: [:]),
             requestTimeout: .seconds(5),
             cleanupInterval: .milliseconds(20)
         )
@@ -251,7 +251,7 @@ final class HTTPTransportIntegrationTests: XCTestCase {
             host: "127.0.0.1",
             port: 0,
             database: Database(),
-            resolver: ContactResolver(),
+            resolver: ContactResolver(seedCache: [:]),
             requestTimeout: .seconds(5),
             cleanupInterval: .milliseconds(20)
         )
@@ -276,7 +276,7 @@ final class HTTPTransportIntegrationTests: XCTestCase {
             host: "127.0.0.1",
             port: 0,
             database: Database(),
-            resolver: ContactResolver(),
+            resolver: ContactResolver(seedCache: [:]),
             requestTimeout: .seconds(2),
             cleanupInterval: .milliseconds(20)
         )
@@ -325,7 +325,7 @@ final class HTTPTransportIntegrationTests: XCTestCase {
             host: "127.0.0.1",
             port: 0,
             database: Database(),
-            resolver: ContactResolver(),
+            resolver: ContactResolver(seedCache: [:]),
             requestTimeout: .milliseconds(200),
             cleanupInterval: .milliseconds(20)
         )

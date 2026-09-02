@@ -657,7 +657,7 @@ private func decodeJSONDictionary(from error: ToolError) throws -> [String: Any]
 
 final class SendToolExecutionTests: XCTestCase {
     func testExecuteRejectsReplyToBeforeAttemptingSend() async {
-        let tool = SendTool(db: Database(path: "/tmp/nonexistent.sqlite"), resolver: ContactResolver())
+        let tool = SendTool(db: Database(path: "/tmp/nonexistent.sqlite"), resolver: ContactResolver(seedCache: [:]))
 
         do {
             _ = try await tool.execute(args: [

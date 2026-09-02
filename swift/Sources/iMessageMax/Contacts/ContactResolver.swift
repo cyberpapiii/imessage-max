@@ -39,6 +39,16 @@ actor ContactResolver {
     func initialize() throws {
         guard !isInitialized else { return }
 
+        // GitHub-hosted macos runners report Contacts as authorized, then
+        // `enumerateContacts` talks to AddressBook over XPC. The daemon is
+        // not running, so Core Data retries for minutes per call and
+        // `swift test` never finishes (serial run 33573931260: one
+        // list_attachments test took 298s, then the next never returned).
+        if ProcessInfo.processInfo.environment["CI"] == "true" {
+            isInitialized = true
+            return
+        }
+
         let (authorized, _) = Self.authorizationStatus()
         guard authorized else {
             isInitialized = true
