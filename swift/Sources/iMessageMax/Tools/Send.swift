@@ -282,12 +282,15 @@ actor SendTool {
                 chat_id is an exact tool-call target; when talking to the user, refer to the destination by the returned chat.name or recipient names.
 
                 Proof vocabulary for text sends (status field):
-                  confirmed: row found in chat.db with error=0. Include verified_message_guid as evidence.
+                  confirmed: outbound row found in chat.db within the verification window (about 1 s) with error=0. Not a delivery receipt.
                   uncertain: transport accepted but no row appeared within the polling window. Follow up with get_messages.
                   mismatch: row found in a different chat than intended. Alert the user, do not treat as success.
                   failed_delivery: row found with a delivery error recorded. The message was NOT delivered.
                   partial_failure: some payloads were dispatched before a later one failed. The message lists which. Never blind-retry the whole call.
                   sent: verification unavailable (DB unreadable). Transport accepted only.
+                Every response also carries disposition (completed | not_started | may_have_completed) and retry_safe.
+                retry_safe=true means a retry cannot duplicate the message (nothing reached Messages, or chat.db shows the row failed).
+                retry_safe=false means do not resend blindly; check with get_messages first.
                 Sends execute immediately when the destination is exact. Ambiguous destinations return status 'ambiguous' without sending. Invalid input returns status 'failed' without sending. File transfers may return 'pending_confirmation' while Messages.app completes the transfer.
                 """,
             inputSchema: InputSchema.object(

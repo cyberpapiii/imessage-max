@@ -386,7 +386,7 @@ Additional send note:
 - Sends execute immediately when the destination is exact; there is no confirmation gate. Ambiguous destinations are refused with `status: "ambiguous"`. The `confirm` parameter is deprecated and ignored (kept only for compatibility). Authorization happens in the user's conversation with the agent and in the client's tool-approval UI, not server-side.
 
 Send result semantics (text sends are verified post-send against chat.db):
-- `status: "confirmed"` means the message row was found in chat.db with no error; `verified_message_guid` is the evidence
+- `status: "confirmed"` means the outbound row was found in chat.db within the verification window with no error; `verified_message_guid` is the evidence. It is not a delivery receipt.
 - `status: "uncertain"` means transport accepted the send but the row was not found within the polling window; follow up with `get_messages`
 - `status: "mismatch"` means the message landed in a different chat than intended; do not treat as success
 - `status: "failed_delivery"` means the message row was found with a delivery error recorded; the message did not deliver, and `verified_message_guid` plus the error code are the evidence
@@ -395,6 +395,25 @@ Send result semantics (text sends are verified post-send against chat.db):
 - `status: "pending_confirmation"` means Messages accepted an attachment send, but the file transfer was not confirmed as finished within the polling window
 - `status: "failed"` means the send failed
 - `status: "ambiguous"` means the target could not be resolved safely
+
+#### Disposition and retry_safe
+
+Every `send` response also carries `disposition` and `retry_safe`. `disposition` is about the transport (did the Apple event go out); `status` is about chat.db.
+
+| status | disposition | retry_safe |
+|---|---|---|
+| confirmed, uncertain, mismatch, sent | `completed` | `false` |
+| failed_delivery | `completed` | `true` |
+| pending_confirmation | `may_have_completed` | `false` |
+| failed (transport) | from the send | `true` only when `not_started` |
+| failed (validation / resolution) | `not_started` | `true` |
+| partial_failure | failing payload's disposition | `false` |
+| ambiguous | `not_started` | `true` |
+
+```json
+{"status":"failed","disposition":"not_started","retry_safe":true,"error":"Could not find chat 'iMessage;-;does-not-exist' in Messages.app."}
+{"status":"failed","disposition":"may_have_completed","retry_safe":false,"error":"Send operation timed out. Messages.app may be unresponsive."}
+```
 
 Notes:
 - `pending_confirmation` is a normal non-fatal attachment state, not the same as a hard failure

@@ -12,7 +12,7 @@ Shared domain vocabulary for this project: entities, named processes, and status
 
 ## Send statuses
 
-- **confirmed**: The sent message was found in the Messages database with no error; the strongest success state, carrying the verified message id as evidence.
+- **confirmed**: The outbound row was found in chat.db within the verification window with no error; the strongest success state, carrying the verified message id as evidence. It is not a delivery receipt.
 
 - **uncertain**: Transport accepted the send but verification could not find the message within the polling window; follow up by reading the conversation rather than retrying.
 
@@ -27,6 +27,10 @@ Shared domain vocabulary for this project: entities, named processes, and status
 - **ambiguous**: The destination could not be resolved to exactly one conversation, so nothing was sent.
 
 - **failed**: Invalid input or the send could not be dispatched; nothing was verified because nothing reliable was sent.
+
+- **disposition**: How far the transport got: `completed` (Messages returned from `send`), `not_started` (failure before the Apple event), or `may_have_completed` (failure after, or we cannot tell). Orthogonal to `status`.
+
+- **retry_safe**: `true` only when a retry cannot duplicate a message: nothing reached Messages, or chat.db recorded a delivery failure. `false` means do not resend blindly.
 
 ## Diagnostics
 
