@@ -508,11 +508,12 @@ final class ListToolCharacterizationTests: XCTestCase {
         }
         XCTAssertEqual(response.chats.count, 12)
         let queryCount = try XCTUnwrap(Database.queryCountForTesting)
-        // 9 queries for one page of 12 named 6-handle chats:
+        // 10 queries for one page of 12 named 6-handle chats:
         // 4 page-candidate widths (2000 / 20_000 / 200_000 / unbounded;
         // exact-limit pages do not trip `count > limit`, so the ladder
         // runs out), participantsByChat, lastMessagesByChat,
-        // attachmentTypesByMessage, recentSendersByChat, getTotals.
-        XCTAssertLessThanOrEqual(queryCount, 9, "list_chats ran \(queryCount) queries")
+        // attachmentTypesByMessage, recentSendersByChat, getTotals,
+        // plus 074's filtered_hidden count.
+        XCTAssertLessThanOrEqual(queryCount, 10, "list_chats ran \(queryCount) queries")
     }
 }

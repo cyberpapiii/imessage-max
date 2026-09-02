@@ -546,9 +546,10 @@ final class SearchToolTests: XCTestCase {
             XCTAssertNotEqual(name, "Unknown Chat")
         }
         let queryCount = try XCTUnwrap(Database.queryCountForTesting)
-        // 2 queries: search rows, participantsByChat. recentSendersByChat
-        // is skipped because every chat is unnamed.
-        XCTAssertLessThanOrEqual(queryCount, 2, "grouped search ran \(queryCount) queries")
+        // 3 queries: search rows, participantsByChat, plus 074's
+        // filtered_hidden count. recentSendersByChat is skipped because
+        // every chat is unnamed.
+        XCTAssertLessThanOrEqual(queryCount, 3, "grouped search ran \(queryCount) queries")
     }
 
     /// Unnamed 6-handle chat. Recency is handles 6, 5, 4; prioritized is

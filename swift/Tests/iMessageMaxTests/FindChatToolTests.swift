@@ -51,7 +51,8 @@ final class FindChatToolTests: XCTestCase {
         let chats = try decodeJSONArray(try XCTUnwrap(payload["chats"]))
         XCTAssertEqual(chats.count, 5)
         let queryCount = try XCTUnwrap(Database.queryCountForTesting)
-        XCTAssertLessThanOrEqual(queryCount, 6, "find_chat ran \(queryCount) queries")
+        // 7: the 068 bound of 6 plus 074's filtered_hidden count.
+        XCTAssertLessThanOrEqual(queryCount, 7, "find_chat ran \(queryCount) queries")
     }
 
     func testNameMatchesUnnamedDMByResolvedParticipantContact() async throws {
