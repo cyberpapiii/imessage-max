@@ -8,9 +8,11 @@ plist_short=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' swi
 plist_build=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' swift/Sources/Resources/Info.plist)
 mcpb_v=$(python3 -c 'import json,sys;print(json.load(open("mcpb/manifest.json"))["version"])')
 codex_v=$(python3 -c 'import json,sys;print(json.load(open(".codex-plugin/plugin.json"))["version"])')
+formula_v=$(sed -nE 's/^ *version "([^"]+)"/\1/p' swift/Formula/imessage-max.rb)
+formula_url_v=$(sed -nE 's|^ *url ".*/releases/download/v([^/]+)/.*"|\1|p' swift/Formula/imessage-max.rb)
 
 status=0
-for pair in "Info.plist short:$plist_short" "Info.plist build:$plist_build" "mcpb/manifest.json:$mcpb_v" ".codex-plugin/plugin.json:$codex_v"; do
+for pair in "Info.plist short:$plist_short" "Info.plist build:$plist_build" "mcpb/manifest.json:$mcpb_v" ".codex-plugin/plugin.json:$codex_v" "Formula version:$formula_v" "Formula url:$formula_url_v"; do
   name=${pair%%:*}; v=${pair##*:}
   if [[ "$v" != "$swift_v" ]]; then
     echo "MISMATCH $name = $v (Version.swift = $swift_v)" >&2

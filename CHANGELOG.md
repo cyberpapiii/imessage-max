@@ -30,5 +30,3 @@ Breaking for the install base: the deployment floor is **macOS 15** (Homebrew `:
 - `QueryBuilder.where` accepts an array of bindings.
 - `--version` prints `iMessage Max <version>`; `scripts/check-version.sh` and `make release-check` keep the four version sites aligned.
 - CI and release workflows target `macos-26`, current action majors, and an arm64-only release asset.
-
-Formula `url`/`sha256` still point at the v1.4.1 tarball until the v1.5.0 tag artifact exists.
