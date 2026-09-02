@@ -74,6 +74,29 @@ final class CapabilityContractTests: XCTestCase {
         XCTAssertEqual(caps["perm_automation"]?.state, "supported")
     }
 
+    /// CI=true makes ContactResolver skip contact loading, so contacts.status
+    /// becomes "skipped_ci". Permission is still granted, so the perm_contacts
+    /// capability must stay "supported" rather than falling to "unverified".
+    func testPermContactsStaysSupportedWhenCILoadSkipped() async throws {
+        let previous = ProcessInfo.processInfo.environment["CI"]
+        setenv("CI", "true", 1)
+        defer {
+            if let previous { setenv("CI", previous, 1) } else { unsetenv("CI") }
+        }
+
+        let result = try await DiagnoseTool.execute(
+            resolver: ContactResolver(),
+            dbProbe: CapabilityContractTests.dbProbe(ok: true),
+            contactsProbe: CapabilityContractTests.contactsProbe(ok: true),
+            automationProbe: CapabilityContractTests.probeAutomationGranted,
+            liveInboxProbe: { false }
+        )
+
+        XCTAssertEqual(result.contacts.status, "skipped_ci")
+        XCTAssertEqual(result.capabilities["perm_contacts"]?.state, "supported")
+        XCTAssertNil(result.capabilities["perm_contacts"]?.fix)
+    }
+
     func testLiveInboxSupportedWhenProbeReportsRunning() async throws {
         let resolver = ContactResolver(seedCache: [:])
         let result = try await DiagnoseTool.execute(

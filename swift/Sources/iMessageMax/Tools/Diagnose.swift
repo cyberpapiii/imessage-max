@@ -304,7 +304,9 @@ enum DiagnoseTool {
         let permContactsState: String
         let permContactsFix: String?
         switch contactsStatus {
-        case "authorized", "limited":
+        case "authorized", "limited", "skipped_ci":
+            // skipped_ci means permission is granted but the CI guard skipped
+            // loading; that is a contacts.fix concern, not a permission gate.
             permContactsState = "supported"
             permContactsFix = nil
         case "denied", "restricted", "not_requested_headless":
