@@ -357,6 +357,15 @@ Rules:
 - At least one of `text` or `file_paths`
 - If both are provided, files are sent first and text is sent last
 
+Attachment paths must be absolute (or start with `~/`). The path is
+checked component by component and refused if any part of it is a symbolic link
+(`/tmp`, `/var`, `/etc` are allowed and read as `/private/...`). The
+file is opened without following links, must be a regular file, and is
+copied from that open handle into a private `0700` directory under
+`~/Pictures/imessage-max-staging/`; Messages only ever sees the copy. If
+`~/Pictures` itself is a symlink on your Mac, `send` with a file will refuse
+to stage until it points at a real directory.
+
 ### diagnose
 Troubleshoot configuration and permission issues.
 
