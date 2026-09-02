@@ -390,6 +390,16 @@ final class GetUnread {
             onlyUnreadInbound: true,
             newestDates: newestUnreadDates
         )
+        let recentSenderChatIds = rows.compactMap { row -> Int64? in
+            let trimmed = row.chatDisplayName?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let isNamed = trimmed?.isEmpty == false
+            let count = (participantsByChat[row.chatId] ?? []).count
+            return (isNamed && count > 4) ? row.chatId : nil
+        }
+        let recentSendersByChat = try ChatSummaryQueries.recentSendersByChat(
+            db: database,
+            chatIds: recentSenderChatIds
+        )
 
         for row in rows {
             let msgChatId = row.chatId
@@ -406,7 +416,8 @@ final class GetUnread {
             let summary = try ChatSummaryBuilder.buildSummary(
                 db: database,
                 chatId: msgChatId,
-                identity: identity
+                identity: identity,
+                recentSenders: recentSendersByChat[msgChatId]
             )
 
             let lastMessage = lastByChat[msgChatId]?.info

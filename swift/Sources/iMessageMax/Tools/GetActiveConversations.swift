@@ -239,6 +239,16 @@ enum GetActiveConversations {
             agoFallback: nil,
             newestDates: newestInWindow
         )
+        let recentSenderChatIds = includedRows.compactMap { row -> Int64? in
+            let trimmed = row.displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let isNamed = trimmed?.isEmpty == false
+            let count = (participantsByChat[row.chatId] ?? []).count
+            return (isNamed && count > 4) ? row.chatId : nil
+        }
+        let recentSendersByChat = try ChatSummaryQueries.recentSendersByChat(
+            db: database,
+            chatIds: recentSenderChatIds
+        )
 
         var conversations: [ActiveConversation] = []
 
@@ -284,7 +294,8 @@ enum GetActiveConversations {
                 participantsPreview: try ChatSummaryBuilder.participantsPreview(
                     db: database,
                     chatId: row.chatId,
-                    identity: identity
+                    identity: identity,
+                    recentSenders: recentSendersByChat[row.chatId]
                 ),
                 lastMessage: lastPreview,
                 awaitingReply: awaitingReply,

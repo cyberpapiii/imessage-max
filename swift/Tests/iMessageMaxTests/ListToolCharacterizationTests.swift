@@ -462,8 +462,8 @@ final class ListToolCharacterizationTests: XCTestCase {
         XCTAssertEqual(convo.activity.exchanges, 2)
     }
 
-    /// Documents the N+1 recent-sender queries. Step 3 flips GreaterThan
-    /// to a constant LessThanOrEqual bound.
+    /// One page of named large chats must stay a constant query count,
+    /// not one recent-sender lookup per row.
     func testListChatsQueryCountIsConstantInRowCount() async throws {
         let fixture = try ToolTestDatabase(name: "list-chats-query-count")
         for rowId in 1...6 {
@@ -508,6 +508,11 @@ final class ListToolCharacterizationTests: XCTestCase {
         }
         XCTAssertEqual(response.chats.count, 12)
         let queryCount = try XCTUnwrap(Database.queryCountForTesting)
-        XCTAssertGreaterThan(queryCount, 12, "list_chats ran \(queryCount) queries")
+        // 9 queries for one page of 12 named 6-handle chats:
+        // 4 page-candidate widths (2000 / 20_000 / 200_000 / unbounded;
+        // exact-limit pages do not trip `count > limit`, so the ladder
+        // runs out), participantsByChat, lastMessagesByChat,
+        // attachmentTypesByMessage, recentSendersByChat, getTotals.
+        XCTAssertLessThanOrEqual(queryCount, 9, "list_chats ran \(queryCount) queries")
     }
 }

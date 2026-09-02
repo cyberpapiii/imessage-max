@@ -513,6 +513,16 @@ enum FindChatTool {
             resolver: resolver,
             agoFallback: nil
         )
+        let recentSenderChatIds = chats.compactMap { chat -> Int64? in
+            let trimmed = chat.displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let isNamed = trimmed?.isEmpty == false
+            let count = (participantsByChat[chat.id] ?? []).count
+            return (isNamed && count > 4) ? chat.id : nil
+        }
+        let recentSendersByChat = try ChatSummaryQueries.recentSendersByChat(
+            db: database,
+            chatIds: recentSenderChatIds
+        )
 
         var results: [ChatResult] = []
         for chat in chats {
@@ -546,7 +556,8 @@ enum FindChatTool {
                     participantsPreview: try ChatSummaryBuilder.participantsPreview(
                         db: database,
                         chatId: chat.id,
-                        identity: identity
+                        identity: identity,
+                        recentSenders: recentSendersByChat[chat.id]
                     ),
                     lastMessage: lastByChat[chat.id]?.info,
                     participants: participants,
