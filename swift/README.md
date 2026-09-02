@@ -147,6 +147,7 @@ Implements MCP Streamable HTTP transport. Legacy sessions (specs through
 - Sessions time out after 1 hour and are cleaned up automatically
 - Server-Sent Events carry server-to-client messages
 - Origin validation blocks DNS rebinding; localhost only by default
+- Request bodies must arrive within 30 seconds; a stalled upload gets HTTP 408 with a JSON-RPC error body, and connections idle for 60 seconds are closed
 - JSON-shaped tools return both legacy text content and MCP `structuredContent`
 - Latest-protocol initialize responses include PNG `serverInfo.icons`, and tools
   carry compact PNG icon metadata
