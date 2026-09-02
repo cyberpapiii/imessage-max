@@ -82,6 +82,63 @@ enum MessageAnnotations {
         return order.compactMap { kept[$0] }
     }
 
+    struct ReplyLookup {
+        let originatorIdByGuid: [String: String]
+        let replyCountByGuid: [String: Int]
+    }
+
+    /// Two batched queries per page: originator ROWIDs not already on the page,
+    /// then reply counts via GROUP BY. Never per row.
+    static func replyLookup(
+        db: Database,
+        pageGuids: [String],
+        pageIdByGuid: [String: Int],
+        originatorGuids: [String]
+    ) throws -> ReplyLookup {
+        var originatorIdByGuid: [String: String] = [:]
+        for (guid, id) in pageIdByGuid {
+            originatorIdByGuid[guid] = "msg_\(id)"
+        }
+
+        let missing = Array(Set(originatorGuids.filter { !$0.isEmpty }).subtracting(pageIdByGuid.keys))
+        if !missing.isEmpty {
+            let placeholders = missing.map { _ in "?" }.joined(separator: ", ")
+            let rows = try db.query(
+                "SELECT guid, ROWID FROM message WHERE guid IN (\(placeholders))",
+                params: missing
+            ) { row in
+                (guid: row.string(0) ?? "", id: Int(row.int(1)))
+            }
+            for row in rows {
+                originatorIdByGuid[row.guid] = "msg_\(row.id)"
+            }
+        }
+
+        var replyCountByGuid: [String: Int] = [:]
+        if !pageGuids.isEmpty {
+            let placeholders = pageGuids.map { _ in "?" }.joined(separator: ", ")
+            let rows = try db.query(
+                """
+                SELECT thread_originator_guid, COUNT(*)
+                FROM message
+                WHERE thread_originator_guid IN (\(placeholders))
+                GROUP BY 1
+                """,
+                params: pageGuids
+            ) { row in
+                (guid: row.string(0) ?? "", count: Int(row.int(1)))
+            }
+            for row in rows where row.count > 0 {
+                replyCountByGuid[row.guid] = row.count
+            }
+        }
+
+        return ReplyLookup(
+            originatorIdByGuid: originatorIdByGuid,
+            replyCountByGuid: replyCountByGuid
+        )
+    }
+
     static func render(
         _ rows: [Reaction],
         reactorName: (String?) -> String
@@ -116,6 +173,8 @@ struct MessageRow {
     let groupActionType: Int
     let groupTitle: String?
     let otherHandle: String?
+    let threadOriginatorGuid: String?
+    let dateEdited: Int64
 }
 
 struct AttachmentRow {
@@ -345,7 +404,9 @@ extension GetMessagesTool {
                 "m.item_type",
                 "m.group_action_type",
                 "m.group_title",
-                "oh.id as other_handle_id"
+                "oh.id as other_handle_id",
+                "m.thread_originator_guid",
+                "m.date_edited"
             )
             .from("message m")
             .join("chat_message_join cmj ON m.ROWID = cmj.message_id")
@@ -420,7 +481,9 @@ extension GetMessagesTool {
                 itemType: Int(row.int(7)),
                 groupActionType: Int(row.int(8)),
                 groupTitle: row.string(9),
-                otherHandle: row.string(10)
+                otherHandle: row.string(10),
+                threadOriginatorGuid: row.string(11),
+                dateEdited: row.optionalInt(12) ?? 0
             )
         }
     }
@@ -539,7 +602,9 @@ extension GetMessagesTool {
                 sessionId: sessionId,
                 sessionStart: sessionStart ? true : nil,
                 sessionGapHours: sessionGapHours,
-                event: msg.event
+                event: msg.event,
+                replyTo: msg.replyTo,
+                replyCount: msg.replyCount
             )
         }
 

@@ -106,6 +106,34 @@ final class GetMessagesToolTests: XCTestCase {
         XCTAssertEqual(media.first?["type"] as? String, "image")
     }
 
+    func testReplyToAndReplyCountAreSurfaced() async throws {
+        let fixture = try makeGetMessagesFixture()
+        let tool = GetMessagesTool(db: fixture.database(), resolver: makeSeededResolver())
+
+        let response = try await decodeGetMessagesResponse(
+            await tool.execute(args: [
+                "chat_id": .string("chat20"),
+                "limit": .int(10),
+            ])
+        )
+
+        let messages = try decodeJSONArray(try XCTUnwrap(response["messages"]))
+        let byId = Dictionary(uniqueKeysWithValues: messages.compactMap { row -> (String, [String: Any])? in
+            guard let id = row["id"] as? String else { return nil }
+            return (id, row)
+        })
+
+        let reply = try XCTUnwrap(byId["msg_203"])
+        XCTAssertEqual(reply["reply_to"] as? String, "msg_201")
+
+        let origin = try XCTUnwrap(byId["msg_201"])
+        XCTAssertEqual(origin["reply_count"] as? Int, 1)
+
+        let unrelated = try XCTUnwrap(byId["msg_202"])
+        XCTAssertFalse(unrelated.keys.contains("reply_to"))
+        XCTAssertFalse(unrelated.keys.contains("reply_count"))
+    }
+
     func testRemovalCancelsEarlierMatchingReaction() async throws {
         let fixture = try makeGetMessagesFixture()
         let base: Int64 = 1_000_000_000_000
@@ -588,7 +616,7 @@ func makeGetMessagesFixture() throws -> ToolTestDatabase {
     try fixture.insertMessage(rowId: 202, guid: "gm202", text: "packing list", date: base + sixteenHours, isFromMe: false, handleId: 1)
     try fixture.joinChatMessage(chatId: 20, messageId: 202)
 
-    try fixture.insertMessage(rowId: 203, guid: "gm203", text: "let me know if this plan works?", date: base + sixteenHours + minute, isFromMe: true)
+    try fixture.insertMessage(rowId: 203, guid: "gm203", text: "let me know if this plan works?", date: base + sixteenHours + minute, isFromMe: true, threadOriginatorGuid: "gm201")
     try fixture.joinChatMessage(chatId: 20, messageId: 203)
 
     try fixture.insertMessage(rowId: 300, guid: "gm300", text: "trip planning notes", date: base + (4 * minute), isFromMe: false, handleId: 2)
