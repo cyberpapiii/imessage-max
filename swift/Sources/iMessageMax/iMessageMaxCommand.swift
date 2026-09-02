@@ -81,7 +81,23 @@ struct iMessageMax: AsyncParsableCommand {
                 let stats = await resolver.getStats()
                 Log.info("Contacts: initialized=\(stats.initialized) handles=\(stats.handleCount)")
             }
-            try await transport.waitForTermination()
+            var watcher: MessageWatcher?
+            do {
+                let started = MessageWatcher(databasePath: Database.defaultPath) { rowid in
+                    Task { await transport.notifyNewMessages(maxRowid: rowid) }
+                }
+                try started.start()
+                watcher = started
+            } catch {
+                Log.warning("MessageWatcher failed to start: \(error)")
+            }
+            do {
+                try await transport.waitForTermination()
+            } catch {
+                watcher?.stop()
+                throw error
+            }
+            watcher?.stop()
         } else {
             let server = MCPServerWrapper(contactsPolicy: contactsPolicy)
             let transport = StdioTransport()

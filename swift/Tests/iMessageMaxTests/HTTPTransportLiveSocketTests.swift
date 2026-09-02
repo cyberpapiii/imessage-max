@@ -85,6 +85,48 @@ final class HTTPTransportLiveSocketTests: XCTestCase {
         }
     }
 
+    func testNewMessagesNotificationReachesOpenSSEGet() async throws {
+        try await withLiveTransport(channelIdleTimeout: .seconds(5)) { transport, port in
+            let sessionA = try initializeSession(port: port)
+            let sessionB = try initializeSession(port: port)
+
+            let getFd = try connectLoopback(port: port)
+            defer { close(getFd) }
+            setRecvTimeout(getFd, seconds: 2)
+            let get = """
+                GET / HTTP/1.1\r\n\
+                Host: 127.0.0.1\r\n\
+                Accept: text/event-stream\r\n\
+                Mcp-Session-Id: \(sessionA)\r\n\
+                \r\n
+                """
+            try writeAll(getFd, get)
+            await AsyncTimeout.sleep(.milliseconds(200))
+            _ = try readUntilDoubleCRLF(getFd)
+
+            let delivered = await transport.notifyNewMessages(maxRowid: 4242)
+            XCTAssertEqual(delivered, 2)
+
+            var received = [UInt8]()
+            var buffer = [UInt8](repeating: 0, count: 1024)
+            let deadline = ContinuousClock.now + .seconds(2)
+            var text = ""
+            while ContinuousClock.now < deadline {
+                let n = recv(getFd, &buffer, buffer.count, 0)
+                if n > 0 {
+                    received.append(contentsOf: buffer.prefix(n))
+                    text = String(decoding: received, as: UTF8.self)
+                    if text.contains("notifications/imessage/new_messages") { break }
+                }
+            }
+            XCTAssertTrue(text.contains("notifications/imessage/new_messages"), "SSE GET: \(text)")
+            XCTAssertTrue(text.contains("\"max_rowid\":4242"), "SSE GET: \(text)")
+            XCTAssertTrue(text.contains("event: message"), "SSE GET: \(text)")
+
+            _ = sessionB
+        }
+    }
+
     private func withLiveTransport(
         channelIdleTimeout: Duration,
         body: (HTTPTransport, Int) async throws -> Void
@@ -118,6 +160,30 @@ final class HTTPTransportLiveSocketTests: XCTestCase {
         }
         throw lastError ?? XCTSkip("could not bind a live HTTP port")
     }
+}
+
+private func initializeSession(port: Int) throws -> String {
+    let fd = try connectLoopback(port: port)
+    defer { close(fd) }
+    setRecvTimeout(fd, seconds: 2)
+    let body = """
+        {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"tests","version":"1.0"}}}
+        """
+    let post = """
+        POST / HTTP/1.1\r\n\
+        Host: 127.0.0.1\r\n\
+        Content-Type: application/json\r\n\
+        Accept: application/json, text/event-stream\r\n\
+        Content-Length: \(body.utf8.count)\r\n\
+        \r\n\
+        \(body)
+        """
+    try writeAll(fd, post)
+    let response = try readUntilDoubleCRLF(fd)
+    return try XCTUnwrap(
+        sessionId(from: response),
+        "initialize response missing Mcp-Session-Id: \(response)"
+    )
 }
 
 private func connectLoopback(port: Int) throws -> Int32 {

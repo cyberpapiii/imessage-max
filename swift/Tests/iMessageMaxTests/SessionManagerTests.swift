@@ -1,5 +1,6 @@
 import XCTest
 import MCP
+import Synchronization
 @testable import iMessageMax
 
 final class SessionManagerTests: XCTestCase {
@@ -116,6 +117,52 @@ final class SessionManagerTests: XCTestCase {
 
         let count = await manager.sessionCount
         XCTAssertEqual(count, 0)
+    }
+
+    func testNotifyAllSessionsReachesEverySessionResponseHandler() async throws {
+        let manager = SessionManager(
+            database: Database(),
+            resolver: ContactResolver(seedCache: [:]),
+            maxSessions: 4,
+            cleanupInterval: .milliseconds(20)
+        )
+        let collected = Mutex<[(String, Data)]>([])
+        await manager.setResponseHandler { sessionId, data in
+            collected.withLock { $0.append((sessionId, data)) }
+        }
+
+        guard case .created(let first) = await manager.createSession() else {
+            return XCTFail("first session")
+        }
+        guard case .created(let second) = await manager.createSession() else {
+            return XCTFail("second session")
+        }
+
+        let delivered = await manager.notifyAllSessions(
+            Message<NewMessagesNotification>(
+                method: NewMessagesNotification.name,
+                params: .init(max_rowid: 42)
+            )
+        )
+        XCTAssertEqual(delivered, 2)
+
+        let deadline = ContinuousClock.now + .seconds(2)
+        while ContinuousClock.now < deadline, collected.withLock({ $0.count }) < 2 {
+            await AsyncTimeout.sleep(.milliseconds(20))
+        }
+        let payloads = collected.withLock { $0 }
+        XCTAssertEqual(payloads.count, 2)
+        XCTAssertEqual(Set(payloads.map(\.0)), Set([first.id, second.id]))
+        for (_, data) in payloads {
+            let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+            XCTAssertEqual(json["method"] as? String, "notifications/imessage/new_messages")
+            XCTAssertNil(json["id"])
+            let params = try XCTUnwrap(json["params"] as? [String: Any])
+            XCTAssertEqual(params["max_rowid"] as? Int, 42)
+        }
+
+        await manager.terminateSession(sessionId: first.id)
+        await manager.terminateSession(sessionId: second.id)
     }
 
     func testTerminateUnknownIdIsANoOp() async {
