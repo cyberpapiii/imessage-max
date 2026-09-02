@@ -134,11 +134,21 @@ enum AppleScriptRunner {
         on run argv
             set recipientId to item 1 of argv
             set messageText to item 2 of argv
-            tell application "Messages"
-                set targetService to 1st account whose service type = iMessage
-                set targetBuddy to participant recipientId of targetService
-                send messageText to targetBuddy
-            end tell
+            set dispatchPhase to "pre_dispatch"
+            try
+                tell application "Messages"
+                    set targetService to 1st account whose service type = iMessage
+                    set targetBuddy to participant recipientId of targetService
+                    set dispatchPhase to "dispatch_started"
+                    send messageText to targetBuddy
+                end tell
+                return "IMESSAGE_MAX_RESULT" & tab & "ok" & tab & "completed" & tab & "0" & tab & ""
+            on error errorMessage number errorNumber
+                if dispatchPhase is "pre_dispatch" then
+                    return "IMESSAGE_MAX_RESULT" & tab & "failure" & tab & "not_started" & tab & errorNumber & tab & errorMessage
+                end if
+                return "IMESSAGE_MAX_RESULT" & tab & "failure" & tab & "may_have_completed" & tab & errorNumber & tab & errorMessage
+            end try
         end run
         """
 
@@ -146,10 +156,20 @@ enum AppleScriptRunner {
         on run argv
             set chatGuid to item 1 of argv
             set messageText to item 2 of argv
-            tell application "Messages"
-                set targetChat to chat id chatGuid
-                send messageText to targetChat
-            end tell
+            set dispatchPhase to "pre_dispatch"
+            try
+                tell application "Messages"
+                    set targetChat to chat id chatGuid
+                    set dispatchPhase to "dispatch_started"
+                    send messageText to targetChat
+                end tell
+                return "IMESSAGE_MAX_RESULT" & tab & "ok" & tab & "completed" & tab & "0" & tab & ""
+            on error errorMessage number errorNumber
+                if dispatchPhase is "pre_dispatch" then
+                    return "IMESSAGE_MAX_RESULT" & tab & "failure" & tab & "not_started" & tab & errorNumber & tab & errorMessage
+                end if
+                return "IMESSAGE_MAX_RESULT" & tab & "failure" & tab & "may_have_completed" & tab & errorNumber & tab & errorMessage
+            end try
         end run
         """
 
@@ -158,11 +178,21 @@ enum AppleScriptRunner {
             set recipientId to item 1 of argv
             set filePath to item 2 of argv
             set attachmentFile to POSIX file filePath
-            tell application "Messages"
-                set targetService to 1st account whose service type = iMessage
-                set targetBuddy to participant recipientId of targetService
-                send attachmentFile to targetBuddy
-            end tell
+            set dispatchPhase to "pre_dispatch"
+            try
+                tell application "Messages"
+                    set targetService to 1st account whose service type = iMessage
+                    set targetBuddy to participant recipientId of targetService
+                    set dispatchPhase to "dispatch_started"
+                    send attachmentFile to targetBuddy
+                end tell
+                return "IMESSAGE_MAX_RESULT" & tab & "ok" & tab & "completed" & tab & "0" & tab & ""
+            on error errorMessage number errorNumber
+                if dispatchPhase is "pre_dispatch" then
+                    return "IMESSAGE_MAX_RESULT" & tab & "failure" & tab & "not_started" & tab & errorNumber & tab & errorMessage
+                end if
+                return "IMESSAGE_MAX_RESULT" & tab & "failure" & tab & "may_have_completed" & tab & errorNumber & tab & errorMessage
+            end try
         end run
         """
 
@@ -171,10 +201,20 @@ enum AppleScriptRunner {
             set chatGuid to item 1 of argv
             set filePath to item 2 of argv
             set attachmentFile to POSIX file filePath
-            tell application "Messages"
-                set targetChat to chat id chatGuid
-                send attachmentFile to targetChat
-            end tell
+            set dispatchPhase to "pre_dispatch"
+            try
+                tell application "Messages"
+                    set targetChat to chat id chatGuid
+                    set dispatchPhase to "dispatch_started"
+                    send attachmentFile to targetChat
+                end tell
+                return "IMESSAGE_MAX_RESULT" & tab & "ok" & tab & "completed" & tab & "0" & tab & ""
+            on error errorMessage number errorNumber
+                if dispatchPhase is "pre_dispatch" then
+                    return "IMESSAGE_MAX_RESULT" & tab & "failure" & tab & "not_started" & tab & errorNumber & tab & errorMessage
+                end if
+                return "IMESSAGE_MAX_RESULT" & tab & "failure" & tab & "may_have_completed" & tab & errorNumber & tab & errorMessage
+            end try
         end run
         """
 
@@ -616,27 +656,23 @@ enum AppleScriptRunner {
     private static func run(
         script: String,
         arguments: [String],
+        sentFileName: String? = nil,
         missingTargetError: SendError
     ) -> Result<Void, SendFailure> {
-        let result = execute(script: script, arguments: arguments, timeoutSeconds: 30)
-        switch result {
+        switch execute(script: script, arguments: arguments, timeoutSeconds: 30) {
         case .failure(.timeout):
             return .failure(SendFailure(.timeout, disposition: .mayHaveCompleted))
         case .failure(let error):
+            // execute() only fails this way when osascript could not be launched.
             return .failure(SendFailure(error, disposition: .notStarted))
-        case .success(let execution):
-            if execution.terminationStatus != 0 {
-                return .failure(SendFailure(
-                    classifySendStderr(
-                        execution.stderr,
-                        sentFileName: ((arguments.last ?? "") as NSString).lastPathComponent,
-                        missingTargetError: missingTargetError
-                    ),
-                    disposition: .mayHaveCompleted
-                ))
-            }
-
-            return .success(())
+        case .success(let output):
+            return interpretSendResult(
+                stdout: output.stdout,
+                stderr: output.stderr,
+                terminationStatus: output.terminationStatus,
+                sentFileName: sentFileName ?? ((arguments.last ?? "") as NSString).lastPathComponent,
+                missingTargetError: missingTargetError
+            )
         }
     }
 
