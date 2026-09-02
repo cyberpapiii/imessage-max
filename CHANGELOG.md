@@ -5,6 +5,7 @@
 ### Added
 
 - `get_messages_since`: ROWID-cursor pull of new messages across chats (plan 080).
+- HTTP mode watches `chat.db` and pushes `notifications/imessage/new_messages` over the legacy SSE stream when MAX(ROWID) grows (plan 080 layer 2).
 - `send` responses carry `disposition` (`completed` / `not_started` / `may_have_completed`) and `retry_safe`; `confirmed` is documented as a chat.db row match within the verification window, not a delivery receipt.
 
 ### Fixes

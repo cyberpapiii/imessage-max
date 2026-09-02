@@ -38,7 +38,8 @@ final class CapabilityContractTests: XCTestCase {
             resolver: resolver,
             dbProbe: CapabilityContractTests.dbProbe(ok: dbOk),
             contactsProbe: CapabilityContractTests.contactsProbe(ok: contactsOk),
-            automationProbe: automation
+            automationProbe: automation,
+            liveInboxProbe: { false }
         )
     }
 
@@ -71,6 +72,22 @@ final class CapabilityContractTests: XCTestCase {
         XCTAssertEqual(caps["perm_full_disk"]?.state, "supported")
         XCTAssertEqual(caps["perm_contacts"]?.state, "supported")
         XCTAssertEqual(caps["perm_automation"]?.state, "supported")
+    }
+
+    func testLiveInboxSupportedWhenProbeReportsRunning() async throws {
+        let resolver = ContactResolver(seedCache: [:])
+        let result = try await DiagnoseTool.execute(
+            resolver: resolver,
+            dbProbe: CapabilityContractTests.dbProbe(ok: true),
+            contactsProbe: CapabilityContractTests.contactsProbe(ok: true),
+            automationProbe: CapabilityContractTests.probeAutomationGranted,
+            liveInboxProbe: { true }
+        )
+        XCTAssertEqual(result.capabilities["live_inbox"]?.state, "supported")
+        XCTAssertEqual(
+            result.capabilities["live_inbox"]?.detail,
+            "notifications/imessage/new_messages over the legacy session SSE stream; stateless clients poll get_messages_since"
+        )
     }
 
     func testAutomationDeniedCapabilities() async throws {
