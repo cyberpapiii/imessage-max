@@ -32,6 +32,10 @@ struct SendResponse: Encodable {
     // Mismatch fields (non-nil only for "mismatch")
     let intendedChat: ChatReference?
     let actualChatId: String?
+    /// Transport progress: completed / not_started / may_have_completed.
+    let disposition: String
+    /// True only when a retry cannot duplicate a message.
+    let retrySafe: Bool
 
     enum CodingKeys: String, CodingKey {
         case status
@@ -46,6 +50,8 @@ struct SendResponse: Encodable {
         case verifiedAt = "verified_at"
         case intendedChat = "intended_chat"
         case actualChatId = "actual_chat_id"
+        case disposition
+        case retrySafe = "retry_safe"
     }
 
     // MARK: - Transport-only fallback ("sent")
@@ -63,7 +69,9 @@ struct SendResponse: Encodable {
             verifiedMessageGuid: nil,
             verifiedAt: nil,
             intendedChat: nil,
-            actualChatId: nil
+            actualChatId: nil,
+            disposition: DeliveryDisposition.completed.rawValue,
+            retrySafe: false
         )
     }
 
@@ -83,7 +91,9 @@ struct SendResponse: Encodable {
             verifiedMessageGuid: guid,
             verifiedAt: TimeUtils.formatISO(Date()),
             intendedChat: nil,
-            actualChatId: nil
+            actualChatId: nil,
+            disposition: DeliveryDisposition.completed.rawValue,
+            retrySafe: false
         )
     }
 
@@ -105,7 +115,9 @@ struct SendResponse: Encodable {
             verifiedMessageGuid: nil,
             verifiedAt: nil,
             intendedChat: nil,
-            actualChatId: nil
+            actualChatId: nil,
+            disposition: DeliveryDisposition.completed.rawValue,
+            retrySafe: false
         )
     }
 
@@ -123,7 +135,9 @@ struct SendResponse: Encodable {
             verifiedMessageGuid: nil,
             verifiedAt: nil,
             intendedChat: intendedChat,
-            actualChatId: "chat\(actualChatId)"
+            actualChatId: "chat\(actualChatId)",
+            disposition: DeliveryDisposition.completed.rawValue,
+            retrySafe: false
         )
     }
 
@@ -141,7 +155,9 @@ struct SendResponse: Encodable {
             verifiedMessageGuid: guid,
             verifiedAt: TimeUtils.formatISO(Date()),
             intendedChat: nil,
-            actualChatId: nil
+            actualChatId: nil,
+            disposition: DeliveryDisposition.completed.rawValue,
+            retrySafe: true
         )
     }
 
@@ -160,14 +176,17 @@ struct SendResponse: Encodable {
             verifiedMessageGuid: nil,
             verifiedAt: nil,
             intendedChat: nil,
-            actualChatId: nil
+            actualChatId: nil,
+            disposition: DeliveryDisposition.mayHaveCompleted.rawValue,
+            retrySafe: false
         )
     }
 
     /// Some payloads were dispatched to Messages.app before a later payload failed.
     static func partialFailure(
         sentDescriptions: [String], failedDescription: String, error: String,
-        deliveredTo: [String], chat: ChatReference?
+        deliveredTo: [String], chat: ChatReference?,
+        disposition: DeliveryDisposition
     ) -> SendResponse {
         SendResponse(
             status: "partial_failure",
@@ -181,11 +200,13 @@ struct SendResponse: Encodable {
             verifiedMessageGuid: nil,
             verifiedAt: nil,
             intendedChat: nil,
-            actualChatId: nil
+            actualChatId: nil,
+            disposition: disposition.rawValue,
+            retrySafe: false
         )
     }
 
-    static func error(_ message: String) -> SendResponse {
+    static func error(_ message: String, disposition: DeliveryDisposition = .notStarted) -> SendResponse {
         SendResponse(
             status: "failed",
             timestamp: nil,
@@ -198,7 +219,9 @@ struct SendResponse: Encodable {
             verifiedMessageGuid: nil,
             verifiedAt: nil,
             intendedChat: nil,
-            actualChatId: nil
+            actualChatId: nil,
+            disposition: disposition.rawValue,
+            retrySafe: disposition.retrySafe
         )
     }
 
@@ -215,7 +238,9 @@ struct SendResponse: Encodable {
             verifiedMessageGuid: nil,
             verifiedAt: nil,
             intendedChat: nil,
-            actualChatId: nil
+            actualChatId: nil,
+            disposition: DeliveryDisposition.notStarted.rawValue,
+            retrySafe: true
         )
     }
 }
@@ -408,14 +433,15 @@ actor SendTool {
             let sentCount = hard.index
             if sentCount == 0 {
                 // Nothing reached Messages.app: a plain "failed", as before.
-                return .error(ClientErrorMessages.sanitized(hard.failure.error))
+                return .error(ClientErrorMessages.sanitized(hard.failure.error), disposition: hard.failure.disposition)
             }
             return .partialFailure(
                 sentDescriptions: payloads.prefix(sentCount).map { describePayload($0) },
                 failedDescription: describePayload(payloads[hard.index]),
                 error: ClientErrorMessages.sanitized(hard.failure.error),
                 deliveredTo: resolved.deliveredTo,
-                chat: resolved.chat
+                chat: resolved.chat,
+                disposition: hard.failure.disposition
             )
         }
 
