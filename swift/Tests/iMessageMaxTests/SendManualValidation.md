@@ -99,22 +99,7 @@ Expected:
 - Error clearly says the file could not be read
 - No send attempt is made in Messages
 
-### 6. Unsupported reply-to
-
-Call:
-
-```json
-{
-  "chat_id": "chat456",
-  "text": "reply test",
-  "reply_to": "msg_123"
-}
-```
-
-Expected:
-
-- Result status is `failed`
-- Error clearly says `reply_to` is unsupported
+<!-- Section 6 removed with plan 075; reply_to is no longer a send parameter. -->
 
 ## Verified-Send Proof Vocabulary
 
