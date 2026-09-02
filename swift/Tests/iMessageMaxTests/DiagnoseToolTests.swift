@@ -38,4 +38,27 @@ final class DiagnoseToolTests: XCTestCase {
             XCTAssertTrue(result.database.path.hasSuffix("/Library/Messages/chat.db"))
         }
     }
+
+    /// CI=true makes ContactResolver.initialize skip contact loading. diagnose
+    /// must say so instead of reporting an authorized, empty, "ready" store.
+    func testCIGuardIsVisibleInDiagnose() async throws {
+        let previous = ProcessInfo.processInfo.environment["CI"]
+        setenv("CI", "true", 1)
+        defer {
+            if let previous { setenv("CI", previous, 1) } else { unsetenv("CI") }
+        }
+
+        let result = try await DiagnoseTool.execute(
+            resolver: ContactResolver(),
+            dbProbe: DiagnoseToolTests.dbAccessible,
+            contactsProbe: DiagnoseToolTests.contactsAuthorized,
+            automationProbe: DiagnoseToolTests.automationGranted
+        )
+
+        XCTAssertEqual(result.contacts.status, "skipped_ci")
+        XCTAssertEqual(result.contacts.loaded, 0)
+        XCTAssertNotNil(result.contacts.fix)
+        XCTAssertEqual(result.status, "needs_setup",
+                       "an empty contact store is not a ready server")
+    }
 }

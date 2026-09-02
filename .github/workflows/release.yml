@@ -9,6 +9,7 @@ on:
 jobs:
   build-and-release:
     runs-on: macos-26
+    timeout-minutes: 30
     permissions:
       contents: write
     defaults:
@@ -25,9 +26,10 @@ jobs:
           swift --version
 
       - name: Build and run tests
+        # Same command as build.yml on purpose; see its comment.
         run: |
           swift build --build-tests
-          swift test --skip-build --parallel
+          swift test --skip-build
 
       - name: Build release binary (arm64) with embedded Info.plist
         run: |
