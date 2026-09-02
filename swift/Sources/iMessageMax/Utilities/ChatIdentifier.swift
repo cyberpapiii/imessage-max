@@ -1,12 +1,12 @@
 import Foundation
 
 enum ChatIdentifier {
-    /// Accepts "123" and "chat123". Returns nil for anything else.
+    /// Accepts unsigned decimal `123` and `chat123`. Returns nil for anything else.
     static func parseRowId(_ raw: String) -> Int64? {
         let trimmed = raw.trimmingCharacters(in: .whitespaces)
-        if let id = Int64(trimmed) { return id }
-        if trimmed.hasPrefix("chat"), let id = Int64(trimmed.dropFirst(4)) { return id }
-        return nil
+        let digits = trimmed.hasPrefix("chat") ? trimmed.dropFirst(4) : Substring(trimmed)
+        guard !digits.isEmpty, digits.allSatisfy(\.isASCII), digits.allSatisfy(\.isNumber) else { return nil }
+        return Int64(digits)
     }
 
     /// parseRowId, then the GUID-substring fallback that get_messages historically allowed.
