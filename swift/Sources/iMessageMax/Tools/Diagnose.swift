@@ -25,12 +25,30 @@ typealias DatabaseProbe = @Sendable () -> (ok: Bool, status: String)
 /// Probe type for contacts authorization checks. Injectable so tests stay hermetic.
 typealias ContactsProbe = @Sendable () -> (authorized: Bool, status: String)
 
+/// Probe type for optional chat.db column flags. Injectable so tests stay hermetic.
+typealias SchemaProbe = @Sendable () -> SchemaCapabilities?
+
 struct DiagnoseResult: Codable {
     struct DatabaseStatus: Codable {
         let accessible: Bool
         let status: String
         let path: String
         let fix: String?
+        let features: [String: Bool]?
+
+        init(
+            accessible: Bool,
+            status: String,
+            path: String,
+            fix: String?,
+            features: [String: Bool]? = nil
+        ) {
+            self.accessible = accessible
+            self.status = status
+            self.path = path
+            self.fix = fix
+            self.features = features
+        }
     }
 
     struct ContactsStatus: Codable {
@@ -61,7 +79,7 @@ struct DiagnoseResult: Codable {
 enum DiagnoseTool {
     // MARK: - Tool Registration
 
-    static func register(on server: Server, resolver: ContactResolver) {
+    static func register(on server: Server, db: Database, resolver: ContactResolver) {
         let inputSchema: Value = .object([
             "type": "object",
             "properties": .object([:]),
@@ -96,7 +114,7 @@ enum DiagnoseTool {
                 openWorldHint: false
             )
         ) { _ in
-            let result = try await execute(resolver: resolver)
+            let result = try await execute(resolver: resolver, schemaProbe: { try? db.schema() })
             return [.plainText(try FormatUtils.encodeJSON(result))]
         }
     }
@@ -131,12 +149,14 @@ enum DiagnoseTool {
         resolver: ContactResolver,
         dbProbe: DatabaseProbe = { Database.checkAccess() },
         contactsProbe: ContactsProbe = { ContactResolver.authorizationStatus() },
-        automationProbe: AutomationProbe = { AutomationPermission.checkAutomationPermission() }
+        automationProbe: AutomationProbe = { AutomationPermission.checkAutomationPermission() },
+        schemaProbe: SchemaProbe = { nil }
     ) async throws -> DiagnoseResult {
         let processId = ProcessInfo.processInfo.processIdentifier
         let databasePath = Database.defaultPath
 
         let (dbOk, dbStatus) = dbProbe()
+        let features = dbOk ? schemaProbe()?.features : nil
 
         var databaseFix: String? = nil
         if !dbOk {
@@ -326,7 +346,8 @@ enum DiagnoseTool {
                 // Keep the path actionable for the operator without echoing
                 // their username to the client.
                 path: (databasePath as NSString).abbreviatingWithTildeInPath,
-                fix: databaseFix
+                fix: databaseFix,
+                features: features
             ),
             contacts: .init(
                 authorized: contactsAuthorized,

@@ -106,4 +106,34 @@ final class DiagnoseToolTests: XCTestCase {
 
         XCTAssertFalse(json.contains(NSHomeDirectory()), "fix must not leak the home directory: \(json)")
     }
+
+    func testFeaturesReportedWhenDatabaseAccessible() async throws {
+        let result = try await DiagnoseTool.execute(
+            resolver: ContactResolver(seedCache: [:]),
+            dbProbe: DiagnoseToolTests.dbAccessible,
+            contactsProbe: DiagnoseToolTests.contactsAuthorized,
+            automationProbe: DiagnoseToolTests.automationGranted,
+            schemaProbe: { SchemaCapabilities(base: .assumed, messageDateEdited: false) }
+        )
+        XCTAssertEqual(result.database.features?["message.date_edited"], false)
+        XCTAssertEqual(result.database.features?["message.thread_originator_guid"], true)
+        let json = try FormatUtils.encodeJSON(result)
+        XCTAssertTrue(json.contains("\"features\""))
+    }
+
+    func testFeaturesOmittedWhenDatabaseDenied() async throws {
+        let result = try await DiagnoseTool.execute(
+            resolver: ContactResolver(seedCache: [:]),
+            dbProbe: DiagnoseToolTests.dbDenied,
+            contactsProbe: DiagnoseToolTests.contactsAuthorized,
+            automationProbe: DiagnoseToolTests.automationGranted,
+            schemaProbe: {
+                XCTFail("must not probe a denied database")
+                return nil
+            }
+        )
+        XCTAssertNil(result.database.features)
+        let json = try FormatUtils.encodeJSON(result)
+        XCTAssertFalse(json.contains("\"features\""))
+    }
 }
