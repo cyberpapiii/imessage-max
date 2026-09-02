@@ -51,4 +51,30 @@ final class ListChatsToolTests: XCTestCase {
         XCTAssertNil(second.totalDms)
         XCTAssertLessThanOrEqual(secondCount, firstCount - 1, "cursor page \(secondCount) first page \(firstCount)")
     }
+
+    func testMoreIsFalseWhenNoCursorCanBeIssued() async throws {
+        let fixture = try ToolTestDatabase(name: "list-chats-null-tail")
+        try fixture.insertHandle(rowId: 1, handle: "+15550000001")
+        // Three chats, no messages: every last_message_date is NULL, so the
+        // keyset cursor cannot address the next page.
+        for chatId in 1...3 {
+            try fixture.insertChat(rowId: chatId, guid: "null-tail-\(chatId)", displayName: "Chat \(chatId)")
+            try fixture.joinChatHandle(chatId: chatId, handleId: 1)
+        }
+
+        let result = await ListChatsTool.execute(
+            limit: 1,
+            sort: "recent",
+            db: fixture.database(),
+            resolver: ContactResolver(seedCache: [:])
+        )
+        guard case .success(let page) = result else {
+            return XCTFail("list_chats failed: \(result)")
+        }
+        XCTAssertEqual(page.chats.count, 1)
+        // The contract: more and cursor agree. At 639529e this is
+        // more == true, cursor == nil.
+        XCTAssertEqual(page.more, page.cursor != nil,
+                       "more=\(page.more) cursor=\(String(describing: page.cursor))")
+    }
 }
