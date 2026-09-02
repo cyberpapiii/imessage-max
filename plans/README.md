@@ -53,7 +53,7 @@ verification `cd swift && swift build && swift test`.
 | 059 | Release prep 1.5.0 (version bump, CHANGELOG, Formula version string) | P2 | S | 048, 052, 058 | DONE 2026-09-01, merged to main (`db1ee55`, branch `advisor/059-release-1.5.0`; 368/0 re-verified). Tag and Formula sha256 are the operator's. |
 | 060 | CI hang: suite never finishes on macos-26 | P0 | S | 059 | DONE 2026-09-01. Serial still timed out: `ListAttachmentsQueryTests.testChatFilterKeepsMessagesSharedIntoThatChat` took 298s (run 33573931260) because `ContactResolver.initialize` enumerates AddressBook over XPC. `advisor/060-ci-hang-5` skips that on `CI=true`. `timeout-minutes: 15` kept. 370/0. |
 | 061 | Release findings: Info.plist 15.0 floor, find_chat unnamed DM names, get_attachment resolved chat.name, diagnose docs | P2 | S | 055, 054, 048 | DONE 2026-09-01, merged to main (`9c842d9`, branch `advisor/061-release-findings`; 370/0 re-verified) |
-| 062 | Formula url/sha256 for v1.5.0 after the operator tags | P2 | S | 059, 061 | WAITING for `git tag v1.5.0 && git push --tags`. Formula still points at v1.4.1 artifact. |
+| 062 | Formula url/sha256 for v1.5.0 after the operator tags | P2 | S | 059, 061 | DONE 2026-09-01. Tagged `v1.5.0` at `5a3867c`; release run 33576420093 green. Formula url and sha256 now point at the v1.5.0 asset (branch `advisor/062-formula-1.5.0`). Homebrew 6 refuses `brew install <path>` for a name that exists in a tap, so verified by extracting the asset: `--version` prints 1.5.0, ad-hoc signed. `cyberpapiii/homebrew-tap` still ships v1.2.1. |
 
 ### Dependency notes (2026-08-07 round)
 
