@@ -35,6 +35,7 @@ final class AppleScriptRunnerValidationTests: XCTestCase {
                 error.localizedDescription,
                 "Could not read file at 'file.png'."
             )
+            XCTAssertEqual(error.disposition, .notStarted)
         }
     }
 
@@ -148,6 +149,7 @@ final class AppleScriptRunnerValidationTests: XCTestCase {
                 error.localizedDescription,
                 "Message too long (max 20,000 chars)"
             )
+            XCTAssertEqual(error.disposition, .notStarted)
         }
     }
 

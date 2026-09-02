@@ -17,37 +17,37 @@ final class StubScriptRunner: ScriptRunning, @unchecked Sendable {
     }
 
     private(set) var invocations: [Call] = []
-    var nextResult: Result<Void, SendError> = .success(())
+    var nextResult: Result<Void, SendFailure> = .success(())
     /// When non-empty, each call pops the next result; nextResult is the fallback.
     /// Lets a test express "payload 1 succeeds, payload 2 fails".
-    var queuedResults: [Result<Void, SendError>] = []
+    var queuedResults: [Result<Void, SendFailure>] = []
     /// Optional side effect run on every send call before nextResult is returned.
     /// Used to simulate Messages.app writing the chat.db row between send and verify.
     var onSend: (() -> Void)?
 
-    private func takeResult() -> Result<Void, SendError> {
+    private func takeResult() -> Result<Void, SendFailure> {
         queuedResults.isEmpty ? nextResult : queuedResults.removeFirst()
     }
 
-    func sendTextToParticipant(handle: String, message: String) async -> Result<Void, SendError> {
+    func sendTextToParticipant(handle: String, message: String) async -> Result<Void, SendFailure> {
         invocations.append(.textToParticipant(handle: handle, message: message))
         onSend?()
         return takeResult()
     }
 
-    func sendFileToParticipant(handle: String, filePath: String) async -> Result<Void, SendError> {
+    func sendFileToParticipant(handle: String, filePath: String) async -> Result<Void, SendFailure> {
         invocations.append(.fileToParticipant(handle: handle, filePath: filePath))
         onSend?()
         return takeResult()
     }
 
-    func sendTextToChat(guid: String, message: String) async -> Result<Void, SendError> {
+    func sendTextToChat(guid: String, message: String) async -> Result<Void, SendFailure> {
         invocations.append(.textToChat(guid: guid, message: message))
         onSend?()
         return takeResult()
     }
 
-    func sendFileToChat(guid: String, filePath: String) async -> Result<Void, SendError> {
+    func sendFileToChat(guid: String, filePath: String) async -> Result<Void, SendFailure> {
         invocations.append(.fileToChat(guid: guid, filePath: filePath))
         onSend?()
         return takeResult()
@@ -152,7 +152,7 @@ final class SendToolExecuteTests: XCTestCase {
     func testScriptFailureProducesFailedStatus() async throws {
         let fixture = try makeSendFixture()
         let stub = StubScriptRunner()
-        stub.nextResult = .failure(.failed("osascript error -1712"))
+        stub.nextResult = .failure(SendFailure(.failed("osascript error -1712"), disposition: .notStarted))
 
         let tool = SendTool(db: fixture.database(), resolver: makeSeededResolver(), runner: stub)
 
@@ -541,7 +541,7 @@ final class SendToolExecuteTests: XCTestCase {
         let fixture = try makeSendFixture()
         let stub = StubScriptRunner()
         // Payload 0 (the file) succeeds; payload 1 (the text) hard-fails.
-        stub.queuedResults = [.success(()), .failure(.messagesAppUnavailable)]
+        stub.queuedResults = [.success(()), .failure(SendFailure(.messagesAppUnavailable, disposition: .notStarted))]
 
         let tool = SendTool(
             db: fixture.database(),
@@ -581,7 +581,7 @@ final class SendToolExecuteTests: XCTestCase {
         let fixture = try makeSendFixture()
         let stub = StubScriptRunner()
         // Payload 0 (the file) hard-fails immediately.
-        stub.queuedResults = [.failure(.messagesAppUnavailable)]
+        stub.queuedResults = [.failure(SendFailure(.messagesAppUnavailable, disposition: .notStarted))]
 
         let tool = SendTool(
             db: fixture.database(),
@@ -613,7 +613,7 @@ final class SendToolExecuteTests: XCTestCase {
         let fixture = try makeSendFixture()
         let stub = StubScriptRunner()
         // Two files: the first reports a pending transfer, the second succeeds.
-        stub.queuedResults = [.failure(.transferPending("a.jpg")), .success(())]
+        stub.queuedResults = [.failure(SendFailure(.transferPending("a.jpg"), disposition: .mayHaveCompleted)), .success(())]
 
         let tool = SendTool(
             db: fixture.database(),

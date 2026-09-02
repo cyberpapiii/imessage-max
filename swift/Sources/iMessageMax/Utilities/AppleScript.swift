@@ -6,10 +6,10 @@ import Foundation
 /// Abstraction over the four send-execution functions used by SendTool.
 /// The production implementation is LiveScriptRunner; tests inject a stub.
 protocol ScriptRunning: Sendable {
-    func sendTextToParticipant(handle: String, message: String) async -> Result<Void, SendError>
-    func sendFileToParticipant(handle: String, filePath: String) async -> Result<Void, SendError>
-    func sendTextToChat(guid: String, message: String) async -> Result<Void, SendError>
-    func sendFileToChat(guid: String, filePath: String) async -> Result<Void, SendError>
+    func sendTextToParticipant(handle: String, message: String) async -> Result<Void, SendFailure>
+    func sendFileToParticipant(handle: String, filePath: String) async -> Result<Void, SendFailure>
+    func sendTextToChat(guid: String, message: String) async -> Result<Void, SendFailure>
+    func sendFileToChat(guid: String, filePath: String) async -> Result<Void, SendFailure>
 }
 
 /// Production implementation: forwards to AppleScriptRunner statics.
@@ -19,8 +19,8 @@ protocol ScriptRunning: Sendable {
 /// blocked send there would stall unrelated requests service-wide.
 struct LiveScriptRunner: ScriptRunning {
     private func onBackgroundThread(
-        _ work: @escaping @Sendable () -> Result<Void, SendError>
-    ) async -> Result<Void, SendError> {
+        _ work: @escaping @Sendable () -> Result<Void, SendFailure>
+    ) async -> Result<Void, SendFailure> {
         await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 continuation.resume(returning: work())
@@ -28,25 +28,25 @@ struct LiveScriptRunner: ScriptRunning {
         }
     }
 
-    func sendTextToParticipant(handle: String, message: String) async -> Result<Void, SendError> {
+    func sendTextToParticipant(handle: String, message: String) async -> Result<Void, SendFailure> {
         await onBackgroundThread {
             AppleScriptRunner.sendTextToParticipant(handle: handle, message: message)
         }
     }
 
-    func sendFileToParticipant(handle: String, filePath: String) async -> Result<Void, SendError> {
+    func sendFileToParticipant(handle: String, filePath: String) async -> Result<Void, SendFailure> {
         await onBackgroundThread {
             AppleScriptRunner.sendFileToParticipant(handle: handle, filePath: filePath)
         }
     }
 
-    func sendTextToChat(guid: String, message: String) async -> Result<Void, SendError> {
+    func sendTextToChat(guid: String, message: String) async -> Result<Void, SendFailure> {
         await onBackgroundThread {
             AppleScriptRunner.sendTextToChat(guid: guid, message: message)
         }
     }
 
-    func sendFileToChat(guid: String, filePath: String) async -> Result<Void, SendError> {
+    func sendFileToChat(guid: String, filePath: String) async -> Result<Void, SendFailure> {
         await onBackgroundThread {
             AppleScriptRunner.sendFileToChat(guid: guid, filePath: filePath)
         }
@@ -178,12 +178,12 @@ enum AppleScriptRunner {
         end run
         """
 
-    static func sendTextToParticipant(handle: String, message: String) -> Result<Void, SendError> {
+    static func sendTextToParticipant(handle: String, message: String) -> Result<Void, SendFailure> {
         guard handle.count <= 100 else {
-            return .failure(.invalidParams("Recipient too long"))
+            return .failure(SendFailure(.invalidParams("Recipient too long"), disposition: .notStarted))
         }
         guard message.count <= 20_000 else {
-            return .failure(.invalidParams("Message too long (max 20,000 chars)"))
+            return .failure(SendFailure(.invalidParams("Message too long (max 20,000 chars)"), disposition: .notStarted))
         }
 
         return run(
@@ -193,12 +193,12 @@ enum AppleScriptRunner {
         )
     }
 
-    static func sendTextToChat(guid: String, message: String) -> Result<Void, SendError> {
+    static func sendTextToChat(guid: String, message: String) -> Result<Void, SendFailure> {
         guard !guid.isEmpty else {
-            return .failure(.invalidParams("Chat guid is required"))
+            return .failure(SendFailure(.invalidParams("Chat guid is required"), disposition: .notStarted))
         }
         guard message.count <= 20_000 else {
-            return .failure(.invalidParams("Message too long (max 20,000 chars)"))
+            return .failure(SendFailure(.invalidParams("Message too long (max 20,000 chars)"), disposition: .notStarted))
         }
 
         return run(
@@ -208,17 +208,17 @@ enum AppleScriptRunner {
         )
     }
 
-    static func sendFileToParticipant(handle: String, filePath: String) -> Result<Void, SendError> {
+    static func sendFileToParticipant(handle: String, filePath: String) -> Result<Void, SendFailure> {
         guard handle.count <= 100 else {
-            return .failure(.invalidParams("Recipient too long"))
+            return .failure(SendFailure(.invalidParams("Recipient too long"), disposition: .notStarted))
         }
         let preparedFile: PreparedOutgoingFile
         do {
             preparedFile = try prepareTrackedOutgoingFile(sourcePath: filePath)
         } catch let error as SendError {
-            return .failure(error)
+            return .failure(SendFailure(error, disposition: .notStarted))
         } catch {
-            return .failure(.failed(ClientErrorMessages.internalDetail(error, context: "Preparing the attachment")))
+            return .failure(SendFailure(.failed(ClientErrorMessages.internalDetail(error, context: "Preparing the attachment")), disposition: .notStarted))
         }
 
         let handoff = run(
@@ -233,17 +233,17 @@ enum AppleScriptRunner {
         return waitForTransferCompletion(preparedFile: preparedFile)
     }
 
-    static func sendFileToChat(guid: String, filePath: String) -> Result<Void, SendError> {
+    static func sendFileToChat(guid: String, filePath: String) -> Result<Void, SendFailure> {
         guard !guid.isEmpty else {
-            return .failure(.invalidParams("Chat guid is required"))
+            return .failure(SendFailure(.invalidParams("Chat guid is required"), disposition: .notStarted))
         }
         let preparedFile: PreparedOutgoingFile
         do {
             preparedFile = try prepareTrackedOutgoingFile(sourcePath: filePath)
         } catch let error as SendError {
-            return .failure(error)
+            return .failure(SendFailure(error, disposition: .notStarted))
         } catch {
-            return .failure(.failed(ClientErrorMessages.internalDetail(error, context: "Preparing the attachment")))
+            return .failure(SendFailure(.failed(ClientErrorMessages.internalDetail(error, context: "Preparing the attachment")), disposition: .notStarted))
         }
 
         let handoff = run(
@@ -387,7 +387,7 @@ enum AppleScriptRunner {
         }
     }
 
-    private static func waitForTransferCompletion(preparedFile: PreparedOutgoingFile) -> Result<Void, SendError> {
+    private static func waitForTransferCompletion(preparedFile: PreparedOutgoingFile) -> Result<Void, SendFailure> {
         let timeoutSeconds: TimeInterval = 15
         let pollInterval: TimeInterval = 0.5
         let deadline = Date().addingTimeInterval(timeoutSeconds)
@@ -404,16 +404,16 @@ enum AppleScriptRunner {
                     return .success(())
                 case .failed:
                     removeStagedDirectory(for: preparedFile)
-                    return .failure(.transferFailed(preparedFile.trackingName))
+                    return .failure(SendFailure(.transferFailed(preparedFile.trackingName), disposition: .mayHaveCompleted))
                 case .pending:
                     sawPending = true
                 case .unknown:
                     break
                 }
             } catch let error as SendError {
-                return .failure(error)
+                return .failure(SendFailure(error, disposition: .mayHaveCompleted))
             } catch {
-                return .failure(.failed(ClientErrorMessages.internalDetail(error, context: "Checking attachment transfer status")))
+                return .failure(SendFailure(.failed(ClientErrorMessages.internalDetail(error, context: "Checking attachment transfer status")), disposition: .mayHaveCompleted))
             }
 
             Thread.sleep(forTimeInterval: pollInterval)
@@ -421,10 +421,10 @@ enum AppleScriptRunner {
 
         if sawPending {
             scheduleDeferredStagedRemoval(preparedFile, after: .seconds(30))
-            return .failure(.transferPending(preparedFile.trackingName))
+            return .failure(SendFailure(.transferPending(preparedFile.trackingName), disposition: .mayHaveCompleted))
         }
         scheduleDeferredStagedRemoval(preparedFile, after: .seconds(30))
-        return .failure(.transferStatusUnknown(preparedFile.trackingName))
+        return .failure(SendFailure(.transferStatusUnknown(preparedFile.trackingName), disposition: .mayHaveCompleted))
     }
 
     /// Messages may still be reading the staged copy for a few seconds after
@@ -568,17 +568,22 @@ enum AppleScriptRunner {
         script: String,
         arguments: [String],
         missingTargetError: SendError
-    ) -> Result<Void, SendError> {
+    ) -> Result<Void, SendFailure> {
         let result = execute(script: script, arguments: arguments, timeoutSeconds: 30)
         switch result {
+        case .failure(.timeout):
+            return .failure(SendFailure(.timeout, disposition: .mayHaveCompleted))
         case .failure(let error):
-            return .failure(error)
+            return .failure(SendFailure(error, disposition: .notStarted))
         case .success(let execution):
             if execution.terminationStatus != 0 {
-                return .failure(classifySendStderr(
-                    execution.stderr,
-                    sentFileName: ((arguments.last ?? "") as NSString).lastPathComponent,
-                    missingTargetError: missingTargetError
+                return .failure(SendFailure(
+                    classifySendStderr(
+                        execution.stderr,
+                        sentFileName: ((arguments.last ?? "") as NSString).lastPathComponent,
+                        missingTargetError: missingTargetError
+                    ),
+                    disposition: .mayHaveCompleted
                 ))
             }
 

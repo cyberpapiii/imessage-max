@@ -366,12 +366,12 @@ actor SendTool {
         // Stops at the first hard failure: firing later payloads after one has
         // failed produces out-of-order conversations and compounds the partial
         // reporting below. Soft transfer outcomes keep sending.
-        var sendResults: [Result<Void, SendError>] = []
+        var sendResults: [Result<Void, SendFailure>] = []
         payloadLoop: for payload in payloads {
             let result = await sendOne(target: resolved.target, payload: payload, runner: runner)
             sendResults.append(result)
-            if case .failure(let error) = result {
-                switch error {
+            if case .failure(let failure) = result {
+                switch failure.error {
                 case .transferPending, .transferStatusUnknown:
                     break  // soft outcome; keep sending
                 default:
@@ -390,30 +390,30 @@ actor SendTool {
         }
 
         var pendingMessages: [String] = []
-        var hardFailure: (index: Int, error: SendError)? = nil
+        var hardFailure: (index: Int, failure: SendFailure)? = nil
         for (index, result) in sendResults.enumerated() {
-            if case .failure(let error) = result {
-                switch error {
+            if case .failure(let failure) = result {
+                switch failure.error {
                 case .transferPending, .transferStatusUnknown:
-                    pendingMessages.append(ClientErrorMessages.sanitized(error))
+                    pendingMessages.append(ClientErrorMessages.sanitized(failure.error))
                 default:
-                    hardFailure = (index, error)
+                    hardFailure = (index, failure)
                 }
             }
         }
 
-        if let failure = hardFailure {
+        if let hard = hardFailure {
             // Every result before the failing one is a payload that was
             // dispatched without hard-failing (the loop stops at the first).
-            let sentCount = failure.index
+            let sentCount = hard.index
             if sentCount == 0 {
                 // Nothing reached Messages.app: a plain "failed", as before.
-                return .error(ClientErrorMessages.sanitized(failure.error))
+                return .error(ClientErrorMessages.sanitized(hard.failure.error))
             }
             return .partialFailure(
                 sentDescriptions: payloads.prefix(sentCount).map { describePayload($0) },
-                failedDescription: describePayload(payloads[failure.index]),
-                error: ClientErrorMessages.sanitized(failure.error),
+                failedDescription: describePayload(payloads[hard.index]),
+                error: ClientErrorMessages.sanitized(hard.failure.error),
                 deliveredTo: resolved.deliveredTo,
                 chat: resolved.chat
             )
@@ -486,7 +486,7 @@ actor SendTool {
         target: SendResolution.Target,
         payload: SendPayload,
         runner: any ScriptRunning
-    ) async -> Result<Void, SendError> {
+    ) async -> Result<Void, SendFailure> {
         switch target {
         case .participant(let handle, _):
             switch payload {
