@@ -226,6 +226,24 @@ final class GetContextToolTests: XCTestCase {
             "got \(err.error): \(err.message)"
         )
     }
+
+    func testMissingReplyAndEditColumnsDegradeContext() async throws {
+        let fixture = try makeGetMessagesFixture()
+        try fixture.execute("ALTER TABLE message DROP COLUMN thread_originator_guid")
+        try fixture.execute("ALTER TABLE message DROP COLUMN date_edited")
+        try fixture.execute("ALTER TABLE message DROP COLUMN associated_message_emoji")
+        let result = await GetContext.execute(
+            messageId: "msg_202",
+            before: 5,
+            after: 5,
+            database: fixture.database(),
+            resolver: makeSeededResolver()
+        )
+        let response = try unwrapSuccess(result)
+        XCTAssertEqual(response.message.id, "msg_202")
+        XCTAssertEqual(response.before.map(\.id), ["msg_200", "msg_201"])
+        XCTAssertEqual(response.after.map(\.id), ["msg_203"])
+    }
 }
 
 private func makeLongChatFixture(messageCount: Int) throws -> ToolTestDatabase {

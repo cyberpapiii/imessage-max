@@ -152,6 +152,7 @@ enum GetContext {
         try? await resolver.initialize()
 
         do {
+            let schema = try database.schema()
             let targetResult: (msgId: Int64, text: String?, attributedBody: Data?, date: Int64, isFromMe: Bool, senderHandle: String?, chatId: Int64, chatName: String?, guid: String, threadOriginatorGuid: String?, dateEdited: Int64)
 
             if let msgIdStr = messageId {
@@ -172,9 +173,9 @@ enum GetContext {
                         h.id as sender_handle,
                         c.ROWID as chat_id,
                         c.display_name as chat_name,
-                        m.guid,
-                        m.thread_originator_guid,
-                        m.date_edited
+                            m.guid,
+                        \(schema.threadOriginatorGuidSQL),
+                        \(schema.dateEditedSQL)
                     FROM message m
                     JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
                     JOIN chat c ON cmj.chat_id = c.ROWID
@@ -248,8 +249,8 @@ enum GetContext {
                             c.ROWID as chat_id,
                             c.display_name as chat_name,
                             m.guid,
-                            m.thread_originator_guid,
-                            m.date_edited
+                            \(schema.threadOriginatorGuidSQL),
+                            \(schema.dateEditedSQL)
                         FROM message m
                         JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
                         JOIN chat c ON cmj.chat_id = c.ROWID
@@ -312,8 +313,8 @@ enum GetContext {
                     m.is_from_me,
                     h.id as sender_handle,
                     m.guid,
-                    m.thread_originator_guid,
-                    m.date_edited
+                    \(schema.threadOriginatorGuidSQL),
+                    \(schema.dateEditedSQL)
                 FROM message m
                 JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
                 LEFT JOIN handle h ON m.handle_id = h.ROWID
@@ -347,8 +348,8 @@ enum GetContext {
                     m.is_from_me,
                     h.id as sender_handle,
                     m.guid,
-                    m.thread_originator_guid,
-                    m.date_edited
+                    \(schema.threadOriginatorGuidSQL),
+                    \(schema.dateEditedSQL)
                 FROM message m
                 JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
                 LEFT JOIN handle h ON m.handle_id = h.ROWID

@@ -187,7 +187,8 @@ extension SearchTool {
         terms: [String] = [],
         matchAll: Bool = false,
         fuzzy: Bool = false,
-        includeFiltered: Bool = false
+        includeFiltered: Bool = false,
+        schema: SchemaCapabilities = .assumed
     ) -> (String, [Any]) {
         let builder = QueryBuilder()
             .select(
@@ -200,8 +201,8 @@ extension SearchTool {
                 "c.ROWID as chat_id",
                 "c.display_name as chat_display_name",
                 "m.guid",
-                "m.thread_originator_guid",
-                "m.date_edited",
+                schema.threadOriginatorGuidSQL,
+                schema.dateEditedSQL,
                 """
                 EXISTS (
                     SELECT 1 FROM message r
@@ -215,12 +216,7 @@ extension SearchTool {
                     )
                 ) as has_reactions
                 """,
-                """
-                EXISTS (
-                    SELECT 1 FROM message r
-                    WHERE r.thread_originator_guid = m.guid
-                ) as has_replies
-                """
+                schema.hasRepliesSQL
             )
         applySearchFilters(
             to: builder,
@@ -527,6 +523,7 @@ extension SearchTool {
             datesByChat[anchor.chatId, default: []].append(anchor.date)
         }
 
+        let schema = try db.schema()
         var result: [String: (before: [ContextRow], after: [ContextRow])] = [:]
         for (chatId, dates) in datesByChat {
             var rowsById: [Int64: ContextRow] = [:]
@@ -537,7 +534,7 @@ extension SearchTool {
             while chunkStart < dates.count {
                 let chunkEnd = min(chunkStart + 100, dates.count)
                 let chunk = Array(dates[chunkStart..<chunkEnd])
-                let (sql, params) = perAnchorContextSQL(chatId: chatId, dates: chunk)
+                let (sql, params) = perAnchorContextSQL(chatId: chatId, dates: chunk, schema: schema)
                 let rows = try db.query(sql, params: params) { row in
                     (
                         anchorDate: row.int(0),
@@ -572,8 +569,10 @@ extension SearchTool {
     /// variable limit is 32766.
     private static func perAnchorContextSQL(
         chatId: Int64,
-        dates: [Int64]
+        dates: [Int64],
+        schema: SchemaCapabilities
     ) -> (String, [Any]) {
+        let columns = contextSelectColumns(schema)
         let fromJoin = """
             FROM message m
             JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
@@ -584,7 +583,7 @@ extension SearchTool {
         for date in dates {
             parts.append("""
                 SELECT * FROM (
-                  SELECT ? AS anchor_date, 'before' AS side, \(contextSelectColumns)
+                  SELECT ? AS anchor_date, 'before' AS side, \(columns)
                   \(fromJoin)
                   WHERE cmj.chat_id = ? AND m.date < ? AND m.associated_message_type = 0
                   ORDER BY m.date DESC LIMIT 2
@@ -593,7 +592,7 @@ extension SearchTool {
             params.append(contentsOf: [date, chatId, date])
             parts.append("""
                 SELECT * FROM (
-                  SELECT ? AS anchor_date, 'after' AS side, \(contextSelectColumns)
+                  SELECT ? AS anchor_date, 'after' AS side, \(columns)
                   \(fromJoin)
                   WHERE cmj.chat_id = ? AND m.date > ? AND m.associated_message_type = 0
                   ORDER BY m.date ASC LIMIT 2
@@ -604,9 +603,10 @@ extension SearchTool {
         return (parts.joined(separator: "\nUNION ALL\n"), params)
     }
 
-    static let contextSelectColumns = """
+    static func contextSelectColumns(_ schema: SchemaCapabilities) -> String {
+        """
         m.ROWID as msg_id, m.text, m.attributedBody, m.date, m.is_from_me, h.id as sender_handle,
-        m.guid, m.thread_originator_guid, m.date_edited,
+        m.guid, \(schema.threadOriginatorGuidSQL), \(schema.dateEditedSQL),
         EXISTS (
             SELECT 1 FROM message r
             WHERE r.associated_message_type >= 2000
@@ -618,11 +618,9 @@ extension SearchTool {
                 )
             )
         ) as has_reactions,
-        EXISTS (
-            SELECT 1 FROM message r
-            WHERE r.thread_originator_guid = m.guid
-        ) as has_replies
+        \(schema.hasRepliesSQL)
         """
+    }
 
     static func mapContextRow(_ row: SQLiteRow, columnOffset: Int = 0) -> ContextRow {
         let base = Int32(columnOffset)
@@ -647,8 +645,10 @@ extension SearchTool {
         msgDate: Int64,
         resolver: ContactResolver
     ) async throws -> ([SearchContextMessage], [SearchContextMessage]) {
+        let schema = try db.schema()
+        let columns = contextSelectColumns(schema)
         let beforeRows = try db.query("""
-            SELECT \(contextSelectColumns)
+            SELECT \(columns)
             FROM message m
             JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
             LEFT JOIN handle h ON m.handle_id = h.ROWID
@@ -659,7 +659,7 @@ extension SearchTool {
         ) { mapContextRow($0) }
 
         let afterRows = try db.query("""
-            SELECT \(contextSelectColumns)
+            SELECT \(columns)
             FROM message m
             JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
             LEFT JOIN handle h ON m.handle_id = h.ROWID
