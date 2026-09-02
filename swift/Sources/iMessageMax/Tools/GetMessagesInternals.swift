@@ -1,5 +1,84 @@
 import Foundation
 
+enum MessageAnnotations {
+    struct Reaction {
+        let type: Int
+        let fromHandle: String?
+        let emoji: String?
+        let date: Int64
+    }
+
+    static func reactionsMap(db: Database, messageGuids: [String]) throws -> [String: [Reaction]] {
+        guard !messageGuids.isEmpty else { return [:] }
+
+        let placeholders = messageGuids.map { _ in "?" }.joined(separator: ", ")
+        let sql = """
+            SELECT m.associated_message_guid, m.associated_message_type, h.id,
+                   m.associated_message_emoji, m.date
+            FROM message m
+            LEFT JOIN handle h ON m.handle_id = h.ROWID
+            WHERE m.associated_message_type >= 2000
+            AND (
+                m.associated_message_guid IN (\(placeholders))
+                OR substr(m.associated_message_guid, instr(m.associated_message_guid, '/') + 1)
+                   IN (\(placeholders))
+            )
+            """
+
+        var map: [String: [Reaction]] = [:]
+
+        let rows = try db.query(sql, params: messageGuids + messageGuids) { row in
+            (
+                guid: row.string(0) ?? "",
+                type: Int(row.int(1)),
+                fromHandle: row.string(2),
+                emoji: row.string(3),
+                date: row.optionalInt(4) ?? 0
+            )
+        }
+
+        for row in rows {
+            let originalGuid = row.guid.hasPrefix("p:") || row.guid.hasPrefix("bp:")
+                ? String(row.guid.split(separator: "/").last ?? "")
+                : row.guid
+
+            map[originalGuid, default: []].append(
+                Reaction(
+                    type: row.type,
+                    fromHandle: row.fromHandle,
+                    emoji: row.emoji,
+                    date: row.date
+                )
+            )
+        }
+
+        return map
+    }
+
+    static func render(
+        _ rows: [Reaction],
+        reactorName: (String?) -> String
+    ) -> [String]? {
+        var reactionStrings: [String] = []
+        for r in rows {
+            guard let reactionType = ReactionType(rawValue: r.type),
+                  !ReactionType.isRemoval(r.type) else { continue }
+
+            let token: String
+            switch reactionType {
+            case .customEmoji:
+                token = r.emoji ?? "?"
+            case .sticker:
+                token = ReactionType.stickerToken
+            default:
+                token = reactionType.emoji
+            }
+            reactionStrings.append("\(token) \(reactorName(r.fromHandle))")
+        }
+        return reactionStrings.isEmpty ? nil : reactionStrings
+    }
+}
+
 struct MessageRow {
     let id: Int
     let guid: String
@@ -320,40 +399,8 @@ extension GetMessagesTool {
         }
     }
 
-    func getReactionsMap(messageGuids: [String]) throws -> [String: [(type: Int, fromHandle: String?)]] {
-        guard !messageGuids.isEmpty else { return [:] }
-
-        let placeholders = messageGuids.map { _ in "?" }.joined(separator: ", ")
-        let sql = """
-            SELECT m.associated_message_guid, m.associated_message_type, h.id
-            FROM message m
-            LEFT JOIN handle h ON m.handle_id = h.ROWID
-            WHERE m.associated_message_guid IN (\(placeholders))
-            AND m.associated_message_type >= 2000
-            """
-
-        var map: [String: [(type: Int, fromHandle: String?)]] = [:]
-
-        let rows = try db.query(sql, params: messageGuids) { row in
-            (
-                guid: row.string(0) ?? "",
-                type: Int(row.int(1)),
-                fromHandle: row.string(2)
-            )
-        }
-
-        for row in rows {
-            let originalGuid = row.guid.hasPrefix("p:") || row.guid.hasPrefix("bp:")
-                ? String(row.guid.split(separator: "/").last ?? "")
-                : row.guid
-
-            if map[originalGuid] == nil {
-                map[originalGuid] = []
-            }
-            map[originalGuid]?.append((type: row.type, fromHandle: row.fromHandle))
-        }
-
-        return map
+    func getReactionsMap(messageGuids: [String]) throws -> [String: [MessageAnnotations.Reaction]] {
+        try MessageAnnotations.reactionsMap(db: db, messageGuids: messageGuids)
     }
 
     func getAttachmentsMap(messageIds: [Int]) throws -> [Int: [AttachmentRow]] {

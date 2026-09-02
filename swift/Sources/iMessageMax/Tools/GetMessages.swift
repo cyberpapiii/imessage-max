@@ -290,7 +290,7 @@ actor GetMessagesTool {
             )
         }
 
-        let reactionsMap: [String: [(type: Int, fromHandle: String?)]]
+        let reactionsMap: [String: [MessageAnnotations.Reaction]]
         if includeReactions && !messageRows.isEmpty {
             reactionsMap = try getReactionsMap(messageGuids: messageRows.map { $0.guid })
         } else {
@@ -324,22 +324,15 @@ actor GetMessagesTool {
 
             var reactions: [String]? = nil
             if includeReactions, let rowReactions = reactionsMap[row.guid] {
-                var reactionStrings: [String] = []
-                for r in rowReactions {
-                    guard let reactionType = ReactionType(rawValue: r.type),
-                          !ReactionType.isRemoval(r.type) else { continue }
-
-                    let reactor: String
-                    if let handle = r.fromHandle {
-                        reactor = handleToKey[handle] ?? "unknown"
-                    } else {
-                        reactor = "me"
+                reactions = MessageAnnotations.render(
+                    rowReactions,
+                    reactorName: { handle in
+                        if let handle {
+                            return handleToKey[handle] ?? "unknown"
+                        }
+                        return "me"
                     }
-                    reactionStrings.append("\(reactionType.emoji) \(reactor)")
-                }
-                if !reactionStrings.isEmpty {
-                    reactions = reactionStrings
-                }
+                )
             }
 
             var media: [GetMessagesResponse.MediaInfo]? = nil

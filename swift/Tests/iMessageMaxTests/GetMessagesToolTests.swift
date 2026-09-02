@@ -98,7 +98,7 @@ final class GetMessagesToolTests: XCTestCase {
         let target = try XCTUnwrap(messages.first(where: { $0["id"] as? String == "msg_201" }))
 
         let reactions = try XCTUnwrap(target["reactions"] as? [String])
-        XCTAssertEqual(reactions, ["❤️ alice"])
+        XCTAssertEqual(reactions, ["❤️ alice", "🥕 bob", "🩵 sticker me"])
 
         let media = try decodeJSONArray(target["media"])
         XCTAssertEqual(media.count, 1)
@@ -519,6 +519,11 @@ func makeGetMessagesFixture() throws -> ToolTestDatabase {
 
     try fixture.insertMessage(rowId: 400, guid: "reaction-love", text: nil, date: base + (3 * minute), isFromMe: false, handleId: 1, associatedMessageType: 2000, associatedMessageGuid: "gm201")
     try fixture.joinChatMessage(chatId: 20, messageId: 400)
+
+    try fixture.insertMessage(rowId: 401, guid: "reaction-carrot", text: nil, date: base + (3 * minute) + 1, isFromMe: false, handleId: 2, associatedMessageType: 2006, associatedMessageGuid: "p:0/gm201", associatedMessageEmoji: "🥕")
+    try fixture.joinChatMessage(chatId: 20, messageId: 401)
+    try fixture.insertMessage(rowId: 402, guid: "reaction-sticker", text: nil, date: base + (3 * minute) + 2, isFromMe: true, associatedMessageType: 2007, associatedMessageGuid: "p:0/gm201")
+    try fixture.joinChatMessage(chatId: 20, messageId: 402)
 
     try fixture.insertMessage(rowId: 202, guid: "gm202", text: "packing list", date: base + sixteenHours, isFromMe: false, handleId: 1)
     try fixture.joinChatMessage(chatId: 20, messageId: 202)
