@@ -429,8 +429,8 @@ extension SearchTool {
         return try FormatUtils.encodeJSON(response)
     }
 
-    /// One windowed query per distinct chat, then slice 2-before / 2-after
-    /// per anchor in Swift. `getContext` stays for the get_context tool.
+    /// One statement per distinct chat: UNION ALL of per-anchor LIMIT 2
+    /// before/after windows. `getContext` stays for the get_context tool.
     static func getContextBatch(
         db: Database,
         anchors: [(chatId: Int64, date: Int64)],
@@ -443,63 +443,92 @@ extension SearchTool {
             datesByChat[anchor.chatId, default: []].append(anchor.date)
         }
 
-        var formattedByChat: [Int64: [(date: Int64, message: SearchContextMessage)]] = [:]
-        for (chatId, dates) in datesByChat {
-            guard let minDate = dates.min(), let maxDate = dates.max() else { continue }
-            let rows = try db.query(
-                """
-                SELECT m.ROWID as msg_id, m.text, m.attributedBody, m.date, m.is_from_me, h.id as sender_handle
-                FROM message m
-                JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
-                LEFT JOIN handle h ON m.handle_id = h.ROWID
-                WHERE cmj.chat_id = ?
-                  AND m.associated_message_type = 0
-                  AND (
-                    m.ROWID IN (
-                      SELECT m2.ROWID
-                      FROM message m2
-                      JOIN chat_message_join cmj2 ON m2.ROWID = cmj2.message_id
-                      WHERE cmj2.chat_id = ? AND m2.date < ? AND m2.associated_message_type = 0
-                      ORDER BY m2.date DESC LIMIT 2
-                    )
-                    OR (m.date >= ? AND m.date <= ?)
-                    OR m.ROWID IN (
-                      SELECT m3.ROWID
-                      FROM message m3
-                      JOIN chat_message_join cmj3 ON m3.ROWID = cmj3.message_id
-                      WHERE cmj3.chat_id = ? AND m3.date > ? AND m3.associated_message_type = 0
-                      ORDER BY m3.date ASC LIMIT 2
-                    )
-                  )
-                ORDER BY m.date
-                """,
-                params: [chatId, chatId, minDate, minDate, maxDate, chatId, maxDate]
-            ) { row in
-                ContextRow(
-                    msgId: row.int(0),
-                    text: row.string(1),
-                    attributedBody: row.blob(2),
-                    date: row.optionalInt(3),
-                    isFromMe: row.int(4) != 0,
-                    senderHandle: row.string(5)
-                )
-            }
-
-            var formatted: [(date: Int64, message: SearchContextMessage)] = []
-            for row in rows {
-                formatted.append((row.date ?? 0, await formatContextMessage(row: row, resolver: resolver)))
-            }
-            formattedByChat[chatId] = formatted
-        }
-
         var result: [String: (before: [SearchContextMessage], after: [SearchContextMessage])] = [:]
-        for anchor in anchors {
-            let messages = formattedByChat[anchor.chatId] ?? []
-            let before = Array(messages.filter { $0.date < anchor.date }.suffix(2).map(\.message))
-            let after = Array(messages.filter { $0.date > anchor.date }.prefix(2).map(\.message))
-            result["\(anchor.chatId):\(anchor.date)"] = (before, after)
+        for (chatId, dates) in datesByChat {
+            var formattedById: [Int64: SearchContextMessage] = [:]
+            var beforeIdsByDate: [Int64: [Int64]] = [:]
+            var afterIdsByDate: [Int64: [Int64]] = [:]
+
+            var chunkStart = 0
+            while chunkStart < dates.count {
+                let chunkEnd = min(chunkStart + 100, dates.count)
+                let chunk = Array(dates[chunkStart..<chunkEnd])
+                let (sql, params) = perAnchorContextSQL(chatId: chatId, dates: chunk)
+                let rows = try db.query(sql, params: params) { row in
+                    (
+                        anchorDate: row.int(0),
+                        side: row.string(1) ?? "",
+                        context: ContextRow(
+                            msgId: row.int(2),
+                            text: row.string(3),
+                            attributedBody: row.blob(4),
+                            date: row.optionalInt(5),
+                            isFromMe: row.int(6) != 0,
+                            senderHandle: row.string(7)
+                        )
+                    )
+                }
+
+                for item in rows {
+                    if formattedById[item.context.msgId] == nil {
+                        formattedById[item.context.msgId] = await formatContextMessage(
+                            row: item.context,
+                            resolver: resolver
+                        )
+                    }
+                    if item.side == "before" {
+                        beforeIdsByDate[item.anchorDate, default: []].append(item.context.msgId)
+                    } else {
+                        afterIdsByDate[item.anchorDate, default: []].append(item.context.msgId)
+                    }
+                }
+                chunkStart = chunkEnd
+            }
+
+            for date in dates {
+                let before = Array((beforeIdsByDate[date] ?? []).reversed().compactMap { formattedById[$0] })
+                let after = (afterIdsByDate[date] ?? []).compactMap { formattedById[$0] }
+                result["\(chatId):\(date)"] = (before, after)
+            }
         }
         return result
+    }
+
+    /// Caps at 100 anchors (200 subselects, 600 bindings). SQLite's default
+    /// variable limit is 32766.
+    private static func perAnchorContextSQL(
+        chatId: Int64,
+        dates: [Int64]
+    ) -> (String, [Any]) {
+        let columns = "m.ROWID AS msg_id, m.text, m.attributedBody, m.date, m.is_from_me, h.id AS sender_handle"
+        let fromJoin = """
+            FROM message m
+            JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
+            LEFT JOIN handle h ON m.handle_id = h.ROWID
+            """
+        var parts: [String] = []
+        var params: [Any] = []
+        for date in dates {
+            parts.append("""
+                SELECT * FROM (
+                  SELECT ? AS anchor_date, 'before' AS side, \(columns)
+                  \(fromJoin)
+                  WHERE cmj.chat_id = ? AND m.date < ? AND m.associated_message_type = 0
+                  ORDER BY m.date DESC LIMIT 2
+                )
+                """)
+            params.append(contentsOf: [date, chatId, date])
+            parts.append("""
+                SELECT * FROM (
+                  SELECT ? AS anchor_date, 'after' AS side, \(columns)
+                  \(fromJoin)
+                  WHERE cmj.chat_id = ? AND m.date > ? AND m.associated_message_type = 0
+                  ORDER BY m.date ASC LIMIT 2
+                )
+                """)
+            params.append(contentsOf: [date, chatId, date])
+        }
+        return (parts.joined(separator: "\nUNION ALL\n"), params)
     }
 
     static func getContext(
