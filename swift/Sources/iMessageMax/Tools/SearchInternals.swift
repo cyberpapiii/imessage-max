@@ -618,16 +618,41 @@ extension SearchTool {
         )
     }
 
+    /// Excerpt is centred on the first query match. A URL that straddles the
+    /// raw-window boundary is collapsed from its truncated form, so
+    /// `[Link: host]` may become `[Link: link]` or the raw fragment may appear.
+    /// The window is four times the excerpt, so this needs a URL longer than
+    /// ~240 characters positioned exactly at the edge.
     static func makeExcerpt(text: String?, query: String?) -> String {
         guard let text else { return "" }
+        let excerptLength = 160
+        let rawWindow = 4 * excerptLength
+        let source: String
+        var rawStart = 0
+        if let query, !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           let r = text.lowercased().range(of: query.lowercased()) {
+            let center = text.distance(from: text.startIndex, to: r.lowerBound)
+            let start = max(0, center - rawWindow / 2)
+            rawStart = start
+            source = String(text.dropFirst(start).prefix(rawWindow))
+        } else {
+            source = String(text.prefix(rawWindow))
+        }
         let normalized = SummaryPreviewFormatter.formattedTextPreview(
-            text: text,
+            text: source,
             attributedBody: nil,
             maxLength: Int.max
-        ) ?? text
-        guard normalized.count > 160 else { return normalized }
+        ) ?? source
 
-        let excerptLength = 160
+        func withWindowPrefix(_ excerpt: String) -> String {
+            if rawStart > 0 && !excerpt.hasPrefix("...") {
+                return "..." + excerpt
+            }
+            return excerpt
+        }
+
+        guard normalized.count > 160 else { return withWindowPrefix(normalized) }
+
         let nsText = normalized as NSString
 
         if let query, !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -641,12 +666,13 @@ extension SearchTool {
                 let excerpt = nsText.substring(with: NSRange(location: start, length: length))
                 let prefix = start > 0 ? "..." : ""
                 let suffix = (start + length) < nsText.length ? "..." : ""
-                return prefix + excerpt + suffix
+                return withWindowPrefix(prefix + excerpt + suffix)
             }
         }
 
         let excerpt = nsText.substring(to: min(excerptLength, nsText.length))
-        return nsText.length > excerptLength ? excerpt + "..." : excerpt
+        let head = nsText.length > excerptLength ? excerpt + "..." : excerpt
+        return withWindowPrefix(head)
     }
 
     static func resolveSenderName(
