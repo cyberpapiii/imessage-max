@@ -40,7 +40,7 @@ VERIFY_ATTEMPTS := 45
 SIGN_HASH = $(shell security find-identity -v -p codesigning 2>/dev/null | \
 	grep -F '"$(CERT_CN)"' | head -1 | awk '{print $$2}')
 
-.PHONY: build test sign install restart status logs clean setup-signing verify help version release-check install-agent
+.PHONY: build test sign install restart status logs clean setup-signing verify verify-db help version release-check install-agent
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
@@ -146,11 +146,35 @@ verify: ## Verify server is healthy
 	echo "✗ Unexpected response (not JSON)"; \
 	exit 1
 
-install: sign restart verify ## Build, sign, restart, verify (the full workflow)
-	@open -R $(BINARY)
-	@echo ""
-	@echo "Done. Finder opened to the binary; drag it into Full Disk Access if needed."
-	@echo "If MCP Router lost connection, reconnect with /mcp"
+verify-db: ## Call diagnose over HTTP and fail if the service cannot read chat.db
+	@URL="http://127.0.0.1:$(PORT)"; \
+	INIT=$$(curl -si "$$URL" -X POST \
+		-H "Content-Type: application/json" \
+		-H "Accept: application/json, text/event-stream" \
+		-d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"verify-db","version":"1.0"}}}' 2>/dev/null) \
+		|| { echo "✗ Server not responding on $$URL"; exit 1; }; \
+	SESSION=$$(printf '%s' "$$INIT" | tr -d '\r' | awk 'tolower($$1)=="mcp-session-id:" {print $$2}'); \
+	if [ -z "$$SESSION" ]; then echo "✗ initialize returned no Mcp-Session-Id header"; exit 1; fi; \
+	BODY=$$(curl -sf "$$URL" -X POST \
+		-H "Content-Type: application/json" \
+		-H "Accept: application/json, text/event-stream" \
+		-H "Mcp-Session-Id: $$SESSION" \
+		-H "MCP-Protocol-Version: 2025-11-25" \
+		-d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"diagnose","arguments":{}}}' 2>/dev/null) \
+		|| { echo "✗ tools/call diagnose failed"; exit 1; }; \
+	printf '%s' "$$BODY" | python3 -c '\
+import sys, json; \
+r = json.load(sys.stdin)["result"]; \
+db = r["structuredContent"]["database"]; \
+ok = db.get("accessible") is True; \
+print(("✓ Database accessible: " if ok else "✗ Database NOT accessible: ") + db.get("status", "?") + " (" + db.get("path", "?") + ", pid " + str(r["structuredContent"].get("process_id")) + ")"); \
+fix = db.get("fix"); \
+print("  " + fix) if (not ok and fix) else None; \
+sys.exit(0 if ok else 1)' \
+	|| { echo "  Run: open -R $(BINARY)   # then drag it into Full Disk Access, then make restart"; exit 1; }
+
+install: sign restart verify verify-db ## Build, sign, restart, verify (the full workflow)
+	@echo "Done. Database access verified."
 
 status: ## Show service status and version
 	@echo "=== Process ==="

@@ -175,6 +175,7 @@ open $(dirname $(readlink -f $(which imessage-max)))
 ```
 
 For source builds, add `.build/release/imessage-max` from your clone directory.
+After changing the grant, relaunch the server; macOS applies Full Disk Access only to processes started after the change.
 
 > In the file picker, press ⌘+Shift+G and paste the path to go straight there.
 
@@ -402,9 +403,34 @@ Examples:
 Run `diagnose` to check status. If `contacts_authorized` is false:
 - Add the `imessage-max` binary to System Settings → Privacy & Security → Contacts
 
+### "Cannot read the iMessage database" / `permission_denied`
+
+Full Disk Access is missing for the **process that opens chat.db**, which
+is the `imessage-max` binary itself for the launchd service, or the app
+that spawns it for stdio clients. Run `diagnose`; `database.fix` names the
+executable and the steps:
+
+1. System Settings → Privacy & Security → Full Disk Access → add that
+   executable (or its launching app).
+2. If it is already listed, toggle it off and on. A grant bound to an
+   earlier code signature looks present but does not work; `make
+   setup-signing` gives the binary a stable identity so rebuilds keep it.
+3. The grant applies only to newly launched processes. Relaunch:
+   `launchctl kickstart -k gui/$(id -u)/local.imessage-max` or `cd swift && make restart`.
+4. Bisect from a terminal: `sqlite3 -readonly ~/Library/Messages/chat.db 'pragma quick_check;'`.
+   `ok` means your terminal has access and the server process does not;
+   `unable to open database file` means the grant is missing for your user.
+
+`make install` now ends with `make verify-db`, which calls `diagnose` over
+HTTP and fails if `database.accessible` is false. Run it on its own after
+changing Full Disk Access:
+
+    cd swift && make verify-db
+
 ### "Database not found" error
 
-Add the `imessage-max` binary to System Settings → Privacy & Security → Full Disk Access
+`~/Library/Messages/chat.db` does not exist. Sign in to iMessage and send or
+receive one message.
 
 ### Images show "attachment_offloaded" error
 

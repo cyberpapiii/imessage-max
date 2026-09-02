@@ -37,6 +37,9 @@ struct iMessageMax: AsyncParsableCommand {
             let (dbOk, dbStatus) = Database.checkAccess()
             if !dbOk {
                 Log.info("Database: \(dbStatus)")
+                if dbStatus == "permission_denied" {
+                    Log.info(DiagnoseTool.fullDiskAccessFix())
+                }
             }
 
             // Warn if binding to a non-loopback address (only reachable when --allow-external-bind is set)
