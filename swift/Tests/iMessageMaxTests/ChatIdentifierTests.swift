@@ -26,4 +26,10 @@ final class ChatIdentifierTests: XCTestCase {
         XCTAssertNil(ChatIdentifier.parseRowId("chatABC"))
         XCTAssertNil(ChatIdentifier.parseRowId("iMessage;-;chat123"))
     }
+
+    func testSignPrefixReturnsNil() {
+        for raw in ["-5", "+5", "chat-5", "chat+5", " -5 "] {
+            XCTAssertNil(ChatIdentifier.parseRowId(raw), "parseRowId(\(raw)) must be nil")
+        }
+    }
 }
