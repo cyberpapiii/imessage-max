@@ -502,7 +502,8 @@ enum ListChatsTool {
                 totalChats: totals?.total,
                 totalGroups: totals?.groups,
                 totalDms: totals?.dms,
-                more: hasMore,
+                // more and cursor must agree; a NULL keyset value yields no cursor and therefore no next page.
+                more: nextCursor != nil,
                 cursor: nextCursor
             ))
 

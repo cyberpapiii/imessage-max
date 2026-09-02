@@ -322,7 +322,7 @@ final class ListAttachments {
             nextCursor = nil
         }
 
-        return (results, hasMore, nextCursor)
+        return (results, nextCursor != nil, nextCursor)
     }
 
     private func buildMessageQuery(
