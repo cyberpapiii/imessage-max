@@ -2,7 +2,7 @@ import Foundation
 import MCP
 
 enum Version {
-    static let current = "1.6.0"
+    static let current = "1.7.0"
     static let name = "iMessage Max"
     static let title = name
     /// What `imessage-max --version` prints. The Homebrew Formula's `test do`

@@ -1,16 +1,25 @@
 # Changelog
 
-## Unreleased
+## 1.7.0
+
+Seven techniques borrowed from a study of [openclaw/imsg](https://github.com/openclaw/imsg) (plans 079 to 085).
 
 ### Added
 
-- `get_messages_since`: ROWID-cursor pull of new messages across chats (plan 080).
-- HTTP mode watches `chat.db` and pushes `notifications/imessage/new_messages` over the legacy SSE stream when MAX(ROWID) grows (plan 080 layer 2).
-- `send` responses carry `disposition` (`completed` / `not_started` / `may_have_completed`) and `retry_safe`; `confirmed` is documented as a chat.db row match within the verification window, not a delivery receipt.
+- `get_messages_since`: ROWID-cursor pull of new messages across chats, in arrival order. Call it with no cursor to get the current cursor, then poll with `since_rowid`.
+- HTTP mode watches `chat.db` (kqueue on the db, wal, and shm files with inode re-arm, plus a fallback poll) and pushes `notifications/imessage/new_messages` over the legacy SSE stream when MAX(ROWID) grows. `diagnose` reports `live_inbox` as `supported` while the watcher runs.
+- `send` responses carry `disposition` (`completed`, `not_started`, or `may_have_completed`) and `retry_safe`, derived from the phase the AppleScript reached. `confirmed` is documented as a chat.db row match within the verification window, not a delivery receipt.
+- `diagnose` reports `database.features` from a schema probe of `chat.db`; the reply, edit, and custom-emoji columns are guarded by those flags instead of assumed.
+- Headless Contacts access policy: the server asks for Contacts access only when started from a terminal. `--request-contacts-access` grants it once; `--contacts-policy request|skip` and `IMESSAGE_MAX_CONTACTS_POLICY` override the terminal detection. `diagnose` reports `not_requested_headless` with the exact command to run.
+- `make verify-db` calls `diagnose` over HTTP after install and fails with Full Disk Access remediation when the database is not readable; `make install` is gated on it. The startup log and the `database.fix` string name the binary to add to Full Disk Access.
 
 ### Fixes
 
 - `get_messages has:"links"` and `search has:"link"` match URL preview balloon rows; link-preview payload attachments are no longer listed.
+- Send attachments are staged through a symlink-safe file handle into a 0700 directory; `SecurePath` normalizes the path lexically and rejects symlinks on every component.
+- Contacts cache refreshes on a Contacts change and on a 30 s TTL, and is dropped as soon as access is revoked; no restart needed.
+- A `permission_denied` database probe retries on the next query, so granting Full Disk Access takes effect without a restart.
+- `perm_contacts` stays `supported` when the CI guard skips contact loading.
 
 ## 1.6.0
 
