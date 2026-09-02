@@ -498,6 +498,54 @@ enum AppleScriptRunner {
         }
     }
 
+    static let sendResultMarker = "IMESSAGE_MAX_RESULT"
+
+    /// Turns the raw osascript output of a send script into a typed result.
+    /// The script prints one line:
+    ///   IMESSAGE_MAX_RESULT <tab> ok|failure <tab> completed|not_started|may_have_completed <tab> errno <tab> message
+    /// The message is last because it may itself contain tabs.
+    static func interpretSendResult(
+        stdout: String,
+        stderr: String,
+        terminationStatus: Int32,
+        sentFileName: String = "",
+        missingTargetError: SendError
+    ) -> Result<Void, SendFailure> {
+        let markerLine = stdout
+            .split(separator: "\n", omittingEmptySubsequences: true)
+            .map(String.init)
+            .last { $0.hasPrefix(sendResultMarker + "\t") }
+
+        guard let markerLine else {
+            if terminationStatus != 0 {
+                return .failure(SendFailure(
+                    classifySendStderr(stderr, sentFileName: sentFileName, missingTargetError: missingTargetError),
+                    disposition: .mayHaveCompleted
+                ))
+            }
+            return .failure(SendFailure(
+                .failed("Messages returned no structured send result"),
+                disposition: .mayHaveCompleted
+            ))
+        }
+
+        let fields = markerLine.split(separator: "\t", maxSplits: 4, omittingEmptySubsequences: false).map(String.init)
+        guard fields.count == 5 else {
+            return .failure(SendFailure(.failed("Messages returned a malformed send result"), disposition: .mayHaveCompleted))
+        }
+        if fields[1] == "ok", fields[2] == "completed" {
+            return .success(())
+        }
+        let disposition: DeliveryDisposition
+        switch fields[2] {
+        case "not_started": disposition = .notStarted
+        case "may_have_completed": disposition = .mayHaveCompleted
+        default: disposition = .mayHaveCompleted
+        }
+        let error = classifySendStderr(fields[4], sentFileName: sentFileName, missingTargetError: missingTargetError)
+        return .failure(SendFailure(error, disposition: disposition))
+    }
+
     /// Map osascript stderr onto a client-facing SendError.
     ///
     /// AppleScript writes the typographic apostrophe in its errors ("can’t get
@@ -516,12 +564,12 @@ enum AppleScriptRunner {
         sentFileName: String,
         missingTargetError: SendError
     ) -> SendError {
-        let stderr = rawStderr
-            .replacingOccurrences(of: "\u{2019}", with: "'")
-            .lowercased()
+        let normalized = rawStderr.replacingOccurrences(of: "\u{2019}", with: "'")
+        let stderr = normalized.lowercased()
 
         if stderr.contains("not allowed") ||
             stderr.contains("not permitted") ||
+            stderr.contains("not authorized") ||
             stderr.contains("assistive access")
         {
             return .automationPermissionRequired
@@ -548,15 +596,16 @@ enum AppleScriptRunner {
         }
 
         // Untrusted, unbounded osascript stderr: keep the first line, clamped.
-        // Absolute paths (home, staging) never go to the client. `stderr` is
-        // lowercased above, so every literal here must be lowercase too.
+        // Match on the lowercased copy so a mixed-case "/Users/" still scrubs;
+        // return the original casing so AppleScript error text stays readable.
         let firstLine = String(
-            (stderr.split(separator: "\n", maxSplits: 1).first ?? "").prefix(300)
+            (normalized.split(separator: "\n", maxSplits: 1).first ?? "").prefix(300)
         )
-        if firstLine.contains("/users/")
-            || firstLine.contains("/private/")
-            || firstLine.contains("/var/")
-            || firstLine.contains("imessage-max-staging")
+        let firstLineLower = firstLine.lowercased()
+        if firstLineLower.contains("/users/")
+            || firstLineLower.contains("/private/")
+            || firstLineLower.contains("/var/")
+            || firstLineLower.contains("imessage-max-staging")
         {
             Log.error("osascript stderr (scrubbed for client): \(firstLine)")
             return .failed("Send failed. Check the server log for details.")
