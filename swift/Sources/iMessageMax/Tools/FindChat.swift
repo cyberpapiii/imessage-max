@@ -29,6 +29,10 @@ enum FindChatTool {
                 "type": "boolean",
                 "description": "Filter to group chats only (true) or DMs only (false)",
             ]),
+            "include_filtered": .object([
+                "type": "boolean",
+                "description": "Include chats Messages.app has filtered as junk or unknown senders (default false)",
+            ]),
             "limit": .object([
                 "type": "integer",
                 "description": "Maximum results to return (default 5)",
@@ -45,6 +49,7 @@ enum FindChatTool {
         let name: String?
         let containsRecent: String?
         let isGroup: Bool?
+        let includeFiltered: Bool
         let limit: Int
 
         init(from arguments: [String: Value]?) {
@@ -52,6 +57,7 @@ enum FindChatTool {
             self.name = arguments?["name"]?.stringValue
             self.containsRecent = arguments?["contains_recent"]?.stringValue
             self.isGroup = arguments?["is_group"]?.boolValue
+            self.includeFiltered = arguments?["include_filtered"]?.boolValue ?? false
             self.limit = max(1, min(arguments?["limit"]?.intValue ?? 5, 50))
         }
     }
@@ -85,6 +91,19 @@ enum FindChatTool {
     struct Response: Codable {
         let chats: [ChatResult]
         let more: Bool
+        let filteredHidden: Int?
+
+        enum CodingKeys: String, CodingKey {
+            case chats, more
+            case filteredHidden = "filtered_hidden"
+        }
+
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(chats, forKey: .chats)
+            try container.encode(more, forKey: .more)
+            try container.encodeIfPresent(filteredHidden, forKey: .filteredHidden)
+        }
     }
 
     struct ErrorResponse: Codable {
@@ -134,6 +153,7 @@ enum FindChatTool {
 
         do {
             var results: [ChatResult] = []
+            var filteredHidden: Int? = params.includeFiltered ? nil : 0
 
             if let participants = params.participants, !participants.isEmpty {
                 let handleGroups = await buildHandleGroups(participants: participants, resolver: resolver)
@@ -142,6 +162,7 @@ enum FindChatTool {
                     database: database,
                     handleGroups: handleGroups,
                     isGroup: params.isGroup,
+                    includeFiltered: params.includeFiltered,
                     limit: params.limit,
                     resolver: resolver
                 )
@@ -151,6 +172,13 @@ enum FindChatTool {
                     resolver: resolver,
                     matchType: "participants"
                 ))
+                if !params.includeFiltered {
+                    filteredHidden = try countFilteredHiddenByHandleGroups(
+                        database: database,
+                        handleGroups: handleGroups,
+                        isGroup: params.isGroup
+                    )
+                }
                 }
             }
 
@@ -160,6 +188,7 @@ enum FindChatTool {
                     name: name,
                     limit: params.limit,
                     isGroup: params.isGroup,
+                    includeFiltered: params.includeFiltered,
                     resolver: resolver
                 )
                 results.append(contentsOf: try await buildChatResults(
@@ -168,6 +197,14 @@ enum FindChatTool {
                     resolver: resolver,
                     matchType: "name"
                 ))
+                if !params.includeFiltered {
+                    filteredHidden = try countFilteredHiddenByName(
+                        database: database,
+                        name: name,
+                        limit: params.limit,
+                        isGroup: params.isGroup
+                    )
+                }
             }
 
             if let containsRecent = params.containsRecent, results.isEmpty {
@@ -175,7 +212,8 @@ enum FindChatTool {
                     database: database,
                     content: containsRecent,
                     limit: params.limit,
-                    isGroup: params.isGroup
+                    isGroup: params.isGroup,
+                    includeFiltered: params.includeFiltered
                 )
                 results.append(contentsOf: try await buildChatResults(
                     database: database,
@@ -183,6 +221,14 @@ enum FindChatTool {
                     resolver: resolver,
                     matchType: "content"
                 ))
+                if !params.includeFiltered {
+                    filteredHidden = try countFilteredHiddenByContent(
+                        database: database,
+                        content: containsRecent,
+                        limit: params.limit,
+                        isGroup: params.isGroup
+                    )
+                }
             }
 
             var seen = Set<String>()
@@ -200,7 +246,8 @@ enum FindChatTool {
             // No cursor on find_chat; never advertise more pages.
             let response = Response(
                 chats: uniqueResults,
-                more: false
+                more: false,
+                filteredHidden: filteredHidden
             )
 
             return [.plainText(try FormatUtils.encodeJSON(response))]
@@ -259,10 +306,20 @@ enum FindChatTool {
         return " AND (SELECT COUNT(*) FROM chat_handle_join chj_g WHERE chj_g.chat_id = c.ROWID) <= 1"
     }
 
+    /// Shown means `is_filtered = 0` (bitmask). Never `!= 1`.
+    private static func filteredSQL(includeFiltered: Bool) -> String {
+        includeFiltered ? "" : " AND c.is_filtered = 0"
+    }
+
+    private static func filteredHiddenSQL() -> String {
+        " AND c.is_filtered != 0"
+    }
+
     private static func findChatsByHandleGroups(
         database: Database,
         handleGroups: [[String]],
         isGroup: Bool?,
+        includeFiltered: Bool,
         limit: Int,
         resolver: ContactResolver
     ) async throws -> [ChatRow] {
@@ -272,6 +329,7 @@ enum FindChatTool {
         let allHandles = handleGroups.flatMap { $0 }
         let placeholders = allHandles.map { _ in "?" }.joined(separator: ", ")
         let groupSQL = groupFilterSQL(isGroup: isGroup)
+        let filterSQL = filteredSQL(includeFiltered: includeFiltered)
 
         // Get candidate chats
         let sql = """
@@ -281,6 +339,7 @@ enum FindChatTool {
             JOIN handle h ON chj.handle_id = h.ROWID
             WHERE h.id IN (\(placeholders))
             \(groupSQL)
+            \(filterSQL)
             ORDER BY c.ROWID DESC
             LIMIT 500
             """
@@ -363,13 +422,15 @@ enum FindChatTool {
         name: String,
         limit: Int,
         isGroup: Bool?,
+        includeFiltered: Bool,
         resolver: ContactResolver
     ) async throws -> [ChatRow] {
         var chats = try findChatsByDisplayName(
             database: database,
             name: name,
             limit: limit,
-            isGroup: isGroup
+            isGroup: isGroup,
+            includeFiltered: includeFiltered
         )
         // Unnamed DMs have no display_name. Match the resolved participant
         // contact with the same word-prefix rule searchByName uses.
@@ -378,6 +439,7 @@ enum FindChatTool {
                 database: database,
                 name: name,
                 limit: limit - chats.count,
+                includeFiltered: includeFiltered,
                 resolver: resolver
             )
             var seen = Set(chats.map(\.id))
@@ -392,15 +454,18 @@ enum FindChatTool {
         database: Database,
         name: String,
         limit: Int,
-        isGroup: Bool?
+        isGroup: Bool?,
+        includeFiltered: Bool
     ) throws -> [ChatRow] {
         let escaped = QueryBuilder.escapeLike(name)
         let groupSQL = groupFilterSQL(isGroup: isGroup)
+        let filterSQL = filteredSQL(includeFiltered: includeFiltered)
         let sql = """
             SELECT c.ROWID as id, c.guid, c.display_name
             FROM chat c
             WHERE c.display_name LIKE ? ESCAPE '\\'
             \(groupSQL)
+            \(filterSQL)
             LIMIT ?
             """
 
@@ -417,6 +482,7 @@ enum FindChatTool {
         database: Database,
         name: String,
         limit: Int,
+        includeFiltered: Bool,
         resolver: ContactResolver
     ) async throws -> [ChatRow] {
         let matches = await resolver.searchByName(name)
@@ -424,6 +490,7 @@ enum FindChatTool {
 
         let handles = Array(Set(matches.map(\.handle)))
         let placeholders = handles.map { _ in "?" }.joined(separator: ",")
+        let filterSQL = filteredSQL(includeFiltered: includeFiltered)
         let sql = """
             SELECT c.ROWID as id, c.guid, c.display_name
             FROM chat c
@@ -432,6 +499,7 @@ enum FindChatTool {
             WHERE (c.display_name IS NULL OR TRIM(c.display_name) = '')
               AND h.id IN (\(placeholders))
               AND (SELECT COUNT(*) FROM chat_handle_join chj_g WHERE chj_g.chat_id = c.ROWID) <= 1
+              \(filterSQL)
             LIMIT ?
             """
         var params: [Any] = handles.map { $0 as Any }
@@ -450,10 +518,12 @@ enum FindChatTool {
         database: Database,
         content: String,
         limit: Int,
-        isGroup: Bool?
+        isGroup: Bool?,
+        includeFiltered: Bool
     ) throws -> [ChatRow] {
         let escaped = QueryBuilder.escapeLike(content)
         let groupSQL = groupFilterSQL(isGroup: isGroup)
+        let filterSQL = filteredSQL(includeFiltered: includeFiltered)
         // Over-fetch: attributedBody matches are confirmed in Swift after typedstream extract.
         let fetchLimit = min(max(limit * 10, 50), 200)
         let sql = """
@@ -467,6 +537,7 @@ enum FindChatTool {
                 OR (m.text IS NULL AND m.attributedBody IS NOT NULL)
               )
               \(groupSQL)
+              \(filterSQL)
             ORDER BY m.date DESC
             LIMIT ?
             """
@@ -493,6 +564,100 @@ enum FindChatTool {
             }
         }
         return chats
+    }
+
+    private static func countFilteredHiddenByHandleGroups(
+        database: Database,
+        handleGroups: [[String]],
+        isGroup: Bool?
+    ) throws -> Int {
+        let allHandles = handleGroups.flatMap { $0 }
+        guard !allHandles.isEmpty else { return 0 }
+        let placeholders = allHandles.map { _ in "?" }.joined(separator: ", ")
+        let groupSQL = groupFilterSQL(isGroup: isGroup)
+        let sql = """
+            SELECT COUNT(*) FROM (
+                SELECT DISTINCT c.ROWID
+                FROM chat c
+                JOIN chat_handle_join chj ON c.ROWID = chj.chat_id
+                JOIN handle h ON chj.handle_id = h.ROWID
+                WHERE h.id IN (\(placeholders))
+                \(groupSQL)
+                \(filteredHiddenSQL())
+                ORDER BY c.ROWID DESC
+                LIMIT 500
+            )
+            """
+        let rows: [Int] = try database.query(sql, params: allHandles) { row in
+            Int(row.int(0))
+        }
+        return rows.first ?? 0
+    }
+
+    private static func countFilteredHiddenByName(
+        database: Database,
+        name: String,
+        limit: Int,
+        isGroup: Bool?
+    ) throws -> Int {
+        let escaped = QueryBuilder.escapeLike(name)
+        let groupSQL = groupFilterSQL(isGroup: isGroup)
+        let sql = """
+            SELECT COUNT(*) FROM (
+                SELECT c.ROWID
+                FROM chat c
+                WHERE c.display_name LIKE ? ESCAPE '\\'
+                \(groupSQL)
+                \(filteredHiddenSQL())
+                LIMIT ?
+            )
+            """
+        let rows: [Int] = try database.query(sql, params: ["%\(escaped)%", limit]) { row in
+            Int(row.int(0))
+        }
+        return rows.first ?? 0
+    }
+
+    private static func countFilteredHiddenByContent(
+        database: Database,
+        content: String,
+        limit: Int,
+        isGroup: Bool?
+    ) throws -> Int {
+        let escaped = QueryBuilder.escapeLike(content)
+        let groupSQL = groupFilterSQL(isGroup: isGroup)
+        let fetchLimit = min(max(limit * 10, 50), 200)
+        let sql = """
+            SELECT c.ROWID as id, m.text, m.attributedBody
+            FROM chat c
+            JOIN chat_message_join cmj ON c.ROWID = cmj.chat_id
+            JOIN message m ON cmj.message_id = m.ROWID
+            WHERE m.associated_message_type = 0
+              AND (
+                m.text LIKE ? ESCAPE '\\'
+                OR (m.text IS NULL AND m.attributedBody IS NOT NULL)
+              )
+              \(groupSQL)
+              \(filteredHiddenSQL())
+            ORDER BY m.date DESC
+            LIMIT ?
+            """
+        let rows = try database.query(sql, params: ["%\(escaped)%", fetchLimit]) { row in
+            (
+                id: row.int(0),
+                text: row.string(1),
+                attributedBody: row.blob(2)
+            )
+        }
+        let needle = content.lowercased()
+        var seen = Set<Int64>()
+        for row in rows {
+            let extracted = MessageTextExtractor.extract(text: row.text, attributedBody: row.attributedBody)
+            guard let extracted, extracted.lowercased().contains(needle) else { continue }
+            seen.insert(row.id)
+            if seen.count >= limit { break }
+        }
+        return seen.count
     }
 
     private static func buildChatResults(

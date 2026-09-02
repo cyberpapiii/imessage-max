@@ -52,4 +52,67 @@ final class GetUnreadToolTests: XCTestCase {
             XCTAssertEqual(object["message"] as? String, "Chat not found: \(hostile)")
         }
     }
+
+    func testFilteredChatsAreHiddenByDefault() async throws {
+        let fixture = try ToolTestDatabase(name: "unread-filtered")
+        let now = Int64(Date().timeIntervalSinceReferenceDate * 1_000_000_000)
+        let filters = [0, 1, 36]
+        for (index, isFiltered) in filters.enumerated() {
+            let chatId = index + 1
+            try fixture.insertHandle(rowId: chatId, handle: "+1555000000\(chatId)")
+            try fixture.insertChat(
+                rowId: chatId,
+                guid: "unread-filtered-\(chatId)",
+                displayName: "Unread Filtered \(chatId)",
+                isFiltered: isFiltered
+            )
+            try fixture.joinChatHandle(chatId: chatId, handleId: chatId)
+            try fixture.insertMessage(
+                rowId: chatId,
+                guid: "unread-filtered-msg-\(chatId)",
+                text: "unread \(chatId)",
+                date: now + Int64(chatId) * 1_000_000_000,
+                isFromMe: false,
+                isRead: false,
+                handleId: chatId
+            )
+            try fixture.joinChatMessage(chatId: chatId, messageId: chatId)
+        }
+
+        let tool = GetUnread(database: fixture.database(), contactResolver: makeSeededResolver())
+
+        let summaryHiddenAny = try await tool.execute(
+            params: GetUnread.Parameters(since: "all", format: .summary, limit: 5)
+        )
+        let summaryHidden = try XCTUnwrap(summaryHiddenAny as? UnreadSummaryResponse)
+        XCTAssertEqual(summaryHidden.chats.count, 1)
+        XCTAssertEqual(summaryHidden.totalUnread, 1)
+        XCTAssertEqual(summaryHidden.chatsWithUnread, 1)
+        XCTAssertEqual(summaryHidden.filteredHidden, 2)
+
+        let summaryShownAny = try await tool.execute(
+            params: GetUnread.Parameters(since: "all", format: .summary, limit: 5, includeFiltered: true)
+        )
+        let summaryShown = try XCTUnwrap(summaryShownAny as? UnreadSummaryResponse)
+        XCTAssertEqual(summaryShown.chats.count, 3)
+        XCTAssertEqual(summaryShown.totalUnread, 3)
+        XCTAssertNil(summaryShown.filteredHidden)
+
+        let messagesHiddenAny = try await tool.execute(
+            params: GetUnread.Parameters(since: "all", format: .messages, limit: 5)
+        )
+        let messagesHidden = try XCTUnwrap(messagesHiddenAny as? UnreadMessagesResponse)
+        XCTAssertEqual(messagesHidden.messages.count, 1)
+        XCTAssertEqual(messagesHidden.totalUnread, 1)
+        XCTAssertEqual(messagesHidden.chatsWithUnread, 1)
+        XCTAssertEqual(messagesHidden.filteredHidden, 2)
+
+        let messagesShownAny = try await tool.execute(
+            params: GetUnread.Parameters(since: "all", format: .messages, limit: 5, includeFiltered: true)
+        )
+        let messagesShown = try XCTUnwrap(messagesShownAny as? UnreadMessagesResponse)
+        XCTAssertEqual(messagesShown.messages.count, 3)
+        XCTAssertEqual(messagesShown.totalUnread, 3)
+        XCTAssertNil(messagesShown.filteredHidden)
+    }
 }

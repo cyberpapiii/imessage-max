@@ -322,6 +322,35 @@ final class GetMessagesToolTests: XCTestCase {
         let messages = try decodeJSONArray(try XCTUnwrap(response["messages"]))
         XCTAssertEqual(messages.count, 4)
     }
+
+    func testExplicitChatIdIgnoresIsFiltered() async throws {
+        let fixture = try ToolTestDatabase(name: "get-messages-filtered")
+        try fixture.insertHandle(rowId: 1, handle: "+15550000001")
+        try fixture.insertChat(
+            rowId: 9,
+            guid: "explicit-filtered",
+            displayName: "Filtered Chat",
+            isFiltered: 1
+        )
+        try fixture.joinChatHandle(chatId: 9, handleId: 1)
+        try fixture.insertMessage(
+            rowId: 1,
+            guid: "explicit-filtered-msg",
+            text: "still visible",
+            date: Int64(Date().timeIntervalSinceReferenceDate * 1_000_000_000),
+            isFromMe: false,
+            handleId: 1
+        )
+        try fixture.joinChatMessage(chatId: 9, messageId: 1)
+
+        let tool = GetMessagesTool(db: fixture.database(), resolver: ContactResolver(seedCache: [:]))
+        let response = try await decodeGetMessagesResponse(
+            await tool.execute(args: ["chat_id": .string("chat9")])
+        )
+        let messages = try decodeJSONArray(try XCTUnwrap(response["messages"]))
+        XCTAssertEqual(messages.count, 1)
+        XCTAssertEqual(messages.first?["text"] as? String, "still visible")
+    }
 }
 
 private func decodeGetMessagesResponse(_ contents: [Tool.Content]) async throws -> [String: Any] {

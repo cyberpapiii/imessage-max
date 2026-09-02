@@ -38,7 +38,8 @@ struct GroupedChatData {
 }
 
 extension SearchTool {
-    static func buildQuery(
+    static func applySearchFilters(
+        to builder: QueryBuilder,
         query: String?,
         fromPerson: SearchSenderFilter?,
         inChat: String?,
@@ -47,29 +48,23 @@ extension SearchTool {
         since: String?,
         before: String?,
         cursor: TimelineCursor?,
-        limit: Int,
         sort: SearchSort,
         unanswered: Bool,
-        terms: [String] = [],
-        matchAll: Bool = false,
-        fuzzy: Bool = false
-    ) -> (String, [Any]) {
-        let builder = QueryBuilder()
-            .select(
-                "m.ROWID as msg_id",
-                "m.text",
-                "m.attributedBody",
-                "m.date",
-                "m.is_from_me",
-                "h.id as sender_handle",
-                "c.ROWID as chat_id",
-                "c.display_name as chat_display_name"
-            )
+        terms: [String],
+        matchAll: Bool,
+        fuzzy: Bool,
+        chatFilterPredicate: String?
+    ) {
+        builder
             .from("message m")
             .join("chat_message_join cmj ON m.ROWID = cmj.message_id")
             .join("chat c ON cmj.chat_id = c.ROWID")
             .leftJoin("handle h ON m.handle_id = h.ROWID")
             .where("m.associated_message_type = ?", 0)
+
+        if let chatFilterPredicate {
+            builder.where(chatFilterPredicate)
+        }
 
         if let query, !query.isEmpty {
             if fuzzy || terms.isEmpty {
@@ -163,6 +158,53 @@ extension SearchTool {
                 break
             }
         }
+    }
+
+    static func buildQuery(
+        query: String?,
+        fromPerson: SearchSenderFilter?,
+        inChat: String?,
+        isGroup: Bool?,
+        has: String?,
+        since: String?,
+        before: String?,
+        cursor: TimelineCursor?,
+        limit: Int,
+        sort: SearchSort,
+        unanswered: Bool,
+        terms: [String] = [],
+        matchAll: Bool = false,
+        fuzzy: Bool = false,
+        includeFiltered: Bool = false
+    ) -> (String, [Any]) {
+        let builder = QueryBuilder()
+            .select(
+                "m.ROWID as msg_id",
+                "m.text",
+                "m.attributedBody",
+                "m.date",
+                "m.is_from_me",
+                "h.id as sender_handle",
+                "c.ROWID as chat_id",
+                "c.display_name as chat_display_name"
+            )
+        applySearchFilters(
+            to: builder,
+            query: query,
+            fromPerson: fromPerson,
+            inChat: inChat,
+            isGroup: isGroup,
+            has: has,
+            since: since,
+            before: before,
+            cursor: cursor,
+            sort: sort,
+            unanswered: unanswered,
+            terms: terms,
+            matchAll: matchAll,
+            fuzzy: fuzzy,
+            chatFilterPredicate: includeFiltered ? nil : "c.is_filtered = 0"
+        )
 
         if sort == .oldestFirst {
             builder.orderBy("m.date ASC", "m.ROWID ASC")
@@ -175,13 +217,54 @@ extension SearchTool {
         return builder.build()
     }
 
+    static func countFilteredHidden(
+        db: Database,
+        query: String?,
+        fromPerson: SearchSenderFilter?,
+        inChat: String?,
+        isGroup: Bool?,
+        has: String?,
+        since: String?,
+        before: String?,
+        unanswered: Bool,
+        terms: [String],
+        matchAll: Bool,
+        fuzzy: Bool
+    ) throws -> Int {
+        let builder = QueryBuilder()
+            .select("COUNT(DISTINCT c.ROWID)")
+        applySearchFilters(
+            to: builder,
+            query: query,
+            fromPerson: fromPerson,
+            inChat: inChat,
+            isGroup: isGroup,
+            has: has,
+            since: since,
+            before: before,
+            cursor: nil,
+            sort: .recentFirst,
+            unanswered: unanswered,
+            terms: terms,
+            matchAll: matchAll,
+            fuzzy: fuzzy,
+            chatFilterPredicate: "c.is_filtered != 0"
+        )
+        let (sql, params) = builder.build()
+        let rows: [Int] = try db.query(sql, params: params) { row in
+            Int(row.int(0))
+        }
+        return rows.first ?? 0
+    }
+
     static func buildFlatResponse(
         db: Database,
         rows: [SearchRow],
         query: String?,
         limit: Int,
         includeContext: Bool,
-        resolver: ContactResolver
+        resolver: ContactResolver,
+        filteredHidden: Int?
     ) async throws -> String {
         var results: [SearchResult] = []
         let identityByChat = try await identitiesByChat(db: db, rows: rows, resolver: resolver)
@@ -231,7 +314,8 @@ extension SearchTool {
             results: results,
             total: results.count,
             more: nextCursor != nil,
-            cursor: nextCursor
+            cursor: nextCursor,
+            filteredHidden: filteredHidden
         )
         return try FormatUtils.encodeJSON(response)
     }
@@ -241,7 +325,8 @@ extension SearchTool {
         rows: [SearchRow],
         query: String?,
         limit: Int,
-        resolver: ContactResolver
+        resolver: ContactResolver,
+        filteredHidden: Int?
     ) async throws -> String {
         var chatsData: [Int64: GroupedChatData] = [:]
         let identityByChat = try await identitiesByChat(db: db, rows: rows, resolver: resolver)
@@ -338,7 +423,8 @@ extension SearchTool {
             chatCount: chats.count,
             query: query,
             more: nextCursor != nil,
-            cursor: nextCursor
+            cursor: nextCursor,
+            filteredHidden: filteredHidden
         )
         return try FormatUtils.encodeJSON(response)
     }

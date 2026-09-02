@@ -122,6 +122,56 @@ final class FindChatToolTests: XCTestCase {
         let names = participants.compactMap { $0["name"] as? String }
         XCTAssertEqual(names, ["Alex Doe (0011)", "Alex Doe (0012)"])
     }
+
+    func testFilteredChatsAreHiddenByDefault() async throws {
+        let fixture = try ToolTestDatabase(name: "find-chat-filtered")
+        try fixture.insertHandle(rowId: 1, handle: "+15550000001")
+        let now = Int64(Date().timeIntervalSinceReferenceDate * 1_000_000_000)
+        let filters = [0, 1, 36]
+        for (index, isFiltered) in filters.enumerated() {
+            let chatId = index + 1
+            try fixture.insertChat(
+                rowId: chatId,
+                guid: "find-filtered-\(chatId)",
+                displayName: "Zebra Club \(chatId)",
+                isFiltered: isFiltered
+            )
+            try fixture.joinChatHandle(chatId: chatId, handleId: 1)
+            try fixture.insertMessage(
+                rowId: chatId,
+                guid: "find-filtered-msg-\(chatId)",
+                text: "hello \(chatId)",
+                date: now + Int64(chatId) * 1_000_000_000,
+                isFromMe: false,
+                handleId: 1
+            )
+            try fixture.joinChatMessage(chatId: chatId, messageId: chatId)
+        }
+
+        let hiddenContents = try await FindChatTool.execute(
+            arguments: ["name": .string("Zebra")],
+            database: fixture.database(),
+            resolver: ContactResolver(seedCache: [:])
+        )
+        let hidden = try decodeJSONDictionary(from: hiddenContents)
+        let hiddenChats = try decodeJSONArray(try XCTUnwrap(hidden["chats"]))
+        XCTAssertEqual(hiddenChats.count, 1)
+        XCTAssertEqual(hiddenChats.first?["id"] as? String, "chat1")
+        XCTAssertEqual(hidden["filtered_hidden"] as? Int, 2)
+
+        let shownContents = try await FindChatTool.execute(
+            arguments: [
+                "name": .string("Zebra"),
+                "include_filtered": .bool(true),
+            ],
+            database: fixture.database(),
+            resolver: ContactResolver(seedCache: [:])
+        )
+        let shown = try decodeJSONDictionary(from: shownContents)
+        let shownChats = try decodeJSONArray(try XCTUnwrap(shown["chats"]))
+        XCTAssertEqual(shownChats.count, 3)
+        XCTAssertNil(shown["filtered_hidden"])
+    }
 }
 
 private func makeContainsRecentRichFixture() throws -> ToolTestDatabase {
