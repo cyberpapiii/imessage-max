@@ -87,7 +87,7 @@ curl -X POST http://localhost:8080 \
 ## Architecture
 
 ### Swift Stack
-- Language: Swift 6.1
+- Language: Swift 6.3
 - MCP SDK: modelcontextprotocol/swift-sdk (version pinned in `swift/Package.swift` / `swift/Package.resolved`)
 - HTTP server: Hummingbird 2.x (for `--http` mode)
 - Database: raw SQLite3 C API for `~/Library/Messages/chat.db`
@@ -109,9 +109,14 @@ swift/
 │   │   ├── SessionManager.swift # Per-session Server instances (legacy)
 │   │   ├── SSEConnection.swift # Server-Sent Events
 │   │   ├── OriginValidationMiddleware.swift
-│   │   └── ToolRegistry.swift  # Tool registration
+│   │   ├── ToolRegistry.swift  # Tool registration
+│   │   ├── ToolCallDispatch.swift # tools/call routing
+│   │   ├── ServerExtensions.swift # Server helpers
+│   │   ├── IconMetadata.swift  # icon/_meta for tools/list
+│   │   └── Version.swift       # Version.current, the source of truth
 │   ├── Database/               # SQLite wrapper, query builder
-│   ├── Tools/                  # 12 MCP tools
+│   ├── Models/                 # AttachmentType, ChatIdentity, GroupEvent, Reactions, ResponsePrimitives, SendPayload
+│   ├── Tools/                  # 12 MCP tools across 16 files
 │   ├── Contacts/               # CNContactStore resolver
 │   ├── Enrichment/             # Image processors (thumbnail, vision, full variants)
 │   └── Utilities/              # Time, phone formatting, Log.swift
