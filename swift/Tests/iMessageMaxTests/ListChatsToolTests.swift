@@ -136,4 +136,56 @@ final class ListChatsToolTests: XCTestCase {
             "added \(PhoneUtils.formatDisplay("+15550000002"))"
         )
     }
+
+    func testFilteredChatsAreHiddenByDefault() async throws {
+        let fixture = try ToolTestDatabase(name: "list-chats-filtered")
+        try fixture.insertHandle(rowId: 1, handle: "+15550000001")
+        let now = Int64(Date().timeIntervalSinceReferenceDate * 1_000_000_000)
+        let filters = [0, 1, 36]
+        for (index, isFiltered) in filters.enumerated() {
+            let chatId = index + 1
+            try fixture.insertChat(
+                rowId: chatId,
+                guid: "filtered-chat-\(chatId)",
+                displayName: "Filtered \(chatId)",
+                isFiltered: isFiltered
+            )
+            try fixture.joinChatHandle(chatId: chatId, handleId: 1)
+            try fixture.insertMessage(
+                rowId: chatId,
+                guid: "filtered-msg-\(chatId)",
+                text: "hello \(chatId)",
+                date: now + Int64(chatId) * 1_000_000_000,
+                isFromMe: false,
+                handleId: 1
+            )
+            try fixture.joinChatMessage(chatId: chatId, messageId: chatId)
+        }
+
+        let hidden = await ListChatsTool.execute(
+            limit: 10,
+            sort: "recent",
+            db: fixture.database(),
+            resolver: ContactResolver(seedCache: [:])
+        )
+        guard case .success(let defaultResponse) = hidden else {
+            return XCTFail("list_chats failed: \(hidden)")
+        }
+        XCTAssertEqual(defaultResponse.chats.map(\.id), ["chat1"])
+        XCTAssertEqual(defaultResponse.filteredHidden, 2)
+        XCTAssertEqual(defaultResponse.totalChats, 1)
+
+        let shown = await ListChatsTool.execute(
+            limit: 10,
+            sort: "recent",
+            includeFiltered: true,
+            db: fixture.database(),
+            resolver: ContactResolver(seedCache: [:])
+        )
+        guard case .success(let included) = shown else {
+            return XCTFail("list_chats include_filtered failed: \(shown)")
+        }
+        XCTAssertEqual(Set(included.chats.map(\.id)), Set(["chat1", "chat2", "chat3"]))
+        XCTAssertNil(included.filteredHidden)
+    }
 }

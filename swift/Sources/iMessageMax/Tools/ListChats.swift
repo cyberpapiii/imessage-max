@@ -17,6 +17,7 @@ struct ListChatsResponse: Codable {
     let totalDms: Int?
     let more: Bool
     let cursor: String?
+    let filteredHidden: Int?
 
     enum CodingKeys: String, CodingKey {
         case chats
@@ -25,6 +26,7 @@ struct ListChatsResponse: Codable {
         case totalDms = "total_dms"
         case more
         case cursor
+        case filteredHidden = "filtered_hidden"
     }
 
     func encode(to encoder: Encoder) throws {
@@ -35,6 +37,7 @@ struct ListChatsResponse: Codable {
         try container.encodeIfPresent(totalDms, forKey: .totalDms)
         try container.encode(more, forKey: .more)
         try container.encodeIfPresent(cursor, forKey: .cursor)
+        try container.encodeIfPresent(filteredHidden, forKey: .filteredHidden)
     }
 
     init(
@@ -43,7 +46,8 @@ struct ListChatsResponse: Codable {
         totalGroups: Int?,
         totalDms: Int?,
         more: Bool,
-        cursor: String?
+        cursor: String?,
+        filteredHidden: Int? = nil
     ) {
         self.chats = chats
         self.totalChats = totalChats
@@ -51,6 +55,7 @@ struct ListChatsResponse: Codable {
         self.totalDms = totalDms
         self.more = more
         self.cursor = cursor
+        self.filteredHidden = filteredHidden
     }
 
     init(from decoder: Decoder) throws {
@@ -61,6 +66,7 @@ struct ListChatsResponse: Codable {
         totalDms = try container.decodeIfPresent(Int.self, forKey: .totalDms)
         more = try container.decode(Bool.self, forKey: .more)
         cursor = try container.decodeIfPresent(String.self, forKey: .cursor)
+        filteredHidden = try container.decodeIfPresent(Int.self, forKey: .filteredHidden)
     }
 }
 
@@ -122,6 +128,10 @@ enum ListChatsTool {
                     "type": "boolean",
                     "description": "True for groups only, False for DMs only",
                 ]),
+                "include_filtered": .object([
+                    "type": "boolean",
+                    "description": "Include chats Messages.app has filtered as junk or unknown senders (default false)",
+                ]),
                 "min_participants": .object([
                     "type": "integer",
                     "description": "Filter to chats with at least N participants",
@@ -159,6 +169,7 @@ enum ListChatsTool {
             let limit = arguments?["limit"]?.intValue ?? 20
             let since = arguments?["since"]?.stringValue
             let isGroup = arguments?["is_group"]?.boolValue
+            let includeFiltered = arguments?["include_filtered"]?.boolValue ?? false
             let minParticipants = arguments?["min_participants"]?.intValue
             let maxParticipants = arguments?["max_participants"]?.intValue
             let sort = arguments?["sort"]?.stringValue ?? "recent"
@@ -172,6 +183,7 @@ enum ListChatsTool {
                 maxParticipants: maxParticipants,
                 sort: sort,
                 cursor: cursor,
+                includeFiltered: includeFiltered,
                 db: db,
                 resolver: resolver
             )
@@ -203,6 +215,7 @@ enum ListChatsTool {
         maxParticipants: Int? = nil,
         sort: String = "recent",
         cursor: String? = nil,
+        includeFiltered: Bool = false,
         db: Database = Database(),
         resolver: ContactResolver
     ) async -> Result<ListChatsResponse, ListChatsError> {
@@ -291,6 +304,10 @@ enum ListChatsTool {
                     needsMessageAggregate ? "msg.last_message_date as last_message_date" : "NULL as last_message_date"
                 )
                 .from("chat c")
+
+                if !includeFiltered {
+                    qb.where("c.is_filtered = 0")
+                }
 
                 if sinceApple != nil || candidateWidth != nil {
                     // `since` previously filtered the joined message rows in
@@ -481,7 +498,10 @@ enum ListChatsTool {
                 chats.append(chatInfo)
             }
 
-            let totals = cursor == nil ? try getTotals(db: db) : nil
+            let totals = cursor == nil ? try getTotals(db: db, includeFiltered: includeFiltered) : nil
+            let filteredHidden = (cursor == nil && !includeFiltered)
+                ? try getFilteredHidden(db: db, sinceApple: sinceApple)
+                : nil
 
             let nextCursor: String?
             if hasMore, let last = chatRows.last {
@@ -515,7 +535,8 @@ enum ListChatsTool {
                 totalDms: totals?.dms,
                 // more and cursor must agree; a NULL keyset value yields no cursor and therefore no next page.
                 more: nextCursor != nil,
-                cursor: nextCursor
+                cursor: nextCursor,
+                filteredHidden: filteredHidden
             ))
 
         } catch let error as DatabaseError {
@@ -541,7 +562,8 @@ enum ListChatsTool {
     }
 
     /// Get total counts
-    private static func getTotals(db: Database) throws -> (total: Int, groups: Int, dms: Int) {
+    private static func getTotals(db: Database, includeFiltered: Bool) throws -> (total: Int, groups: Int, dms: Int) {
+        let filter = includeFiltered ? "" : "WHERE c.is_filtered = 0"
         let sql = """
             SELECT
                 COUNT(*) as total,
@@ -551,6 +573,7 @@ enum ListChatsTool {
                 SELECT c.ROWID, COUNT(chj.handle_id) as cnt
                 FROM chat c
                 LEFT JOIN chat_handle_join chj ON c.ROWID = chj.chat_id
+                \(filter)
                 GROUP BY c.ROWID
             )
             """
@@ -564,5 +587,36 @@ enum ListChatsTool {
         }
 
         return rows.first ?? (0, 0, 0)
+    }
+
+    /// Chats the default filter removed from this view. Scoped to `since` when set.
+    private static func getFilteredHidden(db: Database, sinceApple: Int64?) throws -> Int {
+        if let sinceApple {
+            let sql = """
+                SELECT COUNT(*)
+                FROM chat c
+                WHERE c.is_filtered != 0
+                  AND EXISTS (
+                    SELECT 1
+                    FROM chat_message_join cmj
+                    JOIN message m ON m.ROWID = cmj.message_id
+                    WHERE cmj.chat_id = c.ROWID
+                      AND m.associated_message_type = 0
+                      AND m.date >= ?
+                  )
+                """
+            let rows: [Int] = try db.query(sql, params: [sinceApple]) { row in
+                Int(row.int(0))
+            }
+            return rows.first ?? 0
+        }
+
+        let rows: [Int] = try db.query(
+            "SELECT COUNT(*) FROM chat c WHERE c.is_filtered != 0",
+            params: []
+        ) { row in
+            Int(row.int(0))
+        }
+        return rows.first ?? 0
     }
 }

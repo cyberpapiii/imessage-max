@@ -77,6 +77,21 @@ struct SearchFlatResponse: Codable {
     let total: Int
     let more: Bool
     let cursor: String?
+    let filteredHidden: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case results, total, more, cursor
+        case filteredHidden = "filtered_hidden"
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(results, forKey: .results)
+        try container.encode(total, forKey: .total)
+        try container.encode(more, forKey: .more)
+        try container.encodeIfPresent(cursor, forKey: .cursor)
+        try container.encodeIfPresent(filteredHidden, forKey: .filteredHidden)
+    }
 }
 
 /// Grouped search response
@@ -87,10 +102,23 @@ struct SearchGroupedResponse: Codable {
     let query: String?
     let more: Bool
     let cursor: String?
+    let filteredHidden: Int?
 
     enum CodingKeys: String, CodingKey {
         case chats, total, query, more, cursor
         case chatCount = "chat_count"
+        case filteredHidden = "filtered_hidden"
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(chats, forKey: .chats)
+        try container.encode(total, forKey: .total)
+        try container.encode(chatCount, forKey: .chatCount)
+        try container.encodeIfPresent(query, forKey: .query)
+        try container.encode(more, forKey: .more)
+        try container.encodeIfPresent(cursor, forKey: .cursor)
+        try container.encodeIfPresent(filteredHidden, forKey: .filteredHidden)
     }
 }
 
@@ -123,6 +151,10 @@ enum SearchTool {
                 "is_group": .object([
                     "type": "boolean",
                     "description": "True for groups only, False for DMs only"
+                ]),
+                "include_filtered": .object([
+                    "type": "boolean",
+                    "description": "Include chats Messages.app has filtered as junk or unknown senders (default false)",
                 ]),
                 "has": .object([
                     "type": "string",
@@ -225,6 +257,7 @@ enum SearchTool {
             let fromPerson = arguments?["from_person"]?.stringValue
             let inChat = arguments?["in_chat"]?.stringValue
             let isGroup = arguments?["is_group"]?.boolValue
+            let includeFiltered = arguments?["include_filtered"]?.boolValue ?? false
             let has = arguments?["has"]?.stringValue
             let since = arguments?["since"]?.stringValue
             let before = arguments?["before"]?.stringValue
@@ -255,6 +288,7 @@ enum SearchTool {
                 unansweredHours: unansweredHours,
                 matchAll: matchAll,
                 fuzzy: fuzzy,
+                includeFiltered: includeFiltered,
                 db: db,
                 resolver: resolver
             )
@@ -286,6 +320,7 @@ enum SearchTool {
         unansweredHours: Int = 24,
         matchAll: Bool = false,
         fuzzy: Bool = false,
+        includeFiltered: Bool = false,
         db: Database = Database(),
         resolver: ContactResolver
     ) async -> Result<String, SearchError> {
@@ -344,8 +379,29 @@ enum SearchTool {
                 unanswered: unanswered,
                 terms: searchWords,
                 matchAll: matchAll,
-                fuzzy: fuzzy
+                fuzzy: fuzzy,
+                includeFiltered: includeFiltered
             )
+
+            let filteredHidden: Int?
+            if includeFiltered {
+                filteredHidden = nil
+            } else {
+                filteredHidden = try countFilteredHidden(
+                    db: db,
+                    query: query,
+                    fromPerson: senderFilter,
+                    inChat: inChat,
+                    isGroup: isGroup,
+                    has: has,
+                    since: since,
+                    before: before,
+                    unanswered: unanswered,
+                    terms: searchWords,
+                    matchAll: matchAll,
+                    fuzzy: fuzzy
+                )
+            }
 
             var rows = try db.query(sql, params: params) { row in
                 SearchRow(
@@ -412,7 +468,8 @@ enum SearchTool {
                     rows: rows,
                     query: query,
                     limit: clampedLimit,
-                    resolver: resolver
+                    resolver: resolver,
+                    filteredHidden: filteredHidden
                 )
             } else {
                 jsonString = try await buildFlatResponse(
@@ -421,7 +478,8 @@ enum SearchTool {
                     query: query,
                     limit: clampedLimit,
                     includeContext: includeContext,
-                    resolver: resolver
+                    resolver: resolver,
+                    filteredHidden: filteredHidden
                 )
             }
 

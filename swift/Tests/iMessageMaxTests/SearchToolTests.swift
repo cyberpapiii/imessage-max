@@ -46,6 +46,73 @@ final class SearchToolTests: XCTestCase {
         XCTAssertEqual(allResults.first?["id"] as? String, "msg_200")
     }
 
+    func testFilteredChatsAreHiddenByDefault() async throws {
+        let fixture = try ToolTestDatabase(name: "search-filtered")
+        try fixture.insertHandle(rowId: 1, handle: "+15550000001")
+        let now = Int64(Date().timeIntervalSinceReferenceDate * 1_000_000_000)
+        let filters = [0, 1, 36]
+        for (index, isFiltered) in filters.enumerated() {
+            let chatId = index + 1
+            try fixture.insertChat(
+                rowId: chatId,
+                guid: "search-filtered-\(chatId)",
+                displayName: "Search Filtered \(chatId)",
+                isFiltered: isFiltered
+            )
+            try fixture.joinChatHandle(chatId: chatId, handleId: 1)
+            try fixture.insertMessage(
+                rowId: chatId,
+                guid: "zebra-\(chatId)",
+                text: "zebra \(chatId)",
+                date: now + Int64(chatId) * 1_000_000_000,
+                isFromMe: false,
+                handleId: 1
+            )
+            try fixture.joinChatMessage(chatId: chatId, messageId: chatId)
+        }
+
+        let hidden = try await decodeSearchResponse(
+            SearchTool.execute(
+                query: "zebra",
+                cursor: nil,
+                limit: 10,
+                sort: "recent_first",
+                format: "flat",
+                includeContext: false,
+                unanswered: false,
+                unansweredHours: 24,
+                matchAll: false,
+                fuzzy: false,
+                db: fixture.database(),
+                resolver: ContactResolver(seedCache: [:])
+            )
+        )
+        let hiddenResults = try decodeJSONArray(try XCTUnwrap(hidden["results"]))
+        XCTAssertEqual(hiddenResults.compactMap { $0["id"] as? String }, ["msg_1"])
+        XCTAssertEqual(hidden["filtered_hidden"] as? Int, 2)
+
+        let shown = try await decodeSearchResponse(
+            SearchTool.execute(
+                query: "zebra",
+                cursor: nil,
+                limit: 10,
+                sort: "recent_first",
+                format: "flat",
+                includeContext: false,
+                unanswered: false,
+                unansweredHours: 24,
+                matchAll: false,
+                fuzzy: false,
+                includeFiltered: true,
+                db: fixture.database(),
+                resolver: ContactResolver(seedCache: [:])
+            )
+        )
+        let shownResults = try decodeJSONArray(try XCTUnwrap(shown["results"]))
+        XCTAssertEqual(Set(shownResults.compactMap { $0["id"] as? String }), Set(["msg_1", "msg_2", "msg_3"]))
+        XCTAssertNil(shown["filtered_hidden"])
+    }
+
     func testFuzzySearchMatchesTyposAndIncludesContext() async throws {
         let fixture = try makeSearchFixture()
         let resolver = makeSeededResolver()

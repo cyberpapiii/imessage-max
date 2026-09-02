@@ -13,6 +13,7 @@ struct UnreadMessagesResponse: Codable {
     let chatsWithUnread: Int
     let more: Bool
     let cursor: String?
+    let filteredHidden: Int?
 
     enum CodingKeys: String, CodingKey {
         case messages
@@ -20,6 +21,17 @@ struct UnreadMessagesResponse: Codable {
         case chatsWithUnread = "chats_with_unread"
         case more
         case cursor
+        case filteredHidden = "filtered_hidden"
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(messages, forKey: .messages)
+        try container.encode(totalUnread, forKey: .totalUnread)
+        try container.encode(chatsWithUnread, forKey: .chatsWithUnread)
+        try container.encode(more, forKey: .more)
+        try container.encodeIfPresent(cursor, forKey: .cursor)
+        try container.encodeIfPresent(filteredHidden, forKey: .filteredHidden)
     }
 }
 
@@ -37,12 +49,23 @@ struct UnreadSummaryResponse: Codable {
     let totalUnread: Int
     let chatsWithUnread: Int
     let more: Bool
+    let filteredHidden: Int?
 
     enum CodingKeys: String, CodingKey {
         case chats
         case totalUnread = "total_unread"
         case chatsWithUnread = "chats_with_unread"
         case more
+        case filteredHidden = "filtered_hidden"
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(chats, forKey: .chats)
+        try container.encode(totalUnread, forKey: .totalUnread)
+        try container.encode(chatsWithUnread, forKey: .chatsWithUnread)
+        try container.encode(more, forKey: .more)
+        try container.encodeIfPresent(filteredHidden, forKey: .filteredHidden)
     }
 }
 
@@ -97,6 +120,10 @@ final class GetUnread {
                     "type": "integer",
                     "description": "Max messages (default 50, max 100)",
                 ]),
+                "include_filtered": .object([
+                    "type": "boolean",
+                    "description": "Include chats Messages.app has filtered as junk or unknown senders (default false)",
+                ]),
             ]),
             "additionalProperties": false,
         ])
@@ -118,13 +145,15 @@ final class GetUnread {
             let since = arguments?["since"]?.stringValue ?? "7d"
             let formatStr = arguments?["format"]?.stringValue ?? "summary"
             let limit = arguments?["limit"]?.intValue ?? 50
+            let includeFiltered = arguments?["include_filtered"]?.boolValue ?? false
 
             let format = UnreadFormat(rawValue: formatStr) ?? .summary
             let params = Parameters(
                 chatId: chatId,
                 since: since,
                 format: format,
-                limit: limit
+                limit: limit,
+                includeFiltered: includeFiltered
             )
 
             let tool = GetUnread(database: db, contactResolver: resolver)
@@ -149,17 +178,20 @@ final class GetUnread {
         var since: String
         var format: UnreadFormat
         var limit: Int
+        var includeFiltered: Bool
 
         init(
             chatId: String? = nil,
             since: String = "7d",
             format: UnreadFormat = .summary,
-            limit: Int = 50
+            limit: Int = 50,
+            includeFiltered: Bool = false
         ) {
             self.chatId = chatId
             self.since = since
             self.format = format
             self.limit = max(1, min(limit, 100))
+            self.includeFiltered = includeFiltered
         }
     }
 
@@ -186,13 +218,15 @@ final class GetUnread {
             return try await getUnreadSummary(
                 chatId: numericChatId,
                 sinceApple: sinceApple,
-                limit: params.limit
+                limit: params.limit,
+                includeFiltered: params.includeFiltered
             )
         case .messages:
             return try await getUnreadMessages(
                 chatId: numericChatId,
                 sinceApple: sinceApple,
-                limit: params.limit
+                limit: params.limit,
+                includeFiltered: params.includeFiltered
             )
         }
     }
@@ -202,7 +236,8 @@ final class GetUnread {
     private func getUnreadMessages(
         chatId: Int64?,
         sinceApple: Int64?,
-        limit: Int
+        limit: Int,
+        includeFiltered: Bool
     ) async throws -> UnreadMessagesResponse {
         // Unread = is_read = 0 AND is_from_me = 0
         var queryBuilder = QueryBuilder()
@@ -222,6 +257,10 @@ final class GetUnread {
             .where("m.is_read = 0")
             .where("m.is_from_me = 0")
             .where("m.associated_message_type = 0")
+
+        if !includeFiltered {
+            queryBuilder = queryBuilder.where("c.is_filtered = 0")
+        }
 
         // Apply time window filter (default 7 days to match Messages.app)
         if let sinceApple = sinceApple {
@@ -256,8 +295,12 @@ final class GetUnread {
 
         let (totalUnread, chatsWithUnread) = try getUnreadCounts(
             chatId: chatId,
-            sinceApple: sinceApple
+            sinceApple: sinceApple,
+            includeFiltered: includeFiltered
         )
+        let filteredHidden = includeFiltered
+            ? nil
+            : try getFilteredHiddenCount(chatId: chatId, sinceApple: sinceApple)
 
         let uniqueChatIds = Array(Set(rows.map(\.chatId)))
         let participantsByChat = try await ChatSummaryQueries.participantsByChat(
@@ -307,14 +350,16 @@ final class GetUnread {
             chatsWithUnread: chatsWithUnread,
             // Pagination is by limit only (no cursor); more reports truncation honestly.
             more: more,
-            cursor: nil
+            cursor: nil,
+            filteredHidden: filteredHidden
         )
     }
 
     private func getUnreadSummary(
         chatId: Int64?,
         sinceApple: Int64?,
-        limit: Int
+        limit: Int,
+        includeFiltered: Bool
     ) async throws -> UnreadSummaryResponse {
         var queryBuilder = QueryBuilder()
             .select(
@@ -332,6 +377,10 @@ final class GetUnread {
             .where("m.is_read = 0")
             .where("m.is_from_me = 0")
             .where("m.associated_message_type = 0")
+
+        if !includeFiltered {
+            queryBuilder = queryBuilder.where("c.is_filtered = 0")
+        }
 
         if let sinceApple = sinceApple {
             queryBuilder = queryBuilder.where("m.date >= ?", sinceApple)
@@ -432,11 +481,16 @@ final class GetUnread {
             )
         }
 
+        let filteredHidden = includeFiltered
+            ? nil
+            : try getFilteredHiddenCount(chatId: chatId, sinceApple: sinceApple)
+
         return UnreadSummaryResponse(
             chats: chats,
             totalUnread: totalUnread,
             chatsWithUnread: chats.count,
-            more: more
+            more: more,
+            filteredHidden: filteredHidden
         )
     }
 
@@ -457,7 +511,8 @@ final class GetUnread {
 
     private func getUnreadCounts(
         chatId: Int64?,
-        sinceApple: Int64?
+        sinceApple: Int64?,
+        includeFiltered: Bool
     ) throws -> (totalUnread: Int, chatsWithUnread: Int) {
         var queryBuilder = QueryBuilder()
             .select(
@@ -466,9 +521,14 @@ final class GetUnread {
             )
             .from("message m")
             .join("chat_message_join cmj ON m.ROWID = cmj.message_id")
+            .join("chat c ON cmj.chat_id = c.ROWID")
             .where("m.is_read = 0")
             .where("m.is_from_me = 0")
             .where("m.associated_message_type = 0")
+
+        if !includeFiltered {
+            queryBuilder = queryBuilder.where("c.is_filtered = 0")
+        }
 
         if let sinceApple = sinceApple {
             queryBuilder = queryBuilder.where("m.date >= ?", sinceApple)
@@ -489,6 +549,35 @@ final class GetUnread {
         }
 
         return first
+    }
+
+    private func getFilteredHiddenCount(
+        chatId: Int64?,
+        sinceApple: Int64?
+    ) throws -> Int {
+        var queryBuilder = QueryBuilder()
+            .select("COUNT(DISTINCT cmj.chat_id)")
+            .from("message m")
+            .join("chat_message_join cmj ON m.ROWID = cmj.message_id")
+            .join("chat c ON cmj.chat_id = c.ROWID")
+            .where("m.is_read = 0")
+            .where("m.is_from_me = 0")
+            .where("m.associated_message_type = 0")
+            .where("c.is_filtered != 0")
+
+        if let sinceApple {
+            queryBuilder = queryBuilder.where("m.date >= ?", sinceApple)
+        }
+
+        if let chatId {
+            queryBuilder = queryBuilder.where("cmj.chat_id = ?", chatId)
+        }
+
+        let (sql, params) = queryBuilder.build()
+        let rows: [Int] = try database.query(sql, params: params) { row in
+            Int(row.int(0))
+        }
+        return rows.first ?? 0
     }
 
 }

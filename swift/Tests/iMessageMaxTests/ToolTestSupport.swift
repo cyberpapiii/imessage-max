@@ -44,11 +44,11 @@ final class ToolTestDatabase {
             """)
     }
 
-    func insertChat(rowId: Int, guid: String, displayName: String? = nil, serviceName: String = "iMessage") throws {
+    func insertChat(rowId: Int, guid: String, displayName: String? = nil, serviceName: String = "iMessage", isFiltered: Int = 0) throws {
         let display = displayName.map { "'\(escape($0))'" } ?? "NULL"
         try execute("""
-            INSERT INTO chat (ROWID, guid, display_name, service_name)
-            VALUES (\(rowId), '\(escape(guid))', \(display), '\(escape(serviceName))');
+            INSERT INTO chat (ROWID, guid, display_name, service_name, is_filtered)
+            VALUES (\(rowId), '\(escape(guid))', \(display), '\(escape(serviceName))', \(isFiltered));
             """)
     }
 
@@ -136,7 +136,8 @@ final class ToolTestDatabase {
             ROWID INTEGER PRIMARY KEY,
             guid TEXT,
             display_name TEXT,
-            service_name TEXT
+            service_name TEXT,
+            is_filtered INTEGER DEFAULT 0
         );
         CREATE TABLE handle (
             ROWID INTEGER PRIMARY KEY,

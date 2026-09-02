@@ -223,11 +223,14 @@ After saving the config, reconnect or restart your MCP client. The server should
 ### find_chat
 Find chats by participants, name, or recent content.
 
+By default, chats Messages.app has filtered into Unknown Senders or Junk are hidden. The response carries `filtered_hidden`, the number of chats the filter removed from this view; pass `include_filtered=True` to see them.
+
 ```text
 find_chat(participants=["Contact A"])              # Find a direct chat
 find_chat(participants=["Contact A", "Contact B"]) # Find a group with both
 find_chat(name="Project Group")                    # Find by chat name
 find_chat(contains_recent="latest draft")          # Find by recent content
+find_chat(name="Project Group", include_filtered=True)  # Also search junk / unknown-sender chats
 ```
 
 ### get_chat_details
@@ -239,7 +242,7 @@ get_chat_details(chat_id="chat123", include_shared_summary=false) # Skip recent 
 ```
 
 ### get_messages
-Retrieve messages with flexible filtering. Returns metadata for media.
+Retrieve messages with flexible filtering. Returns metadata for media. Explicit `chat_id` lookups are never filtered.
 
 ```text
 get_messages(chat_id="chat123", limit=50)           # Recent messages
@@ -273,19 +276,25 @@ get_attachment(attachment_id="att123", variant="full")  # Original resolution
 ### list_chats
 Browse recent chats with previews.
 
+By default, chats Messages.app has filtered into Unknown Senders or Junk are hidden. The response carries `filtered_hidden`, the number of chats the filter removed; pass `include_filtered=True` to see them.
+
 ```text
 list_chats(limit=20)          # Recent chats
 list_chats(is_group=True)     # Only group chats
 list_chats(since="7d")        # Active in last week
+list_chats(include_filtered=True)   # Also show junk / unknown-sender chats
 ```
 
 ### search
 Full-text search across messages.
 
+By default, junk and unknown-sender chats are hidden. The response carries `filtered_hidden`; pass `include_filtered=True` to search them too.
+
 ```text
 search(query="draft")                           # Search all messages
 search(query="budget", from_person="Contact A") # From specific person
 search(query="launch", is_group=True)           # Only in group chats
+search(query="draft", include_filtered=True)    # Also search junk / unknown-sender chats
 ```
 
 ### get_context
@@ -314,10 +323,13 @@ list_attachments(chat_id="chat123", type="any")
 ### get_unread
 Get unread threads or unread messages. Default is summary by chat.
 
+By default, junk and unknown-sender chats are hidden. The response carries `filtered_hidden`; pass `include_filtered=True` to include them.
+
 ```text
 get_unread()                         # Summary by chat for last 7 days
 get_unread(since="24h")              # Summary by chat for last 24 hours
 get_unread(format="messages")        # Row-level unread messages
+get_unread(include_filtered=True)    # Also show junk / unknown-sender chats
 ```
 
 ### send
