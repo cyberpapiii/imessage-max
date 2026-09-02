@@ -769,6 +769,7 @@ public actor HTTPTransport: Transport {
 
         return Application(
             router: router,
+            server: .http1(configuration: .init(idleTimeout: Self.nioTimeAmount(channelIdleTimeout))),
             configuration: .init(
                 address: .hostname(host, port: port)
             ),
@@ -883,6 +884,26 @@ public actor HTTPTransport: Transport {
             return "n:null"
         }
         return "u:\(UUID().uuidString)"
+    }
+
+    /// Converts a `Duration` through `AsyncTimeout.dispatchInterval` so the
+    /// channel idle timeout uses the same saturation as every other Dispatch
+    /// deadline in the service.
+    private nonisolated static func nioTimeAmount(_ duration: Duration) -> TimeAmount {
+        switch AsyncTimeout.dispatchInterval(for: duration) {
+        case .nanoseconds(let ns):
+            return .nanoseconds(Int64(ns))
+        case .microseconds(let us):
+            return .microseconds(Int64(us))
+        case .milliseconds(let ms):
+            return .milliseconds(Int64(ms))
+        case .seconds(let s):
+            return .seconds(Int64(s))
+        case .never:
+            return .seconds(60)
+        @unknown default:
+            return .seconds(60)
+        }
     }
 
     /// Creates a JSON-RPC error response
