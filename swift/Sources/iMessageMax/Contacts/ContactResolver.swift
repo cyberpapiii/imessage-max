@@ -5,6 +5,10 @@ import Foundation
 actor ContactResolver {
     private var cache: [String: String] = [:]  // handle -> name
     private var isInitialized = false
+    /// True when `initialize` returned early because `CI=true` was set.
+    /// Surfaced by diagnose so an operator with CI exported in their shell
+    /// can see why no names resolve.
+    private var skippedForCI = false
     // CNContactStore is not Sendable, so we mark it nonisolated(unsafe)
     // This is safe because we only use it from within actor-isolated methods
     nonisolated(unsafe) private let store = CNContactStore()
@@ -45,6 +49,7 @@ actor ContactResolver {
         // `swift test` never finishes (serial run 33573931260: one
         // list_attachments test took 298s, then the next never returned).
         if ProcessInfo.processInfo.environment["CI"] == "true" {
+            skippedForCI = true
             isInitialized = true
             return
         }
@@ -116,7 +121,7 @@ actor ContactResolver {
         }
     }
 
-    func getStats() -> (initialized: Bool, handleCount: Int) {
-        (isInitialized, cache.count)
+    func getStats() -> (initialized: Bool, handleCount: Int, skippedForCI: Bool) {
+        (isInitialized, cache.count, skippedForCI)
     }
 }

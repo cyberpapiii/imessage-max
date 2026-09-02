@@ -137,6 +137,11 @@ enum DiagnoseTool {
                 try await resolver.initialize()
                 let stats = await resolver.getStats()
                 contactsLoaded = stats.handleCount
+                if stats.skippedForCI {
+                    contactsStatus = "skipped_ci"
+                    contactsFix = "CI=true is set in this process's environment, so contact "
+                        + "loading was skipped and no names will resolve. Unset CI to load contacts."
+                }
             } catch {
                 contactsStatus = "\(authorizationStatus)_load_failed"
                 // CNContactStore errors routinely embed local paths and the
@@ -152,7 +157,7 @@ enum DiagnoseTool {
 
         let (automationOk, automationStatus) = automationProbe()
 
-        let allGood = dbOk && contactsAuthorized
+        let allGood = dbOk && contactsAuthorized && contactsStatus != "skipped_ci"
         let overallStatus = allGood ? "ready" : "needs_setup"
 
         // MARK: - Capability derivation (design §2.4)
