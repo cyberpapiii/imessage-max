@@ -63,10 +63,10 @@ jobs:
         run: swift build --build-tests
 
       - name: Run tests
-        # `--parallel` cannot finish on macos-26: SessionManager's cleanup
-        # AsyncTimeout.sleep uses asyncAfter, and cancelled work items stay
-        # until the 300s deadline (see AGENTS.md). That pins every parallel
-        # worker; the suite then advances one test every ~5 minutes and hits
-        # timeout-minutes. Serial is one process, so leftover timers cannot
-        # starve sibling workers.
+        # Serial on purpose. The 2026-09 hang (run 33573931260) was Contacts:
+        # hosted macos runners report Contacts as authorized but have no
+        # AddressBook daemon, and enumerateContacts retried for minutes per
+        # test. ContactResolver.initialize now skips loading when CI=true
+        # (GitHub sets it). Serial stays until a workflow_dispatch run of
+        # `--parallel` with the guard in place is green; see plan 066.
         run: swift test --skip-build
