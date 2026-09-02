@@ -83,6 +83,46 @@ final class FindChatToolTests: XCTestCase {
         XCTAssertEqual(chats.first?["id"] as? String, "chat22")
         XCTAssertEqual(chats.first?["name"] as? String, "Sukhmani Kular")
     }
+
+    // Fails until Step 5.
+    func testFindChatDisambiguatesDuplicateDisplayNames() async throws {
+        let fixture = try ToolTestDatabase(name: "find-chat-alex-doe")
+        try fixture.insertHandle(rowId: 11, handle: "+15550000011")
+        try fixture.insertHandle(rowId: 12, handle: "+15550000012")
+        try fixture.insertChat(rowId: 11, guid: "chat-alex-guid", displayName: nil)
+        try fixture.joinChatHandle(chatId: 11, handleId: 11)
+        try fixture.joinChatHandle(chatId: 11, handleId: 12)
+        try fixture.insertMessage(
+            rowId: 1,
+            guid: "msg-1",
+            text: "hello",
+            date: 1_000_000_000,
+            isFromMe: false,
+            handleId: 11
+        )
+        try fixture.joinChatMessage(chatId: 11, messageId: 1)
+
+        let resolver = ContactResolver(seedCache: [
+            "+15550000001": "Alice Smith",
+            "+15550000002": "Bob Brown",
+            "+15550000003": "Chris Green",
+            "+15550000011": "Alex Doe",
+            "+15550000012": "Alex Doe",
+        ])
+        let contents = try await FindChatTool.execute(
+            arguments: [
+                "participants": .array([.string("+15550000011")]),
+            ],
+            database: fixture.database(),
+            resolver: resolver
+        )
+        let payload = try decodeJSONDictionary(from: contents)
+        let chats = try decodeJSONArray(try XCTUnwrap(payload["chats"]))
+        XCTAssertEqual(chats.count, 1)
+        let participants = try decodeJSONArray(try XCTUnwrap(chats.first?["participants"]))
+        let names = participants.compactMap { $0["name"] as? String }
+        XCTAssertEqual(names, ["Alex Doe (0011)", "Alex Doe (0012)"])
+    }
 }
 
 private func makeContainsRecentRichFixture() throws -> ToolTestDatabase {

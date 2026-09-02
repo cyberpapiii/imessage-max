@@ -461,4 +461,53 @@ final class ListToolCharacterizationTests: XCTestCase {
         XCTAssertEqual(convo.activity.theirMsgs, 2, "2 messages from them, not 2 x 3 participants")
         XCTAssertEqual(convo.activity.exchanges, 2)
     }
+
+    /// Documents the N+1 recent-sender queries. Step 3 flips GreaterThan
+    /// to a constant LessThanOrEqual bound.
+    func testListChatsQueryCountIsConstantInRowCount() async throws {
+        let fixture = try ToolTestDatabase(name: "list-chats-query-count")
+        for rowId in 1...6 {
+            try fixture.insertHandle(rowId: rowId, handle: "+1555000000\(rowId)")
+        }
+        let base: Int64 = 700_000_000_000_000_000
+        let sec: Int64 = 1_000_000_000
+        for chatId in 1...12 {
+            try fixture.insertChat(rowId: chatId, guid: "chat-\(chatId)-guid", displayName: "Group \(chatId)")
+            for handleId in 1...6 {
+                try fixture.joinChatHandle(chatId: chatId, handleId: handleId)
+            }
+            for inbound in 1...3 {
+                let messageId = chatId * 10 + inbound
+                try fixture.insertMessage(
+                    rowId: messageId,
+                    guid: "msg-\(messageId)",
+                    text: "hello \(messageId)",
+                    date: base + Int64(chatId * 3 + inbound) * sec,
+                    isFromMe: false,
+                    handleId: inbound
+                )
+                try fixture.joinChatMessage(chatId: chatId, messageId: messageId)
+            }
+        }
+
+        Database.queryCountForTesting = 0
+        defer { Database.queryCountForTesting = nil }
+
+        let result = await ListChatsTool.execute(
+            limit: 12,
+            since: nil,
+            isGroup: nil,
+            minParticipants: nil,
+            maxParticipants: nil,
+            sort: "recent",
+            db: fixture.database(),
+            resolver: makeSeededResolver()
+        )
+        guard case .success(let response) = result else {
+            return XCTFail("list_chats failed")
+        }
+        XCTAssertEqual(response.chats.count, 12)
+        let queryCount = try XCTUnwrap(Database.queryCountForTesting)
+        XCTAssertGreaterThan(queryCount, 12, "list_chats ran \(queryCount) queries")
+    }
 }
