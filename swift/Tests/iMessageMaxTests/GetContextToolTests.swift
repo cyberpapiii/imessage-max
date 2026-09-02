@@ -176,8 +176,42 @@ final class GetContextToolTests: XCTestCase {
         try assertFailure(result, error: "not_found")
     }
 
+    func testContainsTreatsPercentAndUnderscoreLiterally() async throws {
+        let fixture = try makeLongChatFixture(messageCount: 20)
+        try fixture.execute("UPDATE message SET text = '100% done' WHERE ROWID = 1005")
+        try fixture.execute("UPDATE message SET text = 'a_b' WHERE ROWID = 1008")
+
+        let percent = await GetContext.execute(
+            chatId: "chat50",
+            contains: "%",
+            database: fixture.database(),
+            resolver: makeSeededResolver()
+        )
+        XCTAssertEqual(try unwrapSuccess(percent).message.id, "msg_1005")
+
+        let underscore = await GetContext.execute(
+            chatId: "chat50",
+            contains: "_",
+            database: fixture.database(),
+            resolver: makeSeededResolver()
+        )
+        XCTAssertEqual(try unwrapSuccess(underscore).message.id, "msg_1008")
+
+        let noWildcard = await GetContext.execute(
+            chatId: "chat50",
+            contains: "x_y",
+            database: fixture.database(),
+            resolver: makeSeededResolver()
+        )
+        try assertFailure(noWildcard, error: "not_found")
+    }
+
     func testContainsMissBeyondCapIsNotFoundInWindow() async throws {
         let fixture = try makeLongChatFixture(messageCount: 5100)
+        // Cap counts post-prefilter candidates. Plain-text misses exhaust in
+        // one page; attributedBody-only rows are always admitted, which is
+        // how a chat actually hits the 5000 cap.
+        try fixture.execute("UPDATE message SET text = NULL, attributedBody = X'01'")
         let result = await GetContext.execute(
             chatId: "chat50",
             contains: "zzz-never",
