@@ -53,9 +53,9 @@ jobs:
         uses: actions/cache@v6
         with:
           path: swift/.build
-          key: ${{ runner.os }}-swift-build-${{ hashFiles('swift/Package.resolved') }}
+          key: ${{ runner.os }}-swift-build-serial-${{ hashFiles('swift/Package.resolved') }}
           restore-keys: |
-            ${{ runner.os }}-swift-build-
+            ${{ runner.os }}-swift-build-serial-
 
       # Tests are compiled in this step on purpose, so a compile error is
       # attributed to "Build" rather than "Run tests".
@@ -63,4 +63,10 @@ jobs:
         run: swift build --build-tests
 
       - name: Run tests
-        run: swift test --skip-build --parallel
+        # `--parallel` cannot finish on macos-26: SessionManager's cleanup
+        # AsyncTimeout.sleep uses asyncAfter, and cancelled work items stay
+        # until the 300s deadline (see AGENTS.md). That pins every parallel
+        # worker; the suite then advances one test every ~5 minutes and hits
+        # timeout-minutes. Serial is one process, so leftover timers cannot
+        # starve sibling workers.
+        run: swift test --skip-build
