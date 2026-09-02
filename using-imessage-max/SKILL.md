@@ -33,6 +33,7 @@ Why:
 - `list_chats` gives the safest broad preview across recent conversations.
 - `get_unread` is narrower and can miss important chats that were already opened.
 - `get_active_conversations` is also narrower and can miss quiet but important threads.
+- `list_chats`, `search`, `get_unread`, and `find_chat` hide junk and unknown-sender chats by default and report how many in `filtered_hidden`. Only pass `include_filtered=true` when the user asks about a message that did not show up.
 
 ### Targeted lookup
 
