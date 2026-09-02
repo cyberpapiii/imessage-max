@@ -237,11 +237,12 @@ extension SearchTool {
             results.append(result)
         }
 
+        let nextCursor = Self.nextCursor(from: rows, limit: limit)
         let response = SearchFlatResponse(
             results: results,
             total: results.count,
-            more: results.count >= limit,
-            cursor: nextCursor(from: rows, limit: limit)
+            more: nextCursor != nil,
+            cursor: nextCursor
         )
         return try FormatUtils.encodeJSON(response)
     }
@@ -351,13 +352,14 @@ extension SearchTool {
         }
         chats.sort { $0.matchCount > $1.matchCount }
 
+        let nextCursor = Self.nextCursor(from: rows, limit: limit)
         let response = SearchGroupedResponse(
             chats: chats,
             total: chats.reduce(0) { $0 + $1.matchCount },
             chatCount: chats.count,
             query: query,
-            more: rows.count >= limit,
-            cursor: nextCursor(from: rows, limit: limit)
+            more: nextCursor != nil,
+            cursor: nextCursor
         )
         return try FormatUtils.encodeJSON(response)
     }

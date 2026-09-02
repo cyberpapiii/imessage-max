@@ -443,14 +443,15 @@ actor GetMessagesTool {
         }
 
         let mediaTruncated = mediaTotal > maxMedia
+        let nextCursor = Self.nextCursor(from: messageRows, limit: limit)
 
         return GetMessagesResponse(
             chat: .init(id: "chat\(numericChatId)", name: displayName),
             people: people,
             messages: finalMessages,
             sessions: finalSessions,
-            more: messages.count == limit,
-            cursor: Self.nextCursor(from: messageRows, limit: limit),
+            more: nextCursor != nil,
+            cursor: nextCursor,
             mediaTruncated: mediaTruncated ? true : nil,
             mediaTotal: mediaTruncated ? mediaTotal : nil,
             mediaIncluded: mediaTruncated ? mediaIncluded : nil,
