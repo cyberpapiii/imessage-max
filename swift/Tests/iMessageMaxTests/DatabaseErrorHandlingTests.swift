@@ -35,6 +35,20 @@ final class DatabaseErrorHandlingTests: XCTestCase {
         }
     }
 
+    func testExtraParameterFailsBindInsteadOfRunning() throws {
+        let fixture = try ToolTestDatabase()
+        let db = fixture.database()
+        // One placeholder-less statement, one param: sqlite3_bind_int64 returns
+        // SQLITE_RANGE. At 639529e the code ignores it and returns one row.
+        XCTAssertThrowsError(
+            try db.query("SELECT 1", params: [1]) { _ in 0 }
+        ) { error in
+            guard case DatabaseError.queryFailed = error else {
+                return XCTFail("expected queryFailed, got \(error)")
+            }
+        }
+    }
+
     func testBoolParamBindsAsInteger() throws {
         let fixture = try ToolTestDatabase()
         let db = fixture.database()
