@@ -181,9 +181,9 @@ After changing the grant, relaunch the server; macOS applies Full Disk Access on
 
 ### 2. Grant Contacts access
 
-Required to resolve phone numbers to names. The binary asks for access on first run. To add it manually:
+Required to resolve phone numbers to names. The server only asks for access when it is started from a terminal; launchd and MCP clients start it headless, and a headless process never prompts. Grant access once with `imessage-max --request-contacts-access` from a terminal, then restart the service. `--contacts-policy request|skip` (or `IMESSAGE_MAX_CONTACTS_POLICY`) overrides the terminal detection.
 
-System Settings → Privacy & Security → Contacts → add `imessage-max`
+System Settings → Privacy & Security → Contacts → add `imessage-max` is the manual alternative.
 
 ### 3. Configure your MCP client
 
@@ -382,6 +382,8 @@ diagnose()  # Returns: database status, contacts count, permissions, capabilitie
 
 `database.features` lists which optional `chat.db` columns exist on this Mac, keyed `table.column` (for example `message.date_edited`). When one is `false`, the tools that read it degrade instead of failing: no `reply_to` or `reply_count` without `message.thread_originator_guid`, no `edited` without `message.date_edited`, no custom-emoji reaction text without `message.associated_message_emoji`.
 
+`contacts.status` is one of `authorized`, `limited`, `denied`, `restricted`, `not_determined`, `not_requested_headless`, `skipped_ci`, or `<status>_load_failed`. A headless process that skipped the prompt reports `not_requested_headless` and the fix names `--request-contacts-access`.
+
 ## Release checks
 
 Before a release, work through:
@@ -437,6 +439,8 @@ Examples:
 
 Run `diagnose` to check status. If `contacts_authorized` is false:
 - Add the `imessage-max` binary to System Settings → Privacy & Security → Contacts
+
+If `diagnose` reports `contacts.status: "not_requested_headless"`, run `imessage-max --request-contacts-access` from a terminal. Names refresh within 30 s of a Contacts change and are dropped as soon as access is revoked; no restart needed.
 
 ### "Cannot read the iMessage database" / `permission_denied`
 
