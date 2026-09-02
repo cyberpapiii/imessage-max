@@ -274,7 +274,6 @@ actor SendTool {
                         description: "Local file paths to send as attachments. If combined with text, files are sent first and text is sent last.",
                         items: .string(description: "Absolute or ~/expanded local file path")
                     ),
-                    "reply_to": .string(description: "Message ID to reply to (not yet implemented)"),
                     "confirm": .boolean(description: "Deprecated; accepted for compatibility and ignored. Sends do not require confirmation. An ambiguous destination is refused with status 'ambiguous', and the tool verifies results after sending."),
                 ]
             ),
@@ -298,14 +297,12 @@ actor SendTool {
         let chatId = args?["chat_id"]?.stringValue
         let text = args?["text"]?.stringValue
         let filePaths = args?["file_paths"]?.arrayValue?.compactMap { $0.stringValue }
-        let replyTo = args?["reply_to"]?.stringValue
 
         let response = await send(
             to: to,
             chatId: chatId,
             text: text,
-            filePaths: filePaths,
-            replyTo: replyTo
+            filePaths: filePaths
         )
         let content: [Tool.Content] = [.plainText(try FormatUtils.encodeJSON(response))]
         if response.status == "failed" || response.status == "ambiguous"
@@ -323,17 +320,11 @@ actor SendTool {
         to: String?,
         chatId: String?,
         text: String?,
-        filePaths: [String]?,
-        replyTo: String?
+        filePaths: [String]?
     ) async -> SendResponse {
         // Validation
         guard to != nil || chatId != nil else {
             return .error("Either 'to' or 'chat_id' must be provided")
-        }
-
-        // reply_to is not yet implemented
-        if replyTo != nil {
-            return .error("reply_to is not yet implemented")
         }
 
         let payloads: [SendPayload]
