@@ -22,7 +22,32 @@ documents live in `docs/plans/` (a separate, pre-existing convention).
 > `IconMetadataTests`). Machines that route MCP through plug suppress it via
 > `.claude/settings.local.json` → `disabledMcpjsonServers`, never by deletion.
 
-## Current round (2026-09-01 evening, against `639529e`): execution order & status
+## Current round (2026-09-02, against `42deb1f`): borrowed from openclaw/imsg
+
+Source: a deep-dive comparison of openclaw/imsg (Swift CLI + JSON-RPC for
+Messages, MIT, 0.14.2) against iMessage Max 1.6.0. Seven techniques were
+judged worth adopting; none require private frameworks or SIP changes. The
+injected IMCore helper, `patch-deps.sh`, and imsg's absence of logging and
+CI timeouts were explicitly rejected. Verification baseline: **433/433 tests
+pass at `42deb1f`**; v1.6.0 released, live service on 1.6.0 with Full Disk
+Access. Same branch, commit, merge, and test conventions as the round below.
+
+Execution order: 082 first (it changes `Diagnose.swift`, which 081 and 084
+also edit), then 085, 079, 083, 081, 084, and 080 last (largest; layer 2 is
+optional). Every plan shares `ToolTestSupport.swift` fixture edits; rebase
+before merging each.
+
+| Plan | Title | Priority | Effort | Depends on | Status |
+|------|-------|----------|--------|------------|--------|
+| 082 | Recover from missing Full Disk Access without a restart; `make verify-db` gates install; actionable FDA fix text; incident timeline recorded | P1 | S-M | none | TODO |
+| 085 | Stage `send` attachments through a symlink-safe file handle into a 0700 directory (lstat every component, trusted `/tmp` `/var` `/etc` aliases) | P1 | M | none | TODO |
+| 079 | Typed delivery disposition for `send`: `disposition` (`completed` / `not_started` / `may_have_completed`) and `retry_safe`; `confirmed` defined as chat.db row match within the verification window | P2 | M | none | TODO |
+| 083 | URL preview balloon rows: pin single-row behaviour, fix `has:"links"` blind spot, hide `pluginPayloadAttachment` rows (imsg-style 90 s coalescing deferred: 0 of 1,121 balloon rows in 365 d pair with a text row on this DB) | P2 | S-M | none | TODO |
+| 081 | Probe the chat.db schema at open; `SchemaCapabilities` flags guard `thread_originator_guid`, `date_edited`, `associated_message_emoji`; `database.features` in diagnose | P2 | M | 082 (shared Diagnose edits) | TODO |
+| 084 | Never request Contacts authorization from a headless process; refresh the cache on change and TTL; clear it on revoke; `not_requested_headless` in diagnose | P2 | M | 082 (shared Diagnose edits) | TODO |
+| 080 | Live inbox: `get_messages_since` ROWID cursor tool (layer 1), then a WAL-aware chat.db watcher pushing `notifications/imessage/new_messages` over SSE (layer 2, optional) | P2 | M / L | 083 (balloon rows affect cursor consumption) | TODO |
+
+## Previous round (2026-09-01 evening, against `639529e`): all merged
 
 Post-release audit (standard depth, all nine categories, four parallel
 auditors) run after v1.5.0 shipped. 26 findings survived vetting against the
