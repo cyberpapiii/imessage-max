@@ -75,12 +75,17 @@ final class ToolTestDatabase {
         itemType: Int = 0,
         groupActionType: Int = 0,
         groupTitle: String? = nil,
-        otherHandle: Int = 0
+        otherHandle: Int = 0,
+        associatedMessageEmoji: String? = nil,
+        threadOriginatorGuid: String? = nil,
+        dateEdited: Int64 = 0
     ) throws {
         let textValue = text.map { "'\(escape($0))'" } ?? "NULL"
         let handleValue = handleId.map(String.init) ?? "NULL"
         let assocGuidValue = associatedMessageGuid.map { "'\(escape($0))'" } ?? "NULL"
         let groupTitleValue = groupTitle.map { "'\(escape($0))'" } ?? "NULL"
+        let assocEmojiValue = associatedMessageEmoji.map { "'\(escape($0))'" } ?? "NULL"
+        let threadOriginatorValue = threadOriginatorGuid.map { "'\(escape($0))'" } ?? "NULL"
         let attributedValue: String
         if let attributedBody {
             attributedValue = "X'\(attributedBody.map { String(format: "%02X", $0) }.joined())'"
@@ -90,9 +95,9 @@ final class ToolTestDatabase {
 
         try execute("""
             INSERT INTO message (
-                ROWID, guid, text, attributedBody, date, is_from_me, is_read, handle_id, associated_message_type, associated_message_guid, error, is_sent, item_type, group_action_type, group_title, other_handle
+                ROWID, guid, text, attributedBody, date, is_from_me, is_read, handle_id, associated_message_type, associated_message_guid, error, is_sent, item_type, group_action_type, group_title, other_handle, associated_message_emoji, thread_originator_guid, date_edited
             ) VALUES (
-                \(rowId), '\(escape(guid))', \(textValue), \(attributedValue), \(date), \(isFromMe ? 1 : 0), \(isRead ? 1 : 0), \(handleValue), \(associatedMessageType), \(assocGuidValue), \(error), \(isSent), \(itemType), \(groupActionType), \(groupTitleValue), \(otherHandle)
+                \(rowId), '\(escape(guid))', \(textValue), \(attributedValue), \(date), \(isFromMe ? 1 : 0), \(isRead ? 1 : 0), \(handleValue), \(associatedMessageType), \(assocGuidValue), \(error), \(isSent), \(itemType), \(groupActionType), \(groupTitleValue), \(otherHandle), \(assocEmojiValue), \(threadOriginatorValue), \(dateEdited)
             );
             """)
     }
@@ -164,7 +169,10 @@ final class ToolTestDatabase {
             item_type INTEGER DEFAULT 0,
             group_action_type INTEGER DEFAULT 0,
             group_title TEXT,
-            other_handle INTEGER DEFAULT 0
+            other_handle INTEGER DEFAULT 0,
+            associated_message_emoji TEXT,
+            thread_originator_guid TEXT,
+            date_edited INTEGER DEFAULT 0
         );
         CREATE TABLE chat_message_join (
             chat_id INTEGER,

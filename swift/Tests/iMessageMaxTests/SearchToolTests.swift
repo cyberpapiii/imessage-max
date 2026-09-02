@@ -753,6 +753,51 @@ final class SearchToolTests: XCTestCase {
         XCTAssertEqual(directs, Set(["msg_2"]))
         XCTAssertEqual(all, Set(["msg_1", "msg_2", "msg_3"]))
     }
+
+    func testSearchResultsCarryReactionReplyAndEditFields() async throws {
+        let fixture = try makeSearchFixture()
+        let resolver = makeSeededResolver()
+
+        let response = try await decodeSearchResponse(
+            SearchTool.execute(
+                query: "costa trip",
+                cursor: nil,
+                limit: 10,
+                sort: "recent_first",
+                format: "flat",
+                includeContext: false,
+                unanswered: false,
+                unansweredHours: 24,
+                matchAll: false,
+                fuzzy: false,
+                db: fixture.database(),
+                resolver: resolver
+            )
+        )
+        let results = try decodeJSONArray(try XCTUnwrap(response["results"]))
+        let byId = Dictionary(uniqueKeysWithValues: results.compactMap { row -> (String, [String: Any])? in
+            guard let id = row["id"] as? String else { return nil }
+            return (id, row)
+        })
+
+        let reacted = try XCTUnwrap(byId["msg_200"])
+        XCTAssertEqual(reacted["reactions"] as? [String], ["🥕 Alice Smith"])
+        XCTAssertEqual(reacted["reply_count"] as? Int, 1)
+        XCTAssertFalse(reacted.keys.contains("reply_to"))
+        XCTAssertFalse(reacted.keys.contains("edited"))
+
+        let reply = try XCTUnwrap(byId["msg_250"])
+        XCTAssertEqual(reply["reply_to"] as? String, "msg_200")
+        XCTAssertFalse(reply.keys.contains("reactions"))
+        XCTAssertFalse(reply.keys.contains("reply_count"))
+        XCTAssertFalse(reply.keys.contains("edited"))
+
+        let edited = try XCTUnwrap(byId["msg_300"])
+        XCTAssertEqual(edited["edited"] as? Bool, true)
+        XCTAssertFalse(edited.keys.contains("reactions"))
+        XCTAssertFalse(edited.keys.contains("reply_to"))
+        XCTAssertFalse(edited.keys.contains("reply_count"))
+    }
 }
 
 func decodeSearchResponse(_ result: Result<String, SearchError>) throws -> [String: Any] {
@@ -796,6 +841,18 @@ func makeSearchFixture() throws -> ToolTestDatabase {
 
     try fixture.insertMessage(rowId: 200, guid: "g200", text: "trip to costa rica volcano", date: 4_000_000_000, isFromMe: false, handleId: 2)
     try fixture.joinChatMessage(chatId: 20, messageId: 200)
+    try fixture.insertMessage(
+        rowId: 401,
+        guid: "search-reaction-carrot",
+        text: nil,
+        date: 4_000_000_001,
+        isFromMe: false,
+        handleId: 1,
+        associatedMessageType: 2006,
+        associatedMessageGuid: "p:0/g200",
+        associatedMessageEmoji: "🥕"
+    )
+    try fixture.joinChatMessage(chatId: 20, messageId: 401)
 
     try fixture.insertMessage(rowId: 201, guid: "g201", text: "see the volcano photos http://example.com", date: 5_000_000_000, isFromMe: true)
     try fixture.joinChatMessage(chatId: 20, messageId: 201)
@@ -803,10 +860,10 @@ func makeSearchFixture() throws -> ToolTestDatabase {
     try fixture.insertMessage(rowId: 202, guid: "g202", text: "packing list", date: 6_000_000_000, isFromMe: false, handleId: 1)
     try fixture.joinChatMessage(chatId: 20, messageId: 202)
 
-    try fixture.insertMessage(rowId: 250, guid: "g250", text: "trip planning notes", date: 6_500_000_000, isFromMe: false, handleId: 2)
+    try fixture.insertMessage(rowId: 250, guid: "g250", text: "trip planning notes", date: 6_500_000_000, isFromMe: false, handleId: 2, threadOriginatorGuid: "g200")
     try fixture.joinChatMessage(chatId: 30, messageId: 250)
 
-    try fixture.insertMessage(rowId: 300, guid: "g300", text: "let me know about the trip?", date: 7_000_000_000, isFromMe: true)
+    try fixture.insertMessage(rowId: 300, guid: "g300", text: "let me know about the trip?", date: 7_000_000_000, isFromMe: true, dateEdited: 7_000_000_001)
     try fixture.joinChatMessage(chatId: 30, messageId: 300)
 
     try fixture.insertMessage(

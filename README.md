@@ -258,6 +258,15 @@ leaving) come back with `text: null` and an `event` object:
 name. Chat previews describe the same events in words
 ("renamed the group to Trip").
 
+Reactions, replies, edits: each message may include `reactions`
+(`["❤️ alice"]` for standard tapbacks; custom emoji show the emoji
+itself; sticker reactions use the token `🩵 sticker`), `reply_to`
+(`msg_<rowid>` of the originator), `reply_count`, and `edited: true`.
+Removed tapbacks are omitted. All four fields are optional and omitted
+when empty. `search` and `get_context` carry the same four fields.
+These are read-only; `diagnose` still reports `tapbacks` and
+`edit_unsend` as `unsupported` because the server cannot send them.
+
 ### get_attachment
 Retrieve image content by attachment ID with resolution variants.
 

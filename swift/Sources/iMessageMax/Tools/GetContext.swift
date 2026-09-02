@@ -15,6 +15,17 @@ struct GetContextResponse: Codable {
         let text: String?
         let ago: String?
         let ts: String?
+        let reactions: [String]?
+        let replyTo: String?
+        let replyCount: Int?
+        let edited: Bool?
+
+        enum CodingKeys: String, CodingKey {
+            case id, from, text, ago, ts, reactions
+            case replyTo = "reply_to"
+            case replyCount = "reply_count"
+            case edited
+        }
     }
 
     struct PersonInfo: Codable {
@@ -141,7 +152,7 @@ enum GetContext {
         try? await resolver.initialize()
 
         do {
-            let targetResult: (msgId: Int64, text: String?, attributedBody: Data?, date: Int64, isFromMe: Bool, senderHandle: String?, chatId: Int64, chatName: String?)
+            let targetResult: (msgId: Int64, text: String?, attributedBody: Data?, date: Int64, isFromMe: Bool, senderHandle: String?, chatId: Int64, chatName: String?, guid: String, threadOriginatorGuid: String?, dateEdited: Int64)
 
             if let msgIdStr = messageId {
                 guard let numericId = parseMessageId(msgIdStr) else {
@@ -160,7 +171,10 @@ enum GetContext {
                         m.is_from_me,
                         h.id as sender_handle,
                         c.ROWID as chat_id,
-                        c.display_name as chat_name
+                        c.display_name as chat_name,
+                        m.guid,
+                        m.thread_originator_guid,
+                        m.date_edited
                     FROM message m
                     JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
                     JOIN chat c ON cmj.chat_id = c.ROWID
@@ -177,7 +191,10 @@ enum GetContext {
                         isFromMe: row.int(4) != 0,
                         senderHandle: row.string(5),
                         chatId: row.int(6),
-                        chatName: row.string(7)
+                        chatName: row.string(7),
+                        guid: row.string(8) ?? "",
+                        threadOriginatorGuid: row.string(9),
+                        dateEdited: row.optionalInt(10) ?? 0
                     )
                 }
 
@@ -215,7 +232,7 @@ enum GetContext {
                 let searchLower = searchText.lowercased()
                 var scanned = 0
                 var offset = 0
-                var foundRow: (msgId: Int64, text: String?, attributedBody: Data?, date: Int64, isFromMe: Bool, senderHandle: String?, chatId: Int64, chatName: String?)?
+                var foundRow: (msgId: Int64, text: String?, attributedBody: Data?, date: Int64, isFromMe: Bool, senderHandle: String?, chatId: Int64, chatName: String?, guid: String, threadOriginatorGuid: String?, dateEdited: Int64)?
                 var exhausted = false
 
                 while foundRow == nil && !exhausted && scanned < scanCap {
@@ -229,7 +246,10 @@ enum GetContext {
                             m.is_from_me,
                             h.id as sender_handle,
                             c.ROWID as chat_id,
-                            c.display_name as chat_name
+                            c.display_name as chat_name,
+                            m.guid,
+                            m.thread_originator_guid,
+                            m.date_edited
                         FROM message m
                         JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
                         JOIN chat c ON cmj.chat_id = c.ROWID
@@ -250,7 +270,10 @@ enum GetContext {
                             isFromMe: row.int(4) != 0,
                             senderHandle: row.string(5),
                             chatId: row.int(6),
-                            chatName: row.string(7)
+                            chatName: row.string(7),
+                            guid: row.string(8) ?? "",
+                            threadOriginatorGuid: row.string(9),
+                            dateEdited: row.optionalInt(10) ?? 0
                         )
                     }
                     scanned += rows.count
@@ -287,7 +310,10 @@ enum GetContext {
                     m.attributedBody,
                     m.date,
                     m.is_from_me,
-                    h.id as sender_handle
+                    h.id as sender_handle,
+                    m.guid,
+                    m.thread_originator_guid,
+                    m.date_edited
                 FROM message m
                 JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
                 LEFT JOIN handle h ON m.handle_id = h.ROWID
@@ -305,7 +331,10 @@ enum GetContext {
                     attributedBody: row.blob(2),
                     date: row.int(3),
                     isFromMe: row.int(4) != 0,
-                    senderHandle: row.string(5)
+                    senderHandle: row.string(5),
+                    guid: row.string(6) ?? "",
+                    threadOriginatorGuid: row.string(7),
+                    dateEdited: row.optionalInt(8) ?? 0
                 )
             }.reversed()
 
@@ -316,7 +345,10 @@ enum GetContext {
                     m.attributedBody,
                     m.date,
                     m.is_from_me,
-                    h.id as sender_handle
+                    h.id as sender_handle,
+                    m.guid,
+                    m.thread_originator_guid,
+                    m.date_edited
                 FROM message m
                 JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
                 LEFT JOIN handle h ON m.handle_id = h.ROWID
@@ -334,7 +366,10 @@ enum GetContext {
                     attributedBody: row.blob(2),
                     date: row.int(3),
                     isFromMe: row.int(4) != 0,
-                    senderHandle: row.string(5)
+                    senderHandle: row.string(5),
+                    guid: row.string(6) ?? "",
+                    threadOriginatorGuid: row.string(7),
+                    dateEdited: row.optionalInt(8) ?? 0
                 )
             }
 
@@ -384,13 +419,47 @@ enum GetContext {
                 }
             }
 
+            var pageIdByGuid: [String: Int] = [targetResult.guid: Int(targetResult.msgId)]
+            var originatorGuids: [String] = []
+            if let originator = targetResult.threadOriginatorGuid {
+                originatorGuids.append(originator)
+            }
+            for row in beforeRows {
+                pageIdByGuid[row.guid] = Int(row.msgId)
+                if let originator = row.threadOriginatorGuid {
+                    originatorGuids.append(originator)
+                }
+            }
+            for row in afterRows {
+                pageIdByGuid[row.guid] = Int(row.msgId)
+                if let originator = row.threadOriginatorGuid {
+                    originatorGuids.append(originator)
+                }
+            }
+            let annotations = try MessageAnnotations.loadIfNeeded(
+                db: database,
+                guids: Array(pageIdByGuid.keys),
+                pageIdByGuid: pageIdByGuid,
+                originatorGuids: originatorGuids,
+                fetchReactions: true,
+                fetchReplies: true
+            )
+            for recs in annotations.reactions.values {
+                for reaction in recs {
+                    _ = await getPersonKey(isFromMe: reaction.fromHandle == nil, handle: reaction.fromHandle)
+                }
+            }
+
             func formatMessage(
                 msgId: Int64,
                 text: String?,
                 attributedBody: Data?,
                 date: Int64,
                 isFromMe: Bool,
-                senderHandle: String?
+                senderHandle: String?,
+                guid: String,
+                threadOriginatorGuid: String?,
+                dateEdited: Int64
             ) async -> GetContextResponse.ContextMessage {
                 let messageText = MessageTextExtractor.extract(text: text, attributedBody: attributedBody)
                 let msgDate = AppleTime.toDate(date)
@@ -400,7 +469,19 @@ enum GetContext {
                     from: await getPersonKey(isFromMe: isFromMe, handle: senderHandle),
                     text: messageText,
                     ago: TimeUtils.formatCompactRelative(msgDate),
-                    ts: TimeUtils.formatISO(msgDate)
+                    ts: TimeUtils.formatISO(msgDate),
+                    reactions: MessageAnnotations.render(
+                        annotations.reactions[guid] ?? [],
+                        reactorName: { handle in
+                            if let handle {
+                                return handleToKey[handle] ?? "unknown"
+                            }
+                            return "me"
+                        }
+                    ),
+                    replyTo: threadOriginatorGuid.flatMap { annotations.replies.originatorIdByGuid[$0] },
+                    replyCount: annotations.replies.replyCountByGuid[guid],
+                    edited: dateEdited != 0 ? true : nil
                 )
             }
 
@@ -410,7 +491,10 @@ enum GetContext {
                 attributedBody: targetResult.attributedBody,
                 date: targetResult.date,
                 isFromMe: targetResult.isFromMe,
-                senderHandle: targetResult.senderHandle
+                senderHandle: targetResult.senderHandle,
+                guid: targetResult.guid,
+                threadOriginatorGuid: targetResult.threadOriginatorGuid,
+                dateEdited: targetResult.dateEdited
             )
 
             var beforeMessages: [GetContextResponse.ContextMessage] = []
@@ -421,7 +505,10 @@ enum GetContext {
                     attributedBody: row.attributedBody,
                     date: row.date,
                     isFromMe: row.isFromMe,
-                    senderHandle: row.senderHandle
+                    senderHandle: row.senderHandle,
+                    guid: row.guid,
+                    threadOriginatorGuid: row.threadOriginatorGuid,
+                    dateEdited: row.dateEdited
                 )
                 beforeMessages.append(msg)
             }
@@ -434,7 +521,10 @@ enum GetContext {
                     attributedBody: row.attributedBody,
                     date: row.date,
                     isFromMe: row.isFromMe,
-                    senderHandle: row.senderHandle
+                    senderHandle: row.senderHandle,
+                    guid: row.guid,
+                    threadOriginatorGuid: row.threadOriginatorGuid,
+                    dateEdited: row.dateEdited
                 )
                 afterMessages.append(msg)
             }

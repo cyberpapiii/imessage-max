@@ -44,6 +44,9 @@ struct GetMessagesResponse: Encodable {
         let sessionStart: Bool?
         let sessionGapHours: Double?
         let event: GroupEvent?
+        let replyTo: String?
+        let replyCount: Int?
+        let edited: Bool?
 
         private enum CodingKeys: String, CodingKey {
             case id, ts, text, from, reactions, media, attachments, links
@@ -51,6 +54,9 @@ struct GetMessagesResponse: Encodable {
             case sessionStart = "session_start"
             case sessionGapHours = "session_gap_hours"
             case event
+            case replyTo = "reply_to"
+            case replyCount = "reply_count"
+            case edited
         }
     }
 
@@ -290,12 +296,20 @@ actor GetMessagesTool {
             )
         }
 
-        let reactionsMap: [String: [(type: Int, fromHandle: String?)]]
+        let reactionsMap: [String: [MessageAnnotations.Reaction]]
         if includeReactions && !messageRows.isEmpty {
             reactionsMap = try getReactionsMap(messageGuids: messageRows.map { $0.guid })
         } else {
             reactionsMap = [:]
         }
+
+        let pageIdByGuid = Dictionary(uniqueKeysWithValues: messageRows.map { ($0.guid, $0.id) })
+        let replies = try MessageAnnotations.replyLookup(
+            db: db,
+            pageGuids: messageRows.map(\.guid),
+            pageIdByGuid: pageIdByGuid,
+            originatorGuids: messageRows.compactMap(\.threadOriginatorGuid)
+        )
 
         let attachmentsMap = try getAttachmentsMap(messageIds: messageRows.map { $0.id })
         let processor = ImageProcessor()
@@ -324,22 +338,15 @@ actor GetMessagesTool {
 
             var reactions: [String]? = nil
             if includeReactions, let rowReactions = reactionsMap[row.guid] {
-                var reactionStrings: [String] = []
-                for r in rowReactions {
-                    guard let reactionType = ReactionType(rawValue: r.type),
-                          !ReactionType.isRemoval(r.type) else { continue }
-
-                    let reactor: String
-                    if let handle = r.fromHandle {
-                        reactor = handleToKey[handle] ?? "unknown"
-                    } else {
-                        reactor = "me"
+                reactions = MessageAnnotations.render(
+                    rowReactions,
+                    reactorName: { handle in
+                        if let handle {
+                            return handleToKey[handle] ?? "unknown"
+                        }
+                        return "me"
                     }
-                    reactionStrings.append("\(reactionType.emoji) \(reactor)")
-                }
-                if !reactionStrings.isEmpty {
-                    reactions = reactionStrings
-                }
+                )
             }
 
             var media: [GetMessagesResponse.MediaInfo]? = nil
@@ -424,7 +431,10 @@ actor GetMessagesTool {
                     groupActionType: row.groupActionType,
                     groupTitle: row.groupTitle,
                     otherHandleName: row.otherHandle.flatMap { otherHandleNames[$0] }
-                )
+                ),
+                replyTo: row.threadOriginatorGuid.flatMap { replies.originatorIdByGuid[$0] },
+                replyCount: replies.replyCountByGuid[row.guid],
+                edited: row.dateEdited != 0 ? true : nil
             ))
         }
 

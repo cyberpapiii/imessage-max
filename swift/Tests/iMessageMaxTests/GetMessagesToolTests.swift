@@ -98,12 +98,119 @@ final class GetMessagesToolTests: XCTestCase {
         let target = try XCTUnwrap(messages.first(where: { $0["id"] as? String == "msg_201" }))
 
         let reactions = try XCTUnwrap(target["reactions"] as? [String])
-        XCTAssertEqual(reactions, ["❤️ alice"])
+        XCTAssertEqual(reactions, ["❤️ alice", "🥕 bob", "🩵 sticker me"])
 
         let media = try decodeJSONArray(target["media"])
         XCTAssertEqual(media.count, 1)
         XCTAssertEqual(media.first?["id"] as? String, "att900")
         XCTAssertEqual(media.first?["type"] as? String, "image")
+    }
+
+    func testReplyToAndReplyCountAreSurfaced() async throws {
+        let fixture = try makeGetMessagesFixture()
+        let tool = GetMessagesTool(db: fixture.database(), resolver: makeSeededResolver())
+
+        let response = try await decodeGetMessagesResponse(
+            await tool.execute(args: [
+                "chat_id": .string("chat20"),
+                "limit": .int(10),
+            ])
+        )
+
+        let messages = try decodeJSONArray(try XCTUnwrap(response["messages"]))
+        let byId = Dictionary(uniqueKeysWithValues: messages.compactMap { row -> (String, [String: Any])? in
+            guard let id = row["id"] as? String else { return nil }
+            return (id, row)
+        })
+
+        let reply = try XCTUnwrap(byId["msg_203"])
+        XCTAssertEqual(reply["reply_to"] as? String, "msg_201")
+
+        let origin = try XCTUnwrap(byId["msg_201"])
+        XCTAssertEqual(origin["reply_count"] as? Int, 1)
+
+        let unrelated = try XCTUnwrap(byId["msg_202"])
+        XCTAssertFalse(unrelated.keys.contains("reply_to"))
+        XCTAssertFalse(unrelated.keys.contains("reply_count"))
+    }
+
+    func testEditedFlagIsSurfacedWhenDateEditedIsSet() async throws {
+        let fixture = try makeGetMessagesFixture()
+        let tool = GetMessagesTool(db: fixture.database(), resolver: makeSeededResolver())
+
+        let response = try await decodeGetMessagesResponse(
+            await tool.execute(args: [
+                "chat_id": .string("chat20"),
+                "limit": .int(10),
+            ])
+        )
+
+        let messages = try decodeJSONArray(try XCTUnwrap(response["messages"]))
+        let edited = try XCTUnwrap(messages.first(where: { $0["id"] as? String == "msg_202" }))
+        XCTAssertEqual(edited["edited"] as? Bool, true)
+
+        let untouched = try XCTUnwrap(messages.first(where: { $0["id"] as? String == "msg_201" }))
+        XCTAssertFalse(untouched.keys.contains("edited"))
+    }
+
+    func testRemovalCancelsEarlierMatchingReaction() async throws {
+        let fixture = try makeGetMessagesFixture()
+        let base: Int64 = 1_000_000_000_000
+        let minute: Int64 = 60 * 1_000_000_000
+        try fixture.insertMessage(
+            rowId: 403,
+            guid: "reaction-love-removed",
+            text: nil,
+            date: base + (5 * minute),
+            isFromMe: false,
+            handleId: 1,
+            associatedMessageType: 3000,
+            associatedMessageGuid: "gm201"
+        )
+        try fixture.joinChatMessage(chatId: 20, messageId: 403)
+
+        let tool = GetMessagesTool(db: fixture.database(), resolver: makeSeededResolver())
+        let response = try await decodeGetMessagesResponse(
+            await tool.execute(args: [
+                "chat_id": .string("chat20"),
+                "limit": .int(10),
+            ])
+        )
+
+        let messages = try decodeJSONArray(try XCTUnwrap(response["messages"]))
+        let target = try XCTUnwrap(messages.first(where: { $0["id"] as? String == "msg_201" }))
+        let reactions = try XCTUnwrap(target["reactions"] as? [String])
+        XCTAssertEqual(reactions, ["🥕 bob", "🩵 sticker me"])
+    }
+
+    func testRemovalBeforeAddKeepsReaction() async throws {
+        let fixture = try makeGetMessagesFixture()
+        let base: Int64 = 1_000_000_000_000
+        let minute: Int64 = 60 * 1_000_000_000
+        try fixture.insertMessage(
+            rowId: 404,
+            guid: "reaction-love-removed-early",
+            text: nil,
+            date: base + (2 * minute),
+            isFromMe: false,
+            handleId: 1,
+            associatedMessageType: 3000,
+            associatedMessageGuid: "gm201"
+        )
+        try fixture.joinChatMessage(chatId: 20, messageId: 404)
+
+        let tool = GetMessagesTool(db: fixture.database(), resolver: makeSeededResolver())
+        let response = try await decodeGetMessagesResponse(
+            await tool.execute(args: [
+                "chat_id": .string("chat20"),
+                "limit": .int(10),
+            ])
+        )
+
+        let messages = try decodeJSONArray(try XCTUnwrap(response["messages"]))
+        let target = try XCTUnwrap(messages.first(where: { $0["id"] as? String == "msg_201" }))
+        let reactions = try XCTUnwrap(target["reactions"] as? [String])
+        XCTAssertEqual(reactions, ["❤️ alice", "🥕 bob", "🩵 sticker me"])
     }
 
     func testUnansweredAndSessionFiltersWork() async throws {
@@ -520,10 +627,15 @@ func makeGetMessagesFixture() throws -> ToolTestDatabase {
     try fixture.insertMessage(rowId: 400, guid: "reaction-love", text: nil, date: base + (3 * minute), isFromMe: false, handleId: 1, associatedMessageType: 2000, associatedMessageGuid: "gm201")
     try fixture.joinChatMessage(chatId: 20, messageId: 400)
 
-    try fixture.insertMessage(rowId: 202, guid: "gm202", text: "packing list", date: base + sixteenHours, isFromMe: false, handleId: 1)
+    try fixture.insertMessage(rowId: 401, guid: "reaction-carrot", text: nil, date: base + (3 * minute) + 1, isFromMe: false, handleId: 2, associatedMessageType: 2006, associatedMessageGuid: "p:0/gm201", associatedMessageEmoji: "🥕")
+    try fixture.joinChatMessage(chatId: 20, messageId: 401)
+    try fixture.insertMessage(rowId: 402, guid: "reaction-sticker", text: nil, date: base + (3 * minute) + 2, isFromMe: true, associatedMessageType: 2007, associatedMessageGuid: "p:0/gm201")
+    try fixture.joinChatMessage(chatId: 20, messageId: 402)
+
+    try fixture.insertMessage(rowId: 202, guid: "gm202", text: "packing list", date: base + sixteenHours, isFromMe: false, handleId: 1, dateEdited: base + sixteenHours + 30)
     try fixture.joinChatMessage(chatId: 20, messageId: 202)
 
-    try fixture.insertMessage(rowId: 203, guid: "gm203", text: "let me know if this plan works?", date: base + sixteenHours + minute, isFromMe: true)
+    try fixture.insertMessage(rowId: 203, guid: "gm203", text: "let me know if this plan works?", date: base + sixteenHours + minute, isFromMe: true, threadOriginatorGuid: "gm201")
     try fixture.joinChatMessage(chatId: 20, messageId: 203)
 
     try fixture.insertMessage(rowId: 300, guid: "gm300", text: "trip planning notes", date: base + (4 * minute), isFromMe: false, handleId: 2)
