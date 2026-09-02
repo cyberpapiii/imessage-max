@@ -247,6 +247,14 @@ get_messages(chat_id="chat123", since="24h")        # Last 24 hours
 get_messages(chat_id="chat123", from_person="Contact A")  # From specific person
 ```
 
+Group system messages (renames, members added or removed, someone
+leaving) come back with `text: null` and an `event` object:
+`{"type": "rename", "title": "Trip"}`, `{"type": "participant_added", "participant": "Alice"}`,
+`{"type": "participant_removed", ...}`, `{"type": "left"}`, or
+`{"type": "other", "item_type": N}` for event kinds the server does not
+name. Chat previews describe the same events in words
+("renamed the group to Trip").
+
 ### get_attachment
 Retrieve image content by attachment ID with resolution variants.
 

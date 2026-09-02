@@ -43,7 +43,7 @@ not push, tag, or merge; the operator merges with `--no-ff` and runs
 | 068 | Batched participants and recent senders everywhere; one chat-name producer (`ChatIdentity`); find_chat gets the duplicate-name disambiguator | P2 | M | none | TODO |
 | 069 | Search hot path: per-anchor context windows, static `NSDataDetector`/regexes, `EXISTS` is_group predicate (measure with `EXPLAIN QUERY PLAN`) | P2 | S-M | none | TODO |
 | 070 | get_context: `contains` beyond the newest 500 rows, distinct exhausted-window error, first real test file for the tool | P2 | M | 063 | TODO |
-| 073 | Render group system messages (renames, adds, removes) as a typed `event` instead of null-text messages | P2 | S | none | TODO |
+| 073 | Render group system messages (renames, adds, removes) as a typed `event` instead of null-text messages | P2 | S | none | DONE |
 | 074 | `include_filtered` on list_chats, search, get_unread, find_chat; hide Apple-flagged junk chats by default and report the hidden count | P2 | S | none | TODO |
 | 075 | Remove the never-implemented `reply_to` parameter from the send schema | P3 | S | none | TODO |
 | 076 | Reactions, replies, edits completion: types 2006/2007, removals applied, `reply_to`/`reply_count` from `thread_originator_guid`, `edited` flag, mirrored onto search and context | P2 | M | 068 | TODO |
