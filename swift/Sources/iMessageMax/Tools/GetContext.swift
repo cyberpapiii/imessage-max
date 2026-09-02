@@ -60,7 +60,7 @@ enum GetContext {
                 ]),
                 "contains": .object([
                     "type": "string",
-                    "description": "Find message containing this text, then get context",
+                    "description": "Find the newest message containing this text (case-insensitive), then get context. Scans up to 5000 candidate messages newest-first; returns not_found_in_window if the cap is reached.",
                 ]),
                 "before": .object([
                     "type": "integer",
@@ -204,49 +204,74 @@ enum GetContext {
                     ))
                 }
 
-                // attributedBody is a binary blob — cannot search in SQL; filter in Swift
-                let sql = """
-                    SELECT
-                        m.ROWID as msg_id,
-                        m.text,
-                        m.attributedBody,
-                        m.date,
-                        m.is_from_me,
-                        h.id as sender_handle,
-                        c.ROWID as chat_id,
-                        c.display_name as chat_name
-                    FROM message m
-                    JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
-                    JOIN chat c ON cmj.chat_id = c.ROWID
-                    LEFT JOIN handle h ON m.handle_id = h.ROWID
-                    WHERE c.ROWID = ?
-                    AND (m.text IS NOT NULL OR m.attributedBody IS NOT NULL)
-                    AND m.associated_message_type = 0
-                    ORDER BY m.date DESC
-                    LIMIT 500
-                    """
+                // Page newest-first through the chat. LIKE prefilters rows with
+                // plain text; rows whose text is NULL (attributedBody-only) are
+                // always admitted so the Swift decode can check them. LIKE is
+                // ASCII-case-insensitive; the Swift check below is the one
+                // that decides, so the prefilter can only remove non-matches.
+                let pageSize = 500
+                let scanCap = 5000
+                let pattern = "%\(QueryBuilder.escapeLike(searchText))%"
+                let searchLower = searchText.lowercased()
+                var scanned = 0
+                var offset = 0
+                var foundRow: (msgId: Int64, text: String?, attributedBody: Data?, date: Int64, isFromMe: Bool, senderHandle: String?, chatId: Int64, chatName: String?)?
+                var exhausted = false
 
-                let rows = try database.query(sql, params: [numericChatId]) { row in
-                    (
-                        msgId: row.int(0),
-                        text: row.string(1),
-                        attributedBody: row.blob(2),
-                        date: row.int(3),
-                        isFromMe: row.int(4) != 0,
-                        senderHandle: row.string(5),
-                        chatId: row.int(6),
-                        chatName: row.string(7)
-                    )
+                while foundRow == nil && !exhausted && scanned < scanCap {
+                    let rows = try database.query(
+                        """
+                        SELECT
+                            m.ROWID as msg_id,
+                            m.text,
+                            m.attributedBody,
+                            m.date,
+                            m.is_from_me,
+                            h.id as sender_handle,
+                            c.ROWID as chat_id,
+                            c.display_name as chat_name
+                        FROM message m
+                        JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
+                        JOIN chat c ON cmj.chat_id = c.ROWID
+                        LEFT JOIN handle h ON m.handle_id = h.ROWID
+                        WHERE c.ROWID = ?
+                          AND m.associated_message_type = 0
+                          AND (m.text LIKE ? ESCAPE '\\' OR (m.text IS NULL AND m.attributedBody IS NOT NULL))
+                        ORDER BY m.date DESC
+                        LIMIT ? OFFSET ?
+                        """,
+                        params: [numericChatId, pattern, pageSize, offset]
+                    ) { row in
+                        (
+                            msgId: row.int(0),
+                            text: row.string(1),
+                            attributedBody: row.blob(2),
+                            date: row.int(3),
+                            isFromMe: row.int(4) != 0,
+                            senderHandle: row.string(5),
+                            chatId: row.int(6),
+                            chatName: row.string(7)
+                        )
+                    }
+                    scanned += rows.count
+                    offset += pageSize
+                    exhausted = rows.count < pageSize
+                    foundRow = rows.first(where: { row in
+                        let extracted = MessageTextExtractor.extract(text: row.text, attributedBody: row.attributedBody)
+                        return extracted?.lowercased().contains(searchLower) ?? false
+                    })
                 }
 
-                let searchLower = searchText.lowercased()
-                guard let found = rows.first(where: { row in
-                    let extractedText = MessageTextExtractor.extract(text: row.text, attributedBody: row.attributedBody)
-                    return extractedText?.lowercased().contains(searchLower) ?? false
-                }) else {
+                guard let found = foundRow else {
+                    if exhausted {
+                        return .failure(GetContextError(
+                            error: "not_found",
+                            message: "No message found containing '\(searchText)'"
+                        ))
+                    }
                     return .failure(GetContextError(
-                        error: "not_found",
-                        message: "No message found containing '\(searchText)'"
+                        error: "not_found_in_window",
+                        message: "No message containing '\(searchText)' in the newest \(scanned) candidate messages of this chat (scan cap \(scanCap)). Narrow the phrase or use search with chat_id to find the message id, then call get_context with message_id."
                     ))
                 }
                 targetResult = found
