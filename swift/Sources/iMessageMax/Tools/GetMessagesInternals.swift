@@ -536,52 +536,11 @@ extension GetMessagesTool {
     }
 
     func getAttachmentsMap(messageIds: [Int]) throws -> [Int: [AttachmentRow]] {
-        guard !messageIds.isEmpty else { return [:] }
-
-        let placeholders = messageIds.map { _ in "?" }.joined(separator: ", ")
-        let sql = """
-            SELECT maj.message_id, a.ROWID, a.filename, a.mime_type, a.uti, a.total_bytes
-            FROM attachment a
-            JOIN message_attachment_join maj ON a.ROWID = maj.attachment_id
-            WHERE maj.message_id IN (\(placeholders))
-              AND COALESCE(a.hide_attachment, 0) = 0
-            """
-
-        var map: [Int: [AttachmentRow]] = [:]
-
-        let rows = try db.query(sql, params: messageIds) { row in
-            (
-                messageId: Int(row.int(0)),
-                attachment: AttachmentRow(
-                    id: Int(row.int(1)),
-                    filename: row.string(2),
-                    mimeType: row.string(3),
-                    uti: row.string(4),
-                    totalBytes: row.optionalInt(5).map { Int($0) }
-                )
-            )
-        }
-
-        for row in rows {
-            if map[row.messageId] == nil {
-                map[row.messageId] = []
-            }
-            map[row.messageId]?.append(row.attachment)
-        }
-
-        return map
+        try MessageQueryHelpers.attachmentsMap(db: db, messageIds: messageIds)
     }
 
     func extractLinks(from text: String) -> [String] {
-        let pattern = #"https?://[^\s<>\"{}|\\^`\[\]]+"#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
-
-        let range = NSRange(text.startIndex..., in: text)
-        let matches = regex.matches(in: text, range: range)
-
-        return matches.compactMap { match in
-            Range(match.range, in: text).map { String(text[$0]) }
-        }
+        MessageQueryHelpers.extractLinks(from: text)
     }
 
     func assignSessions(
@@ -667,5 +626,53 @@ extension GetMessagesTool {
     static func nextCursor(from rows: [MessageRow], limit: Int) -> String? {
         guard rows.count >= limit, let last = rows.last else { return nil }
         return TimelineCursor.encode(date: last.date, messageId: Int64(last.id))
+    }
+}
+
+enum MessageQueryHelpers {
+    static func attachmentsMap(db: Database, messageIds: [Int]) throws -> [Int: [AttachmentRow]] {
+        guard !messageIds.isEmpty else { return [:] }
+
+        let placeholders = messageIds.map { _ in "?" }.joined(separator: ", ")
+        let sql = """
+            SELECT maj.message_id, a.ROWID, a.filename, a.mime_type, a.uti, a.total_bytes
+            FROM attachment a
+            JOIN message_attachment_join maj ON a.ROWID = maj.attachment_id
+            WHERE maj.message_id IN (\(placeholders))
+              AND COALESCE(a.hide_attachment, 0) = 0
+            """
+
+        var map: [Int: [AttachmentRow]] = [:]
+
+        let rows = try db.query(sql, params: messageIds) { row in
+            (
+                messageId: Int(row.int(0)),
+                attachment: AttachmentRow(
+                    id: Int(row.int(1)),
+                    filename: row.string(2),
+                    mimeType: row.string(3),
+                    uti: row.string(4),
+                    totalBytes: row.optionalInt(5).map { Int($0) }
+                )
+            )
+        }
+
+        for row in rows {
+            map[row.messageId, default: []].append(row.attachment)
+        }
+
+        return map
+    }
+
+    static func extractLinks(from text: String) -> [String] {
+        let pattern = #"https?://[^\s<>\"{}|\\^`\[\]]+"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+
+        let range = NSRange(text.startIndex..., in: text)
+        let matches = regex.matches(in: text, range: range)
+
+        return matches.compactMap { match in
+            Range(match.range, in: text).map { String(text[$0]) }
+        }
     }
 }
