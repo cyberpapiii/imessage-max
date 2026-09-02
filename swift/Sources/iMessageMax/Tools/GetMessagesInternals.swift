@@ -55,14 +55,40 @@ enum MessageAnnotations {
         return map
     }
 
+    static func applyingRemovals(_ rows: [Reaction]) -> [Reaction] {
+        let sorted = rows.sorted { $0.date < $1.date }
+        struct Key: Hashable {
+            let handle: String?
+            let type: Int
+        }
+        var kept: [Key: Reaction] = [:]
+        var order: [Key] = []
+
+        for r in sorted {
+            if ReactionType.isRemoval(r.type) {
+                let key = Key(handle: r.fromHandle, type: r.type - 1000)
+                if kept.removeValue(forKey: key) != nil {
+                    order.removeAll { $0 == key }
+                }
+            } else if ReactionType(rawValue: r.type) != nil {
+                let key = Key(handle: r.fromHandle, type: r.type)
+                if kept[key] == nil {
+                    order.append(key)
+                }
+                kept[key] = r
+            }
+        }
+
+        return order.compactMap { kept[$0] }
+    }
+
     static func render(
         _ rows: [Reaction],
         reactorName: (String?) -> String
     ) -> [String]? {
         var reactionStrings: [String] = []
-        for r in rows {
-            guard let reactionType = ReactionType(rawValue: r.type),
-                  !ReactionType.isRemoval(r.type) else { continue }
+        for r in applyingRemovals(rows) {
+            guard let reactionType = ReactionType(rawValue: r.type) else { continue }
 
             let token: String
             switch reactionType {
