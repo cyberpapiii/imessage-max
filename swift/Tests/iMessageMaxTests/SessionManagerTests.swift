@@ -80,4 +80,63 @@ final class SessionManagerTests: XCTestCase {
         let count = await manager.sessionCount
         XCTAssertEqual(count, 0)
     }
+
+    func testRouteMessageRefusesAfterTerminateReturns() async {
+        let manager = SessionManager(
+            database: Database(),
+            resolver: ContactResolver(seedCache: [:]),
+            maxSessions: 2,
+            cleanupInterval: .milliseconds(20)
+        )
+        guard case .created(let session) = await manager.createSession() else {
+            return XCTFail("session should be created")
+        }
+
+        await manager.terminateSession(sessionId: session.id)
+
+        let routed = await manager.routeMessage(sessionId: session.id, data: Data("{}".utf8))
+        XCTAssertFalse(routed)
+        let ids = await manager.activeSessionIds()
+        XCTAssertFalse(ids.contains(session.id))
+    }
+
+    func testTerminateSessionTwiceIsIdempotent() async {
+        let manager = SessionManager(
+            database: Database(),
+            resolver: ContactResolver(seedCache: [:]),
+            maxSessions: 2,
+            cleanupInterval: .milliseconds(20)
+        )
+        guard case .created(let session) = await manager.createSession() else {
+            return XCTFail("session should be created")
+        }
+
+        await manager.terminateSession(sessionId: session.id)
+        await manager.terminateSession(sessionId: session.id)
+
+        let count = await manager.sessionCount
+        XCTAssertEqual(count, 0)
+    }
+
+    func testTerminateUnknownIdIsANoOp() async {
+        let manager = SessionManager(
+            database: Database(),
+            resolver: ContactResolver(seedCache: [:]),
+            maxSessions: 2,
+            cleanupInterval: .milliseconds(20)
+        )
+
+        await manager.terminateSession(sessionId: "missing")
+
+        let count = await manager.sessionCount
+        XCTAssertEqual(count, 0)
+    }
+
+    /// A detached `terminateSession` plus an immediate `activeSessionIds()`
+    /// hop does not pin in-flight removal. The test task's actor hop wins
+    /// the mailbox before terminate starts, so the id is still present even
+    /// after `removeValue` moved above the first `await`. Yield-count races
+    /// were already rejected as flaky. The three tests above pin the
+    /// postcondition: after `terminateSession` returns, the id is gone and
+    /// `routeMessage` refuses it.
 }
