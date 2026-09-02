@@ -4,6 +4,7 @@
 
 ### Added
 
+- `get_messages_since`: ROWID-cursor pull of new messages across chats (plan 080).
 - `send` responses carry `disposition` (`completed` / `not_started` / `may_have_completed`) and `retry_safe`; `confirmed` is documented as a chat.db row match within the verification window, not a delivery receipt.
 
 ### Fixes

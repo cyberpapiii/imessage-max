@@ -119,7 +119,7 @@ swift/
 │   │   └── Version.swift       # Version.current, the source of truth
 │   ├── Database/               # SQLite wrapper, query builder
 │   ├── Models/                 # AttachmentType, ChatIdentity, GroupEvent, Reactions, ResponsePrimitives, SendPayload
-│   ├── Tools/                  # 12 MCP tools across 16 files
+│   ├── Tools/                  # 13 MCP tools across 17 files
 │   ├── Contacts/               # CNContactStore resolver
 │   ├── Enrichment/             # Image processors (thumbnail, vision, full variants)
 │   └── Utilities/              # Time, phone formatting, Log.swift
@@ -226,13 +226,14 @@ Message text is often stored in `attributedBody` (binary typedstream format) ins
 3. Read length byte (0x81 = 2-byte length, 0x82 = 3-byte length, else single byte)
 4. Read UTF-8 text of that length
 
-## Twelve core tools
+## Thirteen core tools
 
 | Tool | Purpose |
 |------|---------|
 | `find_chat` | Locate chat by participants, name, or content |
 | `get_chat_details` | Inspect a known chat's participants, handles, state, and recent shared summary |
 | `get_messages` | Retrieve messages with flexible filtering |
+| `get_messages_since` | New messages across chats after a ROWID cursor, in arrival order |
 | `get_context` | Get messages surrounding a specific message |
 | `search` | Full-text search with compound filters |
 | `list_chats` | Browse recent/active chats with previews |

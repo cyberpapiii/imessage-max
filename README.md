@@ -22,7 +22,7 @@ Everything current lives under `swift/`.
 
 ## Features
 
-- 12 tools shaped around questions people actually ask, not around database tables
+- 13 tools shaped around questions people actually ask, not around database tables
 - Phone numbers resolve to names through macOS Contacts
 - Three image variants: vision (1568px), thumb (400px), full (original), so a photo does not have to arrive at full size
 - Messages group into sessions, split on gaps of 4 hours or more
@@ -270,6 +270,58 @@ Removed tapbacks are omitted. All four fields are optional and omitted
 when empty. `search` and `get_context` carry the same four fields.
 These are read-only; `diagnose` still reports `tapbacks` and
 `edit_unsend` as `unsupported` because the server cannot send them.
+
+### get_messages_since
+New messages across all chats after a ROWID cursor, in arrival order. Pass the returned `next_rowid` back as `since_rowid` to page or poll. `next_rowid` may be larger than the last returned message's rowid because consumed rows (reactions, filtered chats, orphans) advance it. Omit `since_rowid` to get only the current cursor. Cursors are only valid against this Mac's `chat.db`.
+
+```text
+get_messages_since()                          # Current cursor only
+get_messages_since(since_rowid=234000)        # Messages after that row
+get_messages_since(since_rowid=234000, limit=50)
+get_messages_since(since_rowid=234000, chat_id="chat123")
+get_messages_since(since_rowid=234000, include_filtered=True)
+```
+
+| Parameter | Type | Default | Meaning |
+|-----------|------|---------|---------|
+| `since_rowid` | integer | omitted | Exclusive ROWID cursor. Omit or pass `-1` for the current cursor only. |
+| `chat_id` | string | omitted | Restrict to one chat (`chat123` or `123`) |
+| `limit` | integer | 100 | Maximum messages to return (1–500) |
+| `include_filtered` | boolean | false | Include junk / unknown-sender chats |
+| `include_reactions` | boolean | true | Attach reaction strings to returned messages |
+
+Example response:
+
+```json
+{
+  "since_rowid": 234000,
+  "messages": [
+    {
+      "id": "msg_234001",
+      "rowid": 234001,
+      "chat": {"id": "chat12", "name": "Alice Smith"},
+      "from": "Alice Smith",
+      "text": "on my way",
+      "ts": "2026-09-02T15:00:00Z"
+    },
+    {
+      "id": "msg_234010",
+      "rowid": 234010,
+      "chat": {"id": "chat40", "name": "Weekend"},
+      "from": "me",
+      "text": "see you there",
+      "ts": "2026-09-02T15:01:00Z"
+    }
+  ],
+  "next_rowid": 234050,
+  "has_more": false,
+  "current_rowid": 234050,
+  "stalled": false,
+  "filtered_hidden": 1
+}
+```
+
+Polling recipe: call once without `since_rowid`, store `next_rowid`, then call with it on whatever cadence. When `stalled` is true, wait about one second and retry with the same cursor. Never compare `next_rowid` to message ids.
 
 ### get_attachment
 Retrieve image content by attachment ID with resolution variants.

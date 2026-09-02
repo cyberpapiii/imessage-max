@@ -17,6 +17,8 @@ Preferred sequence:
 3. `get_active_conversations(hours=48)`
 4. `get_messages(chat_id="...", since="2d")` for the chats that matter
 
+If you already hold a `next_rowid` from a previous turn, call `get_messages_since` with it instead of `get_unread`.
+
 Reasoning:
 - `list_chats` is the broadest recent preview
 - `get_unread` defaults to unread thread summaries and catches still-unread items

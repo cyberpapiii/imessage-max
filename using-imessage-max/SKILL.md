@@ -28,6 +28,7 @@ Default flow:
 2. Use `get_unread` as a cross-check for still-unread threads and message-level unread review when needed.
 3. Use `get_active_conversations` only to prioritize which recent threads may deserve attention first.
 4. Use `get_messages` to drill into the chats surfaced by the overview.
+If you already hold a `next_rowid` from a previous turn, call `get_messages_since` with it instead of `get_unread`.
 
 Why:
 - `list_chats` gives the safest broad preview across recent conversations.
@@ -85,6 +86,7 @@ Use the right tool for the user's actual question:
 - `find_chat`: richer details-layer lookup for a specific conversation by people, name, or recent content
 - `get_chat_details`: factual details-layer view for a known thread
 - `get_messages`: drill into one known chat
+- Keeping up with new messages across all chats → `get_messages_since` (store `next_rowid`)
 - `get_context`: inspect messages around one known message
 - `search`: topic-first lookup when the chat is unknown
 - `list_attachments`: discover shared items by message before fetching a specific file
