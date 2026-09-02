@@ -21,6 +21,7 @@ final class ToolRegistryTests: XCTestCase {
             "get_chat_details",
             "get_context",
             "get_messages",
+            "get_messages_since",
             "get_unread",
             "list_attachments",
             "list_chats",

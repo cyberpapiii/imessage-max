@@ -57,6 +57,6 @@ final class ToolRegistryBindingTests: XCTestCase {
         )
 
         XCTAssertGreaterThan(ToolHandlerRegistry.shared.catalogVersion, afterFirst)
-        XCTAssertEqual(ToolHandlerRegistry.shared.getTools().count, 12)
+        XCTAssertEqual(ToolHandlerRegistry.shared.getTools().count, 13)
     }
 }
