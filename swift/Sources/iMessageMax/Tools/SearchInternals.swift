@@ -623,18 +623,19 @@ extension SearchTool {
         """
 
     static func mapContextRow(_ row: SQLiteRow, columnOffset: Int = 0) -> ContextRow {
-        ContextRow(
-            msgId: row.int(columnOffset + 0),
-            text: row.string(columnOffset + 1),
-            attributedBody: row.blob(columnOffset + 2),
-            date: row.optionalInt(columnOffset + 3),
-            isFromMe: row.int(columnOffset + 4) != 0,
-            senderHandle: row.string(columnOffset + 5),
-            guid: row.string(columnOffset + 6) ?? "",
-            threadOriginatorGuid: row.string(columnOffset + 7),
-            dateEdited: row.optionalInt(columnOffset + 8) ?? 0,
-            hasReactions: row.int(columnOffset + 9) != 0,
-            hasReplies: row.int(columnOffset + 10) != 0
+        let base = Int32(columnOffset)
+        return ContextRow(
+            msgId: row.int(base + 0),
+            text: row.string(base + 1),
+            attributedBody: row.blob(base + 2),
+            date: row.optionalInt(base + 3),
+            isFromMe: row.int(base + 4) != 0,
+            senderHandle: row.string(base + 5),
+            guid: row.string(base + 6) ?? "",
+            threadOriginatorGuid: row.string(base + 7),
+            dateEdited: row.optionalInt(base + 8) ?? 0,
+            hasReactions: row.int(base + 9) != 0,
+            hasReplies: row.int(base + 10) != 0
         )
     }
 
