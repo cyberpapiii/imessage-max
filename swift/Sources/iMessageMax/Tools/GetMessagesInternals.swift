@@ -604,7 +604,8 @@ extension GetMessagesTool {
                 sessionGapHours: sessionGapHours,
                 event: msg.event,
                 replyTo: msg.replyTo,
-                replyCount: msg.replyCount
+                replyCount: msg.replyCount,
+                edited: msg.edited
             )
         }
 

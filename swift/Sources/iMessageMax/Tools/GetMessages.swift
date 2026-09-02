@@ -46,6 +46,7 @@ struct GetMessagesResponse: Encodable {
         let event: GroupEvent?
         let replyTo: String?
         let replyCount: Int?
+        let edited: Bool?
 
         private enum CodingKeys: String, CodingKey {
             case id, ts, text, from, reactions, media, attachments, links
@@ -55,6 +56,7 @@ struct GetMessagesResponse: Encodable {
             case event
             case replyTo = "reply_to"
             case replyCount = "reply_count"
+            case edited
         }
     }
 
@@ -431,7 +433,8 @@ actor GetMessagesTool {
                     otherHandleName: row.otherHandle.flatMap { otherHandleNames[$0] }
                 ),
                 replyTo: row.threadOriginatorGuid.flatMap { replies.originatorIdByGuid[$0] },
-                replyCount: replies.replyCountByGuid[row.guid]
+                replyCount: replies.replyCountByGuid[row.guid],
+                edited: row.dateEdited != 0 ? true : nil
             ))
         }
 
