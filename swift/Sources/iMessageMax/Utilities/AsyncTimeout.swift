@@ -2,6 +2,10 @@ import Foundation
 import Synchronization
 
 enum AsyncTimeout {
+    /// Test seam: number of Dispatch timers enqueued by `sleep`. Only
+    /// incremented on the path that actually calls `asyncAfter`.
+    nonisolated(unsafe) static var enqueuedTimersForTesting = 0
+
     /// Dispatch-backed sleep. NEVER sleep Swift tasks inside the launchd service
     /// (sleeping unstructured tasks abort in swift_task_dealloc at wakeup.
     /// See HTTPTransport.swift storePendingRequest for the known-good pattern).
@@ -16,6 +20,7 @@ enum AsyncTimeout {
                     gate.resume(continuation)
                 }
                 gate.arm(work: work, continuation: continuation)
+                enqueuedTimersForTesting += 1
                 DispatchQueue.global(qos: .utility).asyncAfter(
                     deadline: .now() + dispatchInterval(for: duration),
                     execute: work
