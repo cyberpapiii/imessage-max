@@ -182,3 +182,17 @@ If a future plan still wanted (B) after a re-measure that showed DM settle, the 
 - The self-probe could not use a live style-43 thread. Messages.app does not open the style-43 rows that contain the operator's own handle. A consenting two-party DM probe would be a different experiment; this spike did not send one.
 - Why Apple's `message_idx_undelivered_one_to_one_imessage` exists while this account's one-to-one iMessages never leave that state is unanswered. The index is evidence the column is meaningful to Apple, not evidence it is useful on this Mac.
 - `date_read` on groups (228 of 2,678) is a secondary opt-in signal. Not enough to justify a `read` field on `send`.
+
+## Plug lane permission_denied
+
+Observed during the 078 probe on 2026-09-02. Plug `send` returned `Cannot read the iMessage database (Full Disk Access may be missing)`. This section records which process that is. Nothing was changed.
+
+Plug `[servers.imessage]` is HTTP, legacy protocol, `url = "http://127.0.0.1:8080"`. It does not spawn its own binary. `IMessage__diagnose` on that lane reports `process_id` **87132**, `version` **1.5.0**, `database.status=permission_denied`, `database.accessible=false`, `capabilities.perm_full_disk.state=permission-gated`, `capabilities.verified_send.state=permission-gated`. Contacts are authorized (1666 handles). Send-text capabilities are `supported`; verification is not.
+
+That PID is launchd `local.imessage-max` (`~/Library/LaunchAgents/local.imessage-max.plist`). `launchctl print` program and `lsof` on 8080 are the same path:
+
+`/Users/robdezendorf/Documents/GitHub/imessage-max/swift/.build/release/imessage-max --http --port 8080`
+
+So the plug lane and the launchd service are one process. The 18081 probe that could read chat.db was a different executable, `.build/debug/imessage-max`, started from a terminal that already has Full Disk Access. `Database.checkAccess` (`Database.swift:21-29`) returns `permission_denied` when `FileManager.isReadableFile` fails; that is the diagnose field above.
+
+Cause: Full Disk Access is missing (or was dropped after a rebuild) on the **release** binary launchd runs. It is not a second server hiding behind plug. Re-grant FDA to that release path (or `make install` so the signed identity keeps it). Do not treat this as a send-semantics bug.
