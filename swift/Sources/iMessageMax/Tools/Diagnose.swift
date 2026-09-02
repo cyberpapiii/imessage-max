@@ -193,8 +193,17 @@ enum DiagnoseTool {
                     + ClientErrorMessages.internalDetail(error, context: "loading contacts")
             }
         } else {
-            contactsFix = "Grant Contacts access: System Settings -> Privacy & Security -> " +
-                "Contacts -> Add your terminal app or the imessage-max executable"
+            let stats = await resolver.getStats()
+            if authorizationStatus == "not_determined", stats.accessRequestSkippedHeadless {
+                contactsStatus = "not_requested_headless"
+                contactsFix = "This process has no terminal, so it did not ask for Contacts access "
+                    + "(macOS lists an app under Privacy & Security -> Contacts only after it asks). "
+                    + "Run `imessage-max --request-contacts-access` from a terminal once, approve the "
+                    + "prompt, then restart the service (`make install`)."
+            } else {
+                contactsFix = "Grant Contacts access: System Settings -> Privacy & Security -> " +
+                    "Contacts -> Add your terminal app or the imessage-max executable"
+            }
         }
 
         let (automationOk, automationStatus) = automationProbe()
@@ -284,11 +293,11 @@ enum DiagnoseTool {
 
         let permContactsState: String
         let permContactsFix: String?
-        switch authorizationStatus {
+        switch contactsStatus {
         case "authorized", "limited":
             permContactsState = "supported"
             permContactsFix = nil
-        case "denied", "restricted":
+        case "denied", "restricted", "not_requested_headless":
             permContactsState = "permission-gated"
             permContactsFix = contactsFix
         default:

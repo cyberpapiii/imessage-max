@@ -3,21 +3,93 @@ import Contacts
 import Foundation
 
 actor ContactResolver {
-    private var cache: [String: String] = [:]  // handle -> name
+    /// Contacts access behind three closures so tests never touch
+    /// CNContactStore (mirrors imsg's ContactCatalogSource). Closures run
+    /// inside the actor; `@unchecked` for the same reason the old
+    /// `nonisolated(unsafe) store` existed: CNContactStore is not Sendable.
+    struct Source: @unchecked Sendable {
+        let authorization: () -> (authorized: Bool, status: String)
+        let load: () throws -> [String: String]
+        let requestAccess: () async -> Bool
+
+        static func live() -> Source {
+            let store = CNContactStore()
+            return Source(
+                authorization: { ContactResolver.authorizationStatus() },
+                load: { try ContactResolver.loadNames(from: store) },
+                requestAccess: { (try? await store.requestAccess(for: .contacts)) ?? false }
+            )
+        }
+    }
+
+    private let source: Source
+    private let refreshInterval: TimeInterval
+    private let now: () -> TimeInterval
+
+    private var cache: [String: String] = [:]
     private var isInitialized = false
+    private var loadedAt: TimeInterval = -.infinity
+    private var invalidated = false
+    private var lastAuthorized = false
+    private var hasLastGoodCache = false
     /// True when `initialize` returned early because `CI=true` was set.
     /// Surfaced by diagnose so an operator with CI exported in their shell
     /// can see why no names resolve.
     private var skippedForCI = false
-    // CNContactStore is not Sendable, so we mark it nonisolated(unsafe)
-    // This is safe because we only use it from within actor-isolated methods
-    nonisolated(unsafe) private let store = CNContactStore()
+    /// True when authorization was notDetermined and the policy said not to
+    /// prompt. Surfaced by diagnose as `not_requested_headless`.
+    private var accessRequestSkippedHeadless = false
+    nonisolated(unsafe) private var changeObserver: (any NSObjectProtocol)?
 
-    init() {}
+    init() {
+        self.init(
+            source: .live(),
+            refreshInterval: 30,
+            now: { ProcessInfo.processInfo.systemUptime },
+            observeChanges: true
+        )
+    }
 
     init(seedCache: [String: String]) {
-        self.cache = seedCache
-        self.isInitialized = true
+        self.init(
+            source: Source(
+                authorization: { (true, "authorized") },
+                load: { seedCache },
+                requestAccess: { true }
+            ),
+            refreshInterval: .infinity,
+            now: { 0 },
+            seedCache: seedCache
+        )
+    }
+
+    init(
+        source: Source,
+        refreshInterval: TimeInterval,
+        now: @escaping () -> TimeInterval,
+        seedCache: [String: String]? = nil,
+        observeChanges: Bool = false
+    ) {
+        self.source = source
+        self.refreshInterval = refreshInterval
+        self.now = now
+        if let seedCache {
+            self.cache = seedCache
+            self.isInitialized = true
+            self.lastAuthorized = true
+            self.hasLastGoodCache = true
+        }
+        if observeChanges {
+            changeObserver = NotificationCenter.default.addObserver(
+                forName: .CNContactStoreDidChange, object: nil, queue: nil
+            ) { [weak self] _ in
+                Task { await self?.invalidate() }
+            }
+        }
+    }
+
+    deinit {
+        if let changeObserver { NotificationCenter.default.removeObserver(changeObserver) }
     }
 
     // MARK: - Authorization
@@ -34,15 +106,26 @@ actor ContactResolver {
         }
     }
 
-    func requestAccess() async throws -> Bool {
-        try await store.requestAccess(for: .contacts)
+    func requestAccessIfAllowed(policy: ContactsAccessPolicy) async {
+        let (_, status) = source.authorization()
+        guard status == "not_determined" else { return }
+        switch policy {
+        case .requestIfNeeded:
+            let granted = await source.requestAccess()
+            Log.info("Contacts: authorization requested, granted=\(granted)")
+        case .skipIfNotDetermined:
+            accessRequestSkippedHeadless = true
+            Log.info("Contacts: authorization not determined and this process is headless; not prompting. Run `imessage-max --request-contacts-access` from a terminal once, then restart the service.")
+        }
+    }
+
+    func invalidate() {
+        invalidated = true
     }
 
     // MARK: - Initialization
 
     func initialize() throws {
-        guard !isInitialized else { return }
-
         // GitHub-hosted macos runners report Contacts as authorized, then
         // `enumerateContacts` talks to AddressBook over XPC. The daemon is
         // not running, so Core Data retries for minutes per call and
@@ -54,12 +137,35 @@ actor ContactResolver {
             return
         }
 
-        let (authorized, _) = Self.authorizationStatus()
+        let (authorized, _) = source.authorization()
+        let expired = now() - loadedAt >= refreshInterval
+        let authorizationChanged = authorized != lastAuthorized
+        guard !isInitialized || invalidated || expired || authorizationChanged else { return }
+
+        invalidated = false
+        loadedAt = now()
+        lastAuthorized = authorized
+        isInitialized = true
+
         guard authorized else {
-            isInitialized = true
+            // Revoked or never granted: never serve names we are no longer allowed to have.
+            cache.removeAll()
+            hasLastGoodCache = false
             return
         }
+        do {
+            cache = try source.load()
+            hasLastGoodCache = true
+        } catch {
+            // Keep the last good cache; a transient AddressBook failure must
+            // not fail five tools every 30 s. First-ever failure still throws
+            // so diagnose can report `<status>_load_failed`.
+            Log.warning("Contacts: refresh failed, keeping \(cache.count) cached names")
+            if !hasLastGoodCache { throw error }
+        }
+    }
 
+    private static func loadNames(from store: CNContactStore) throws -> [String: String] {
         let keys: [CNKeyDescriptor] = [
             CNContactGivenNameKey as CNKeyDescriptor,
             CNContactFamilyNameKey as CNKeyDescriptor,
@@ -68,6 +174,7 @@ actor ContactResolver {
         ]
 
         let request = CNContactFetchRequest(keysToFetch: keys)
+        var names: [String: String] = [:]
 
         try store.enumerateContacts(with: request) { contact, _ in
             let name = [contact.givenName, contact.familyName]
@@ -76,22 +183,20 @@ actor ContactResolver {
 
             guard !name.isEmpty else { return }
 
-            // Map phone numbers using PhoneUtils
             for phone in contact.phoneNumbers {
                 let number = phone.value.stringValue
                 if let normalized = PhoneUtils.normalizeToE164(number) {
-                    self.cache[normalized] = name
+                    names[normalized] = name
                 }
             }
 
-            // Map emails (lowercase)
             for email in contact.emailAddresses {
                 let addr = (email.value as String).lowercased()
-                self.cache[addr] = name
+                names[addr] = name
             }
         }
 
-        isInitialized = true
+        return names
     }
 
     // MARK: - Resolution
@@ -115,13 +220,12 @@ actor ContactResolver {
         let queryWords = q.split(separator: " ").map(String.init)
         return cache.compactMap { handle, name in
             let nameWords = name.lowercased().split(whereSeparator: { $0 == " " || $0 == "-" }).map(String.init)
-            // Every query word must prefix some name word.
             let ok = queryWords.allSatisfy { qw in nameWords.contains { $0.hasPrefix(qw) } }
             return ok ? (handle, name) : nil
         }
     }
 
-    func getStats() -> (initialized: Bool, handleCount: Int, skippedForCI: Bool) {
-        (isInitialized, cache.count, skippedForCI)
+    func getStats() -> (initialized: Bool, handleCount: Int, skippedForCI: Bool, accessRequestSkippedHeadless: Bool) {
+        (isInitialized, cache.count, skippedForCI, accessRequestSkippedHeadless)
     }
 }

@@ -47,6 +47,9 @@ swift build -c release
 
 # HTTP mode (for MCP Router, Inspector, etc.)
 ./.build/release/imessage-max --http --port 8080
+
+# one-shot Contacts prompt, run from a terminal
+./.build/release/imessage-max --request-contacts-access
 ```
 
 ### Running the test suite
@@ -311,7 +314,7 @@ Attachments can be offloaded to iCloud. `list_attachments` includes nested attac
 ## Required macOS permissions
 
 - Full Disk Access, for ~/Library/Messages/chat.db
-- Contacts, for AddressBook resolution
+- Contacts, for AddressBook resolution (granted via `--request-contacts-access`; headless starts never prompt)
 - Automation, for Messages.app (sending only)
 
 ## Maintainer notes

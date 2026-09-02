@@ -22,6 +22,12 @@ struct iMessageMax: AsyncParsableCommand {
     @Flag(name: .long, help: "Allow binding the HTTP transport to a non-loopback host (exposes iMessage data to the network; no authentication is provided)")
     var allowExternalBind = false
 
+    @Option(name: .long, help: "When Contacts authorization is not yet determined: auto (prompt only if stdin is a terminal), request, or skip. IMESSAGE_MAX_CONTACTS_POLICY=request|skip is honoured when auto.")
+    var contactsPolicy: ContactsAccessPolicy.Override = .auto
+
+    @Flag(name: .long, help: "Ask macOS for Contacts access once, print the resulting status, and exit. Run this from a terminal; the server never prompts when it has no terminal.")
+    var requestContactsAccess = false
+
     func validate() throws {
         if http, let message = HostBindingPolicy.validationError(host: host, allowExternalBind: allowExternalBind) {
             throw ValidationError(message)
@@ -29,6 +35,14 @@ struct iMessageMax: AsyncParsableCommand {
     }
 
     mutating func run() async throws {
+        if requestContactsAccess {
+            let resolver = ContactResolver()
+            await resolver.requestAccessIfAllowed(policy: .requestIfNeeded)
+            let (_, status) = ContactResolver.authorizationStatus()
+            print("Contacts authorization: \(status)")
+            return
+        }
+
         if http {
             // Per-session Server instances: clean reconnection without "already initialized"
             let database = Database()
@@ -55,20 +69,25 @@ struct iMessageMax: AsyncParsableCommand {
             )
 
             try await transport.connect()
+            let resolvedPolicy = ContactsAccessPolicy.resolve(
+                flag: contactsPolicy,
+                environment: ProcessInfo.processInfo.environment,
+                isTTY: ContactsAccessPolicy.stdinIsTTY
+            )
             Task {
-                let (contactsOk, contactsStatus) = ContactResolver.authorizationStatus()
-                if !contactsOk && contactsStatus == "not_determined" {
-                    _ = try? await resolver.requestAccess()
-                }
+                let policy = resolvedPolicy
+                await resolver.requestAccessIfAllowed(policy: policy)
                 try? await resolver.initialize()
                 let stats = await resolver.getStats()
                 Log.info("Contacts: initialized=\(stats.initialized) handles=\(stats.handleCount)")
             }
             try await transport.waitForTermination()
         } else {
-            let server = MCPServerWrapper()
+            let server = MCPServerWrapper(contactsPolicy: contactsPolicy)
             let transport = StdioTransport()
             try await server.start(transport: transport)
         }
     }
 }
+
+extension ContactsAccessPolicy.Override: ExpressibleByArgument {}
