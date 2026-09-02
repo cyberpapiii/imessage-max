@@ -132,28 +132,34 @@ final class Database: @unchecked Sendable {
 
         for (index, param) in params.enumerated() {
             let idx = Int32(index + 1)
+            let rc: Int32
             switch param {
             case let value as Bool:
-                sqlite3_bind_int64(stmt, idx, value ? 1 : 0)
+                rc = sqlite3_bind_int64(stmt, idx, value ? 1 : 0)
             case let value as Int:
-                sqlite3_bind_int64(stmt, idx, Int64(value))
+                rc = sqlite3_bind_int64(stmt, idx, Int64(value))
             case let value as Int64:
-                sqlite3_bind_int64(stmt, idx, value)
+                rc = sqlite3_bind_int64(stmt, idx, value)
             case let value as String:
-                sqlite3_bind_text(stmt, idx, value, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+                rc = sqlite3_bind_text(stmt, idx, value, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
             case let value as Double:
-                sqlite3_bind_double(stmt, idx, value)
+                rc = sqlite3_bind_double(stmt, idx, value)
             case let value as Data:
-                _ = value.withUnsafeBytes { ptr in
+                rc = value.withUnsafeBytes { ptr in
                     sqlite3_bind_blob(stmt, idx, ptr.baseAddress, Int32(value.count), unsafeBitCast(-1, to: sqlite3_destructor_type.self))
                 }
             case is NSNull:
-                sqlite3_bind_null(stmt, idx)
+                rc = sqlite3_bind_null(stmt, idx)
             default:
                 sqlite3_finalize(stmt)
                 throw DatabaseError.invalidData(
                     "Unsupported SQL parameter type at index \(index): \(type(of: param))"
                 )
+            }
+            guard rc == SQLITE_OK else {
+                let message = String(cString: sqlite3_errmsg(conn))
+                sqlite3_finalize(stmt)
+                throw DatabaseError.queryFailed("bind failed at index \(index): \(message)")
             }
         }
 
