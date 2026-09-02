@@ -213,6 +213,8 @@ final class ResponseContractTests: XCTestCase {
         XCTAssertNotNil(encoded["chat"])
         XCTAssertNil(encoded["success"])
         XCTAssertNil(encoded["message_id"])
+        XCTAssertEqual(encoded["disposition"] as? String, "completed")
+        XCTAssertEqual(encoded["retry_safe"] as? Bool, false)
     }
 
     func testDiagnoseResultEncodesGroupedSections() throws {

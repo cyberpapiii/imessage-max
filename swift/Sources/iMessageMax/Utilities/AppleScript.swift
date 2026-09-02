@@ -6,10 +6,10 @@ import Foundation
 /// Abstraction over the four send-execution functions used by SendTool.
 /// The production implementation is LiveScriptRunner; tests inject a stub.
 protocol ScriptRunning: Sendable {
-    func sendTextToParticipant(handle: String, message: String) async -> Result<Void, SendError>
-    func sendFileToParticipant(handle: String, filePath: String) async -> Result<Void, SendError>
-    func sendTextToChat(guid: String, message: String) async -> Result<Void, SendError>
-    func sendFileToChat(guid: String, filePath: String) async -> Result<Void, SendError>
+    func sendTextToParticipant(handle: String, message: String) async -> Result<Void, SendFailure>
+    func sendFileToParticipant(handle: String, filePath: String) async -> Result<Void, SendFailure>
+    func sendTextToChat(guid: String, message: String) async -> Result<Void, SendFailure>
+    func sendFileToChat(guid: String, filePath: String) async -> Result<Void, SendFailure>
 }
 
 /// Production implementation: forwards to AppleScriptRunner statics.
@@ -19,8 +19,8 @@ protocol ScriptRunning: Sendable {
 /// blocked send there would stall unrelated requests service-wide.
 struct LiveScriptRunner: ScriptRunning {
     private func onBackgroundThread(
-        _ work: @escaping @Sendable () -> Result<Void, SendError>
-    ) async -> Result<Void, SendError> {
+        _ work: @escaping @Sendable () -> Result<Void, SendFailure>
+    ) async -> Result<Void, SendFailure> {
         await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 continuation.resume(returning: work())
@@ -28,25 +28,25 @@ struct LiveScriptRunner: ScriptRunning {
         }
     }
 
-    func sendTextToParticipant(handle: String, message: String) async -> Result<Void, SendError> {
+    func sendTextToParticipant(handle: String, message: String) async -> Result<Void, SendFailure> {
         await onBackgroundThread {
             AppleScriptRunner.sendTextToParticipant(handle: handle, message: message)
         }
     }
 
-    func sendFileToParticipant(handle: String, filePath: String) async -> Result<Void, SendError> {
+    func sendFileToParticipant(handle: String, filePath: String) async -> Result<Void, SendFailure> {
         await onBackgroundThread {
             AppleScriptRunner.sendFileToParticipant(handle: handle, filePath: filePath)
         }
     }
 
-    func sendTextToChat(guid: String, message: String) async -> Result<Void, SendError> {
+    func sendTextToChat(guid: String, message: String) async -> Result<Void, SendFailure> {
         await onBackgroundThread {
             AppleScriptRunner.sendTextToChat(guid: guid, message: message)
         }
     }
 
-    func sendFileToChat(guid: String, filePath: String) async -> Result<Void, SendError> {
+    func sendFileToChat(guid: String, filePath: String) async -> Result<Void, SendFailure> {
         await onBackgroundThread {
             AppleScriptRunner.sendFileToChat(guid: guid, filePath: filePath)
         }
@@ -134,11 +134,21 @@ enum AppleScriptRunner {
         on run argv
             set recipientId to item 1 of argv
             set messageText to item 2 of argv
-            tell application "Messages"
-                set targetService to 1st account whose service type = iMessage
-                set targetBuddy to participant recipientId of targetService
-                send messageText to targetBuddy
-            end tell
+            set dispatchPhase to "pre_dispatch"
+            try
+                tell application "Messages"
+                    set targetService to 1st account whose service type = iMessage
+                    set targetBuddy to participant recipientId of targetService
+                    set dispatchPhase to "dispatch_started"
+                    send messageText to targetBuddy
+                end tell
+                return "IMESSAGE_MAX_RESULT" & tab & "ok" & tab & "completed" & tab & "0" & tab & ""
+            on error errorMessage number errorNumber
+                if dispatchPhase is "pre_dispatch" then
+                    return "IMESSAGE_MAX_RESULT" & tab & "failure" & tab & "not_started" & tab & errorNumber & tab & errorMessage
+                end if
+                return "IMESSAGE_MAX_RESULT" & tab & "failure" & tab & "may_have_completed" & tab & errorNumber & tab & errorMessage
+            end try
         end run
         """
 
@@ -146,10 +156,20 @@ enum AppleScriptRunner {
         on run argv
             set chatGuid to item 1 of argv
             set messageText to item 2 of argv
-            tell application "Messages"
-                set targetChat to chat id chatGuid
-                send messageText to targetChat
-            end tell
+            set dispatchPhase to "pre_dispatch"
+            try
+                tell application "Messages"
+                    set targetChat to chat id chatGuid
+                    set dispatchPhase to "dispatch_started"
+                    send messageText to targetChat
+                end tell
+                return "IMESSAGE_MAX_RESULT" & tab & "ok" & tab & "completed" & tab & "0" & tab & ""
+            on error errorMessage number errorNumber
+                if dispatchPhase is "pre_dispatch" then
+                    return "IMESSAGE_MAX_RESULT" & tab & "failure" & tab & "not_started" & tab & errorNumber & tab & errorMessage
+                end if
+                return "IMESSAGE_MAX_RESULT" & tab & "failure" & tab & "may_have_completed" & tab & errorNumber & tab & errorMessage
+            end try
         end run
         """
 
@@ -158,11 +178,21 @@ enum AppleScriptRunner {
             set recipientId to item 1 of argv
             set filePath to item 2 of argv
             set attachmentFile to POSIX file filePath
-            tell application "Messages"
-                set targetService to 1st account whose service type = iMessage
-                set targetBuddy to participant recipientId of targetService
-                send attachmentFile to targetBuddy
-            end tell
+            set dispatchPhase to "pre_dispatch"
+            try
+                tell application "Messages"
+                    set targetService to 1st account whose service type = iMessage
+                    set targetBuddy to participant recipientId of targetService
+                    set dispatchPhase to "dispatch_started"
+                    send attachmentFile to targetBuddy
+                end tell
+                return "IMESSAGE_MAX_RESULT" & tab & "ok" & tab & "completed" & tab & "0" & tab & ""
+            on error errorMessage number errorNumber
+                if dispatchPhase is "pre_dispatch" then
+                    return "IMESSAGE_MAX_RESULT" & tab & "failure" & tab & "not_started" & tab & errorNumber & tab & errorMessage
+                end if
+                return "IMESSAGE_MAX_RESULT" & tab & "failure" & tab & "may_have_completed" & tab & errorNumber & tab & errorMessage
+            end try
         end run
         """
 
@@ -171,19 +201,29 @@ enum AppleScriptRunner {
             set chatGuid to item 1 of argv
             set filePath to item 2 of argv
             set attachmentFile to POSIX file filePath
-            tell application "Messages"
-                set targetChat to chat id chatGuid
-                send attachmentFile to targetChat
-            end tell
+            set dispatchPhase to "pre_dispatch"
+            try
+                tell application "Messages"
+                    set targetChat to chat id chatGuid
+                    set dispatchPhase to "dispatch_started"
+                    send attachmentFile to targetChat
+                end tell
+                return "IMESSAGE_MAX_RESULT" & tab & "ok" & tab & "completed" & tab & "0" & tab & ""
+            on error errorMessage number errorNumber
+                if dispatchPhase is "pre_dispatch" then
+                    return "IMESSAGE_MAX_RESULT" & tab & "failure" & tab & "not_started" & tab & errorNumber & tab & errorMessage
+                end if
+                return "IMESSAGE_MAX_RESULT" & tab & "failure" & tab & "may_have_completed" & tab & errorNumber & tab & errorMessage
+            end try
         end run
         """
 
-    static func sendTextToParticipant(handle: String, message: String) -> Result<Void, SendError> {
+    static func sendTextToParticipant(handle: String, message: String) -> Result<Void, SendFailure> {
         guard handle.count <= 100 else {
-            return .failure(.invalidParams("Recipient too long"))
+            return .failure(SendFailure(.invalidParams("Recipient too long"), disposition: .notStarted))
         }
         guard message.count <= 20_000 else {
-            return .failure(.invalidParams("Message too long (max 20,000 chars)"))
+            return .failure(SendFailure(.invalidParams("Message too long (max 20,000 chars)"), disposition: .notStarted))
         }
 
         return run(
@@ -193,12 +233,12 @@ enum AppleScriptRunner {
         )
     }
 
-    static func sendTextToChat(guid: String, message: String) -> Result<Void, SendError> {
+    static func sendTextToChat(guid: String, message: String) -> Result<Void, SendFailure> {
         guard !guid.isEmpty else {
-            return .failure(.invalidParams("Chat guid is required"))
+            return .failure(SendFailure(.invalidParams("Chat guid is required"), disposition: .notStarted))
         }
         guard message.count <= 20_000 else {
-            return .failure(.invalidParams("Message too long (max 20,000 chars)"))
+            return .failure(SendFailure(.invalidParams("Message too long (max 20,000 chars)"), disposition: .notStarted))
         }
 
         return run(
@@ -208,17 +248,17 @@ enum AppleScriptRunner {
         )
     }
 
-    static func sendFileToParticipant(handle: String, filePath: String) -> Result<Void, SendError> {
+    static func sendFileToParticipant(handle: String, filePath: String) -> Result<Void, SendFailure> {
         guard handle.count <= 100 else {
-            return .failure(.invalidParams("Recipient too long"))
+            return .failure(SendFailure(.invalidParams("Recipient too long"), disposition: .notStarted))
         }
         let preparedFile: PreparedOutgoingFile
         do {
             preparedFile = try prepareTrackedOutgoingFile(sourcePath: filePath)
         } catch let error as SendError {
-            return .failure(error)
+            return .failure(SendFailure(error, disposition: .notStarted))
         } catch {
-            return .failure(.failed(ClientErrorMessages.internalDetail(error, context: "Preparing the attachment")))
+            return .failure(SendFailure(.failed(ClientErrorMessages.internalDetail(error, context: "Preparing the attachment")), disposition: .notStarted))
         }
 
         let handoff = run(
@@ -233,17 +273,17 @@ enum AppleScriptRunner {
         return waitForTransferCompletion(preparedFile: preparedFile)
     }
 
-    static func sendFileToChat(guid: String, filePath: String) -> Result<Void, SendError> {
+    static func sendFileToChat(guid: String, filePath: String) -> Result<Void, SendFailure> {
         guard !guid.isEmpty else {
-            return .failure(.invalidParams("Chat guid is required"))
+            return .failure(SendFailure(.invalidParams("Chat guid is required"), disposition: .notStarted))
         }
         let preparedFile: PreparedOutgoingFile
         do {
             preparedFile = try prepareTrackedOutgoingFile(sourcePath: filePath)
         } catch let error as SendError {
-            return .failure(error)
+            return .failure(SendFailure(error, disposition: .notStarted))
         } catch {
-            return .failure(.failed(ClientErrorMessages.internalDetail(error, context: "Preparing the attachment")))
+            return .failure(SendFailure(.failed(ClientErrorMessages.internalDetail(error, context: "Preparing the attachment")), disposition: .notStarted))
         }
 
         let handoff = run(
@@ -387,7 +427,7 @@ enum AppleScriptRunner {
         }
     }
 
-    private static func waitForTransferCompletion(preparedFile: PreparedOutgoingFile) -> Result<Void, SendError> {
+    private static func waitForTransferCompletion(preparedFile: PreparedOutgoingFile) -> Result<Void, SendFailure> {
         let timeoutSeconds: TimeInterval = 15
         let pollInterval: TimeInterval = 0.5
         let deadline = Date().addingTimeInterval(timeoutSeconds)
@@ -404,16 +444,16 @@ enum AppleScriptRunner {
                     return .success(())
                 case .failed:
                     removeStagedDirectory(for: preparedFile)
-                    return .failure(.transferFailed(preparedFile.trackingName))
+                    return .failure(SendFailure(.transferFailed(preparedFile.trackingName), disposition: .mayHaveCompleted))
                 case .pending:
                     sawPending = true
                 case .unknown:
                     break
                 }
             } catch let error as SendError {
-                return .failure(error)
+                return .failure(SendFailure(error, disposition: .mayHaveCompleted))
             } catch {
-                return .failure(.failed(ClientErrorMessages.internalDetail(error, context: "Checking attachment transfer status")))
+                return .failure(SendFailure(.failed(ClientErrorMessages.internalDetail(error, context: "Checking attachment transfer status")), disposition: .mayHaveCompleted))
             }
 
             Thread.sleep(forTimeInterval: pollInterval)
@@ -421,10 +461,10 @@ enum AppleScriptRunner {
 
         if sawPending {
             scheduleDeferredStagedRemoval(preparedFile, after: .seconds(30))
-            return .failure(.transferPending(preparedFile.trackingName))
+            return .failure(SendFailure(.transferPending(preparedFile.trackingName), disposition: .mayHaveCompleted))
         }
         scheduleDeferredStagedRemoval(preparedFile, after: .seconds(30))
-        return .failure(.transferStatusUnknown(preparedFile.trackingName))
+        return .failure(SendFailure(.transferStatusUnknown(preparedFile.trackingName), disposition: .mayHaveCompleted))
     }
 
     /// Messages may still be reading the staged copy for a few seconds after
@@ -498,6 +538,54 @@ enum AppleScriptRunner {
         }
     }
 
+    static let sendResultMarker = "IMESSAGE_MAX_RESULT"
+
+    /// Turns the raw osascript output of a send script into a typed result.
+    /// The script prints one line:
+    ///   IMESSAGE_MAX_RESULT <tab> ok|failure <tab> completed|not_started|may_have_completed <tab> errno <tab> message
+    /// The message is last because it may itself contain tabs.
+    static func interpretSendResult(
+        stdout: String,
+        stderr: String,
+        terminationStatus: Int32,
+        sentFileName: String = "",
+        missingTargetError: SendError
+    ) -> Result<Void, SendFailure> {
+        let markerLine = stdout
+            .split(separator: "\n", omittingEmptySubsequences: true)
+            .map(String.init)
+            .last { $0.hasPrefix(sendResultMarker + "\t") }
+
+        guard let markerLine else {
+            if terminationStatus != 0 {
+                return .failure(SendFailure(
+                    classifySendStderr(stderr, sentFileName: sentFileName, missingTargetError: missingTargetError),
+                    disposition: .mayHaveCompleted
+                ))
+            }
+            return .failure(SendFailure(
+                .failed("Messages returned no structured send result"),
+                disposition: .mayHaveCompleted
+            ))
+        }
+
+        let fields = markerLine.split(separator: "\t", maxSplits: 4, omittingEmptySubsequences: false).map(String.init)
+        guard fields.count == 5 else {
+            return .failure(SendFailure(.failed("Messages returned a malformed send result"), disposition: .mayHaveCompleted))
+        }
+        if fields[1] == "ok", fields[2] == "completed" {
+            return .success(())
+        }
+        let disposition: DeliveryDisposition
+        switch fields[2] {
+        case "not_started": disposition = .notStarted
+        case "may_have_completed": disposition = .mayHaveCompleted
+        default: disposition = .mayHaveCompleted
+        }
+        let error = classifySendStderr(fields[4], sentFileName: sentFileName, missingTargetError: missingTargetError)
+        return .failure(SendFailure(error, disposition: disposition))
+    }
+
     /// Map osascript stderr onto a client-facing SendError.
     ///
     /// AppleScript writes the typographic apostrophe in its errors ("can’t get
@@ -516,12 +604,12 @@ enum AppleScriptRunner {
         sentFileName: String,
         missingTargetError: SendError
     ) -> SendError {
-        let stderr = rawStderr
-            .replacingOccurrences(of: "\u{2019}", with: "'")
-            .lowercased()
+        let normalized = rawStderr.replacingOccurrences(of: "\u{2019}", with: "'")
+        let stderr = normalized.lowercased()
 
         if stderr.contains("not allowed") ||
             stderr.contains("not permitted") ||
+            stderr.contains("not authorized") ||
             stderr.contains("assistive access")
         {
             return .automationPermissionRequired
@@ -548,15 +636,16 @@ enum AppleScriptRunner {
         }
 
         // Untrusted, unbounded osascript stderr: keep the first line, clamped.
-        // Absolute paths (home, staging) never go to the client. `stderr` is
-        // lowercased above, so every literal here must be lowercase too.
+        // Match on the lowercased copy so a mixed-case "/Users/" still scrubs;
+        // return the original casing so AppleScript error text stays readable.
         let firstLine = String(
-            (stderr.split(separator: "\n", maxSplits: 1).first ?? "").prefix(300)
+            (normalized.split(separator: "\n", maxSplits: 1).first ?? "").prefix(300)
         )
-        if firstLine.contains("/users/")
-            || firstLine.contains("/private/")
-            || firstLine.contains("/var/")
-            || firstLine.contains("imessage-max-staging")
+        let firstLineLower = firstLine.lowercased()
+        if firstLineLower.contains("/users/")
+            || firstLineLower.contains("/private/")
+            || firstLineLower.contains("/var/")
+            || firstLineLower.contains("imessage-max-staging")
         {
             Log.error("osascript stderr (scrubbed for client): \(firstLine)")
             return .failed("Send failed. Check the server log for details.")
@@ -567,22 +656,23 @@ enum AppleScriptRunner {
     private static func run(
         script: String,
         arguments: [String],
+        sentFileName: String? = nil,
         missingTargetError: SendError
-    ) -> Result<Void, SendError> {
-        let result = execute(script: script, arguments: arguments, timeoutSeconds: 30)
-        switch result {
+    ) -> Result<Void, SendFailure> {
+        switch execute(script: script, arguments: arguments, timeoutSeconds: 30) {
+        case .failure(.timeout):
+            return .failure(SendFailure(.timeout, disposition: .mayHaveCompleted))
         case .failure(let error):
-            return .failure(error)
-        case .success(let execution):
-            if execution.terminationStatus != 0 {
-                return .failure(classifySendStderr(
-                    execution.stderr,
-                    sentFileName: ((arguments.last ?? "") as NSString).lastPathComponent,
-                    missingTargetError: missingTargetError
-                ))
-            }
-
-            return .success(())
+            // execute() only fails this way when osascript could not be launched.
+            return .failure(SendFailure(error, disposition: .notStarted))
+        case .success(let output):
+            return interpretSendResult(
+                stdout: output.stdout,
+                stderr: output.stderr,
+                terminationStatus: output.terminationStatus,
+                sentFileName: sentFileName ?? ((arguments.last ?? "") as NSString).lastPathComponent,
+                missingTargetError: missingTargetError
+            )
         }
     }
 

@@ -125,6 +125,7 @@ Call:
 Expected:
 
 - `status` is `confirmed`
+- `disposition` is `completed`, `retry_safe` is `false`
 - `verified_message_guid` is a non-empty string (the DB GUID)
 - `verified_at` is a recent ISO timestamp
 - `chat.id` matches the known DM chat ID
@@ -140,6 +141,7 @@ a sandbox handle that reliably does NOT write a DB row.
 Expected:
 
 - `status` is `uncertain`
+- `disposition` is `completed`, `retry_safe` is `false`
 - `message` field contains "get_messages" hint
 - No `verified_message_guid` or `verified_at` in the response
 - The text appears in Messages.app even though status is uncertain
@@ -155,6 +157,7 @@ set up the condition.
 Expected:
 
 - `status` is `mismatch`
+- `disposition` is `completed`, `retry_safe` is `false`
 - `intended_chat` reflects the originally resolved chat
 - `actual_chat_id` identifies the chat where the message actually landed
 - `message` contains routing-mismatch language
@@ -177,6 +180,7 @@ be reachable. Prefer the self-alias route.
 Expected:
 
 - `status` is `failed_delivery`
+- `disposition` is `completed`, `retry_safe` is `true`
 - `verified_message_guid` is a non-empty string, so the row was found
 - `message` states the message was NOT delivered and names the error code
 - The agent must not report this as a successful send
@@ -197,12 +201,25 @@ second in, while the first is still transferring.
 Expected:
 
 - `status` is `partial_failure`
+- `retry_safe` is `false` (an earlier payload already went out)
 - `message` begins `PARTIAL SEND:` and names which payload was dispatched and
   which failed
 - `message` says explicitly not to resend the already-dispatched payload
 - The text is visible in the conversation; the attachment is not
 - Re-running the same call blind would duplicate the text. Confirm the
   response makes that obvious
+
+### 12. Bogus chat guid → `failed`, `not_started`, `retry_safe: true`
+
+Call send with `chat_id` set to a guid that does not exist (`iMessage;-;does-not-exist`).
+
+Expected:
+
+- `status` is `failed`
+- `disposition` is `not_started`
+- `retry_safe` is `true`
+- `error` contains `Chat not found` / the bogus guid
+- Nothing appears in Messages.app
 
 ## Attachment Spot Checks
 

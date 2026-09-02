@@ -32,6 +32,10 @@ struct SendResponse: Encodable {
     // Mismatch fields (non-nil only for "mismatch")
     let intendedChat: ChatReference?
     let actualChatId: String?
+    /// Transport progress: completed / not_started / may_have_completed.
+    let disposition: String
+    /// True only when a retry cannot duplicate a message.
+    let retrySafe: Bool
 
     enum CodingKeys: String, CodingKey {
         case status
@@ -46,6 +50,8 @@ struct SendResponse: Encodable {
         case verifiedAt = "verified_at"
         case intendedChat = "intended_chat"
         case actualChatId = "actual_chat_id"
+        case disposition
+        case retrySafe = "retry_safe"
     }
 
     // MARK: - Transport-only fallback ("sent")
@@ -63,7 +69,9 @@ struct SendResponse: Encodable {
             verifiedMessageGuid: nil,
             verifiedAt: nil,
             intendedChat: nil,
-            actualChatId: nil
+            actualChatId: nil,
+            disposition: DeliveryDisposition.completed.rawValue,
+            retrySafe: false
         )
     }
 
@@ -83,7 +91,9 @@ struct SendResponse: Encodable {
             verifiedMessageGuid: guid,
             verifiedAt: TimeUtils.formatISO(Date()),
             intendedChat: nil,
-            actualChatId: nil
+            actualChatId: nil,
+            disposition: DeliveryDisposition.completed.rawValue,
+            retrySafe: false
         )
     }
 
@@ -105,7 +115,9 @@ struct SendResponse: Encodable {
             verifiedMessageGuid: nil,
             verifiedAt: nil,
             intendedChat: nil,
-            actualChatId: nil
+            actualChatId: nil,
+            disposition: DeliveryDisposition.completed.rawValue,
+            retrySafe: false
         )
     }
 
@@ -123,7 +135,9 @@ struct SendResponse: Encodable {
             verifiedMessageGuid: nil,
             verifiedAt: nil,
             intendedChat: intendedChat,
-            actualChatId: "chat\(actualChatId)"
+            actualChatId: "chat\(actualChatId)",
+            disposition: DeliveryDisposition.completed.rawValue,
+            retrySafe: false
         )
     }
 
@@ -141,7 +155,9 @@ struct SendResponse: Encodable {
             verifiedMessageGuid: guid,
             verifiedAt: TimeUtils.formatISO(Date()),
             intendedChat: nil,
-            actualChatId: nil
+            actualChatId: nil,
+            disposition: DeliveryDisposition.completed.rawValue,
+            retrySafe: true
         )
     }
 
@@ -160,14 +176,17 @@ struct SendResponse: Encodable {
             verifiedMessageGuid: nil,
             verifiedAt: nil,
             intendedChat: nil,
-            actualChatId: nil
+            actualChatId: nil,
+            disposition: DeliveryDisposition.mayHaveCompleted.rawValue,
+            retrySafe: false
         )
     }
 
     /// Some payloads were dispatched to Messages.app before a later payload failed.
     static func partialFailure(
         sentDescriptions: [String], failedDescription: String, error: String,
-        deliveredTo: [String], chat: ChatReference?
+        deliveredTo: [String], chat: ChatReference?,
+        disposition: DeliveryDisposition
     ) -> SendResponse {
         SendResponse(
             status: "partial_failure",
@@ -181,11 +200,13 @@ struct SendResponse: Encodable {
             verifiedMessageGuid: nil,
             verifiedAt: nil,
             intendedChat: nil,
-            actualChatId: nil
+            actualChatId: nil,
+            disposition: disposition.rawValue,
+            retrySafe: false
         )
     }
 
-    static func error(_ message: String) -> SendResponse {
+    static func error(_ message: String, disposition: DeliveryDisposition = .notStarted) -> SendResponse {
         SendResponse(
             status: "failed",
             timestamp: nil,
@@ -198,7 +219,9 @@ struct SendResponse: Encodable {
             verifiedMessageGuid: nil,
             verifiedAt: nil,
             intendedChat: nil,
-            actualChatId: nil
+            actualChatId: nil,
+            disposition: disposition.rawValue,
+            retrySafe: disposition.retrySafe
         )
     }
 
@@ -215,7 +238,9 @@ struct SendResponse: Encodable {
             verifiedMessageGuid: nil,
             verifiedAt: nil,
             intendedChat: nil,
-            actualChatId: nil
+            actualChatId: nil,
+            disposition: DeliveryDisposition.notStarted.rawValue,
+            retrySafe: true
         )
     }
 }
@@ -257,12 +282,15 @@ actor SendTool {
                 chat_id is an exact tool-call target; when talking to the user, refer to the destination by the returned chat.name or recipient names.
 
                 Proof vocabulary for text sends (status field):
-                  confirmed: row found in chat.db with error=0. Include verified_message_guid as evidence.
+                  confirmed: outbound row found in chat.db within the verification window (about 1 s) with error=0. Not a delivery receipt.
                   uncertain: transport accepted but no row appeared within the polling window. Follow up with get_messages.
                   mismatch: row found in a different chat than intended. Alert the user, do not treat as success.
                   failed_delivery: row found with a delivery error recorded. The message was NOT delivered.
                   partial_failure: some payloads were dispatched before a later one failed. The message lists which. Never blind-retry the whole call.
                   sent: verification unavailable (DB unreadable). Transport accepted only.
+                Every response also carries disposition (completed | not_started | may_have_completed) and retry_safe.
+                retry_safe=true means a retry cannot duplicate the message (nothing reached Messages, or chat.db shows the row failed).
+                retry_safe=false means do not resend blindly; check with get_messages first.
                 Sends execute immediately when the destination is exact. Ambiguous destinations return status 'ambiguous' without sending. Invalid input returns status 'failed' without sending. File transfers may return 'pending_confirmation' while Messages.app completes the transfer.
                 """,
             inputSchema: InputSchema.object(
@@ -366,12 +394,12 @@ actor SendTool {
         // Stops at the first hard failure: firing later payloads after one has
         // failed produces out-of-order conversations and compounds the partial
         // reporting below. Soft transfer outcomes keep sending.
-        var sendResults: [Result<Void, SendError>] = []
+        var sendResults: [Result<Void, SendFailure>] = []
         payloadLoop: for payload in payloads {
             let result = await sendOne(target: resolved.target, payload: payload, runner: runner)
             sendResults.append(result)
-            if case .failure(let error) = result {
-                switch error {
+            if case .failure(let failure) = result {
+                switch failure.error {
                 case .transferPending, .transferStatusUnknown:
                     break  // soft outcome; keep sending
                 default:
@@ -390,32 +418,33 @@ actor SendTool {
         }
 
         var pendingMessages: [String] = []
-        var hardFailure: (index: Int, error: SendError)? = nil
+        var hardFailure: (index: Int, failure: SendFailure)? = nil
         for (index, result) in sendResults.enumerated() {
-            if case .failure(let error) = result {
-                switch error {
+            if case .failure(let failure) = result {
+                switch failure.error {
                 case .transferPending, .transferStatusUnknown:
-                    pendingMessages.append(ClientErrorMessages.sanitized(error))
+                    pendingMessages.append(ClientErrorMessages.sanitized(failure.error))
                 default:
-                    hardFailure = (index, error)
+                    hardFailure = (index, failure)
                 }
             }
         }
 
-        if let failure = hardFailure {
+        if let hard = hardFailure {
             // Every result before the failing one is a payload that was
             // dispatched without hard-failing (the loop stops at the first).
-            let sentCount = failure.index
+            let sentCount = hard.index
             if sentCount == 0 {
                 // Nothing reached Messages.app: a plain "failed", as before.
-                return .error(ClientErrorMessages.sanitized(failure.error))
+                return .error(ClientErrorMessages.sanitized(hard.failure.error), disposition: hard.failure.disposition)
             }
             return .partialFailure(
                 sentDescriptions: payloads.prefix(sentCount).map { describePayload($0) },
-                failedDescription: describePayload(payloads[failure.index]),
-                error: ClientErrorMessages.sanitized(failure.error),
+                failedDescription: describePayload(payloads[hard.index]),
+                error: ClientErrorMessages.sanitized(hard.failure.error),
                 deliveredTo: resolved.deliveredTo,
-                chat: resolved.chat
+                chat: resolved.chat,
+                disposition: hard.failure.disposition
             )
         }
 
@@ -486,7 +515,7 @@ actor SendTool {
         target: SendResolution.Target,
         payload: SendPayload,
         runner: any ScriptRunning
-    ) async -> Result<Void, SendError> {
+    ) async -> Result<Void, SendFailure> {
         switch target {
         case .participant(let handle, _):
             switch payload {

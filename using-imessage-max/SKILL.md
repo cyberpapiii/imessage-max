@@ -62,7 +62,7 @@ Use this when the user wants to reply, send an update, or share a file.
 - Use `to` only when starting from a person is acceptable.
 - If there is any ambiguity about the destination, resolve the chat first with `find_chat`.
 - An exact destination sends immediately. There is no confirmation step, and the deprecated `confirm` parameter is ignored. Read the returned `status`:
-  - `confirmed`: verified delivery.
+  - `confirmed`: row found in chat.db within the verification window.
   - `uncertain`: follow up with `get_messages`.
   - `mismatch`: it landed in the wrong chat. Tell the user.
   - `failed_delivery`: chat.db recorded a delivery error. The message did not send. Tell the user and treat the destination as unreachable.
@@ -71,6 +71,8 @@ Use this when the user wants to reply, send an update, or share a file.
   - `failed`: invalid input or send could not dispatch; nothing sent.
   - `ambiguous`: destination not unique; nothing sent. Resolve with `find_chat` first.
   - `pending_confirmation`: a file transfer has not finished yet. This is not a request to retry.
+- `retry_safe: true` — safe to resend.
+- `retry_safe: false` — do not resend; read the chat with `get_messages` first.
 - In your response to the user, name the destination using the returned `chat.name` or participant labels, not the `chat_id`.
 
 ## Tool selection

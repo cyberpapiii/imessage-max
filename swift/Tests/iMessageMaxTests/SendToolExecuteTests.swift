@@ -17,37 +17,37 @@ final class StubScriptRunner: ScriptRunning, @unchecked Sendable {
     }
 
     private(set) var invocations: [Call] = []
-    var nextResult: Result<Void, SendError> = .success(())
+    var nextResult: Result<Void, SendFailure> = .success(())
     /// When non-empty, each call pops the next result; nextResult is the fallback.
     /// Lets a test express "payload 1 succeeds, payload 2 fails".
-    var queuedResults: [Result<Void, SendError>] = []
+    var queuedResults: [Result<Void, SendFailure>] = []
     /// Optional side effect run on every send call before nextResult is returned.
     /// Used to simulate Messages.app writing the chat.db row between send and verify.
     var onSend: (() -> Void)?
 
-    private func takeResult() -> Result<Void, SendError> {
+    private func takeResult() -> Result<Void, SendFailure> {
         queuedResults.isEmpty ? nextResult : queuedResults.removeFirst()
     }
 
-    func sendTextToParticipant(handle: String, message: String) async -> Result<Void, SendError> {
+    func sendTextToParticipant(handle: String, message: String) async -> Result<Void, SendFailure> {
         invocations.append(.textToParticipant(handle: handle, message: message))
         onSend?()
         return takeResult()
     }
 
-    func sendFileToParticipant(handle: String, filePath: String) async -> Result<Void, SendError> {
+    func sendFileToParticipant(handle: String, filePath: String) async -> Result<Void, SendFailure> {
         invocations.append(.fileToParticipant(handle: handle, filePath: filePath))
         onSend?()
         return takeResult()
     }
 
-    func sendTextToChat(guid: String, message: String) async -> Result<Void, SendError> {
+    func sendTextToChat(guid: String, message: String) async -> Result<Void, SendFailure> {
         invocations.append(.textToChat(guid: guid, message: message))
         onSend?()
         return takeResult()
     }
 
-    func sendFileToChat(guid: String, filePath: String) async -> Result<Void, SendError> {
+    func sendFileToChat(guid: String, filePath: String) async -> Result<Void, SendFailure> {
         invocations.append(.fileToChat(guid: guid, filePath: filePath))
         onSend?()
         return takeResult()
@@ -152,7 +152,7 @@ final class SendToolExecuteTests: XCTestCase {
     func testScriptFailureProducesFailedStatus() async throws {
         let fixture = try makeSendFixture()
         let stub = StubScriptRunner()
-        stub.nextResult = .failure(.failed("osascript error -1712"))
+        stub.nextResult = .failure(SendFailure(.failed("osascript error -1712"), disposition: .notStarted))
 
         let tool = SendTool(db: fixture.database(), resolver: makeSeededResolver(), runner: stub)
 
@@ -541,7 +541,7 @@ final class SendToolExecuteTests: XCTestCase {
         let fixture = try makeSendFixture()
         let stub = StubScriptRunner()
         // Payload 0 (the file) succeeds; payload 1 (the text) hard-fails.
-        stub.queuedResults = [.success(()), .failure(.messagesAppUnavailable)]
+        stub.queuedResults = [.success(()), .failure(SendFailure(.messagesAppUnavailable, disposition: .notStarted))]
 
         let tool = SendTool(
             db: fixture.database(),
@@ -581,7 +581,7 @@ final class SendToolExecuteTests: XCTestCase {
         let fixture = try makeSendFixture()
         let stub = StubScriptRunner()
         // Payload 0 (the file) hard-fails immediately.
-        stub.queuedResults = [.failure(.messagesAppUnavailable)]
+        stub.queuedResults = [.failure(SendFailure(.messagesAppUnavailable, disposition: .notStarted))]
 
         let tool = SendTool(
             db: fixture.database(),
@@ -613,7 +613,7 @@ final class SendToolExecuteTests: XCTestCase {
         let fixture = try makeSendFixture()
         let stub = StubScriptRunner()
         // Two files: the first reports a pending transfer, the second succeeds.
-        stub.queuedResults = [.failure(.transferPending("a.jpg")), .success(())]
+        stub.queuedResults = [.failure(SendFailure(.transferPending("a.jpg"), disposition: .mayHaveCompleted)), .success(())]
 
         let tool = SendTool(
             db: fixture.database(),
@@ -632,6 +632,175 @@ final class SendToolExecuteTests: XCTestCase {
             "A pending transfer is a soft outcome and must not become a hard failure")
         XCTAssertEqual(stub.invocations.count, 2,
             "A soft outcome must not stop the loop; the second file must still be sent")
+    }
+
+    // MARK: - Disposition and retry_safe (plan 079)
+
+    func testConfirmedSendReportsCompletedNotRetrySafe() async throws {
+        let fixture = try makeSendFixture()
+        let stub = StubScriptRunner()
+        stub.nextResult = .success(())
+        try fixture.insertMessage(
+            rowId: 130, guid: "msg-guid-079-confirm", text: "Hello Alice",
+            date: AppleTime.fromDate(Date()), isFromMe: true, error: 0, isSent: 0
+        )
+        try fixture.joinChatMessage(chatId: 1, messageId: 130)
+        let tool = SendTool(
+            db: fixture.database(),
+            resolver: makeSeededResolver(),
+            runner: stub,
+            verifier: fastVerifier(fixture: fixture)
+        )
+        let json = try decodeJSONDictionary(from: try await tool.execute(args: [
+            "to": .string("+15550000001"),
+            "text": .string("Hello Alice"),
+        ]))
+        XCTAssertEqual(json["status"] as? String, "confirmed")
+        XCTAssertEqual(json["disposition"] as? String, "completed")
+        XCTAssertEqual(json["retry_safe"] as? Bool, false)
+    }
+
+    func testUncertainSendReportsCompletedNotRetrySafe() async throws {
+        let fixture = try makeSendFixture()
+        let stub = StubScriptRunner()
+        stub.nextResult = .success(())
+        let tool = SendTool(
+            db: fixture.database(),
+            resolver: makeSeededResolver(),
+            runner: stub,
+            verifier: fastVerifier(fixture: fixture)
+        )
+        let json = try decodeJSONDictionary(from: try await tool.execute(args: [
+            "to": .string("+15550000001"),
+            "text": .string("Hello Alice"),
+        ]))
+        XCTAssertEqual(json["status"] as? String, "uncertain")
+        XCTAssertEqual(json["disposition"] as? String, "completed")
+        XCTAssertEqual(json["retry_safe"] as? Bool, false)
+    }
+
+    func testNotStartedFailureIsRetrySafe() async throws {
+        let fixture = try makeSendFixture()
+        let stub = StubScriptRunner()
+        stub.nextResult = .failure(SendFailure(.chatNotFound("x"), disposition: .notStarted))
+        let tool = SendTool(db: fixture.database(), resolver: makeSeededResolver(), runner: stub)
+        do {
+            _ = try await tool.execute(args: [
+                "to": .string("+15550000001"),
+                "text": .string("Hello"),
+            ])
+            XCTFail("expected failed")
+        } catch let error as ToolError {
+            let json = try decodeJSONDictionary(from: error.content)
+            XCTAssertEqual(json["status"] as? String, "failed")
+            XCTAssertEqual(json["disposition"] as? String, "not_started")
+            XCTAssertEqual(json["retry_safe"] as? Bool, true)
+        }
+    }
+
+    func testMayHaveCompletedFailureIsNotRetrySafe() async throws {
+        let fixture = try makeSendFixture()
+        let stub = StubScriptRunner()
+        stub.nextResult = .failure(SendFailure(.timeout, disposition: .mayHaveCompleted))
+        let tool = SendTool(db: fixture.database(), resolver: makeSeededResolver(), runner: stub)
+        do {
+            _ = try await tool.execute(args: [
+                "to": .string("+15550000001"),
+                "text": .string("Hello"),
+            ])
+            XCTFail("expected failed")
+        } catch let error as ToolError {
+            let json = try decodeJSONDictionary(from: error.content)
+            XCTAssertEqual(json["status"] as? String, "failed")
+            XCTAssertEqual(json["disposition"] as? String, "may_have_completed")
+            XCTAssertEqual(json["retry_safe"] as? Bool, false)
+        }
+    }
+
+    func testPartialFailureIsNeverRetrySafe() async throws {
+        let fixture = try makeSendFixture()
+        let stub = StubScriptRunner()
+        stub.queuedResults = [
+            .success(()),
+            .failure(SendFailure(.messagesAppUnavailable, disposition: .notStarted)),
+        ]
+        let tool = SendTool(
+            db: fixture.database(),
+            resolver: makeSeededResolver(),
+            runner: stub,
+            verifier: fastVerifier(fixture: fixture)
+        )
+        do {
+            _ = try await tool.execute(args: [
+                "to": .string("+15550000001"),
+                "text": .string("Hello Alice"),
+                "file_paths": .array([.string("/tmp/x.jpg")]),
+            ])
+            XCTFail("expected partial_failure")
+        } catch let error as ToolError {
+            let json = try decodeJSONDictionary(from: error.content)
+            XCTAssertEqual(json["status"] as? String, "partial_failure")
+            XCTAssertEqual(json["disposition"] as? String, "not_started")
+            XCTAssertEqual(json["retry_safe"] as? Bool, false)
+        }
+    }
+
+    func testFailedDeliveryRowIsRetrySafe() async throws {
+        let fixture = try makeSendFixture()
+        let stub = StubScriptRunner()
+        stub.nextResult = .success(())
+        try fixture.insertMessage(
+            rowId: 131, guid: "msg-guid-079-fail-row", text: "Hello Alice",
+            date: AppleTime.fromDate(Date()), isFromMe: true, error: 22, isSent: 0
+        )
+        try fixture.joinChatMessage(chatId: 1, messageId: 131)
+        let tool = SendTool(
+            db: fixture.database(),
+            resolver: makeSeededResolver(),
+            runner: stub,
+            verifier: fastVerifier(fixture: fixture)
+        )
+        do {
+            _ = try await tool.execute(args: [
+                "to": .string("+15550000001"),
+                "text": .string("Hello Alice"),
+            ])
+            XCTFail("expected failed_delivery")
+        } catch let error as ToolError {
+            let json = try decodeJSONDictionary(from: error.content)
+            XCTAssertEqual(json["status"] as? String, "failed_delivery")
+            XCTAssertEqual(json["disposition"] as? String, "completed")
+            XCTAssertEqual(json["retry_safe"] as? Bool, true)
+        }
+    }
+
+    func testValidationErrorIsNotStartedRetrySafe() async throws {
+        let fixture = try makeSendFixture()
+        let stub = StubScriptRunner()
+        let tool = SendTool(db: fixture.database(), resolver: makeSeededResolver(), runner: stub)
+        do {
+            _ = try await tool.execute(args: [
+                "text": .string("Hello"),
+            ])
+            XCTFail("expected failed")
+        } catch let error as ToolError {
+            let json = try decodeJSONDictionary(from: error.content)
+            XCTAssertEqual(json["status"] as? String, "failed")
+            XCTAssertEqual(json["disposition"] as? String, "not_started")
+            XCTAssertEqual(json["retry_safe"] as? Bool, true)
+        }
+        XCTAssertTrue(stub.invocations.isEmpty)
+    }
+
+    func testAmbiguousIsNotStartedRetrySafe() throws {
+        let encoded = try FormatUtils.encodeJSON(SendResponse.ambiguous(candidates: [
+            RecipientCandidate(name: "Nick Jones", handle: "+15555550123", lastContact: "today"),
+            RecipientCandidate(name: "Andrew Jones", handle: "+15555550124", lastContact: "never"),
+        ]))
+        let json = try JSONSerialization.jsonObject(with: Data(encoded.utf8)) as? [String: Any]
+        XCTAssertEqual(json?["status"] as? String, "ambiguous")
+        XCTAssertEqual(json?["disposition"] as? String, "not_started")
+        XCTAssertEqual(json?["retry_safe"] as? Bool, true)
     }
 }
 
