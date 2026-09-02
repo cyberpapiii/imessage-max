@@ -18,7 +18,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-tags: true
 
@@ -69,21 +69,27 @@ jobs:
           [[ "$REPORTED" == *"$EXPECTED"* ]] || { echo "version mismatch: binary '$REPORTED' vs Version.swift '$EXPECTED'"; exit 1; }
 
       - name: Create tarball
+        id: tarball
         run: |
           cd .build/arm64-apple-macosx/release
           tar -czvf imessage-max-macos.tar.gz imessage-max
-          shasum -a 256 imessage-max-macos.tar.gz
+          DIGEST=$(shasum -a 256 imessage-max-macos.tar.gz | cut -d' ' -f1)
+          echo "sha256=$DIGEST" >> "$GITHUB_OUTPUT"
+          echo "imessage-max-macos.tar.gz sha256 $DIGEST"
           mv imessage-max-macos.tar.gz $GITHUB_WORKSPACE/
 
       - name: Upload tarball as workflow artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: imessage-max-macos
           path: imessage-max-macos.tar.gz
 
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           files: imessage-max-macos.tar.gz
           generate_release_notes: true
+          append_body: true
+          body: |
+            `imessage-max-macos.tar.gz` sha256: `${{ steps.tarball.outputs.sha256 }}`
