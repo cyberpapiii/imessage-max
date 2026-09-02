@@ -7,6 +7,10 @@ struct MessageRow {
     let date: Int64?
     let isFromMe: Bool
     let senderHandle: String?
+    let itemType: Int
+    let groupActionType: Int
+    let groupTitle: String?
+    let otherHandle: String?
 }
 
 struct AttachmentRow {
@@ -232,11 +236,16 @@ extension GetMessagesTool {
                 "m.attributedBody",
                 "m.date",
                 "m.is_from_me",
-                "h.id as sender_handle"
+                "h.id as sender_handle",
+                "m.item_type",
+                "m.group_action_type",
+                "m.group_title",
+                "oh.id as other_handle_id"
             )
             .from("message m")
             .join("chat_message_join cmj ON m.ROWID = cmj.message_id")
             .leftJoin("handle h ON m.handle_id = h.ROWID")
+            .leftJoin("handle oh ON m.other_handle = oh.ROWID")
             .where("cmj.chat_id = ?", chatId)
             .where("m.associated_message_type = 0")
 
@@ -302,7 +311,11 @@ extension GetMessagesTool {
                 text: MessageTextExtractor.extract(text: row.string(2), attributedBody: row.blob(3)),
                 date: row.optionalInt(4),
                 isFromMe: row.int(5) == 1,
-                senderHandle: row.string(6)
+                senderHandle: row.string(6),
+                itemType: Int(row.int(7)),
+                groupActionType: Int(row.int(8)),
+                groupTitle: row.string(9),
+                otherHandle: row.string(10)
             )
         }
     }
@@ -452,7 +465,8 @@ extension GetMessagesTool {
                 links: msg.links,
                 sessionId: sessionId,
                 sessionStart: sessionStart ? true : nil,
-                sessionGapHours: sessionGapHours
+                sessionGapHours: sessionGapHours,
+                event: msg.event
             )
         }
 

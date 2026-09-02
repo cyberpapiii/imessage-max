@@ -77,4 +77,63 @@ final class ListChatsToolTests: XCTestCase {
         XCTAssertEqual(page.more, page.cursor != nil,
                        "more=\(page.more) cursor=\(String(describing: page.cursor))")
     }
+
+    func testLastMessagePreviewDescribesGroupEvents() async throws {
+        let fixture = try ToolTestDatabase(name: "list-chats-group-events")
+        try fixture.insertHandle(rowId: 1, handle: "+15550000001")
+        try fixture.insertHandle(rowId: 2, handle: "+15550000002")
+
+        try fixture.insertChat(rowId: 10, guid: "list-rename", displayName: "Rename Chat")
+        try fixture.joinChatHandle(chatId: 10, handleId: 1)
+        try fixture.joinChatHandle(chatId: 10, handleId: 2)
+        try fixture.insertMessage(
+            rowId: 100,
+            guid: "list-rename-msg",
+            text: nil,
+            date: 2_000_000_000_000,
+            isFromMe: false,
+            handleId: 1,
+            itemType: 2,
+            groupActionType: 0,
+            groupTitle: "Trip"
+        )
+        try fixture.joinChatMessage(chatId: 10, messageId: 100)
+
+        try fixture.insertChat(rowId: 11, guid: "list-added", displayName: "Added Chat")
+        try fixture.joinChatHandle(chatId: 11, handleId: 1)
+        try fixture.joinChatHandle(chatId: 11, handleId: 2)
+        try fixture.insertMessage(
+            rowId: 101,
+            guid: "list-added-msg",
+            text: nil,
+            date: 1_000_000_000_000,
+            isFromMe: false,
+            handleId: 1,
+            itemType: 1,
+            groupActionType: 0,
+            otherHandle: 2
+        )
+        try fixture.joinChatMessage(chatId: 11, messageId: 101)
+
+        let result = await ListChatsTool.execute(
+            limit: 5,
+            sort: "recent",
+            cursor: nil,
+            db: fixture.database(),
+            resolver: ContactResolver(seedCache: [:])
+        )
+        guard case .success(let page) = result else {
+            return XCTFail("list_chats failed: \(result)")
+        }
+
+        let renameChat = try XCTUnwrap(page.chats.first(where: { $0.id == "chat10" }))
+        XCTAssertEqual(renameChat.lastMessage?.text, "renamed the group to Trip")
+        XCTAssertEqual(renameChat.lastMessage?.from, PhoneUtils.formatDisplay("+15550000001"))
+
+        let addedChat = try XCTUnwrap(page.chats.first(where: { $0.id == "chat11" }))
+        XCTAssertEqual(
+            addedChat.lastMessage?.text,
+            "added \(PhoneUtils.formatDisplay("+15550000002"))"
+        )
+    }
 }

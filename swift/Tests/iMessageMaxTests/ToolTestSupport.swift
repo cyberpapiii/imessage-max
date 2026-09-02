@@ -71,11 +71,16 @@ final class ToolTestDatabase {
         associatedMessageGuid: String? = nil,
         error: Int = 0,
         isSent: Int = 0,
-        attributedBody: Data? = nil
+        attributedBody: Data? = nil,
+        itemType: Int = 0,
+        groupActionType: Int = 0,
+        groupTitle: String? = nil,
+        otherHandle: Int = 0
     ) throws {
         let textValue = text.map { "'\(escape($0))'" } ?? "NULL"
         let handleValue = handleId.map(String.init) ?? "NULL"
         let assocGuidValue = associatedMessageGuid.map { "'\(escape($0))'" } ?? "NULL"
+        let groupTitleValue = groupTitle.map { "'\(escape($0))'" } ?? "NULL"
         let attributedValue: String
         if let attributedBody {
             attributedValue = "X'\(attributedBody.map { String(format: "%02X", $0) }.joined())'"
@@ -85,9 +90,9 @@ final class ToolTestDatabase {
 
         try execute("""
             INSERT INTO message (
-                ROWID, guid, text, attributedBody, date, is_from_me, is_read, handle_id, associated_message_type, associated_message_guid, error, is_sent
+                ROWID, guid, text, attributedBody, date, is_from_me, is_read, handle_id, associated_message_type, associated_message_guid, error, is_sent, item_type, group_action_type, group_title, other_handle
             ) VALUES (
-                \(rowId), '\(escape(guid))', \(textValue), \(attributedValue), \(date), \(isFromMe ? 1 : 0), \(isRead ? 1 : 0), \(handleValue), \(associatedMessageType), \(assocGuidValue), \(error), \(isSent)
+                \(rowId), '\(escape(guid))', \(textValue), \(attributedValue), \(date), \(isFromMe ? 1 : 0), \(isRead ? 1 : 0), \(handleValue), \(associatedMessageType), \(assocGuidValue), \(error), \(isSent), \(itemType), \(groupActionType), \(groupTitleValue), \(otherHandle)
             );
             """)
     }
@@ -154,7 +159,11 @@ final class ToolTestDatabase {
             associated_message_type INTEGER,
             associated_message_guid TEXT,
             error INTEGER DEFAULT 0,
-            is_sent INTEGER DEFAULT 0
+            is_sent INTEGER DEFAULT 0,
+            item_type INTEGER DEFAULT 0,
+            group_action_type INTEGER DEFAULT 0,
+            group_title TEXT,
+            other_handle INTEGER DEFAULT 0
         );
         CREATE TABLE chat_message_join (
             chat_id INTEGER,

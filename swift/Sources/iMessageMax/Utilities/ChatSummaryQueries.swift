@@ -282,7 +282,8 @@ enum ChatSummaryQueries {
             sql = """
                 WITH ids(chat_id, newest_date) AS (VALUES \(idRows))
                 SELECT i.chat_id, m.text, m.attributedBody, m.is_from_me,
-                       h.id as sender_handle, m.date, m.ROWID as message_id
+                       h.id as sender_handle, m.date, m.ROWID as message_id,
+                       m.item_type, m.group_action_type, m.group_title, oh.id as other_handle_id
                 FROM ids i
                 JOIN message m ON m.ROWID = (
                     SELECT cmj.message_id
@@ -295,12 +296,14 @@ enum ChatSummaryQueries {
                     LIMIT 1
                 )
                 LEFT JOIN handle h ON m.handle_id = h.ROWID
+                LEFT JOIN handle oh ON m.other_handle = oh.ROWID
                 """
         } else {
             sql = """
                 WITH ids(chat_id) AS (VALUES \(idRows))
                 SELECT i.chat_id, m.text, m.attributedBody, m.is_from_me,
-                       h.id as sender_handle, m.date, m.ROWID as message_id
+                       h.id as sender_handle, m.date, m.ROWID as message_id,
+                       m.item_type, m.group_action_type, m.group_title, oh.id as other_handle_id
                 FROM ids i
                 JOIN message m ON m.ROWID = (
                     SELECT cmj.message_id
@@ -312,6 +315,7 @@ enum ChatSummaryQueries {
                     LIMIT 1
                 )
                 LEFT JOIN handle h ON m.handle_id = h.ROWID
+                LEFT JOIN handle oh ON m.other_handle = oh.ROWID
                 """
         }
 
@@ -323,6 +327,10 @@ enum ChatSummaryQueries {
             let senderHandle: String?
             let date: Int64?
             let messageId: Int64
+            let itemType: Int
+            let groupActionType: Int
+            let groupTitle: String?
+            let otherHandle: String?
         }
 
         let rows = try db.query(sql, params: params) { row in
@@ -333,12 +341,17 @@ enum ChatSummaryQueries {
                 isFromMe: row.int(3) == 1,
                 senderHandle: row.string(4),
                 date: row.optionalInt(5),
-                messageId: row.int(6)
+                messageId: row.int(6),
+                itemType: Int(row.int(7)),
+                groupActionType: Int(row.int(8)),
+                groupTitle: row.string(9),
+                otherHandle: row.string(10)
             )
         }
 
-        // Collect unique sender handles for batched name resolution.
-        let uniqueHandles = Set(rows.compactMap(\.senderHandle))
+        // Collect unique sender and other-handle ids for batched name resolution.
+        var uniqueHandles = Set(rows.compactMap(\.senderHandle))
+        uniqueHandles.formUnion(rows.compactMap(\.otherHandle))
         var resolvedNames: [String: String] = [:]
         for handle in uniqueHandles {
             resolvedNames[handle] = await IdentityDisplayFormatter.displayName(
@@ -368,14 +381,27 @@ enum ChatSummaryQueries {
             let date = AppleTime.toDate(row.date)
             let ago = TimeUtils.formatCompactRelative(date) ?? agoFallback
 
-            let summary = LastMessageSummary(
-                from: sender,
-                text: MessagePreviewResolver.messageSummary(
+            let event = GroupEvent.classify(
+                itemType: row.itemType,
+                groupActionType: row.groupActionType,
+                groupTitle: row.groupTitle,
+                otherHandleName: row.otherHandle.flatMap { resolvedNames[$0] }
+            )
+            let previewText: String
+            if let event {
+                previewText = event.previewText
+            } else {
+                previewText = MessagePreviewResolver.messageSummary(
                     text: row.text,
                     attributedBody: row.attributedBody,
                     maxLength: previewMaxLength,
                     attachmentTypes: typesByMessage[row.messageId] ?? []
-                ),
+                )
+            }
+
+            let summary = LastMessageSummary(
+                from: sender,
+                text: previewText,
                 ago: ago,
                 ts: TimeUtils.formatISO(date)
             )
