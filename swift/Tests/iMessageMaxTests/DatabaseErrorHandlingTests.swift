@@ -138,4 +138,36 @@ final class DatabaseErrorHandlingTests: XCTestCase {
                 + "failed sqlite3_open_v2 handles are not being closed"
         )
     }
+
+    // MARK: - Recovery without restart (plan 082)
+
+    /// 2026-09-01: the launchd service ran 14 h with permission_denied.
+    /// The Database itself must never cache a failed open; once the file
+    /// becomes readable the same instance must serve the next query.
+    func testPermissionDeniedIsRetriedOnTheNextQuery() throws {
+        try XCTSkipIf(getuid() == 0, "root ignores POSIX mode bits")
+
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("self-heal-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let path = dir.appendingPathComponent("chat.db").path
+        FileManager.default.createFile(atPath: path, contents: Data())
+        try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: path)
+
+        let db = Database(path: path)
+
+        XCTAssertThrowsError(try db.query("SELECT 1") { _ in 0 }) { error in
+            guard case DatabaseError.permissionDenied = error else {
+                return XCTFail("expected permissionDenied, got \(error)")
+            }
+        }
+        XCTAssertEqual(Database.checkAccess(path: path).status, "permission_denied")
+
+        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: path)
+
+        let rows = try db.query("SELECT 1") { row in row.int(0) }
+        XCTAssertEqual(rows, [1], "same Database instance must recover once the file is readable")
+        XCTAssertEqual(Database.checkAccess(path: path).status, "accessible")
+    }
 }
