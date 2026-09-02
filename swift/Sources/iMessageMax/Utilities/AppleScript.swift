@@ -264,25 +264,36 @@ enum AppleScriptRunner {
     ) throws -> PreparedOutgoingFile {
         cleanupOldStagedFilesIfPossible()
 
-        let validatedPath = try validateFilePath(sourcePath)
-        let sourceURL = URL(fileURLWithPath: validatedPath)
-        let trackingName = sourceURL.lastPathComponent
+        let (validatedPath, sourceHandle) = try openValidatedSource(sourcePath)
+        defer { try? sourceHandle.close() }
+
+        let trackingName = (validatedPath as NSString).lastPathComponent
         let existingOutgoingTransferCount = try existingOutgoingTransferStatuses(trackingName).count
-        let stagedDirectory = stagingRootDirectory()
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+
+        let root = stagingRootDirectory()
+        let ownerOnly: [FileAttributeKey: Any] = [.posixPermissions: 0o700]
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true, attributes: ownerOnly)
+        try FileManager.default.setAttributes(ownerOnly, ofItemAtPath: root.path)   // pre-existing 0755 roots
+        guard !SecurePath.hasSymlinkComponent(root.path) else {
+            throw SendError.invalidParams("Attachment staging directory is behind a symbolic link.")
+        }
+
+        let stagedDirectory = root.appendingPathComponent(UUID().uuidString, isDirectory: true)
         let stagedURL = stagedDirectory.appendingPathComponent(trackingName, isDirectory: false)
+        try FileManager.default.createDirectory(at: stagedDirectory, withIntermediateDirectories: false, attributes: ownerOnly)
 
-        try FileManager.default.createDirectory(
-            at: stagedDirectory,
-            withIntermediateDirectories: true
-        )
-        try FileManager.default.copyItem(at: sourceURL, to: stagedURL)
-
-        return PreparedOutgoingFile(
+        let prepared = PreparedOutgoingFile(
             fileURL: stagedURL,
             trackingName: trackingName,
             existingOutgoingTransferCount: existingOutgoingTransferCount
         )
+        do {
+            try AttachmentSource.copy(sourceHandle, to: stagedURL)
+        } catch {
+            removeStagedDirectory(for: prepared)
+            throw SendError.fileNotFound(trackingName)
+        }
+        return prepared
     }
 
     static func interpretTransferStatuses(_ statuses: [String]) -> TransferObservation {
@@ -306,17 +317,29 @@ enum AppleScriptRunner {
         "preparing", "waiting", "transferring", "finalizing"
     ]
 
-    private static func validateFilePath(_ filePath: String) throws -> String {
-        let expandedPath = (filePath as NSString).expandingTildeInPath
-        var isDirectory: ObjCBool = false
-        let exists = FileManager.default.fileExists(atPath: expandedPath, isDirectory: &isDirectory)
-        guard exists, !isDirectory.boolValue else {
-            throw SendError.fileNotFound((filePath as NSString).lastPathComponent)
+    /// Lexically absolutize, refuse symlinks anywhere in the path, then open
+    /// the file without following links and confirm it is a regular file.
+    /// Error text never contains the caller's path, only the basename.
+    private static func openValidatedSource(_ filePath: String) throws -> (path: String, handle: FileHandle) {
+        let basename = (filePath as NSString).lastPathComponent
+        guard let lexical = SecurePath.absoluteLexicalPath(filePath) else {
+            throw SendError.invalidParams("Attachment path for '\(basename)' must be absolute (or start with ~/).")
         }
-        guard FileManager.default.isReadableFile(atPath: expandedPath) else {
-            throw SendError.fileNotFound((filePath as NSString).lastPathComponent)
+        if SecurePath.hasSymlinkComponent(lexical) {
+            throw SendError.invalidParams("Attachment '\(basename)' is or is behind a symbolic link; pass the real path.")
         }
-        return expandedPath
+        do {
+            return (lexical, try AttachmentSource.openFile(at: lexical))
+        } catch AttachmentSource.Failure.symlink {
+            throw SendError.invalidParams("Attachment '\(basename)' is or is behind a symbolic link; pass the real path.")
+        } catch AttachmentSource.Failure.notRegularFile {
+            throw SendError.invalidParams("Attachment '\(basename)' must be a regular file.")
+        } catch AttachmentSource.Failure.notAbsolute {
+            throw SendError.invalidParams("Attachment path for '\(basename)' must be absolute (or start with ~/).")
+        } catch {
+            // notFound, notPermitted, other: same client-facing wording as before.
+            throw SendError.fileNotFound(basename)
+        }
     }
 
     private static func queryOutgoingTransferStatuses(trackingName: String) throws -> [String] {
@@ -431,7 +454,7 @@ enum AppleScriptRunner {
         try? FileManager.default.removeItem(at: directory)
     }
 
-    private static func stagingRootDirectory() -> URL {
+    static func stagingRootDirectory() -> URL {
         let picturesDirectory = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Pictures", isDirectory: true)
         return picturesDirectory.appendingPathComponent("imessage-max-staging", isDirectory: true)
