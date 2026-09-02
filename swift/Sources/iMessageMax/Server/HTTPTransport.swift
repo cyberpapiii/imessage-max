@@ -34,6 +34,8 @@ public actor HTTPTransport: Transport {
     private let pendingRequests: PendingRequestRegistry
     private var routingConfigured = false
     private let requestTimeout: Duration
+    private let bodyReadDeadline: Duration
+    private let channelIdleTimeout: Duration
 
     /// Background task running the Hummingbird server
     private var serverTask: Task<Void, Error>?
@@ -55,12 +57,16 @@ public actor HTTPTransport: Transport {
         resolver: ContactResolver,
         logger: Logger? = nil,
         requestTimeout: Duration = .seconds(300),
+        bodyReadDeadline: Duration = .seconds(30),
+        channelIdleTimeout: Duration = .seconds(60),
         maxSessions: Int = 512,
         cleanupInterval: Duration = .seconds(300)
     ) {
         self.host = host
         self.port = port
         self.requestTimeout = requestTimeout
+        self.bodyReadDeadline = bodyReadDeadline
+        self.channelIdleTimeout = channelIdleTimeout
         self.pendingRequests = PendingRequestRegistry(timeout: requestTimeout)
         self.database = database
         self.resolver = resolver
@@ -175,7 +181,8 @@ public actor HTTPTransport: Transport {
             request.body,
             declaredLength: request.headers[.contentLength].flatMap(Int.init),
             maxBytes: Self.maxRequestBodyBytes,
-            drainLimit: Self.overLimitDrainBytes
+            drainLimit: Self.overLimitDrainBytes,
+            deadline: bodyReadDeadline
         ) {
         case .complete(let data):
             requestData = data
@@ -183,6 +190,8 @@ public actor HTTPTransport: Transport {
             // Same observable shape as the old `collect(upTo:)` throw that
             // Hummingbird converted to 413: empty body, Content-Length: 0.
             return Response(status: .contentTooLarge)
+        case .timedOut:
+            return errorResponse(status: .requestTimeout, message: "Request body read timed out")
         }
 
         let jsonString = String(data: requestData, encoding: .utf8) ?? ""
@@ -714,13 +723,15 @@ public actor HTTPTransport: Transport {
         _ body: RequestBody,
         declaredLength: Int?,
         maxBytes: Int,
-        drainLimit: Int
+        drainLimit: Int,
+        deadline: Duration
     ) async throws -> BodyCollection {
         try await HTTPRequestParsing.collectBodyDrainingOverflow(
             body,
             declaredLength: declaredLength,
             maxBytes: maxBytes,
-            drainLimit: drainLimit
+            drainLimit: drainLimit,
+            deadline: deadline
         )
     }
 
@@ -758,6 +769,7 @@ public actor HTTPTransport: Transport {
 
         return Application(
             router: router,
+            server: .http1(configuration: .init(idleTimeout: Self.nioTimeAmount(channelIdleTimeout))),
             configuration: .init(
                 address: .hostname(host, port: port)
             ),
@@ -872,6 +884,26 @@ public actor HTTPTransport: Transport {
             return "n:null"
         }
         return "u:\(UUID().uuidString)"
+    }
+
+    /// Converts a `Duration` through `AsyncTimeout.dispatchInterval` so the
+    /// channel idle timeout uses the same saturation as every other Dispatch
+    /// deadline in the service.
+    private nonisolated static func nioTimeAmount(_ duration: Duration) -> TimeAmount {
+        switch AsyncTimeout.dispatchInterval(for: duration) {
+        case .nanoseconds(let ns):
+            return .nanoseconds(Int64(ns))
+        case .microseconds(let us):
+            return .microseconds(Int64(us))
+        case .milliseconds(let ms):
+            return .milliseconds(Int64(ms))
+        case .seconds(let s):
+            return .seconds(Int64(s))
+        case .never:
+            return .seconds(60)
+        @unknown default:
+            return .seconds(60)
+        }
     }
 
     /// Creates a JSON-RPC error response

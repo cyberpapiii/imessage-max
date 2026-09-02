@@ -14,7 +14,10 @@ enum HTTPRequestParsing {
     enum BodyCollection {
         case complete(Data)
         case tooLarge
+        case timedOut
     }
+
+    private struct BodyReadTimeout: Error {}
 
     /// Collects the request body up to `maxBytes`. On overflow, keeps
     /// consuming the remaining body (bounded by `drainLimit`) before
@@ -40,12 +43,35 @@ enum HTTPRequestParsing {
         _ body: RequestBody,
         declaredLength: Int?,
         maxBytes: Int,
-        drainLimit: Int
+        drainLimit: Int,
+        deadline: Duration
     ) async throws -> BodyCollection {
         if let declaredLength, declaredLength > drainLimit {
             return .tooLarge
         }
+        do {
+            return try await withThrowingTaskGroup(of: BodyCollection.self) { group in
+                group.addTask {
+                    try await readAndDrain(body, maxBytes: maxBytes, drainLimit: drainLimit)
+                }
+                group.addTask {
+                    await AsyncTimeout.sleep(deadline)
+                    throw BodyReadTimeout()
+                }
+                let first = try await group.next()!
+                group.cancelAll()
+                return first
+            }
+        } catch is BodyReadTimeout {
+            return .timedOut
+        }
+    }
 
+    private static func readAndDrain(
+        _ body: RequestBody,
+        maxBytes: Int,
+        drainLimit: Int
+    ) async throws -> BodyCollection {
         var collected = ByteBuffer()
         var iterator = body.makeAsyncIterator()
         while var chunk = try await iterator.next() {

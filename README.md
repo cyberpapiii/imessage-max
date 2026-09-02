@@ -441,7 +441,9 @@ Some attachments are stored in iCloud, not on disk. `list_attachments` includes 
 ## Advanced setup
 
 For HTTP mode, local background service setup, development commands, and
-contributor-focused workflow details, see:
+contributor-focused workflow details, see the Swift README. Request bodies
+must arrive within 30 seconds; a stalled upload gets HTTP 408 with a JSON-RPC
+error body, and connections idle for 60 seconds are closed. See also:
 
 - [swift/README.md](swift/README.md)
 

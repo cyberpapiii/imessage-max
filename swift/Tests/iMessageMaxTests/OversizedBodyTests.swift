@@ -33,7 +33,8 @@ final class OversizedBodyTests: XCTestCase {
             body,
             declaredLength: chunk.readableBytes * chunkCount,
             maxBytes: maxBytes,
-            drainLimit: drainLimit
+            drainLimit: drainLimit,
+            deadline: .seconds(30)
         )
 
         guard case .tooLarge = result else {
@@ -60,7 +61,8 @@ final class OversizedBodyTests: XCTestCase {
             body,
             declaredLength: 4096,
             maxBytes: maxBytes,
-            drainLimit: drainLimit
+            drainLimit: drainLimit,
+            deadline: .seconds(30)
         )
         await producer.value
 
@@ -80,7 +82,8 @@ final class OversizedBodyTests: XCTestCase {
             body,
             declaredLength: drainLimit + 1,
             maxBytes: maxBytes,
-            drainLimit: drainLimit
+            drainLimit: drainLimit,
+            deadline: .seconds(30)
         )
 
         guard case .tooLarge = result else {
