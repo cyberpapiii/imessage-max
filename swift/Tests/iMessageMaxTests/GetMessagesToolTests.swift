@@ -270,10 +270,182 @@ final class GetMessagesToolTests: XCTestCase {
             response["cursor"] != nil && !(response["cursor"] is NSNull)
         )
     }
+
+    func testGroupEventsAreRenderedAsEventObjects() async throws {
+        let fixture = try makeGroupEventFixture()
+        let tool = GetMessagesTool(db: fixture.database(), resolver: makeSeededResolver())
+
+        let response = try await decodeGetMessagesResponse(
+            await tool.execute(args: [
+                "chat_id": .string("chat40"),
+                "limit": .int(10),
+            ])
+        )
+
+        let messages = try decodeJSONArray(try XCTUnwrap(response["messages"]))
+        let byId = Dictionary(uniqueKeysWithValues: messages.compactMap { row -> (String, [String: Any])? in
+            guard let id = row["id"] as? String else { return nil }
+            return (id, row)
+        })
+
+        try assertGroupEvent(byId["msg_500"], type: "rename", title: "Trip")
+        try assertGroupEvent(byId["msg_501"], type: "participant_added", participant: "Bob Brown")
+        try assertGroupEvent(byId["msg_502"], type: "participant_removed", participant: "Bob Brown")
+        try assertGroupEvent(byId["msg_503"], type: "left")
+        try assertGroupEvent(byId["msg_504"], type: "other", itemType: 5)
+    }
+
+    func testOrdinaryMessagesHaveNoEventKey() async throws {
+        let fixture = try makeGroupEventFixture()
+        let tool = GetMessagesTool(db: fixture.database(), resolver: makeSeededResolver())
+
+        let response = try await decodeGetMessagesResponse(
+            await tool.execute(args: [
+                "chat_id": .string("chat40"),
+                "limit": .int(10),
+            ])
+        )
+
+        let messages = try decodeJSONArray(try XCTUnwrap(response["messages"]))
+        let ordinary = try XCTUnwrap(messages.first(where: { $0["id"] as? String == "msg_499" }))
+        XCTAssertFalse(ordinary.keys.contains("event"))
+    }
+
+    func testExistingFixtureIsUnchanged() async throws {
+        let fixture = try makeGetMessagesFixture()
+        let tool = GetMessagesTool(db: fixture.database(), resolver: makeSeededResolver())
+
+        let response = try await decodeGetMessagesResponse(
+            await tool.execute(args: ["chat_id": .string("chat20")])
+        )
+
+        let messages = try decodeJSONArray(try XCTUnwrap(response["messages"]))
+        XCTAssertEqual(messages.count, 4)
+    }
 }
 
 private func decodeGetMessagesResponse(_ contents: [Tool.Content]) async throws -> [String: Any] {
     return try decodeJSONDictionary(from: contents)
+}
+
+private func assertGroupEvent(
+    _ row: [String: Any]?,
+    type: String,
+    title: String? = nil,
+    participant: String? = nil,
+    itemType: Int? = nil,
+    file: StaticString = #filePath,
+    line: UInt = #line
+) throws {
+    let row = try XCTUnwrap(row, file: file, line: line)
+    XCTAssertTrue(row["text"] == nil || row["text"] is NSNull, file: file, line: line)
+    let event = try XCTUnwrap(row["event"] as? [String: Any], file: file, line: line)
+    XCTAssertEqual(event["type"] as? String, type, file: file, line: line)
+    if let title {
+        XCTAssertEqual(event["title"] as? String, title, file: file, line: line)
+    } else {
+        XCTAssertFalse(event.keys.contains("title"), file: file, line: line)
+    }
+    if let participant {
+        XCTAssertEqual(event["participant"] as? String, participant, file: file, line: line)
+    } else {
+        XCTAssertFalse(event.keys.contains("participant"), file: file, line: line)
+    }
+    if let itemType {
+        XCTAssertEqual(event["item_type"] as? Int, itemType, file: file, line: line)
+    } else {
+        XCTAssertFalse(event.keys.contains("item_type"), file: file, line: line)
+    }
+}
+
+func makeGroupEventFixture() throws -> ToolTestDatabase {
+    let fixture = try ToolTestDatabase(name: "get-messages-group-events")
+    try fixture.insertHandle(rowId: 1, handle: "+15550000001")
+    try fixture.insertHandle(rowId: 2, handle: "+15550000002")
+    try fixture.insertChat(rowId: 40, guid: "chat-group-events-guid", displayName: "Events")
+    try fixture.joinChatHandle(chatId: 40, handleId: 1)
+    try fixture.joinChatHandle(chatId: 40, handleId: 2)
+
+    let base: Int64 = 3_000_000_000_000
+    let minute: Int64 = 60 * 1_000_000_000
+
+    try fixture.insertMessage(
+        rowId: 499,
+        guid: "gm499",
+        text: "hello group",
+        date: base,
+        isFromMe: false,
+        handleId: 1
+    )
+    try fixture.joinChatMessage(chatId: 40, messageId: 499)
+
+    try fixture.insertMessage(
+        rowId: 500,
+        guid: "gm500",
+        text: nil,
+        date: base + minute,
+        isFromMe: false,
+        handleId: 1,
+        itemType: 2,
+        groupActionType: 0,
+        groupTitle: "Trip",
+        otherHandle: 0
+    )
+    try fixture.joinChatMessage(chatId: 40, messageId: 500)
+
+    try fixture.insertMessage(
+        rowId: 501,
+        guid: "gm501",
+        text: nil,
+        date: base + (2 * minute),
+        isFromMe: false,
+        handleId: 1,
+        itemType: 1,
+        groupActionType: 0,
+        otherHandle: 2
+    )
+    try fixture.joinChatMessage(chatId: 40, messageId: 501)
+
+    try fixture.insertMessage(
+        rowId: 502,
+        guid: "gm502",
+        text: nil,
+        date: base + (3 * minute),
+        isFromMe: false,
+        handleId: 1,
+        itemType: 1,
+        groupActionType: 1,
+        otherHandle: 2
+    )
+    try fixture.joinChatMessage(chatId: 40, messageId: 502)
+
+    try fixture.insertMessage(
+        rowId: 503,
+        guid: "gm503",
+        text: nil,
+        date: base + (4 * minute),
+        isFromMe: false,
+        handleId: 2,
+        itemType: 3,
+        groupActionType: 0,
+        otherHandle: 0
+    )
+    try fixture.joinChatMessage(chatId: 40, messageId: 503)
+
+    try fixture.insertMessage(
+        rowId: 504,
+        guid: "gm504",
+        text: nil,
+        date: base + (5 * minute),
+        isFromMe: false,
+        handleId: nil,
+        itemType: 5,
+        groupActionType: 0,
+        otherHandle: 0
+    )
+    try fixture.joinChatMessage(chatId: 40, messageId: 504)
+
+    return fixture
 }
 
 func makeGetMessagesFixture() throws -> ToolTestDatabase {

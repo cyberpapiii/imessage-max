@@ -43,12 +43,14 @@ struct GetMessagesResponse: Encodable {
         let sessionId: String?
         let sessionStart: Bool?
         let sessionGapHours: Double?
+        let event: GroupEvent?
 
         private enum CodingKeys: String, CodingKey {
             case id, ts, text, from, reactions, media, attachments, links
             case sessionId = "session_id"
             case sessionStart = "session_start"
             case sessionGapHours = "session_gap_hours"
+            case event
         }
     }
 
@@ -298,6 +300,14 @@ actor GetMessagesTool {
         let attachmentsMap = try getAttachmentsMap(messageIds: messageRows.map { $0.id })
         let processor = ImageProcessor()
 
+        let uniqueOtherHandles = Set(messageRows.compactMap(\.otherHandle))
+        var otherHandleNames: [String: String] = [:]
+        for handle in uniqueOtherHandles {
+            otherHandleNames[handle] = await IdentityDisplayFormatter.displayName(
+                handle: handle, resolver: resolver
+            )
+        }
+
         var messages: [GetMessagesResponse.MessageInfo] = []
         var mediaCountsByMessageId: [String: (total: Int, included: Int)] = [:]
         var mediaIncludedGlobal = 0
@@ -408,7 +418,13 @@ actor GetMessagesTool {
                 links: links,
                 sessionId: nil,
                 sessionStart: nil,
-                sessionGapHours: nil
+                sessionGapHours: nil,
+                event: GroupEvent.classify(
+                    itemType: row.itemType,
+                    groupActionType: row.groupActionType,
+                    groupTitle: row.groupTitle,
+                    otherHandleName: row.otherHandle.flatMap { otherHandleNames[$0] }
+                )
             ))
         }
 
