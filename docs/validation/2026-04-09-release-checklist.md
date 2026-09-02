@@ -32,7 +32,7 @@ Confirm a fresh HTTP session works against the running service:
 Expected:
 - initialize succeeds
 - the session id is present
-- `tools/list` returns 12 tools
+- `tools/list` returns 13 tools
 
 Recommended quick check:
 
@@ -115,7 +115,7 @@ Go deeper on send only if these checks turn something up.
 
 Before shipping, confirm the public docs still match the running server:
 
-- tool count is 12 everywhere
+- tool count is 13 everywhere
 - no references to the retired Python implementation as if it were active
 - usage examples still match current argument names and behavior
 

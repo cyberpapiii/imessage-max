@@ -5,7 +5,7 @@ import Synchronization
 
 enum ToolRegistry {
     /// The database and resolver the catalog's handlers are bound to. The
-    /// catalog itself is process-wide, so re-registering the same twelve tools
+    /// catalog itself is process-wide, so re-registering the same thirteen tools
     /// for every new session only rebuilt identical schemas and bumped the
     /// registry's catalog version twelve times, which invalidated the modern
     /// lane's encoded-catalog cache on every `initialize`.
@@ -47,6 +47,7 @@ enum ToolRegistry {
         ListChatsTool.register(on: server, db: db, resolver: resolver)
         GetActiveConversations.register(on: server, db: db, resolver: resolver)
         GetMessagesTool.register(on: server, db: db, resolver: resolver)
+        GetMessagesSinceTool.register(on: server, db: db, resolver: resolver)
         GetContext.register(on: server, db: db, resolver: resolver)
         SearchTool.register(on: server, db: db, resolver: resolver)
         GetUnread.register(on: server, db: db, resolver: resolver)

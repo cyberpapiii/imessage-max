@@ -49,7 +49,7 @@ final class ModernHTTPIntegrationTests: XCTestCase {
             XCTAssertNotNil(result["ttlMs"] as? Int)
             XCTAssertEqual(result["cacheScope"] as? String, "private")
             let tools = try XCTUnwrap(result["tools"] as? [[String: Any]])
-            XCTAssertEqual(tools.count, 12)
+            XCTAssertEqual(tools.count, 13)
             XCTAssertTrue(tools.contains { $0["name"] as? String == "send" })
             XCTAssertNil(response.head.headerFields[.mcpSessionId])
         }
@@ -275,7 +275,7 @@ final class ModernHTTPIntegrationTests: XCTestCase {
             let json = try modernDecodeJSON(from: tools.body)
             let result = try XCTUnwrap(json["result"] as? [String: Any])
             let toolList = try XCTUnwrap(result["tools"] as? [[String: Any]])
-            XCTAssertEqual(toolList.count, 12)
+            XCTAssertEqual(toolList.count, 13)
         }
     }
 
@@ -349,7 +349,7 @@ final class ModernHTTPIntegrationTests: XCTestCase {
             let json = try modernDecodeJSON(from: tools.body)
             let result = try XCTUnwrap(json["result"] as? [String: Any])
             let toolList = try XCTUnwrap(result["tools"] as? [[String: Any]])
-            XCTAssertEqual(toolList.count, 12)
+            XCTAssertEqual(toolList.count, 13)
         }
     }
 }
