@@ -476,12 +476,14 @@ extension GetMessagesTool {
         if let has = has {
             switch has {
             case "links":
-                query.where("(m.text LIKE '%http://%' OR m.text LIKE '%https://%')")
+                query.where("(m.text LIKE '%http://%' OR m.text LIKE '%https://%' OR m.balloon_bundle_id = '\(BalloonBundle.urlPreview)')")
             case "attachments":
                 query.where("""
                     EXISTS (
-                        SELECT 1 FROM message_attachment_join maj
+                        SELECT 1 FROM attachment a
+                        JOIN message_attachment_join maj ON a.ROWID = maj.attachment_id
                         WHERE maj.message_id = m.ROWID
+                          AND COALESCE(a.hide_attachment, 0) = 0
                     )
                     """)
             case "images":
@@ -492,6 +494,7 @@ extension GetMessagesTool {
                             JOIN message_attachment_join maj ON a.ROWID = maj.attachment_id
                             WHERE maj.message_id = m.ROWID
                               AND (\(imagePredicate))
+                              AND COALESCE(a.hide_attachment, 0) = 0
                         )
                         """)
                 }
@@ -536,6 +539,7 @@ extension GetMessagesTool {
             FROM attachment a
             JOIN message_attachment_join maj ON a.ROWID = maj.attachment_id
             WHERE maj.message_id IN (\(placeholders))
+              AND COALESCE(a.hide_attachment, 0) = 0
             """
 
         var map: [Int: [AttachmentRow]] = [:]

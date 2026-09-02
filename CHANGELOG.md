@@ -6,6 +6,10 @@
 
 - `send` responses carry `disposition` (`completed` / `not_started` / `may_have_completed`) and `retry_safe`; `confirmed` is documented as a chat.db row match within the verification window, not a delivery receipt.
 
+### Fixes
+
+- `get_messages has:"links"` and `search has:"link"` match URL preview balloon rows; link-preview payload attachments are no longer listed.
+
 ## 1.6.0
 
 ### Added

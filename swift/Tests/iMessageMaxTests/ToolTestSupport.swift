@@ -78,7 +78,8 @@ final class ToolTestDatabase {
         otherHandle: Int = 0,
         associatedMessageEmoji: String? = nil,
         threadOriginatorGuid: String? = nil,
-        dateEdited: Int64 = 0
+        dateEdited: Int64 = 0,
+        balloonBundleId: String? = nil
     ) throws {
         let textValue = text.map { "'\(escape($0))'" } ?? "NULL"
         let handleValue = handleId.map(String.init) ?? "NULL"
@@ -86,6 +87,7 @@ final class ToolTestDatabase {
         let groupTitleValue = groupTitle.map { "'\(escape($0))'" } ?? "NULL"
         let assocEmojiValue = associatedMessageEmoji.map { "'\(escape($0))'" } ?? "NULL"
         let threadOriginatorValue = threadOriginatorGuid.map { "'\(escape($0))'" } ?? "NULL"
+        let balloonBundleValue = balloonBundleId.map { "'\(escape($0))'" } ?? "NULL"
         let attributedValue: String
         if let attributedBody {
             attributedValue = "X'\(attributedBody.map { String(format: "%02X", $0) }.joined())'"
@@ -95,9 +97,9 @@ final class ToolTestDatabase {
 
         try execute("""
             INSERT INTO message (
-                ROWID, guid, text, attributedBody, date, is_from_me, is_read, handle_id, associated_message_type, associated_message_guid, error, is_sent, item_type, group_action_type, group_title, other_handle, associated_message_emoji, thread_originator_guid, date_edited
+                ROWID, guid, text, attributedBody, date, is_from_me, is_read, handle_id, associated_message_type, associated_message_guid, error, is_sent, item_type, group_action_type, group_title, other_handle, associated_message_emoji, thread_originator_guid, date_edited, balloon_bundle_id
             ) VALUES (
-                \(rowId), '\(escape(guid))', \(textValue), \(attributedValue), \(date), \(isFromMe ? 1 : 0), \(isRead ? 1 : 0), \(handleValue), \(associatedMessageType), \(assocGuidValue), \(error), \(isSent), \(itemType), \(groupActionType), \(groupTitleValue), \(otherHandle), \(assocEmojiValue), \(threadOriginatorValue), \(dateEdited)
+                \(rowId), '\(escape(guid))', \(textValue), \(attributedValue), \(date), \(isFromMe ? 1 : 0), \(isRead ? 1 : 0), \(handleValue), \(associatedMessageType), \(assocGuidValue), \(error), \(isSent), \(itemType), \(groupActionType), \(groupTitleValue), \(otherHandle), \(assocEmojiValue), \(threadOriginatorValue), \(dateEdited), \(balloonBundleValue)
             );
             """)
     }
@@ -112,15 +114,17 @@ final class ToolTestDatabase {
     func insertAttachment(
         rowId: Int,
         filename: String,
-        mimeType: String,
+        mimeType: String?,
         uti: String,
         totalBytes: Int = 0,
-        transferName: String? = nil
+        transferName: String? = nil,
+        hideAttachment: Bool = false
     ) throws {
         let transfer = transferName.map { "'\(escape($0))'" } ?? "NULL"
+        let mimeValue = mimeType.map { "'\(escape($0))'" } ?? "NULL"
         try execute("""
-            INSERT INTO attachment (ROWID, filename, mime_type, uti, total_bytes, transfer_name)
-            VALUES (\(rowId), '\(escape(filename))', '\(escape(mimeType))', '\(escape(uti))', \(totalBytes), \(transfer));
+            INSERT INTO attachment (ROWID, filename, mime_type, uti, total_bytes, transfer_name, hide_attachment)
+            VALUES (\(rowId), '\(escape(filename))', \(mimeValue), '\(escape(uti))', \(totalBytes), \(transfer), \(hideAttachment ? 1 : 0));
             """)
     }
 
@@ -172,7 +176,8 @@ final class ToolTestDatabase {
             other_handle INTEGER DEFAULT 0,
             associated_message_emoji TEXT,
             thread_originator_guid TEXT,
-            date_edited INTEGER DEFAULT 0
+            date_edited INTEGER DEFAULT 0,
+            balloon_bundle_id TEXT
         );
         CREATE TABLE chat_message_join (
             chat_id INTEGER,
@@ -184,7 +189,8 @@ final class ToolTestDatabase {
             mime_type TEXT,
             uti TEXT,
             total_bytes INTEGER,
-            transfer_name TEXT
+            transfer_name TEXT,
+            hide_attachment INTEGER DEFAULT 0
         );
         CREATE TABLE message_attachment_join (
             message_id INTEGER,

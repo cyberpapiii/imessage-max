@@ -144,13 +144,14 @@ extension SearchTool {
         if let hasType = has {
             switch hasType {
             case "link":
-                builder.where("m.text LIKE ? ESCAPE '\\'", "%http%")
+                builder.where("(m.text LIKE ? ESCAPE '\\' OR m.balloon_bundle_id = '\(BalloonBundle.urlPreview)')", "%http%")
             case "attachment":
                 builder.where("""
                     EXISTS (
                         SELECT 1 FROM attachment a
                         JOIN message_attachment_join maj ON a.ROWID = maj.attachment_id
                         WHERE maj.message_id = m.ROWID
+                          AND COALESCE(a.hide_attachment, 0) = 0
                     )
                     """)
             case "image", "video":
@@ -161,6 +162,7 @@ extension SearchTool {
                             JOIN message_attachment_join maj ON a.ROWID = maj.attachment_id
                             WHERE maj.message_id = m.ROWID
                               AND (\(typePredicate))
+                              AND COALESCE(a.hide_attachment, 0) = 0
                         )
                         """)
                 }
