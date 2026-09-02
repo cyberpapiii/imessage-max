@@ -35,22 +35,22 @@ not push, tag, or merge; the operator merges with `--no-ff` and runs
 
 | Plan | Title | Priority | Effort | Depends on | Status |
 |------|-------|----------|--------|------------|--------|
-| 063 | Input hygiene: sign-prefixed `parseRowId`, hand-built JSON in get_unread, raw sqlite3 text in `ToolErrorMapping`, ignored `sqlite3_bind_*` codes | P1 | S | none | TODO |
-| 064 | Pagination: `more: true` with a null cursor when the last row has no date (list_chats, get_messages, list_attachments, search) | P1 | S | none | TODO |
-| 066 | `CI=true` contacts bypass visible in stats, log, and `diagnose`; fix the build.yml comment; align release.yml to the serial test command with a timeout | P2 | S | none | TODO |
-| 065 | Session lifecycle: remove-before-await in `terminateSession`, `ResumeGate.arm` leaked work item (register-once already landed at `d5968cf`, verify only) | P2 | M | none | TODO |
-| 067 | Release hygiene: release.yml timeout and `--tag` check, Formula in the version check, SHA-pinned actions and Dependabot, RELEASING.md brew step, CHANGELOG tail, AGENTS.md tree and Swift version | P2 | S-M | 066 | TODO |
-| 068 | Batched participants and recent senders everywhere; one chat-name producer (`ChatIdentity`); find_chat gets the duplicate-name disambiguator | P2 | M | none | TODO |
-| 069 | Search hot path: per-anchor context windows, static `NSDataDetector`/regexes, `EXISTS` is_group predicate (measure with `EXPLAIN QUERY PLAN`) | P2 | S-M | none | TODO |
-| 070 | get_context: `contains` beyond the newest 500 rows, distinct exhausted-window error, first real test file for the tool | P2 | M | 063 | TODO |
-| 073 | Render group system messages (renames, adds, removes) as a typed `event` instead of null-text messages | P2 | S | none | DONE |
-| 074 | `include_filtered` on list_chats, search, get_unread, find_chat; hide Apple-flagged junk chats by default and report the hidden count | P2 | S | none | TODO |
-| 075 | Remove the never-implemented `reply_to` parameter from the send schema | P3 | S | none | TODO |
-| 076 | Reactions, replies, edits completion: types 2006/2007, removals applied, `reply_to`/`reply_count` from `thread_originator_guid`, `edited` flag, mirrored onto search and context | P2 | M | 068 | TODO |
-| 071 | Extract the pending-request registry from `HTTPTransport`; migrate ListAttachments and GetActiveConversations onto `QueryBuilder` | P3 | M | 065 | TODO |
-| 072 | Bounded read deadline on HTTP body collection (408), SSE exempt | P3 | M | 071 | TODO |
-| 077 | SPIKE: one-call catch-up sweep design and measurement (no tool registered until approved) | P2 | M | none | TODO |
-| 078 | SPIKE: what `confirmed` proves; measure `is_delivered`/`date_read` settling before any response change | P2 | M | none | TODO |
+| 063 | Input hygiene: sign-prefixed `parseRowId`, hand-built JSON in get_unread, raw sqlite3 text in `ToolErrorMapping`, ignored `sqlite3_bind_*` codes | P1 | S | none | DONE 2026-09-02, merged to main (`99b6a17`, branch `advisor/063-input-hygiene`; 373/0 re-verified) |
+| 064 | Pagination: `more: true` with a null cursor when the last row has no date (list_chats, get_messages, list_attachments, search) | P1 | S | none | DONE 2026-09-02, merged to main (`4c93560`, branch `advisor/064-more-vs-null-cursor`; 375/0 re-verified) |
+| 066 | `CI=true` contacts bypass visible in stats, log, and `diagnose`; fix the build.yml comment; align release.yml to the serial test command with a timeout | P2 | S | none | DONE 2026-09-02, merged to main (`c2150c5`, branch `advisor/066-ci-guard-visibility`; 376/0 re-verified) |
+| 065 | Session lifecycle: remove-before-await in `terminateSession`, `ResumeGate.arm` leaked work item (register-once already landed at `d5968cf`, verify only) | P2 | M | none | BLOCKED 2026-09-02: Step 1's test cannot be made to fail deterministically at `639529e` after the yield-loop adjustment. Single `Task.yield()` passed 3/3 (`server.stop()` already finished; `routed == false`). `for _ in 0..<10` yield loop was flaky (`routed == true` only sometimes). No commits. Item (c) verified: `292b497`, `claimCatalogBinding` count 2, ToolRegistryBindingTests 2/0. |
+| 067 | Release hygiene: release.yml timeout and `--tag` check, Formula in the version check, SHA-pinned actions and Dependabot, RELEASING.md brew step, CHANGELOG tail, AGENTS.md tree and Swift version | P2 | S-M | 066 | DONE 2026-09-02, merged to main (`41a6e07`, branch `advisor/067-release-hygiene`; 393/0 re-verified). Kept `timeout-minutes: 30` from 066 (did not lower to 20). Tap publish not done (operator action). |
+| 068 | Batched participants and recent senders everywhere; one chat-name producer (`ChatIdentity`); find_chat gets the duplicate-name disambiguator | P2 | M | none | DONE 2026-09-02, merged to main (`88003df`, branch `advisor/068-batched-participants`; 384/0 re-verified) |
+| 069 | Search hot path: per-anchor context windows, static `NSDataDetector`/regexes, `EXISTS` is_group predicate (measure with `EXPLAIN QUERY PLAN`) | P2 | S-M | none | DONE 2026-09-02, merged to main (`065d036`, branch `advisor/069-search-hot-path`; 401/0 re-verified). Step 3 kept COUNT: identical EXPLAIN (CORRELATED SCALAR SUBQUERY + COVERING INDEX) and best warm time 0.093s vs 0.093s. |
+| 070 | get_context: `contains` beyond the newest 500 rows, distinct exhausted-window error, first real test file for the tool | P2 | M | 063 | DONE 2026-09-02, merged to main (`f5bba45`, branch `advisor/070-get-context-contains-window`; 414/0 re-verified). No docs commit: no tool-error-code list to update. |
+| 073 | Render group system messages (renames, adds, removes) as a typed `event` instead of null-text messages | P2 | S | none | DONE 2026-09-02, merged to main (`3241f0a`, branch `advisor/073-render-group-system-messages`; 388/0 re-verified). Rebased ChatSummaryQueries onto 068's batched attachment-types path. |
+| 074 | `include_filtered` on list_chats, search, get_unread, find_chat; hide Apple-flagged junk chats by default and report the hidden count | P2 | S | none | DONE 2026-09-02, merged to main (`34590a5`, branch `advisor/074-is-filtered-junk-chats`; 393/0 after `da29e72` raised 068 query-count bounds by 1 for `filtered_hidden`). Live sanity: 29 vs 33 in 7d, 4 hidden junk/RCS/short-code, no saved contact hidden. |
+| 075 | Remove the never-implemented `reply_to` parameter from the send schema | P3 | S | none | DONE 2026-09-02, merged to main (`549300a`, branch `advisor/075-remove-reply-to-from-send-schema`; 376/0 re-verified) |
+| 076 | Reactions, replies, edits completion: types 2006/2007, removals applied, `reply_to`/`reply_count` from `thread_originator_guid`, `edited` flag, mirrored onto search and context | P2 | M | 068 | DONE 2026-09-02, merged to main (`bec239e`, branch `advisor/076-reactions-replies-edits-completion`; 420/0 re-verified). Rebased onto 069+070. Sticker token `🩵 sticker`. Live spot-check chat2151. |
+| 071 | Extract the pending-request registry from `HTTPTransport`; migrate ListAttachments and GetActiveConversations onto `QueryBuilder` | P3 | M | 065 | BLOCKED 2026-09-02: depends on 065, which is BLOCKED. Step 1's test cannot be made to fail deterministically at `639529e` after the yield-loop adjustment. |
+| 072 | Bounded read deadline on HTTP body collection (408), SSE exempt | P3 | M | 071 | BLOCKED 2026-09-02: depends on 071, which is BLOCKED because 065 is BLOCKED. |
+| 077 | SPIKE: one-call catch-up sweep design and measurement (no tool registered until approved) | P2 | M | none | SPIKE 2026-09-02, doc `docs/plans/2026-09-01-catch-up-sweep-design.md` cherry-picked to main (`ac0229d`). Prototype branch `advisor/077-spike-catch-up-sweep` unmerged. Recommendation: do not implement (union = recent = 33). 420/0 unchanged. |
+| 078 | SPIKE: what `confirmed` proves; measure `is_delivered`/`date_read` settling before any response change | P2 | M | none | SPIKE 2026-09-02, merged to main (`a004283`, branch `advisor/078-spike-send-delivery-semantics`; doc `docs/plans/2026-09-01-send-delivery-semantics.md`). Recommendation (C) do nothing: 0 of 1,530 iMessage DMs delivered in 180d. No prototype. 420/0 unchanged. |
 
 ### Dependency notes (2026-09-01 evening round)
 
@@ -61,6 +61,10 @@ not push, tag, or merge; the operator merges with `--no-ff` and runs
 - **069 and 068 both touch `SearchInternals.swift`** in different regions (context window vs. chat naming); land 068 first and rebase 069.
 - **073 and 074 both add fixture columns** to `ToolTestSupport.swift`; whichever lands second rebases.
 - Independent waves for parallel worktrees: (063, 064, 066) first; (065, 068, 073, 074, 075) second; (067, 069, 070, 076) third; (071, 072) fourth; 077 and 078 any time, they merge no code.
+
+### Execution record (2026-09-02)
+
+Executed 063–078 on this machine from `639529e`. Code merges used `--no-ff` and `cd swift && swift build && swift test` after each. 065, 071, and 072 are BLOCKED (see rows). 077 and 078 are spikes: design docs under `docs/plans/`, no tool code. 077's prototype stays on `advisor/077-spike-catch-up-sweep`. Suite after 076 and both spike docs: **420/0**. `main` was not pushed. No tag beyond `v1.5.0`.
 
 ### Findings considered and rejected (2026-09-01 evening)
 
