@@ -7,7 +7,7 @@ final class SendResolverTests: XCTestCase {
         let dbPath = try makeResolverTestDatabase()
         defer { try? FileManager.default.removeItem(atPath: dbPath) }
 
-        let resolver = SendResolver(db: Database(path: dbPath), resolver: ContactResolver())
+        let resolver = SendResolver(db: Database(path: dbPath), resolver: ContactResolver(seedCache: [:]))
         let result = await resolver.resolve(chatId: "chat10", to: nil)
 
         switch result {
@@ -29,7 +29,7 @@ final class SendResolverTests: XCTestCase {
         let dbPath = try makeResolverTestDatabase()
         defer { try? FileManager.default.removeItem(atPath: dbPath) }
 
-        let resolver = SendResolver(db: Database(path: dbPath), resolver: ContactResolver())
+        let resolver = SendResolver(db: Database(path: dbPath), resolver: ContactResolver(seedCache: [:]))
         let result = await resolver.resolve(chatId: nil, to: "+15555550123")
 
         switch result {
@@ -124,7 +124,7 @@ final class SendResolverTests: XCTestCase {
         let dbPath = try makeResolverTestDatabase()
         defer { try? FileManager.default.removeItem(atPath: dbPath) }
 
-        let resolver = SendResolver(db: Database(path: dbPath), resolver: ContactResolver())
+        let resolver = SendResolver(db: Database(path: dbPath), resolver: ContactResolver(seedCache: [:]))
         let result = await resolver.resolve(chatId: nil, to: "+55555")
 
         guard case .failure(let message) = result else {

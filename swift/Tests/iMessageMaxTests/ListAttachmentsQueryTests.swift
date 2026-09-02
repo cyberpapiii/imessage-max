@@ -109,7 +109,7 @@ final class ListAttachmentsQueryTests: XCTestCase {
         sort: String = "recent_first",
         cursor: String? = nil
     ) async throws -> ListAttachmentsResponse {
-        let tool = ListAttachments(db: fixture.database(), resolver: ContactResolver())
+        let tool = ListAttachments(db: fixture.database(), resolver: makeSeededResolver())
         let result = await tool.execute(
             chatId: chatId,
             fromPerson: fromPerson,

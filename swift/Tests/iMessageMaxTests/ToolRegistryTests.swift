@@ -7,7 +7,7 @@ final class ToolRegistryTests: XCTestCase {
         ToolHandlerRegistry.shared.resetForTesting()
 
         let server = Server(name: "test", version: "0")
-        await ToolRegistry.registerAll(on: server, db: Database(), resolver: ContactResolver())
+        await ToolRegistry.registerAll(on: server, db: Database(), resolver: ContactResolver(seedCache: [:]))
 
         let tools = ToolHandlerRegistry.shared.getTools()
         let names = Set(tools.map(\.name))
@@ -33,7 +33,7 @@ final class ToolRegistryTests: XCTestCase {
         ToolHandlerRegistry.shared.resetForTesting()
 
         let server = Server(name: "test", version: "0")
-        await ToolRegistry.registerAll(on: server, db: Database(), resolver: ContactResolver())
+        await ToolRegistry.registerAll(on: server, db: Database(), resolver: ContactResolver(seedCache: [:]))
 
         let tools = Dictionary(
             uniqueKeysWithValues: ToolHandlerRegistry.shared.getTools().map { ($0.name, $0) }
@@ -64,7 +64,7 @@ final class ToolRegistryTests: XCTestCase {
         ToolHandlerRegistry.shared.resetForTesting()
 
         let server = Server(name: "test", version: "0")
-        await ToolRegistry.registerAll(on: server, db: Database(), resolver: ContactResolver())
+        await ToolRegistry.registerAll(on: server, db: Database(), resolver: ContactResolver(seedCache: [:]))
 
         let tools = Dictionary(
             uniqueKeysWithValues: ToolHandlerRegistry.shared.getTools().map { ($0.name, $0) }
