@@ -1,19 +1,40 @@
 // Sources/iMessageMax/Database/Database.swift
 import Foundation
 import SQLite3
+import Synchronization
 
-// Safe as @unchecked Sendable because instances only hold an immutable path string.
-// Every query opens its own short-lived read-only SQLite connection, so there is no
-// shared mutable connection state crossing actor/task boundaries.
+// Safe as @unchecked Sendable because instances only hold an immutable path
+// string plus a Mutex-guarded schema cache. Every query opens its own
+// short-lived read-only SQLite connection, so there is no shared mutable
+// connection state crossing actor/task boundaries.
 final class Database: @unchecked Sendable {
     static let defaultPath: String = {
         ("~/Library/Messages/chat.db" as NSString).expandingTildeInPath
     }()
 
     private let path: String
+    private let schemaCache: Mutex<SchemaCapabilities?>
 
     init(path: String = Database.defaultPath) {
         self.path = path
+        self.schemaCache = Mutex(nil)
+    }
+
+    /// Test-only: skip the probe and use `schema` as the answer.
+    init(path: String, schemaOverride: SchemaCapabilities) {
+        self.path = path
+        self.schemaCache = Mutex(schemaOverride)
+    }
+
+    /// The probed schema, cached after the first successful open. A failed
+    /// open throws and caches nothing, so the next call probes again.
+    func schema() throws -> SchemaCapabilities {
+        if let cached = schemaCache.withLock({ $0 }) { return cached }
+        let conn = try openReadOnly()
+        defer { sqlite3_close(conn) }
+        let probed = try SchemaCapabilities(probing: conn)
+        schemaCache.withLock { $0 = probed }
+        return probed
     }
 
     // MARK: - Access Check

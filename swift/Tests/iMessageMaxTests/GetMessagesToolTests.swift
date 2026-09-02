@@ -458,6 +458,45 @@ final class GetMessagesToolTests: XCTestCase {
         XCTAssertEqual(messages.count, 1)
         XCTAssertEqual(messages.first?["text"] as? String, "still visible")
     }
+
+    func testMissingReplyAndEditColumnsDegradeToPlainMessages() async throws {
+        let fixture = try makeGetMessagesFixture()
+        try fixture.execute("ALTER TABLE message DROP COLUMN thread_originator_guid")
+        try fixture.execute("ALTER TABLE message DROP COLUMN date_edited")
+        try fixture.execute("ALTER TABLE message DROP COLUMN associated_message_emoji")
+        let tool = GetMessagesTool(db: fixture.database(), resolver: makeSeededResolver())
+        let response = try await decodeGetMessagesResponse(
+            await tool.execute(args: ["chat_id": .string("chat20")])
+        )
+        let messages = try decodeJSONArray(try XCTUnwrap(response["messages"]))
+        XCTAssertEqual(messages.count, 4)
+        for message in messages {
+            XCTAssertNil(message["reply_to"])
+            XCTAssertNil(message["reply_count"])
+            XCTAssertNil(message["edited"])
+        }
+    }
+
+    func testSchemaOverrideIsConsultedEvenWhenColumnsExist() async throws {
+        let fixture = try makeGetMessagesFixture()
+        let db = Database(
+            path: fixture.path,
+            schemaOverride: SchemaCapabilities(
+                base: .assumed,
+                messageThreadOriginatorGuid: false,
+                messageDateEdited: false
+            )
+        )
+        let tool = GetMessagesTool(db: db, resolver: makeSeededResolver())
+        let response = try await decodeGetMessagesResponse(
+            await tool.execute(args: ["chat_id": .string("chat20")])
+        )
+        let messages = try decodeJSONArray(try XCTUnwrap(response["messages"]))
+        for message in messages {
+            XCTAssertNil(message["reply_to"])
+            XCTAssertNil(message["edited"])
+        }
+    }
 }
 
 private func decodeGetMessagesResponse(_ contents: [Tool.Content]) async throws -> [String: Any] {

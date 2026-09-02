@@ -12,9 +12,10 @@ enum MessageAnnotations {
         guard !messageGuids.isEmpty else { return [:] }
 
         let placeholders = messageGuids.map { _ in "?" }.joined(separator: ", ")
+        let schema = try db.schema()
         let sql = """
             SELECT m.associated_message_guid, m.associated_message_type, h.id,
-                   m.associated_message_emoji, m.date
+                   \(schema.associatedMessageEmojiSQL), m.date
             FROM message m
             LEFT JOIN handle h ON m.handle_id = h.ROWID
             WHERE m.associated_message_type >= 2000
@@ -95,6 +96,9 @@ enum MessageAnnotations {
         pageIdByGuid: [String: Int],
         originatorGuids: [String]
     ) throws -> ReplyLookup {
+        guard try db.schema().messageThreadOriginatorGuid else {
+            return ReplyLookup(originatorIdByGuid: [:], replyCountByGuid: [:])
+        }
         var originatorIdByGuid: [String: String] = [:]
         for (guid, id) in pageIdByGuid {
             originatorIdByGuid[guid] = "msg_\(id)"
@@ -427,6 +431,7 @@ extension GetMessagesTool {
         contains: String?,
         has: String?
     ) throws -> [MessageRow] {
+        let schema = try db.schema()
         let query = QueryBuilder()
             .select(
                 "m.ROWID as id",
@@ -440,8 +445,8 @@ extension GetMessagesTool {
                 "m.group_action_type",
                 "m.group_title",
                 "oh.id as other_handle_id",
-                "m.thread_originator_guid",
-                "m.date_edited"
+                schema.threadOriginatorGuidSQL,
+                schema.dateEditedSQL
             )
             .from("message m")
             .join("chat_message_join cmj ON m.ROWID = cmj.message_id")

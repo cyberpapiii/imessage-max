@@ -384,6 +384,7 @@ enum SearchTool {
                 searchWords = []
             }
 
+            let schema = try db.schema()
             let (sql, params) = buildQuery(
                 query: query,
                 fromPerson: senderFilter,
@@ -399,7 +400,8 @@ enum SearchTool {
                 terms: searchWords,
                 matchAll: matchAll,
                 fuzzy: fuzzy,
-                includeFiltered: includeFiltered
+                includeFiltered: includeFiltered,
+                schema: schema
             )
 
             let filteredHidden: Int?

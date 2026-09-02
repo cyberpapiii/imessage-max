@@ -798,6 +798,40 @@ final class SearchToolTests: XCTestCase {
         XCTAssertFalse(edited.keys.contains("reply_to"))
         XCTAssertFalse(edited.keys.contains("reply_count"))
     }
+
+    func testMissingReplyAndEditColumnsDegradeSearch() async throws {
+        let fixture = try makeSearchFixture()
+        try fixture.execute("ALTER TABLE message DROP COLUMN thread_originator_guid")
+        try fixture.execute("ALTER TABLE message DROP COLUMN date_edited")
+        try fixture.execute("ALTER TABLE message DROP COLUMN associated_message_emoji")
+        let result = await SearchTool.execute(
+            query: "costa trip",
+            cursor: nil,
+            limit: 10,
+            sort: "recent_first",
+            format: "flat",
+            includeContext: true,
+            unanswered: false,
+            unansweredHours: 24,
+            matchAll: false,
+            fuzzy: false,
+            db: fixture.database(),
+            resolver: makeSeededResolver()
+        )
+        let json: String
+        switch result {
+        case .success(let text):
+            json = text
+        case .failure(let error):
+            XCTFail("Unexpected search error: \(error)")
+            return
+        }
+        let decoded = try decodeJSONDictionary(from: json)
+        let results = try decodeJSONArray(decoded["results"])
+        XCTAssertEqual(Set(results.compactMap { $0["id"] as? String }), Set(["msg_200", "msg_250", "msg_300"]))
+        XCTAssertFalse(json.contains("\"reply_to\""))
+        XCTAssertFalse(json.contains("\"edited\""))
+    }
 }
 
 func decodeSearchResponse(_ result: Result<String, SearchError>) throws -> [String: Any] {
