@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+
+- `search` and search `include_context` no longer hang on modern chat.db: the correlated `has_reactions` `instr`/`substr` subquery is gone; reactions are batched after the Swift trim. `search` also `instr`s `attributedBody` so a NULL-`text` inbox does not burn the 500-row fetch window. A cancelled `tools/call` interrupts in-flight SQLite.
+
 ## 1.7.0
 
 Seven techniques borrowed from a study of [openclaw/imsg](https://github.com/openclaw/imsg) (plans 079 to 085).

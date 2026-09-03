@@ -367,9 +367,8 @@ enum SearchTool {
 
         do {
             // Build and execute query
-            // Fetch more rows if we need to filter by text in Swift
-            // (since attributedBody can't be searched in SQL)
-            // Use a higher multiplier to improve search coverage without time filters
+            // Over-fetch when Swift still has to apply word/fuzzy/unanswered
+            // filters. attributedBody is prefiltered in SQL via instr.
             let fetchLimit = (hasQuery || unanswered) ? max(500, clampedLimit * 10) : clampedLimit
 
             let senderFilter = await resolveFromPersonFilter(fromPerson, resolver: resolver)
@@ -437,12 +436,12 @@ enum SearchTool {
                     guid: row.string(8) ?? "",
                     threadOriginatorGuid: row.string(9),
                     dateEdited: row.optionalInt(10) ?? 0,
-                    hasReactions: row.int(11) != 0,
-                    hasReplies: row.int(12) != 0
+                    hasReactions: false,
+                    hasReplies: row.int(11) != 0
                 )
             }
 
-            // Filter by search query in Swift (since we can't search attributedBody in SQL)
+            // Word/fuzzy filter on extracted text (SQL instr is a prefilter).
             // Supports multi-word search: OR (any word) by default, AND (all words) with matchAll=true
             // With fuzzy=true, also matches words within 1-2 edits (handles typos)
             if hasQuery, !searchWords.isEmpty {
