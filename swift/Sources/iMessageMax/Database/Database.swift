@@ -74,6 +74,23 @@ final class Database: @unchecked Sendable {
     /// Opt-in query counter for tests. Incremented at the start of `query` when non-nil.
     nonisolated(unsafe) static var queryCountForTesting: Int?
 
+    /// In-flight read connections so a cancelled `tools/call` can
+    /// `sqlite3_interrupt` them instead of leaving a full-scan running.
+    private static let activeQueries = Mutex([ObjectIdentifier: ActiveQuery]())
+
+    private final class ActiveQuery: @unchecked Sendable {
+        let conn: OpaquePointer
+        init(_ conn: OpaquePointer) { self.conn = conn }
+        func interrupt() { sqlite3_interrupt(conn) }
+    }
+
+    static func interruptActiveQueries() {
+        let queries = activeQueries.withLock { Array($0.values) }
+        for query in queries {
+            query.interrupt()
+        }
+    }
+
     func query<T>(
         _ sql: String,
         params: [Any] = [],
@@ -83,8 +100,18 @@ final class Database: @unchecked Sendable {
             Database.queryCountForTesting! += 1
         }
 
+        if Task.isCancelled {
+            throw DatabaseError.cancelled
+        }
+
         let conn = try openReadOnly()
-        defer { sqlite3_close(conn) }
+        let active = ActiveQuery(conn)
+        let id = ObjectIdentifier(active)
+        Self.activeQueries.withLock { $0[id] = active }
+        defer {
+            Self.activeQueries.withLock { _ = $0.removeValue(forKey: id) }
+            sqlite3_close(conn)
+        }
 
         let stmt = try prepare(conn, sql: sql, params: params)
         defer { sqlite3_finalize(stmt) }
@@ -92,8 +119,15 @@ final class Database: @unchecked Sendable {
         var results: [T] = []
         var stepResult = sqlite3_step(stmt)
         while stepResult == SQLITE_ROW {
+            if Task.isCancelled {
+                sqlite3_interrupt(conn)
+                throw DatabaseError.cancelled
+            }
             try results.append(map(SQLiteRow(stmt)))
             stepResult = sqlite3_step(stmt)
+        }
+        if stepResult == SQLITE_INTERRUPT || Task.isCancelled {
+            throw DatabaseError.cancelled
         }
         guard stepResult == SQLITE_DONE else {
             throw DatabaseError.queryFailed(String(cString: sqlite3_errmsg(conn)))

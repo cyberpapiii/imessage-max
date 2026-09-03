@@ -37,6 +37,9 @@ final class ClientErrorSanitizationTests: XCTestCase {
         XCTAssertEqual(invalidData, ClientErrorMessages.internalError)
         XCTAssertFalse(invalidData.contains("bad blob"),
             "Raw invalid-data detail must not reach the client")
+
+        let cancelled = ClientErrorMessages.sanitized(DatabaseError.cancelled)
+        XCTAssertEqual(cancelled, ClientErrorMessages.cancelled)
     }
 
     // Non-DatabaseError passes through unchanged: SendError descriptions are

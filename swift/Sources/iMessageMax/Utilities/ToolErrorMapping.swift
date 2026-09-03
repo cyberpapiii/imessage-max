@@ -6,7 +6,7 @@ enum ToolErrorMapping {
         let message: String
     }
 
-    /// Shared `DatabaseError` → tool-error mapping. All four cases; no `default`.
+    /// Shared `DatabaseError` → tool-error mapping. All five cases; no `default`.
     /// `.queryFailed` and `.invalidData` log the detail under `context` and
     /// return `ClientErrorMessages.internalError`.
     static func map(_ error: DatabaseError, context: String) -> Mapped {
@@ -21,6 +21,8 @@ enum ToolErrorMapping {
         case .invalidData(let msg):
             Log.error("\(context): invalid data: \(msg)")
             return Mapped(code: "invalid_data", message: ClientErrorMessages.internalError)
+        case .cancelled:
+            return Mapped(code: "cancelled", message: ClientErrorMessages.cancelled)
         }
     }
 }

@@ -31,7 +31,11 @@ enum ToolCallDispatch {
         }
 
         do {
-            let content = try await handler(arguments)
+            let content = try await withTaskCancellationHandler {
+                try await handler(arguments)
+            } onCancel: {
+                Database.interruptActiveQueries()
+            }
             return .completed(
                 Outcome(
                     content: contentJSON(content),

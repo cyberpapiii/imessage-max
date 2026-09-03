@@ -6,6 +6,7 @@ enum DatabaseError: LocalizedError {
     case notFound(String)
     case queryFailed(String)
     case invalidData(String)
+    case cancelled
 
     var errorDescription: String? {
         switch self {
@@ -17,6 +18,8 @@ enum DatabaseError: LocalizedError {
             return "Query failed: \(msg)"
         case .invalidData(let msg):
             return "Invalid data: \(msg)"
+        case .cancelled:
+            return "Query cancelled"
         }
     }
 }
