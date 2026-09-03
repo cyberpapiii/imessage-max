@@ -1,6 +1,6 @@
 {
   "name": "imessage-max",
-  "version": "1.7.0",
+  "version": "1.7.1",
   "description": "Local MCP server for reading, searching, and sending iMessages on macOS.",
   "author": {
     "name": "Rob Dezendorf",
