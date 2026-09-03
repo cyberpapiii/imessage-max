@@ -27,4 +27,10 @@ final class ToolErrorMappingTests: XCTestCase {
         XCTAssertEqual(mapped.code, "invalid_data")
         XCTAssertEqual(mapped.message, ClientErrorMessages.internalError)
     }
+
+    func testCancelled() {
+        let mapped = ToolErrorMapping.map(.cancelled, context: "test")
+        XCTAssertEqual(mapped.code, "cancelled")
+        XCTAssertEqual(mapped.message, ClientErrorMessages.cancelled)
+    }
 }

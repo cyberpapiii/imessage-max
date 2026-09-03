@@ -433,7 +433,9 @@ final class SearchToolTests: XCTestCase {
         let results = try decodeJSONArray(try XCTUnwrap(response["results"]))
         XCTAssertEqual(results.count, 20)
         let queryCount = try XCTUnwrap(Database.queryCountForTesting)
-        XCTAssertLessThanOrEqual(queryCount, 5, "include_context ran \(queryCount) queries")
+        // schema uncounted + search + filteredHidden + context batch +
+        // reactions (always, after trim) + reply lookup.
+        XCTAssertLessThanOrEqual(queryCount, 6, "include_context ran \(queryCount) queries")
     }
 
     func testIncludeContextWindowsArePerAnchorAndExact() async throws {

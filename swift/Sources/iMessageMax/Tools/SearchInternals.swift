@@ -80,14 +80,25 @@ extension SearchTool {
             if fuzzy || terms.isEmpty {
                 builder.where("(m.text IS NOT NULL OR m.attributedBody IS NOT NULL)")
             } else {
-                // Cheap SQL prefilter on the text column. Rows whose text lives only in
-                // attributedBody still pass (text IS NULL) and are filtered in Swift.
-                // Cap the bound list at 8 and leave leftover terms to the Swift word filter.
+                // LIKE on text (ASCII case-insensitive) plus instr on the
+                // typedstream blob so attributedBody-only rows do not all
+                // pass and steal the fetchLimit window. instr is
+                // case-sensitive; bind lower / titled / upper UTF-8.
+                // Cap at 8; leftover terms stay in the Swift word filter.
                 let capped = Array(terms.prefix(8))
                 let likeClauses = capped.map { _ in "m.text LIKE ? ESCAPE '\\'" }
+                let blobClauses = capped.map { _ in
+                    "(instr(m.attributedBody, ?) > 0 OR instr(m.attributedBody, ?) > 0 OR instr(m.attributedBody, ?) > 0)"
+                }
                 let joiner = matchAll ? " AND " : " OR "
-                let condition = "((\(likeClauses.joined(separator: joiner))) OR (m.text IS NULL AND m.attributedBody IS NOT NULL))"
-                let bindings: [Any] = capped.map { "%\(QueryBuilder.escapeLike($0))%" }
+                let condition = "((\(likeClauses.joined(separator: joiner))) OR (\(blobClauses.joined(separator: joiner))))"
+                var bindings: [Any] = capped.map { "%\(QueryBuilder.escapeLike($0))%" }
+                for term in capped {
+                    let titled = term.prefix(1).uppercased() + term.dropFirst()
+                    bindings.append(Data(term.utf8))
+                    bindings.append(Data(titled.utf8))
+                    bindings.append(Data(term.uppercased().utf8))
+                }
                 builder.where(condition, params: bindings)
             }
         }
@@ -203,19 +214,6 @@ extension SearchTool {
                 "m.guid",
                 schema.threadOriginatorGuidSQL,
                 schema.dateEditedSQL,
-                """
-                EXISTS (
-                    SELECT 1 FROM message r
-                    WHERE r.associated_message_type >= 2000
-                    AND (
-                        r.associated_message_guid = m.guid
-                        OR (
-                            instr(r.associated_message_guid, '/') > 0
-                            AND substr(r.associated_message_guid, instr(r.associated_message_guid, '/') + 1) = m.guid
-                        )
-                    )
-                ) as has_reactions
-                """,
                 schema.hasRepliesSQL
             )
         applySearchFilters(
@@ -320,7 +318,7 @@ extension SearchTool {
             guids: Array(pageIdByGuid.keys),
             pageIdByGuid: pageIdByGuid,
             originatorGuids: rows.compactMap(\.threadOriginatorGuid) + contextRows.compactMap(\.threadOriginatorGuid),
-            fetchReactions: rows.contains(where: \.hasReactions) || contextRows.contains(where: \.hasReactions),
+            fetchReactions: !pageIdByGuid.isEmpty,
             fetchReplies: rows.contains(where: { $0.hasReplies || ($0.threadOriginatorGuid?.isEmpty == false) })
                 || contextRows.contains(where: { $0.hasReplies || ($0.threadOriginatorGuid?.isEmpty == false) })
         )
@@ -607,17 +605,6 @@ extension SearchTool {
         """
         m.ROWID as msg_id, m.text, m.attributedBody, m.date, m.is_from_me, h.id as sender_handle,
         m.guid, \(schema.threadOriginatorGuidSQL), \(schema.dateEditedSQL),
-        EXISTS (
-            SELECT 1 FROM message r
-            WHERE r.associated_message_type >= 2000
-            AND (
-                r.associated_message_guid = m.guid
-                OR (
-                    instr(r.associated_message_guid, '/') > 0
-                    AND substr(r.associated_message_guid, instr(r.associated_message_guid, '/') + 1) = m.guid
-                )
-            )
-        ) as has_reactions,
         \(schema.hasRepliesSQL)
         """
     }
@@ -634,8 +621,8 @@ extension SearchTool {
             guid: row.string(base + 6) ?? "",
             threadOriginatorGuid: row.string(base + 7),
             dateEdited: row.optionalInt(base + 8) ?? 0,
-            hasReactions: row.int(base + 9) != 0,
-            hasReplies: row.int(base + 10) != 0
+            hasReactions: false,
+            hasReplies: row.int(base + 9) != 0
         )
     }
 
@@ -679,7 +666,7 @@ extension SearchTool {
             guids: Array(pageIdByGuid.keys),
             pageIdByGuid: pageIdByGuid,
             originatorGuids: allRows.compactMap(\.threadOriginatorGuid),
-            fetchReactions: allRows.contains(where: \.hasReactions),
+            fetchReactions: !pageIdByGuid.isEmpty,
             fetchReplies: allRows.contains(where: { $0.hasReplies || ($0.threadOriginatorGuid?.isEmpty == false) })
         )
         var reactorNames: [String: String] = [:]
