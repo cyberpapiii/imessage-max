@@ -13,7 +13,7 @@ action, not an executor step.
 
 | Plan | Title | Priority | Effort | Depends on | Status |
 |------|-------|----------|--------|------------|--------|
-| 086 | Remove the correlated `has_reactions` `instr`/`substr` subquery from `search` and search context SQL; `instr` prefilter on `attributedBody`; interrupt SQLite when a `tools/call` is cancelled | P0 | M | none | TODO |
+| 086 | Remove the correlated `has_reactions` `instr`/`substr` subquery from `search` and search context SQL; `instr` prefilter on `attributedBody`; interrupt SQLite when a `tools/call` is cancelled | P0 | M | none | DONE 2026-09-03, merged to main (`0238e80`, branch `advisor/086-search-reaction-subquery-hang`; 526 tests, 1 skip, 0 failures). Live launchd service not restarted. |
 
 Scope note: this directory is for executor handoff plans. Dated design
 documents live in `docs/plans/` (a separate, pre-existing convention).
@@ -22,6 +22,10 @@ documents live in `docs/plans/` (a separate, pre-existing convention).
 > launch manifest (referenced by `.codex-plugin/plugin.json`, enforced by
 > `IconMetadataTests`). Machines that route MCP through plug suppress it via
 > `.claude/settings.local.json` → `disabledMcpjsonServers`, never by deletion.
+
+### Execution record (2026-09-03)
+
+Executed 086 from `9eac6a0`. Code merge used `--no-ff` (`0238e80`). Post-merge `cd swift && swift build && swift test`: **526 tests, 1 skipped, 0 failures**. `main` was not pushed. Live `local.imessage-max` left on v1.7.0.
 
 ## Current round (2026-09-02, against `42deb1f`): borrowed from openclaw/imsg
 
