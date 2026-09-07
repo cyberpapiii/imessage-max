@@ -74,6 +74,7 @@ push, not CI's). The tap keeps formulas at the repo root
 ```bash
 TAP=$(brew --repository cyberpapiii/tap)
 cp swift/Formula/imessage-max.rb "$TAP/imessage-max.rb"
+HOMEBREW_NO_AUTO_UPDATE=1 brew info --json=v2 cyberpapiii/tap/imessage-max >/dev/null
 git -C "$TAP" commit -am "imessage-max $VERSION"
 git -C "$TAP" push
 brew update

@@ -15,7 +15,9 @@ class ImessageMax < Formula
 
   depends_on arch: :arm64
   depends_on :macos
-  depends_on macos: :sequoia
+  on_macos do
+    depends_on macos: :sequoia
+  end
 
   def install
     bin.install "imessage-max"
