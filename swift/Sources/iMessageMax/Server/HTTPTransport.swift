@@ -308,7 +308,10 @@ public actor HTTPTransport: Transport {
             let method = (json["method"] as? String)
                 ?? (messageType == .notification ? "notification" : "response")
             let version = request.headers[.mcpProtocolVersion] ?? "legacy"
-            Log.info("era=legacy transport=http version=\(ModernDispatcher.sanitizedLogField(version)) method=\(ModernDispatcher.sanitizedLogField(method)) session=\(sessionId.prefix(8))")
+            // A tools/call gets its own line, with outcome and duration.
+            if method != "tools/call" {
+                Log.info("era=legacy transport=http version=\(ModernDispatcher.sanitizedLogField(version)) method=\(ModernDispatcher.sanitizedLogField(method)) session=\(sessionId.prefix(8))")
+            }
         }
 
         // A `tools/call` needs nothing that the session's own Server holds:
@@ -327,6 +330,7 @@ public actor HTTPTransport: Transport {
                 id: json["id"] ?? NSNull(),
                 name: toolName,
                 arguments: ToolCallDispatch.decodeArguments(params["arguments"]),
+                sessionId: sessionId,
                 headers: responseHeaders
             )
         }
@@ -413,9 +417,14 @@ public actor HTTPTransport: Transport {
         id: Any,
         name: String,
         arguments: [String: Value]?,
+        sessionId: String,
         headers: HTTPFields
     ) async -> Response {
-        let outcome = await ToolCallDispatch.perform(name: name, arguments: arguments)
+        let outcome = await ToolCallDispatch.perform(
+            name: name,
+            arguments: arguments,
+            lane: .legacyHTTP(session: sessionId)
+        )
 
         let envelope: [String: Any]
         switch outcome {

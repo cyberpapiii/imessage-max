@@ -151,9 +151,14 @@ traffic, so header presence must never route a request to the modern
 lane. The regression test for this is
 `testLegacyRequestWithModernHeadersStaysOnLegacyLane`.
 
-Every request logs one era line to stderr
-(`era=modern|legacy transport=... version=... method=...`) with no
-arguments or credentials.
+Every request except a legacy `tools/call` logs one era line to stderr
+(`era=modern|legacy transport=... version=... method=...`). Every
+`tools/call`, on any lane, logs one call line when it ends
+(`call tool=... lane=legacy-http|legacy-stdio|modern-http|modern-stdio
+outcome=ok|tool_error|internal_error|cancelled|unknown_tool ms=...`,
+plus `session=` on legacy HTTP). Neither carries arguments or
+credentials. Every stderr line starts with an ISO 8601 UTC timestamp,
+and startup logs a `Started version=... pid=... transport=...` line.
 
 Not implemented, by design (rationale in
 `plans/018-mcp-2026-07-28-dual-era.md`): prompts, resources, completion,

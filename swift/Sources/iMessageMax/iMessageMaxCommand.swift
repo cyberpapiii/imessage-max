@@ -69,6 +69,7 @@ struct iMessageMax: AsyncParsableCommand {
             )
 
             try await transport.connect()
+            Log.info("Started version=\(Version.current) pid=\(getpid()) transport=http addr=\(host):\(port)")
             let resolvedPolicy = ContactsAccessPolicy.resolve(
                 flag: contactsPolicy,
                 environment: ProcessInfo.processInfo.environment,
