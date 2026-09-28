@@ -255,7 +255,7 @@ actor GetMessagesTool {
         guard let numericChatId = parseChatId(chatId) else {
             throw GetMessagesToolError(errorResponse: GetMessagesErrorResponse(
                 error: "chat_not_found",
-                message: "Chat not found: \(chatId ?? "nil")",
+                message: ClientErrorMessages.chatNotFound(chatId ?? "nil"),
                 candidates: nil,
                 suggestion: nil
             ))

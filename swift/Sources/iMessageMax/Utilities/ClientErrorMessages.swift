@@ -6,6 +6,16 @@ enum ClientErrorMessages {
     static let internalError = "Internal error. Check the server log for details."
     static let cancelled = "Request cancelled."
 
+    // Not-found errors name the tool that returns a current id, so the
+    // caller can recover without guessing.
+    static func chatNotFound(_ chatId: String) -> String {
+        "Chat not found: \(chatId). Call list_chats or find_chat for a current chat_id."
+    }
+    static let messageNotFound = "Target message not found. Call search or get_messages for a current message_id."
+    static func attachmentNotFound(_ attachmentId: String) -> String {
+        "Attachment not found: \(attachmentId). Call list_attachments for a current attachment_id."
+    }
+
     /// Client-safe rendering of an arbitrary error. DatabaseError carries
     /// filesystem paths in its description (useful in logs, not for clients);
     /// map it to the fixed guidance strings and log the detailed form to

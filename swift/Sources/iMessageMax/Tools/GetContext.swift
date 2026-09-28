@@ -202,7 +202,7 @@ enum GetContext {
                 guard let found = rows.first else {
                     return .failure(GetContextError(
                         error: "not_found",
-                        message: "Target message not found"
+                        message: ClientErrorMessages.messageNotFound
                     ))
                 }
                 targetResult = found

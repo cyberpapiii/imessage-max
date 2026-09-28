@@ -73,11 +73,11 @@ enum GetChatDetailsTool {
 
         do {
             guard let numericChatId = ChatIdentifier.parseRowId(chatId) else {
-                let error = GetChatDetailsError(error: "chat_not_found", message: "Chat not found: \(chatId)")
-                throw ToolError(content: [.plainText(try FormatUtils.encodeJSON(error))])
+                throw try chatNotFound(chatId)
             }
-
-            let chatRow = try loadChatRow(chatId: numericChatId, database: database)
+            guard let chatRow = try loadChatRow(chatId: numericChatId, database: database) else {
+                throw try chatNotFound(chatId)
+            }
             let participants = try await loadParticipants(chatId: numericChatId, resolver: resolver, database: database)
             let identity = ChatIdentity(
                 mcpId: "chat\(numericChatId)",
@@ -152,18 +152,19 @@ enum GetChatDetailsTool {
         let awaitingReply: Bool?
     }
 
-    private static func loadChatRow(chatId: Int64, database: Database) throws -> ChatRow {
+    private static func chatNotFound(_ chatId: String) throws -> ToolError {
+        let error = GetChatDetailsError(error: "chat_not_found", message: ClientErrorMessages.chatNotFound(chatId))
+        return ToolError(content: [.plainText(try FormatUtils.encodeJSON(error))])
+    }
+
+    private static func loadChatRow(chatId: Int64, database: Database) throws -> ChatRow? {
         let rows: [ChatRow] = try database.query(
             "SELECT guid, display_name FROM chat WHERE ROWID = ?",
             params: [chatId]
         ) { row in
             ChatRow(guid: row.string(0), displayName: row.string(1))
         }
-
-        guard let row = rows.first else {
-            throw DatabaseError.queryFailed("Chat not found: \(chatId)")
-        }
-        return row
+        return rows.first
     }
 
     private static func loadParticipants(

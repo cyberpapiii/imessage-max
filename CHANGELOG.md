@@ -22,6 +22,7 @@
 - Ending a session (DELETE, expiry) now ends its SSE response. The last chunk was never written, so the client's GET stayed open.
 - Every internal timed wait (SSE keep-alive, request-body deadline, send verification, session sweeps) leaked its timer, continuation and gate. Waits now run on a cancellable Dispatch timer that is released when the wait ends.
 - Live inbox notifications no longer stay off for the life of the process when chat.db is unreadable at startup (Full Disk Access not yet granted, disk not mounted). The watcher keeps retrying, logs one warning, and starts once chat.db can be read. A replaced chat.db (restore, reset) resets the watcher instead of silencing it until new ROWIDs pass the old maximum.
+- `get_chat_details` for a well-formed chat id with no chat returns `chat_not_found` instead of `query_failed` "Internal error" and an ERROR log line. Not-found errors from `get_chat_details`, `get_messages`, `get_unread`, `get_context`, `get_attachment` and `send` now name the tool that returns a current id.
 
 ## 1.7.1
 

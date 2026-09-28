@@ -100,7 +100,7 @@ final class GetContextToolTests: XCTestCase {
         try assertFailure(
             result,
             error: "not_found",
-            message: "Target message not found"
+            message: "Target message not found. Call search or get_messages for a current message_id."
         )
     }
 

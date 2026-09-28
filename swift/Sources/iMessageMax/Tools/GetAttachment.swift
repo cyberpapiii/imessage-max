@@ -154,7 +154,7 @@ struct GetAttachment {
             guard let attachment = attachments.first else {
                 return .error(
                     type: "attachment_not_found",
-                    message: "Attachment not found: \(attachmentId)",
+                    message: ClientErrorMessages.attachmentNotFound(attachmentId),
                     details: nil
                 )
             }
