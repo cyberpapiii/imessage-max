@@ -21,6 +21,7 @@
 - `make restart`, upgrades and any other SIGTERM no longer hang while a client holds an SSE stream open. The server closed nothing, waited for the stream forever, and launchd ended it with SIGKILL after 20 s. Shutdown now closes SSE streams first and takes about 0.2 s, with a 15 s cap on draining in-flight calls.
 - Ending a session (DELETE, expiry) now ends its SSE response. The last chunk was never written, so the client's GET stayed open.
 - Every internal timed wait (SSE keep-alive, request-body deadline, send verification, session sweeps) leaked its timer, continuation and gate. Waits now run on a cancellable Dispatch timer that is released when the wait ends.
+- Live inbox notifications no longer stay off for the life of the process when chat.db is unreadable at startup (Full Disk Access not yet granted, disk not mounted). The watcher keeps retrying, logs one warning, and starts once chat.db can be read. A replaced chat.db (restore, reset) resets the watcher instead of silencing it until new ROWIDs pass the old maximum.
 
 ## 1.7.1
 

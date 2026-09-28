@@ -11,11 +11,13 @@ final class ToolTestDatabase {
     let url: URL
     let path: String
     private let db: OpaquePointer
+    private let ownsFile: Bool
 
     init(name: String = "tool-fixture") throws {
         self.url = FileManager.default.temporaryDirectory
             .appendingPathComponent("\(name)-\(UUID().uuidString).sqlite")
         self.path = url.path
+        self.ownsFile = true
 
         var dbPointer: OpaquePointer?
         guard sqlite3_open(path, &dbPointer) == SQLITE_OK, let dbPointer else {
@@ -25,9 +27,25 @@ final class ToolTestDatabase {
         try execute(schemaSQL)
     }
 
+    /// Opens an existing fixture file for writing without creating the schema
+    /// or deleting the file on deinit.
+    init(attachingTo path: String) throws {
+        self.url = URL(fileURLWithPath: path)
+        self.path = path
+        self.ownsFile = false
+
+        var dbPointer: OpaquePointer?
+        guard sqlite3_open(path, &dbPointer) == SQLITE_OK, let dbPointer else {
+            throw NSError(domain: "ToolTestDatabase", code: 1)
+        }
+        self.db = dbPointer
+    }
+
     deinit {
         sqlite3_close(db)
-        try? FileManager.default.removeItem(at: url)
+        if ownsFile {
+            try? FileManager.default.removeItem(at: url)
+        }
     }
 
     func execute(_ sql: String) throws {
