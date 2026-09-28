@@ -23,6 +23,9 @@ PLIST        := $(HOME)/Library/LaunchAgents/$(LAUNCHD_LABEL).plist
 PORT         := 8080
 CERT_CN      := iMessage Max Dev
 VERIFY_ATTEMPTS := 45
+# Per-probe cap, so a server that accepts but never answers fails the probe
+# instead of hanging make.
+CURL_MAX_TIME := 5
 
 # Resolve CERT_CN to a certificate SHA-1. `codesign --sign <name>` fails with
 # "ambiguous" when the login keychain holds more than one cert with that common
@@ -100,9 +103,9 @@ verify: ## Verify server is healthy
 	LAST_BODY=""; \
 	CURL_OK=0; \
 	while [ $$i -le $(VERIFY_ATTEMPTS) ]; do \
-		sleep 1; \
+		[ $$i -gt 1 ] && sleep 1; \
 		CURL_STATUS=0; \
-		RESULT=$$(curl -sf "$$URL" -X POST \
+		RESULT=$$(curl -sf --max-time $(CURL_MAX_TIME) "$$URL" -X POST \
 			-H "Content-Type: application/json" \
 			-H "Accept: application/json, text/event-stream" \
 			-d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"verify","version":"1.0"}}}' 2>/dev/null) || CURL_STATUS=$$?; \
@@ -121,7 +124,7 @@ verify: ## Verify server is healthy
 				else \
 					echo "✓ Legacy lane: v$$SERVER_VERSION healthy on port $(PORT)"; \
 				fi; \
-				MODERN=$$(curl -sf "$$URL" -X POST \
+				MODERN=$$(curl -sf --max-time $(CURL_MAX_TIME) "$$URL" -X POST \
 					-H "Content-Type: application/json" \
 					-H "Accept: application/json, text/event-stream" \
 					-H "MCP-Protocol-Version: 2026-07-28" \
@@ -148,20 +151,21 @@ verify: ## Verify server is healthy
 
 verify-db: ## Call diagnose over HTTP and fail if the service cannot read chat.db
 	@URL="http://127.0.0.1:$(PORT)"; \
-	INIT=$$(curl -si "$$URL" -X POST \
+	INIT=$$(curl -si --max-time $(CURL_MAX_TIME) "$$URL" -X POST \
 		-H "Content-Type: application/json" \
 		-H "Accept: application/json, text/event-stream" \
 		-d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"verify-db","version":"1.0"}}}' 2>/dev/null) \
 		|| { echo "✗ Server not responding on $$URL"; exit 1; }; \
 	SESSION=$$(printf '%s' "$$INIT" | tr -d '\r' | awk 'tolower($$1)=="mcp-session-id:" {print $$2}'); \
 	if [ -z "$$SESSION" ]; then echo "✗ initialize returned no Mcp-Session-Id header"; exit 1; fi; \
-	BODY=$$(curl -sf "$$URL" -X POST \
+	BODY=$$(curl -sf --max-time 15 "$$URL" -X POST \
 		-H "Content-Type: application/json" \
 		-H "Accept: application/json, text/event-stream" \
 		-H "Mcp-Session-Id: $$SESSION" \
 		-H "MCP-Protocol-Version: 2025-11-25" \
 		-d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"diagnose","arguments":{}}}' 2>/dev/null) \
 		|| { echo "✗ tools/call diagnose failed"; exit 1; }; \
+	curl -s --max-time 2 -o /dev/null "$$URL" -X DELETE -H "Mcp-Session-Id: $$SESSION" -H "MCP-Protocol-Version: 2025-11-25" || true; \
 	printf '%s' "$$BODY" | python3 -c '\
 import sys, json; \
 r = json.load(sys.stdin)["result"]; \
@@ -187,7 +191,7 @@ status: ## Show service status and version
 	@codesign -dvv $(BINARY) 2>&1 | grep -E "Signature|Authority|CDHash" || echo "Not signed"
 	@echo ""
 	@echo "=== Health ==="
-	@BODY=$$(curl -sf http://127.0.0.1:$(PORT) -X POST \
+	@BODY=$$(curl -sf --max-time $(CURL_MAX_TIME) http://127.0.0.1:$(PORT) -X POST \
 		-H "Content-Type: application/json" \
 		-H "Accept: application/json, text/event-stream" \
 		-d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"status","version":"1.0"}}}' 2>/dev/null) || { echo "✗ Not responding"; exit 0; }; \
