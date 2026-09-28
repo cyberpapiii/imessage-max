@@ -49,7 +49,7 @@ final class GetUnreadToolTests: XCTestCase {
                 JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any]
             )
             XCTAssertEqual(object["error"] as? String, "chat_not_found")
-            XCTAssertEqual(object["message"] as? String, "Chat not found: \(hostile)")
+            XCTAssertEqual(object["message"] as? String, ClientErrorMessages.chatNotFound(hostile))
         }
     }
 

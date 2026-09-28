@@ -38,6 +38,31 @@ final class ChatDetailsToolTests: XCTestCase {
         XCTAssertEqual(participants[0]["handle"] as? String, "+15550001111")
         XCTAssertNil(participants[0]["service"])
     }
+
+    /// A well-formed id with no chat row is the caller's mistake, not an
+    /// internal error. At 2cd5734 it came back as query_failed with
+    /// "Internal error. Check the server log for details." and logged ERROR.
+    func testMissingChatIsChatNotFoundWithANextStep() async throws {
+        let fixture = try makeChatDetailsFixture()
+
+        do {
+            _ = try await GetChatDetailsTool.execute(
+                arguments: ["chat_id": .string("chat999999")],
+                database: fixture.database(),
+                resolver: makeChatDetailsResolver()
+            )
+            XCTFail("expected ToolError")
+        } catch let error as ToolError {
+            guard case .text(let text, _, _)? = error.content.first else {
+                return XCTFail("expected text content")
+            }
+            let object = try XCTUnwrap(
+                JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any]
+            )
+            XCTAssertEqual(object["error"] as? String, "chat_not_found")
+            XCTAssertEqual(object["message"] as? String, ClientErrorMessages.chatNotFound("chat999999"))
+        }
+    }
 }
 
 func makeChatDetailsFixture() throws -> ToolTestDatabase {

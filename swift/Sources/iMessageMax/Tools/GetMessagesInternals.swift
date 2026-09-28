@@ -350,7 +350,7 @@ extension GetMessagesTool {
         guard let info = rows.first else {
             throw GetMessagesToolError(errorResponse: GetMessagesErrorResponse(
                 error: "chat_not_found",
-                message: "Chat not found: chat\(chatId)",
+                message: ClientErrorMessages.chatNotFound("chat\(chatId)"),
                 candidates: nil,
                 suggestion: nil
             ))

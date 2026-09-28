@@ -54,7 +54,7 @@ actor SendResolver {
             }
 
             guard let chat = chats.first else {
-                return .failure("Chat not found: \(chatId)")
+                return .failure(ClientErrorMessages.chatNotFound(chatId))
             }
 
             guard let guid = chat.guid, !guid.isEmpty else {

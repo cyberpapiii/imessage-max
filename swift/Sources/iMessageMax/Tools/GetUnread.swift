@@ -208,7 +208,7 @@ final class GetUnread {
         if let chatId = params.chatId {
             numericChatId = ChatIdentifier.parseRowId(chatId)
             if numericChatId == nil {
-                let payload = UnreadError(error: "chat_not_found", message: "Chat not found: \(chatId)")
+                let payload = UnreadError(error: "chat_not_found", message: ClientErrorMessages.chatNotFound(chatId))
                 throw ToolError(content: [.plainText(try FormatUtils.encodeJSON(payload))])
             }
         }
