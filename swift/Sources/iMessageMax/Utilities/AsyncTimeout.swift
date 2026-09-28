@@ -2,8 +2,8 @@ import Foundation
 import Synchronization
 
 enum AsyncTimeout {
-    /// Test seam: number of Dispatch timers enqueued by `sleep`. Only
-    /// incremented on the path that actually calls `asyncAfter`.
+    /// Test seam: number of Dispatch timers started by `sleep`. Only
+    /// incremented on the path that actually resumes a timer source.
     nonisolated(unsafe) static var enqueuedTimersForTesting = 0
 
     /// Dispatch-backed sleep. NEVER sleep Swift tasks inside the launchd service
@@ -13,18 +13,30 @@ enum AsyncTimeout {
     /// Honors task cancellation: cancels the Dispatch timer and resumes so the
     /// awaiting task can observe `Task.isCancelled` without leaking a continuation.
     static func sleep(_ duration: Duration) async {
-        let gate = ResumeGate()
+        await sleep(duration, gate: ResumeGate())
+    }
+
+    /// Test seam: lets a test hold a weak reference to the gate.
+    static func sleep(_ duration: Duration, gate: ResumeGate) async {
         await withTaskCancellationHandler {
             await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-                let work = DispatchWorkItem {
-                    gate.resume(continuation)
+                // A timer source, not asyncAfter: cancelling a source releases
+                // its handler at once, while a cancelled asyncAfter item stays
+                // enqueued, with everything it captured, until its deadline.
+                let timer = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
+                timer.setEventHandler {
+                    gate.resume()
                 }
-                guard gate.arm(work: work, continuation: continuation) else { return }
+                timer.schedule(deadline: .now() + dispatchInterval(for: duration))
+                guard gate.arm(timer: timer, continuation: continuation) else {
+                    // Releasing a never-activated source traps in libdispatch,
+                    // so cancel it and activate it; it never fires.
+                    timer.cancel()
+                    timer.activate()
+                    return
+                }
                 enqueuedTimersForTesting += 1
-                DispatchQueue.global(qos: .utility).asyncAfter(
-                    deadline: .now() + dispatchInterval(for: duration),
-                    execute: work
-                )
+                timer.resume()
             }
         } onCancel: {
             gate.cancelAndResume()
@@ -62,20 +74,23 @@ enum AsyncTimeout {
     /// can run before `arm`; it must not claim the resume in that case, or the
     /// continuation that `arm` later delivers is never resumed.
     ///
-    /// `arm` returns true when the caller must schedule `work`, false when
-    /// cancellation already resumed the continuation and nothing should be
-    /// enqueued.
-    private final class ResumeGate: @unchecked Sendable {
+    /// `arm` returns true when the caller must start the timer, false when
+    /// cancellation already resumed the continuation and nothing should run.
+    ///
+    /// The timer's handler captures the gate, so the gate must drop the
+    /// timer (and cancel it, which releases the handler) whichever way the
+    /// sleep ends. Holding it formed a cycle that leaked every gate.
+    final class ResumeGate: @unchecked Sendable {
         private let state = Mutex(())
-        private var work: DispatchWorkItem?
+        private var timer: DispatchSourceTimer?
         private var continuation: CheckedContinuation<Void, Never>?
         private var resumed = false
         private var cancelled = false
 
-        /// Returns true when the gate now holds `work` and `continuation`, i.e. the
-        /// caller must schedule `work`. Returns false when cancellation already
-        /// resumed the continuation; the caller must not enqueue anything.
-        func arm(work: DispatchWorkItem, continuation: CheckedContinuation<Void, Never>) -> Bool {
+        /// Returns true when the gate now holds `timer` and `continuation`, i.e.
+        /// the caller must start `timer`. Returns false when cancellation
+        /// already resumed the continuation; the caller must not start it.
+        func arm(timer: DispatchSourceTimer, continuation: CheckedContinuation<Void, Never>) -> Bool {
             state.withLock { _ in
                 if cancelled || resumed {
                     if !resumed {
@@ -84,39 +99,36 @@ enum AsyncTimeout {
                     }
                     return false
                 }
-                self.work = work
+                self.timer = timer
                 self.continuation = continuation
                 return true
             }
         }
 
-        func resume(_ continuation: CheckedContinuation<Void, Never>) {
-            state.withLock { _ in
-                guard !resumed else { return }
-                resumed = true
-                self.continuation = nil
-                continuation.resume()
-            }
+        /// Timer fired.
+        func resume() {
+            finish(cancelling: false)
         }
 
         func cancelAndResume() {
-            let (item, cont, already) = state.withLock { _ in
-                cancelled = true
-                let item = work
-                let cont = continuation
-                let already = resumed
-                // Only claim the resume if we actually hold the continuation. If arm()
-                // has not run yet, leave `resumed` false so arm() resumes on arrival.
-                if !already, cont != nil {
-                    resumed = true
-                    continuation = nil
-                }
-                return (item, cont, already)
+            finish(cancelling: true)
+        }
+
+        private func finish(cancelling: Bool) {
+            let (timer, cont) = state.withLock { _ in
+                if cancelling { cancelled = true }
+                // Only claim the resume if we actually hold the continuation. If
+                // arm() has not run yet, leave `resumed` false so arm() resumes
+                // on arrival.
+                let cont = resumed ? nil : continuation
+                if cont != nil { resumed = true }
+                let timer = self.timer
+                self.timer = nil
+                self.continuation = nil
+                return (timer, cont)
             }
-            item?.cancel()
-            if !already, let cont {
-                cont.resume()
-            }
+            timer?.cancel()
+            cont?.resume()
         }
     }
 }

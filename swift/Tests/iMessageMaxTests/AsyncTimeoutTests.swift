@@ -52,4 +52,48 @@ final class AsyncTimeoutTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(elapsed, .milliseconds(90))
         XCTAssertLessThan(elapsed, .seconds(2))
     }
+
+    /// Every sleep must free its gate once it returns. At 33e20cb the gate
+    /// held the work item and the work item captured the gate, so each
+    /// sleep leaked a gate, a work item and a continuation canary.
+    func testGateIsReleasedAfterSleepCompletes() async {
+        let box = WeakBox()
+        do {
+            let gate = AsyncTimeout.ResumeGate()
+            box.value = gate
+            await AsyncTimeout.sleep(.milliseconds(10), gate: gate)
+        }
+        await waitForRelease(box)
+        XCTAssertNil(box.value, "sleep leaked its ResumeGate")
+    }
+
+    /// A cancelled sleep must free its gate at cancellation, not at the
+    /// original deadline: a cancelled asyncAfter item stays enqueued until
+    /// then and keeps everything it captured alive.
+    func testGateIsReleasedPromptlyWhenCancelled() async {
+        let box = WeakBox()
+        let task: Task<Void, Never>
+        do {
+            let gate = AsyncTimeout.ResumeGate()
+            box.value = gate
+            task = Task { await AsyncTimeout.sleep(.seconds(300), gate: gate) }
+        }
+        try? await Task.sleep(for: .milliseconds(50))
+        task.cancel()
+        await task.value
+        await waitForRelease(box)
+        XCTAssertNil(box.value, "cancelled sleep kept its ResumeGate until the deadline")
+    }
+
+    private final class WeakBox: @unchecked Sendable {
+        weak var value: AnyObject?
+    }
+
+    /// Dispatch drops its reference to a timer handler just after it runs,
+    /// so give it a moment before judging.
+    private func waitForRelease(_ box: WeakBox) async {
+        for _ in 0..<100 where box.value != nil {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+    }
 }
