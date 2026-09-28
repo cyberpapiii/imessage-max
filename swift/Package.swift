@@ -13,6 +13,9 @@ let package = Package(
         .package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", .upToNextMinor(from: "0.12.1")),
         .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.8.2"),
         .package(url: "https://github.com/hummingbird-project/hummingbird.git", from: "2.26.0"),
+        // Already resolved through Hummingbird; named here because the HTTP
+        // transport builds its own ServiceGroup for graceful shutdown.
+        .package(url: "https://github.com/swift-server/swift-service-lifecycle.git", from: "2.12.0"),
     ],
     targets: [
         .executableTarget(
@@ -21,6 +24,8 @@ let package = Package(
                 .product(name: "MCP", package: "swift-sdk"),
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
                 .product(name: "Hummingbird", package: "hummingbird"),
+                .product(name: "ServiceLifecycle", package: "swift-service-lifecycle"),
+                .product(name: "UnixSignals", package: "swift-service-lifecycle"),
             ],
             path: "Sources/iMessageMax"
         ),

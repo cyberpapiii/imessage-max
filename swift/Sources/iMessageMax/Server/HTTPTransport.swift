@@ -4,6 +4,8 @@ import HTTPTypes
 import Logging
 import MCP
 import NIOCore
+import ServiceLifecycle
+import UnixSignals
 
 enum MCPProtocolVersion {
     static let latest = "2025-11-25"
@@ -39,6 +41,7 @@ public actor HTTPTransport: Transport {
 
     /// Background task running the Hummingbird server
     private var serverTask: Task<Void, Error>?
+    private var serviceGroup: ServiceGroup?
 
     /// Creates a new HTTP server transport
     ///
@@ -90,6 +93,11 @@ public actor HTTPTransport: Transport {
     ///
     /// - Throws: Error if the server cannot be started
     public func connect() async throws {
+        try await connect(gracefulShutdownSignals: [.sigterm, .sigint])
+    }
+
+    /// Tests pass no signals so the test process keeps its own handlers.
+    func connect(gracefulShutdownSignals: [UnixSignal]) async throws {
         guard !isConnected else { return }
 
         await configureRoutingIfNeeded()
@@ -101,10 +109,39 @@ public actor HTTPTransport: Transport {
 
         isConnected = true
 
+        // ServiceGroup shuts services down last-first, so the stream closer
+        // runs before the server starts waiting for open requests to finish.
+        var configuration = ServiceGroupConfiguration(
+            services: [app, SSEShutdownService(transport: self)],
+            gracefulShutdownSignals: gracefulShutdownSignals,
+            logger: logger
+        )
+        configuration.maximumGracefulShutdownDuration = Self.maximumGracefulShutdownDuration
+        let group = ServiceGroup(configuration: configuration)
+        self.serviceGroup = group
+
         // Start the server in a background task
         self.serverTask = Task {
-            try await app.runService()
+            try await group.run()
         }
+    }
+
+    /// Bounds a SIGTERM drain. It stays under launchd's default 20 s
+    /// ExitTimeOut, so the service exits on its own instead of by SIGKILL.
+    static let maximumGracefulShutdownDuration: Duration = .seconds(15)
+
+    /// Ends every open SSE stream. An SSE GET never finishes on its own, and
+    /// graceful shutdown waits for open requests, so without this a single
+    /// connected client kept the process alive until launchd's SIGKILL.
+    fileprivate func closeAllSSEStreams() async {
+        for sessionId in await sessionManager.activeSessionIds() {
+            await sseManager.terminateSession(sessionId: sessionId)
+        }
+    }
+
+    /// What SIGTERM does, without the signal.
+    func triggerGracefulShutdownForTesting() async {
+        await serviceGroup?.triggerGracefulShutdown()
     }
 
     func makeApplicationForTesting() async -> some ApplicationProtocol {
@@ -619,6 +656,9 @@ public actor HTTPTransport: Transport {
                     for await event in channel.stream {
                         try await writer.write(ByteBuffer(string: event))
                     }
+                    // Hummingbird only ends the response on finish. Without
+                    // it a server-side close left the client's stream open.
+                    try await writer.finish(nil)
                 } catch {
                     logger.debug("SSE stream error: \(error)")
                 }
@@ -969,4 +1009,14 @@ extension HTTPField.Name {
 
     /// Mcp-Name request-metadata header (2026-07-28)
     static let mcpName = HTTPField.Name("Mcp-Name")!
+}
+
+/// Waits for graceful shutdown, then closes the transport's SSE streams.
+private struct SSEShutdownService: Service {
+    let transport: HTTPTransport
+
+    func run() async throws {
+        try await gracefulShutdown()
+        await transport.closeAllSSEStreams()
+    }
 }

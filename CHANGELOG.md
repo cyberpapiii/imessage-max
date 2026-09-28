@@ -14,6 +14,8 @@
 ### Fixes
 
 - Cancelling one `tools/call` no longer aborts other clients' in-flight queries: the SQLite interrupt reaches only the cancelled call's connections. The stdio lane now shares the HTTP lanes' dispatch, so a cancelled stdio call interrupts its queries too.
+- `make restart`, upgrades and any other SIGTERM no longer hang while a client holds an SSE stream open. The server closed nothing, waited for the stream forever, and launchd ended it with SIGKILL after 20 s. Shutdown now closes SSE streams first and takes about 0.2 s, with a 15 s cap on draining in-flight calls.
+- Ending a session (DELETE, expiry) now ends its SSE response. The last chunk was never written, so the client's GET stayed open.
 - Every internal timed wait (SSE keep-alive, request-body deadline, send verification, session sweeps) leaked its timer, continuation and gate. Waits now run on a cancellable Dispatch timer that is released when the wait ends.
 
 ## 1.7.1
