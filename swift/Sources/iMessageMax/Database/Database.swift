@@ -80,10 +80,30 @@ final class Database: @unchecked Sendable {
 
     private final class ActiveQuery: @unchecked Sendable {
         let conn: OpaquePointer
-        init(_ conn: OpaquePointer) { self.conn = conn }
+        let scope: CallScope?
+        init(_ conn: OpaquePointer, scope: CallScope?) {
+            self.conn = conn
+            self.scope = scope
+        }
         func interrupt() { sqlite3_interrupt(conn) }
     }
 
+    /// Identifies one `tools/call`. Queries opened while it is the task's
+    /// `currentCall` (child tasks inherit it) belong to that call, so
+    /// cancelling the call interrupts only its own connections, never
+    /// another client's.
+    final class CallScope: Sendable {}
+
+    @TaskLocal static var currentCall: CallScope?
+
+    static func interruptActiveQueries(in scope: CallScope) {
+        let queries = activeQueries.withLock { $0.values.filter { $0.scope === scope } }
+        for query in queries {
+            query.interrupt()
+        }
+    }
+
+    /// Test-only: interrupts every open query in the process.
     static func interruptActiveQueries() {
         let queries = activeQueries.withLock { Array($0.values) }
         for query in queries {
@@ -105,7 +125,7 @@ final class Database: @unchecked Sendable {
         }
 
         let conn = try openReadOnly()
-        let active = ActiveQuery(conn)
+        let active = ActiveQuery(conn, scope: Database.currentCall)
         let id = ObjectIdentifier(active)
         Self.activeQueries.withLock { $0[id] = active }
         defer {

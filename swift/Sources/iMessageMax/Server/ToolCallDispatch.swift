@@ -23,37 +23,50 @@ enum ToolCallDispatch {
         case completed(Outcome)
     }
 
-    /// Arguments arrive already decoded: the raw `Any` a JSON parse yields is
-    /// not `Sendable`, so it must not cross into the handler's task.
-    static func perform(name: String, arguments: [String: Value]?) async -> Result {
+    /// A finished call before rendering. The legacy stdio lane hands this
+    /// straight to the SDK; the HTTP lanes render it with `perform`.
+    enum Execution {
+        case unknownTool
+        case completed(content: [Tool.Content], isError: Bool)
+    }
+
+    /// Runs the handler. Cancelling the calling task interrupts the SQLite
+    /// queries this call opened, and only those.
+    static func execute(name: String, arguments: [String: Value]?) async -> Execution {
         guard let handler = ToolHandlerRegistry.shared.getHandler(for: name) else {
             return .unknownTool
         }
 
+        let scope = Database.CallScope()
         do {
-            let content = try await withTaskCancellationHandler {
-                try await handler(arguments)
-            } onCancel: {
-                Database.interruptActiveQueries()
+            let content = try await Database.$currentCall.withValue(scope) {
+                try await withTaskCancellationHandler {
+                    try await handler(arguments)
+                } onCancel: {
+                    Database.interruptActiveQueries(in: scope)
+                }
             }
+            return .completed(content: content, isError: false)
+        } catch let error as ToolError {
+            return .completed(content: error.content, isError: true)
+        } catch {
+            let message = "Error: \(ClientErrorMessages.internalDetail(error, context: "Tool execution"))"
+            return .completed(content: [.plainText(message)], isError: true)
+        }
+    }
+
+    /// Arguments arrive already decoded: the raw `Any` a JSON parse yields is
+    /// not `Sendable`, so it must not cross into the handler's task.
+    static func perform(name: String, arguments: [String: Value]?) async -> Result {
+        switch await execute(name: name, arguments: arguments) {
+        case .unknownTool:
+            return .unknownTool
+        case .completed(let content, let isError):
             return .completed(
                 Outcome(
                     content: contentJSON(content),
-                    structuredContent: structuredContentJSON(from: content),
-                    isError: false
-                )
-            )
-        } catch let error as ToolError {
-            return .completed(
-                Outcome(content: contentJSON(error.content), structuredContent: nil, isError: true)
-            )
-        } catch {
-            let message = "Error: \(ClientErrorMessages.internalDetail(error, context: "Tool execution"))"
-            return .completed(
-                Outcome(
-                    content: contentJSON([.plainText(message)]),
-                    structuredContent: nil,
-                    isError: true
+                    structuredContent: isError ? nil : structuredContentJSON(from: content),
+                    isError: isError
                 )
             )
         }
