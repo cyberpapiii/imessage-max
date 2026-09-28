@@ -211,28 +211,15 @@ extension Server {
 
         // Register CallTool handler
         self.withMethodHandler(CallTool.self) { params in
-            guard let handler = ToolHandlerRegistry.shared.getHandler(for: params.name) else {
+            switch await ToolCallDispatch.execute(name: params.name, arguments: params.arguments) {
+            case .unknownTool:
                 throw MCPError.methodNotFound("Unknown tool: \(params.name)")
-            }
-
-            do {
-                let content = try await handler(params.arguments)
+            case .completed(let content, isError: true):
+                return CallTool.Result(content: content, isError: true)
+            case .completed(let content, isError: false):
                 return CallTool.Result(
                     content: content,
                     structuredContent: Self.structuredContent(from: content)
-                )
-            } catch let error as ToolError {
-                return CallTool.Result(content: error.content, isError: true)
-            } catch let error as MCPError {
-                throw error
-            } catch {
-                return CallTool.Result(
-                    content: [
-                        .plainText(
-                            "Error: \(ClientErrorMessages.internalDetail(error, context: "Tool execution"))"
-                        )
-                    ],
-                    isError: true
                 )
             }
         }

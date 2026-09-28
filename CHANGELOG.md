@@ -8,6 +8,7 @@
 
 ### Fixes
 
+- Cancelling one `tools/call` no longer aborts other clients' in-flight queries: the SQLite interrupt reaches only the cancelled call's connections. The stdio lane now shares the HTTP lanes' dispatch, so a cancelled stdio call interrupts its queries too.
 - Every internal timed wait (SSE keep-alive, request-body deadline, send verification, session sweeps) leaked its timer, continuation and gate. Waits now run on a cancellable Dispatch timer that is released when the wait ends.
 
 ## 1.7.1
