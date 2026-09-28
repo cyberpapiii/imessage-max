@@ -6,6 +6,11 @@
 
 - `search` counts `filtered_hidden` from the filtered chats instead of a second scan of every message.
 
+### Observability
+
+- Every `tools/call` logs one line when it ends: tool, lane, outcome (`ok`, `tool_error`, `internal_error`, `cancelled`, `unknown_tool`) and duration in ms. It never logs arguments. It replaces the legacy era line for tool calls.
+- stderr lines now start with an ISO 8601 UTC timestamp, and startup logs the version, pid and transport.
+
 ### Fixes
 
 - Cancelling one `tools/call` no longer aborts other clients' in-flight queries: the SQLite interrupt reaches only the cancelled call's connections. The stdio lane now shares the HTTP lanes' dispatch, so a cancelled stdio call interrupts its queries too.
