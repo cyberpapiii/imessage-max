@@ -6,6 +6,8 @@ import Foundation
 /// runs a fallback poll every `fallbackInterval` that also re-checks file
 /// identities (st_dev, st_ino) and re-registers sources after rotation.
 /// Fires `onNewRows(maxRowid)` when SELECT MAX(ROWID) FROM message grows.
+/// The first successful read only seeds the maximum, so an unreadable
+/// chat.db at startup delays live notifications instead of disabling them.
 /// No Task.sleep: all timing is DispatchSourceTimer on a private queue.
 final class MessageWatcher: @unchecked Sendable {
     struct FileIdentity: Equatable {
@@ -30,7 +32,9 @@ final class MessageWatcher: @unchecked Sendable {
     private var identities: [String: FileIdentity?] = [:]
     private var debounceTimer: DispatchSourceTimer?
     private var fallbackTimer: DispatchSourceTimer?
-    private var lastMax: Int64 = 0
+    /// nil until chat.db has been read once.
+    private var lastMax: Int64?
+    private var pollFailing = false
     private var running = false
 
     private var watchedPaths: [String] {
@@ -50,15 +54,13 @@ final class MessageWatcher: @unchecked Sendable {
         self.onNewRows = onNewRows
     }
 
-    func start() throws {
-        let seed = try currentMaxRowid()
+    func start() {
         queue.sync {
             guard !running else { return }
-            lastMax = seed
             running = true
             refreshFileSources()
             armFallbackTimer()
-            LiveInboxState.set(running: true)
+            poll()
         }
     }
 
@@ -90,6 +92,8 @@ final class MessageWatcher: @unchecked Sendable {
         }
         sources.removeAll()
         identities.removeAll()
+        lastMax = nil
+        pollFailing = false
         running = false
         LiveInboxState.set(running: false)
     }
@@ -149,12 +153,29 @@ final class MessageWatcher: @unchecked Sendable {
         do {
             maxRowid = try currentMaxRowid()
         } catch {
-            Log.warning("MessageWatcher poll failed: \(error)")
+            // The fallback timer retries every few seconds; say so once.
+            if !pollFailing {
+                pollFailing = true
+                Log.warning("MessageWatcher cannot read chat.db, will keep retrying: \(error)")
+            }
             return
         }
-        guard maxRowid > lastMax else { return }
+        if pollFailing {
+            pollFailing = false
+            Log.info("MessageWatcher reading chat.db again")
+        }
+        guard let previous = lastMax else {
+            lastMax = maxRowid
+            LiveInboxState.set(running: true)
+            return
+        }
+        guard maxRowid != previous else { return }
         lastMax = maxRowid
-        onNewRows(maxRowid)
+        // A smaller maximum means chat.db was replaced (restore, reset,
+        // re-sync). Start over from it; those rows are not new mail.
+        if maxRowid > previous {
+            onNewRows(maxRowid)
+        }
     }
 
     private func currentMaxRowid() throws -> Int64 {

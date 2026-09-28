@@ -34,7 +34,7 @@ final class MessageWatcherTests: XCTestCase {
         ) { rowid in
             collected.withLock { $0.append(rowid) }
         }
-        try watcher.start()
+        watcher.start()
         defer { watcher.stop() }
 
         try fixture.insertMessage(rowId: 5, guid: "w-5", text: "hi", date: 1, isFromMe: false, handleId: 1)
@@ -52,7 +52,7 @@ final class MessageWatcherTests: XCTestCase {
         ) { rowid in
             collected.withLock { $0.append(rowid) }
         }
-        try watcher.start()
+        watcher.start()
         defer { watcher.stop() }
 
         var batch = ""
@@ -80,7 +80,7 @@ final class MessageWatcherTests: XCTestCase {
         ) { rowid in
             collected.withLock { $0.append(rowid) }
         }
-        try watcher.start()
+        watcher.start()
         defer { watcher.stop() }
 
         let walPath = fixture.path + "-wal"
@@ -106,6 +106,77 @@ final class MessageWatcherTests: XCTestCase {
         XCTAssertTrue(collected.withLock { $0.contains(7) }, "insert after rotation was not reported")
     }
 
+    /// chat.db unreadable at startup must not switch live notifications off
+    /// for the life of the process. At f005283 start() threw, the caller
+    /// logged it, and nothing ever tried again.
+    func testStartsWatchingOnceTheDatabaseBecomesReadable() async throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("watcher-late-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let path = dir.appendingPathComponent("chat.db").path
+
+        let collected = Mutex<[Int64]>([])
+        let watcher = MessageWatcher(
+            databasePath: path,
+            debounce: .milliseconds(50),
+            fallbackInterval: .seconds(30)
+        ) { rowid in
+            collected.withLock { $0.append(rowid) }
+        }
+        watcher.start()
+        defer { watcher.stop() }
+        XCTAssertTrue(watcher.isRunning)
+        XCTAssertFalse(LiveInboxState.isRunning, "not live until chat.db has been read")
+
+        let fixture = try makeWalFixture()
+        try fixture.insertMessage(rowId: 3, guid: "late-3", text: "old", date: 1, isFromMe: false, handleId: 1)
+        // A WAL database copied without its -shm cannot be opened read-only.
+        try fixture.execute("PRAGMA journal_mode=DELETE;")
+        try FileManager.default.copyItem(atPath: fixture.path, toPath: path)
+        watcher.pollNowForTesting()
+        XCTAssertEqual(collected.withLock { $0 }, [], "the first read only seeds")
+        XCTAssertTrue(LiveInboxState.isRunning)
+
+        let late = try ToolTestDatabase(attachingTo: path)
+        try late.insertMessage(rowId: 4, guid: "late-4", text: "new", date: 2, isFromMe: false, handleId: 1)
+        watcher.pollNowForTesting()
+        XCTAssertEqual(collected.withLock { $0 }, [4])
+    }
+
+    /// A replaced chat.db (restore, reset, re-sync) restarts ROWIDs low.
+    /// At f005283 the watcher kept the old maximum and stayed silent until
+    /// new rows passed it.
+    func testResetsWhenTheDatabaseIsReplaced() async throws {
+        let fixture = try makeWalFixture()
+        try fixture.insertMessage(rowId: 20, guid: "old-20", text: "old", date: 1, isFromMe: false, handleId: 1)
+        let collected = Mutex<[Int64]>([])
+        let watcher = MessageWatcher(
+            databasePath: fixture.path,
+            debounce: .milliseconds(50),
+            fallbackInterval: .seconds(30)
+        ) { rowid in
+            collected.withLock { $0.append(rowid) }
+        }
+        watcher.start()
+        defer { watcher.stop() }
+
+        let replacement = try ToolTestDatabase(name: "watcher-replacement")
+        try replacement.insertMessage(rowId: 2, guid: "new-2", text: "restored", date: 1, isFromMe: false, handleId: 1)
+        try fixture.execute("PRAGMA wal_checkpoint(TRUNCATE);")
+        for suffix in ["-wal", "-shm"] {
+            try? FileManager.default.removeItem(atPath: fixture.path + suffix)
+        }
+        _ = try FileManager.default.replaceItemAt(fixture.url, withItemAt: replacement.url)
+        watcher.pollNowForTesting()
+        XCTAssertEqual(collected.withLock { $0 }, [], "a smaller maximum is a reset, not new mail")
+
+        let reopened = try ToolTestDatabase(attachingTo: fixture.path)
+        try reopened.insertMessage(rowId: 3, guid: "new-3", text: "after", date: 2, isFromMe: false, handleId: 1)
+        watcher.pollNowForTesting()
+        XCTAssertEqual(collected.withLock { $0 }, [3])
+    }
+
     func testStopIsIdempotentAndLeavesNoTimers() async throws {
         let fixture = try makeWalFixture()
         let collected = Mutex<[Int64]>([])
@@ -116,7 +187,7 @@ final class MessageWatcherTests: XCTestCase {
         ) { rowid in
             collected.withLock { $0.append(rowid) }
         }
-        try watcher.start()
+        watcher.start()
         watcher.stop()
         watcher.stop()
         XCTAssertFalse(watcher.isRunning)
