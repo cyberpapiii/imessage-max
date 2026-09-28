@@ -128,11 +128,16 @@ actor SSEConnectionManager {
     private var connectionInfo: [String: SSEConnectionInfo] = [:]
     private var channels: [String: SSEChannel] = [:]
     private var sessionConnections: [String: Set<String>] = [:]
+    private let keepAliveInterval: Duration
+
+    init(keepAliveInterval: Duration = .seconds(30)) {
+        self.keepAliveInterval = keepAliveInterval
+    }
 
     func register(info: SSEConnectionInfo) -> SSEChannel {
         connectionInfo[info.id] = info
 
-        let channel = SSEChannel()
+        let channel = SSEChannel(keepAliveInterval: keepAliveInterval)
         channels[info.id] = channel
 
         if sessionConnections[info.sessionId] == nil {
