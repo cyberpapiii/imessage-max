@@ -170,6 +170,36 @@ final class HTTPTransportLiveSocketTests: XCTestCase {
         }
     }
 
+    /// SIGTERM must finish promptly while a client holds an SSE stream open.
+    /// At 5b17dd8 the server's graceful shutdown waited for every open
+    /// request, and an SSE GET never ends on its own, so the service never
+    /// exited: under launchd each restart waited out ExitTimeOut and ended
+    /// in SIGKILL.
+    func testGracefulShutdownClosesOpenSSEStreams() async throws {
+        try await withLiveTransport(channelIdleTimeout: .seconds(5)) { transport, port in
+            let session = try initializeSession(port: port)
+            let getFd = try connectLoopback(port: port)
+            defer { close(getFd) }
+            setRecvTimeout(getFd, seconds: 5)
+            try writeAll(getFd, """
+                GET / HTTP/1.1\r\n\
+                Host: 127.0.0.1\r\n\
+                Accept: text/event-stream\r\n\
+                Mcp-Session-Id: \(session)\r\n\
+                \r\n
+                """)
+            _ = try readUntilDoubleCRLF(getFd)
+
+            let exited = expectation(description: "server exits after graceful shutdown")
+            Task {
+                try? await transport.waitForTermination()
+                exited.fulfill()
+            }
+            await transport.triggerGracefulShutdownForTesting()
+            await fulfillment(of: [exited], timeout: 3)
+        }
+    }
+
     private func withLiveTransport(
         channelIdleTimeout: Duration,
         body: (HTTPTransport, Int) async throws -> Void
@@ -187,7 +217,7 @@ final class HTTPTransportLiveSocketTests: XCTestCase {
                 cleanupInterval: .milliseconds(20)
             )
             do {
-                try await transport.connect()
+                try await transport.connect(gracefulShutdownSignals: [])
                 await AsyncTimeout.sleep(.milliseconds(200))
                 do {
                     try await body(transport, port)
