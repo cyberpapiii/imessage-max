@@ -6,6 +6,10 @@
 
 - `search` counts `filtered_hidden` from the filtered chats instead of a second scan of every message.
 
+### Tooling
+
+- `make verify` probes before it sleeps, so a healthy install verifies in about 0.1 s instead of 1.3 s. Every health probe in `make verify`, `verify-db` and `status` now times out, so a server that accepts connections but never answers fails the check instead of hanging `make`. `verify-db` ends the session it opens.
+
 ### Observability
 
 - Every `tools/call` logs one line when it ends: tool, lane, outcome (`ok`, `tool_error`, `internal_error`, `cancelled`, `unknown_tool`) and duration in ms. It never logs arguments. It replaces the legacy era line for tool calls.
