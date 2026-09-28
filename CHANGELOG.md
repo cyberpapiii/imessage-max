@@ -6,6 +6,10 @@
 
 - `search` counts `filtered_hidden` from the filtered chats instead of a second scan of every message.
 
+### Fixes
+
+- Every internal timed wait (SSE keep-alive, request-body deadline, send verification, session sweeps) leaked its timer, continuation and gate. Waits now run on a cancellable Dispatch timer that is released when the wait ends.
+
 ## 1.7.1
 
 ### Fixes
