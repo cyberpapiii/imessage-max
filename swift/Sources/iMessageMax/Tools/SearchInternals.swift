@@ -63,12 +63,25 @@ extension SearchTool {
         terms: [String],
         matchAll: Bool,
         fuzzy: Bool,
-        chatFilterPredicate: String?
+        chatFilterPredicate: String?,
+        drivenFromChats: Bool = false
     ) {
+        if drivenFromChats {
+            // CROSS JOIN pins SQLite's loop order: visit the chats the
+            // predicate selects, then only their messages by rowid.
+            builder
+                .from("""
+                    chat c
+                    CROSS JOIN chat_message_join cmj ON cmj.chat_id = c.ROWID
+                    CROSS JOIN message m ON m.ROWID = cmj.message_id
+                    """)
+        } else {
+            builder
+                .from("message m")
+                .join("chat_message_join cmj ON m.ROWID = cmj.message_id")
+                .join("chat c ON cmj.chat_id = c.ROWID")
+        }
         builder
-            .from("message m")
-            .join("chat_message_join cmj ON m.ROWID = cmj.message_id")
-            .join("chat c ON cmj.chat_id = c.ROWID")
             .leftJoin("handle h ON m.handle_id = h.ROWID")
             .where("m.associated_message_type = ?", 0)
 
@@ -245,6 +258,9 @@ extension SearchTool {
         return builder.build()
     }
 
+    /// Counts filtered chats with a match. Runs on every search that hides
+    /// them, so it starts from the few filtered chats rather than scanning
+    /// every message a second time.
     static func countFilteredHidden(
         db: Database,
         query: String?,
@@ -259,6 +275,38 @@ extension SearchTool {
         matchAll: Bool,
         fuzzy: Bool
     ) throws -> Int {
+        let (sql, params) = filteredHiddenQuery(
+            query: query,
+            fromPerson: fromPerson,
+            inChat: inChat,
+            isGroup: isGroup,
+            has: has,
+            since: since,
+            before: before,
+            unanswered: unanswered,
+            terms: terms,
+            matchAll: matchAll,
+            fuzzy: fuzzy
+        )
+        let rows: [Int] = try db.query(sql, params: params) { row in
+            Int(row.int(0))
+        }
+        return rows.first ?? 0
+    }
+
+    static func filteredHiddenQuery(
+        query: String?,
+        fromPerson: SearchSenderFilter?,
+        inChat: String?,
+        isGroup: Bool?,
+        has: String?,
+        since: String?,
+        before: String?,
+        unanswered: Bool,
+        terms: [String],
+        matchAll: Bool,
+        fuzzy: Bool
+    ) -> (String, [Any]) {
         let builder = QueryBuilder()
             .select("COUNT(DISTINCT c.ROWID)")
         applySearchFilters(
@@ -276,13 +324,10 @@ extension SearchTool {
             terms: terms,
             matchAll: matchAll,
             fuzzy: fuzzy,
-            chatFilterPredicate: "c.is_filtered != 0"
+            chatFilterPredicate: "c.is_filtered != 0",
+            drivenFromChats: true
         )
-        let (sql, params) = builder.build()
-        let rows: [Int] = try db.query(sql, params: params) { row in
-            Int(row.int(0))
-        }
-        return rows.first ?? 0
+        return builder.build()
     }
 
     static func buildFlatResponse(
