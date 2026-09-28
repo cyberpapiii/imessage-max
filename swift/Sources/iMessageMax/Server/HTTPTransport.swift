@@ -619,6 +619,9 @@ public actor HTTPTransport: Transport {
                     for await event in channel.stream {
                         try await writer.write(ByteBuffer(string: event))
                     }
+                    // Hummingbird only ends the response on finish. Without
+                    // it a server-side close left the client's stream open.
+                    try await writer.finish(nil)
                 } catch {
                     logger.debug("SSE stream error: \(error)")
                 }

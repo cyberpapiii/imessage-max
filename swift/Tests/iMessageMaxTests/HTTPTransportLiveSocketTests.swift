@@ -127,6 +127,49 @@ final class HTTPTransportLiveSocketTests: XCTestCase {
         }
     }
 
+    /// Ending a session must end its SSE response, not just stop writing to
+    /// it. At 5b17dd8 the body closure returned without `writer.finish`, so
+    /// the client never saw the last chunk and the stream hung open.
+    func testDeletingSessionEndsItsSSEResponse() async throws {
+        try await withLiveTransport(channelIdleTimeout: .seconds(5)) { _, port in
+            let session = try initializeSession(port: port)
+            let getFd = try connectLoopback(port: port)
+            defer { close(getFd) }
+            setRecvTimeout(getFd, seconds: 2)
+            try writeAll(getFd, """
+                GET / HTTP/1.1\r\n\
+                Host: 127.0.0.1\r\n\
+                Accept: text/event-stream\r\n\
+                Mcp-Session-Id: \(session)\r\n\
+                \r\n
+                """)
+            _ = try readUntilDoubleCRLF(getFd)
+
+            let deleteFd = try connectLoopback(port: port)
+            defer { close(deleteFd) }
+            setRecvTimeout(deleteFd, seconds: 2)
+            try writeAll(deleteFd, """
+                DELETE / HTTP/1.1\r\n\
+                Host: 127.0.0.1\r\n\
+                Mcp-Session-Id: \(session)\r\n\
+                \r\n
+                """)
+            _ = try readUntilDoubleCRLF(deleteFd)
+
+            var received = [UInt8]()
+            var buffer = [UInt8](repeating: 0, count: 256)
+            while !String(decoding: received, as: UTF8.self).contains("0\r\n\r\n") {
+                let n = recv(getFd, &buffer, buffer.count, 0)
+                if n <= 0 { break }
+                received.append(contentsOf: buffer.prefix(n))
+            }
+            XCTAssertTrue(
+                String(decoding: received, as: UTF8.self).contains("0\r\n\r\n"),
+                "SSE response never ended: \(String(decoding: received, as: UTF8.self))"
+            )
+        }
+    }
+
     private func withLiveTransport(
         channelIdleTimeout: Duration,
         body: (HTTPTransport, Int) async throws -> Void
