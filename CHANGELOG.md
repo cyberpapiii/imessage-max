@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Performance
+
+- `search` counts `filtered_hidden` from the filtered chats instead of a second scan of every message.
+
 ## 1.7.1
 
 ### Fixes

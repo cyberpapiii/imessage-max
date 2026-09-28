@@ -113,6 +113,41 @@ final class SearchToolTests: XCTestCase {
         XCTAssertNil(shown["filtered_hidden"])
     }
 
+    /// The hidden-chat count runs on every unfiltered search. Driven from
+    /// `message` it is a second scan of the whole table (150-316 ms of a
+    /// 300-380 ms search on a real chat.db); driven from the few filtered chats
+    /// it only visits their messages.
+    func testFilteredHiddenCountIsDrivenFromFilteredChats() throws {
+        let fixture = try ToolTestDatabase(name: "search-filtered-plan")
+        try fixture.execute("""
+            CREATE UNIQUE INDEX cmj_pk ON chat_message_join(chat_id, message_id);
+            CREATE INDEX cmj_message ON chat_message_join(message_id);
+            CREATE INDEX message_date ON message(date);
+            """)
+        let (sql, params) = SearchTool.filteredHiddenQuery(
+            query: "zebra",
+            fromPerson: nil,
+            inChat: nil,
+            isGroup: nil,
+            has: nil,
+            since: nil,
+            before: nil,
+            unanswered: false,
+            terms: ["zebra"],
+            matchAll: false,
+            fuzzy: false
+        )
+        let plan = try fixture.database().query("EXPLAIN QUERY PLAN " + sql, params: params) { row in
+            row.string(3) ?? ""
+        }
+        let loops = plan.filter { $0.hasPrefix("SCAN") || $0.hasPrefix("SEARCH") }
+        XCTAssertTrue(loops.first?.hasPrefix("SCAN c") ?? false, "plan: \(plan)")
+        XCTAssertTrue(
+            loops.contains { $0.hasPrefix("SEARCH m USING INTEGER PRIMARY KEY") },
+            "plan: \(plan)"
+        )
+    }
+
     func testFuzzySearchMatchesTyposAndIncludesContext() async throws {
         let fixture = try makeSearchFixture()
         let resolver = makeSeededResolver()
