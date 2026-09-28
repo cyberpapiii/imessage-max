@@ -200,8 +200,48 @@ final class HTTPTransportLiveSocketTests: XCTestCase {
         }
     }
 
+    /// An open SSE GET is a live client even when it sends no requests.
+    /// At 35f5d37 only requests refreshed a session, so a client that just
+    /// listened for new-message notifications lost its session, and its
+    /// stream, one session timeout (an hour) after its last call.
+    func testOpenSSEStreamKeepsItsSessionAlive() async throws {
+        try await withLiveTransport(
+            channelIdleTimeout: .seconds(5),
+            sessionTimeout: 0.5,
+            sseKeepAliveInterval: .milliseconds(100)
+        ) { _, port in
+            let session = try initializeSession(port: port)
+            let getFd = try connectLoopback(port: port)
+            defer { close(getFd) }
+            setRecvTimeout(getFd, seconds: 1)
+            try writeAll(getFd, """
+                GET / HTTP/1.1\r\n\
+                Host: 127.0.0.1\r\n\
+                Accept: text/event-stream\r\n\
+                Mcp-Session-Id: \(session)\r\n\
+                \r\n
+                """)
+            _ = try readUntilDoubleCRLF(getFd)
+
+            var received = [UInt8]()
+            var buffer = [UInt8](repeating: 0, count: 256)
+            let deadline = ContinuousClock.now + .milliseconds(1500)
+            while ContinuousClock.now < deadline {
+                let n = recv(getFd, &buffer, buffer.count, 0)
+                if n <= 0 { break }
+                received.append(contentsOf: buffer.prefix(n))
+                if String(decoding: received, as: UTF8.self).contains("0\r\n\r\n") { break }
+            }
+            let text = String(decoding: received, as: UTF8.self)
+            XCTAssertFalse(text.contains("0\r\n\r\n"), "session expired under an open SSE stream")
+            XCTAssertGreaterThanOrEqual(ContinuousClock.now, deadline, "SSE stream ended early: \(text)")
+        }
+    }
+
     private func withLiveTransport(
         channelIdleTimeout: Duration,
+        sessionTimeout: TimeInterval = 3600,
+        sseKeepAliveInterval: Duration = .seconds(30),
         body: (HTTPTransport, Int) async throws -> Void
     ) async throws {
         var lastError: Error?
@@ -214,7 +254,9 @@ final class HTTPTransportLiveSocketTests: XCTestCase {
                 resolver: ContactResolver(seedCache: [:]),
                 requestTimeout: .seconds(5),
                 channelIdleTimeout: channelIdleTimeout,
-                cleanupInterval: .milliseconds(20)
+                cleanupInterval: .milliseconds(20),
+                sessionTimeout: sessionTimeout,
+                sseKeepAliveInterval: sseKeepAliveInterval
             )
             do {
                 try await transport.connect(gracefulShutdownSignals: [])

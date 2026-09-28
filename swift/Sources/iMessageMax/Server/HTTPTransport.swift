@@ -28,7 +28,7 @@ public actor HTTPTransport: Transport {
     // State
     private var isConnected = false
     private let sessionManager: SessionManager
-    private let sseManager = SSEConnectionManager()
+    private let sseManager: SSEConnectionManager
     private let database: Database
     private let resolver: ContactResolver
 
@@ -53,6 +53,8 @@ public actor HTTPTransport: Transport {
     ///   - logger: Optional logger instance for transport events
     ///   - maxSessions: concurrent-session cap, forwarded to `SessionManager`.
     ///     Production uses the default; tests lower it to reach the 503 path.
+    ///   - sessionTimeout, sseKeepAliveInterval: production uses the defaults;
+    ///     tests shrink them to watch a session outlive its timeout.
     init(
         host: String = "127.0.0.1",
         port: Int = 8080,
@@ -63,7 +65,9 @@ public actor HTTPTransport: Transport {
         bodyReadDeadline: Duration = .seconds(30),
         channelIdleTimeout: Duration = .seconds(60),
         maxSessions: Int = 512,
-        cleanupInterval: Duration = .seconds(300)
+        cleanupInterval: Duration = .seconds(300),
+        sessionTimeout: TimeInterval = 3600,
+        sseKeepAliveInterval: Duration = .seconds(30)
     ) {
         self.host = host
         self.port = port
@@ -82,9 +86,11 @@ public actor HTTPTransport: Transport {
         self.sessionManager = SessionManager(
             database: database,
             resolver: resolver,
+            sessionTimeout: sessionTimeout,
             maxSessions: maxSessions,
             cleanupInterval: cleanupInterval
         )
+        self.sseManager = SSEConnectionManager(keepAliveInterval: sseKeepAliveInterval)
     }
 
     /// Establishes the HTTP server connection
@@ -643,6 +649,7 @@ public actor HTTPTransport: Transport {
         let channel = await sseManager.register(info: connectionInfo)
         let connectionId = connectionInfo.id
         let sseManager = self.sseManager
+        let sessionManager = self.sessionManager
         let logger = self.logger
 
         logger.debug("SSE connection established: \(connectionId) for session: \(sessionId)")
@@ -655,6 +662,10 @@ public actor HTTPTransport: Transport {
                 do {
                     for await event in channel.stream {
                         try await writer.write(ByteBuffer(string: event))
+                        // An open stream is a live client, even one that only
+                        // listens. Keep-alives land every 30s, so its session
+                        // never looks idle to expiry or reclaim.
+                        await sessionManager.touch(sessionId: sessionId)
                     }
                     // Hummingbird only ends the response on finish. Without
                     // it a server-side close left the client's stream open.
