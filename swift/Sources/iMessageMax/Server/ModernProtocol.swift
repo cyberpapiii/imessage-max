@@ -180,7 +180,7 @@ enum ModernDispatcher {
         case "tools/list":
             return successResult(id: id, result: toolsListResult())
         case "tools/call":
-            return await callTool(id: id, params: params)
+            return await callTool(id: id, params: params, transport: transport)
         default:
             return errorResult(
                 id: id,
@@ -217,7 +217,7 @@ enum ModernDispatcher {
         return result
     }
 
-    private static func callTool(id: Any, params: [String: Any]) async -> ModernDispatchResult {
+    private static func callTool(id: Any, params: [String: Any], transport: String) async -> ModernDispatchResult {
         guard let name = params["name"] as? String else {
             return errorResult(
                 id: id,
@@ -229,7 +229,7 @@ enum ModernDispatcher {
 
         let arguments = ToolCallDispatch.decodeArguments(params["arguments"])
 
-        switch await ToolCallDispatch.perform(name: name, arguments: arguments) {
+        switch await ToolCallDispatch.perform(name: name, arguments: arguments, lane: .modern(transport: transport)) {
         case .unknownTool:
             return errorResult(
                 id: id,

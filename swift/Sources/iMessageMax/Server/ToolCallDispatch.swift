@@ -30,11 +30,44 @@ enum ToolCallDispatch {
         case completed(content: [Tool.Content], isError: Bool)
     }
 
+    /// Where a call came in, for its log line.
+    enum Lane {
+        case legacyHTTP(session: String)
+        case legacyStdio
+        case modern(transport: String)
+
+        var logFields: String {
+            switch self {
+            case .legacyHTTP(let session): "lane=legacy-http session=\(session.prefix(8))"
+            case .legacyStdio: "lane=legacy-stdio"
+            case .modern(let transport): "lane=modern-\(transport)"
+            }
+        }
+    }
+
+    /// Test seam: the most recent call log line.
+    nonisolated(unsafe) static var lastCallLogForTesting: String?
+
     /// Runs the handler. Cancelling the calling task interrupts the SQLite
     /// queries this call opened, and only those.
-    static func execute(name: String, arguments: [String: Value]?) async -> Execution {
+    ///
+    /// Logs one line per call with the tool, lane, outcome and duration. It
+    /// never logs arguments: they carry message text and phone numbers.
+    static func execute(name: String, arguments: [String: Value]?, lane: Lane) async -> Execution {
+        let start = ContinuousClock.now
+        let (execution, outcome) = await run(name: name, arguments: arguments)
+        let elapsed = ContinuousClock.now - start
+        let ms = Double(elapsed.components.seconds) * 1000
+            + Double(elapsed.components.attoseconds) / 1e15
+        let line = "call tool=\(ModernDispatcher.sanitizedLogField(name)) \(lane.logFields) outcome=\(outcome) ms=\(String(format: "%.1f", ms))"
+        lastCallLogForTesting = line
+        Log.info(line)
+        return execution
+    }
+
+    private static func run(name: String, arguments: [String: Value]?) async -> (Execution, String) {
         guard let handler = ToolHandlerRegistry.shared.getHandler(for: name) else {
-            return .unknownTool
+            return (.unknownTool, "unknown_tool")
         }
 
         let scope = Database.CallScope()
@@ -46,19 +79,26 @@ enum ToolCallDispatch {
                     Database.interruptActiveQueries(in: scope)
                 }
             }
-            return .completed(content: content, isError: false)
+            return (.completed(content: content, isError: false), "ok")
         } catch let error as ToolError {
-            return .completed(content: error.content, isError: true)
+            return (.completed(content: error.content, isError: true), Task.isCancelled ? "cancelled" : "tool_error")
         } catch {
             let message = "Error: \(ClientErrorMessages.internalDetail(error, context: "Tool execution"))"
-            return .completed(content: [.plainText(message)], isError: true)
+            let outcome = Task.isCancelled || Self.isCancellation(error) ? "cancelled" : "internal_error"
+            return (.completed(content: [.plainText(message)], isError: true), outcome)
         }
+    }
+
+    private static func isCancellation(_ error: Error) -> Bool {
+        if error is CancellationError { return true }
+        if case DatabaseError.cancelled = error { return true }
+        return false
     }
 
     /// Arguments arrive already decoded: the raw `Any` a JSON parse yields is
     /// not `Sendable`, so it must not cross into the handler's task.
-    static func perform(name: String, arguments: [String: Value]?) async -> Result {
-        switch await execute(name: name, arguments: arguments) {
+    static func perform(name: String, arguments: [String: Value]?, lane: Lane) async -> Result {
+        switch await execute(name: name, arguments: arguments, lane: lane) {
         case .unknownTool:
             return .unknownTool
         case .completed(let content, let isError):

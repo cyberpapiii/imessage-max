@@ -94,8 +94,8 @@ final class DatabaseCancellationTests: XCTestCase {
             return [.plainText("\(rows[0])")]
         }
 
-        let cancelled = Task { await ToolCallDispatch.execute(name: "slow_count", arguments: nil) }
-        let bystander = Task { await ToolCallDispatch.execute(name: "slow_count", arguments: nil) }
+        let cancelled = Task { await ToolCallDispatch.execute(name: "slow_count", arguments: nil, lane: .legacyStdio) }
+        let bystander = Task { await ToolCallDispatch.execute(name: "slow_count", arguments: nil, lane: .legacyStdio) }
         await AsyncTimeout.sleep(.milliseconds(15))
         cancelled.cancel()
 

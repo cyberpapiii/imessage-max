@@ -72,7 +72,10 @@ actor DualEraStdioTransport: Transport {
                             ?? (json?["id"] != nil ? "response" : "unknown")
                         let version = (json?["params"] as? [String: Any])?["protocolVersion"] as? String
                             ?? "legacy"
-                        Log.info("era=legacy transport=stdio version=\(ModernDispatcher.sanitizedLogField(version)) method=\(ModernDispatcher.sanitizedLogField(method))")
+                        // A tools/call gets its own line, with outcome and duration.
+                        if method != "tools/call" {
+                            Log.info("era=legacy transport=stdio version=\(ModernDispatcher.sanitizedLogField(version)) method=\(ModernDispatcher.sanitizedLogField(method))")
+                        }
                         continuation.yield(data)
                     }
                     continuation.finish()

@@ -28,6 +28,8 @@ actor MCPServerWrapper {
         // continues through the SDK Server (with icon injection on send).
         let transport = IconMetadataTransport(base: DualEraStdioTransport(base: transport))
 
+        Log.info("Started version=\(Version.current) pid=\(getpid()) transport=stdio")
+
         // Start server in background, then do startup checks
         // This allows MCP initialization to complete while contacts load
         async let serverTask: () = server.start(transport: transport)
