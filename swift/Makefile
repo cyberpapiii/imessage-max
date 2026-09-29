@@ -50,7 +50,10 @@ help: ## Show this help
 
 build: ## Build release binary
 	@echo "Building release..."
-	@swift build -c release \
+	@# Swift 6.4's default build system writes to .build/out/Products/Release.
+	@# Full Disk Access is bound to the executable's path, and the existing
+	@# grant names .build/arm64-apple-macosx/release, so keep the native layout.
+	@swift build -c release --build-system native \
 		-Xlinker -sectcreate \
 		-Xlinker __TEXT \
 		-Xlinker __info_plist \
