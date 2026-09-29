@@ -9,6 +9,7 @@
 ### Tooling
 
 - `make verify` probes before it sleeps, so a healthy install verifies in about 0.1 s instead of 1.3 s. Every health probe in `make verify`, `verify-db` and `status` now times out, so a server that accepts connections but never answers fails the check instead of hanging `make`. `verify-db` ends the session it opens.
+- `make build` uses the native build system. Swift 6.4's default build system writes the binary to `.build/out/Products/Release`, a path the existing Full Disk Access grant does not cover, so the service could not read chat.db after an upgrade.
 
 ### Observability
 
