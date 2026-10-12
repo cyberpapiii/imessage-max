@@ -9,7 +9,25 @@ Verification baseline for all plans: `cd swift && swift build && swift test`.
 Deploying to the local launchd service (`make install`) is an operator
 action, not an executor step.
 
-## Current (2026-09-03): search hang
+## Current (2026-10-12): v1.8.0
+
+No plan is open. The round after 086 ran as `improve/*` branches without
+numbered plan files, merged to main between 2026-09-28 and 2026-09-29:
+`search-filtered-count`, `async-timeout-leak`, `scoped-interrupt`,
+`call-log`, `graceful-shutdown`, `makefile-verify`, `watcher-recovery`,
+`not-found-next-steps`, `sse-keeps-session`, `pin-release-path`.
+`CHANGELOG.md` under 1.8.0 is the record of what each one changed.
+
+Released as v1.8.0 on 2026-10-12, with one more fix (`e481a17`:
+`get_context` validates ids before it opens chat.db). Baseline:
+**541 tests, 1 skipped, 0 failures**. The release procedure is
+`docs/RELEASING.md`.
+
+Still open outside this directory: PRs 5 and 6 (`advisor/018-imcore-helper-bridge`,
+`advisor/019-imcore-helper-dylib`), and the local-only spike branch
+`advisor/077-spike-catch-up-sweep`.
+
+## Round 2026-09-03: search hang
 
 | Plan | Title | Priority | Effort | Depends on | Status |
 |------|-------|----------|--------|------------|--------|

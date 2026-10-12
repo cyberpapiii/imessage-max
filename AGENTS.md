@@ -29,12 +29,14 @@ Other Makefile targets:
 - `make logs` tails the stderr log
 - `make clean` removes debug artifacts and clears logs
 - `make setup-signing` is one-time setup for a persistent code signing identity
-- `make version` checks the four version sites agree; `make release-check` runs everything that must pass before tagging (see `docs/RELEASING.md`)
+- `make version` checks the five version sites agree; `make release-check` runs everything that must pass before tagging (see `docs/RELEASING.md`)
 - `make install-agent` copies `swift/launchd/local.imessage-max.plist` into `~/Library/LaunchAgents/` (do not hand-write the plist)
 
 The server runs as a launchd service (`local.imessage-max`) on port 8080, configured at `~/Library/LaunchAgents/local.imessage-max.plist`. Install that agent with `make install-agent`. It auto-starts on login and auto-restarts on crash.
 
-Connected via MCP Router as `remote-streamable` at `http://127.0.0.1:8080`. After restarting the service, MCP Router clients may need to reconnect (e.g. `/mcp` in Codex).
+Clients reach it through plug (HTTP, `protocol = "legacy"`) at `http://127.0.0.1:8080`. After restarting the service, clients may need to reconnect (e.g. `/mcp` in Codex).
+
+`make build` passes `--build-system native` so the binary stays at `.build/arm64-apple-macosx/release/imessage-max`, the path the Full Disk Access grant names. Swift 6.4's default build system writes elsewhere; a bare `swift build -c release` binary is not the one launchd runs.
 
 ### Manual build and run (without Makefile)
 
@@ -45,7 +47,7 @@ swift build -c release
 # stdio mode (for Codex Desktop)
 ./.build/release/imessage-max
 
-# HTTP mode (for MCP Router, Inspector, etc.)
+# HTTP mode (for plug, Inspector, etc.)
 ./.build/release/imessage-max --http --port 8080
 
 # one-shot Contacts prompt, run from a terminal
@@ -90,7 +92,7 @@ curl -X POST http://localhost:8080 \
 ## Architecture
 
 ### Swift Stack
-- Language: Swift 6.3
+- Language: Swift (tools-version 6.3; builds with the 6.4 toolchain)
 - MCP SDK: modelcontextprotocol/swift-sdk (version pinned in `swift/Package.swift` / `swift/Package.resolved`)
 - HTTP server: Hummingbird 2.x (for `--http` mode)
 - Database: raw SQLite3 C API for `~/Library/Messages/chat.db`
@@ -111,18 +113,23 @@ swift/
 │   │   ├── DualEraStdioTransport.swift # stdio era router
 │   │   ├── SessionManager.swift # Per-session Server instances (legacy)
 │   │   ├── SSEConnection.swift # Server-Sent Events
+│   │   ├── HTTPRequestParsing.swift # Header and body parsing helpers
+│   │   ├── PendingRequestRegistry.swift # Request/response correlation and timeouts
+│   │   ├── MessageWatcher.swift # chat.db watcher for live inbox notifications
+│   │   ├── LiveInboxState.swift # Watcher state reported by diagnose
+│   │   ├── NewMessagesNotification.swift # notifications/imessage/new_messages payload
 │   │   ├── OriginValidationMiddleware.swift
 │   │   ├── ToolRegistry.swift  # Tool registration
 │   │   ├── ToolCallDispatch.swift # tools/call routing
 │   │   ├── ServerExtensions.swift # Server helpers
 │   │   ├── IconMetadata.swift  # icon/_meta for tools/list
 │   │   └── Version.swift       # Version.current, the source of truth
-│   ├── Database/               # SQLite wrapper, query builder
+│   ├── Database/               # SQLite wrapper, query builder, schema capability probe
 │   ├── Models/                 # AttachmentType, ChatIdentity, GroupEvent, Reactions, ResponsePrimitives, SendPayload
 │   ├── Tools/                  # 13 MCP tools across 17 files
-│   ├── Contacts/               # CNContactStore resolver
-│   ├── Enrichment/             # Image processors (thumbnail, vision, full variants)
-│   └── Utilities/              # Time, phone formatting, Log.swift
+│   ├── Contacts/               # CNContactStore resolver, headless access policy
+│   ├── Enrichment/             # Image processor (thumbnail, vision, full variants)
+│   └── Utilities/              # AppleScript runner, AsyncTimeout, path policies, cursors, Log.swift
 ├── Tests/
 ├── launchd/                    # launchd plist template (local.imessage-max)
 └── Package.swift

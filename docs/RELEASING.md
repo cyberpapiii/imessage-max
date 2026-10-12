@@ -15,7 +15,7 @@ OLD=1.4.2 NEW=1.4.3
 sed -i '' "s/\"$OLD\"/\"$NEW\"/" swift/Sources/iMessageMax/Server/Version.swift
 sed -i '' "s|<string>$OLD</string>|<string>$NEW</string>|g" swift/Sources/Resources/Info.plist
 sed -i '' "s/\"version\": \"$OLD\"/\"version\": \"$NEW\"/" mcpb/manifest.json .codex-plugin/plugin.json
-sed -i '' "s/v$OLD\//v$NEW\//; s/version \"$OLD\"/version \"$NEW\"/" swift/Formula/imessage-max.rb
+sed -i '' "s/v$OLD\//v$NEW\//; s/version \"$OLD\"/version \"$NEW\"/; s/from v$OLD/from v$NEW/" swift/Formula/imessage-max.rb
 scripts/check-version.sh   # prints "OK 1.4.3"
 ```
 

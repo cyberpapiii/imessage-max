@@ -8,9 +8,13 @@ install/update workflow.
 ## Building
 
 ```bash
-swift build -c release
+make build
 # Binary: .build/release/imessage-max
 ```
+
+`make build` passes `--build-system native`. Swift 6.4's default build
+system writes the binary to `.build/out/Products/Release` instead, a path
+the launchd service and its Full Disk Access grant do not use.
 
 ## Dev install workflow
 
@@ -58,6 +62,12 @@ Sources/iMessageMax/
 │   ├── DualEraStdioTransport.swift # stdio era router
 │   ├── SessionManager.swift    # Per-session Server instances (legacy era)
 │   ├── SSEConnection.swift     # Server-Sent Events streaming
+│   ├── HTTPRequestParsing.swift # Header and bounded body parsing
+│   ├── PendingRequestRegistry.swift # In-flight requests keyed by session and id, with timeouts
+│   ├── ToolCallDispatch.swift  # The one place a tools/call runs, for both eras and stdio
+│   ├── MessageWatcher.swift    # kqueue watcher on chat.db with a fallback poll
+│   ├── LiveInboxState.swift    # Watcher state reported by diagnose
+│   ├── NewMessagesNotification.swift # notifications/imessage/new_messages
 │   ├── OriginValidationMiddleware.swift # DNS rebinding protection
 │   ├── ToolRegistry.swift      # Tool registration
 │   ├── ServerExtensions.swift  # .plainText/.plainImage content helpers, schema builders
@@ -66,14 +76,16 @@ Sources/iMessageMax/
 ├── Database/
 │   ├── Database.swift          # SQLite wrapper
 │   ├── QueryBuilder.swift      # SQL construction
+│   ├── SchemaCapabilities.swift # Which optional chat.db columns exist on this machine
 │   ├── SQLiteRow.swift         # Typed column accessors for a SQLite row
 │   ├── Errors.swift            # DatabaseError cases
 │   └── AppleTime.swift         # Apple epoch conversion
-├── Tools/                      # 12 tool files + internals/helpers
+├── Tools/                      # 13 tool files + internals/helpers
 │   ├── FindChat.swift
 │   ├── GetChatDetails.swift    # Chat detail: participants, identity, last message
 │   ├── GetMessages.swift
 │   ├── GetMessagesInternals.swift  # helper: cursor/row types for GetMessages
+│   ├── GetMessagesSince.swift  # ROWID-cursor pull of new messages across chats
 │   ├── ListChats.swift
 │   ├── Search.swift
 │   ├── SearchInternals.swift   # helper: cursor/filter types for Search
@@ -88,12 +100,14 @@ Sources/iMessageMax/
 │   └── Diagnose.swift
 ├── Contacts/
 │   ├── ContactResolver.swift   # CNContactStore integration
+│   ├── ContactsAccessPolicy.swift # Never prompt for Contacts from a headless process
 │   └── PhoneUtils.swift        # Phone number formatting (E.164 normalization)
 ├── Enrichment/
 │   └── ImageProcessor.swift    # Core Image resizing
 ├── Models/
 │   ├── AttachmentType.swift    # Attachment type derived from MIME type or UTI
 │   ├── ChatIdentity.swift      # Canonical conversation identity shared across discovery, retrieval, and sending
+│   ├── GroupEvent.swift        # Group system messages (rename, membership change, leave)
 │   ├── Reactions.swift         # Tapback/reaction type mapping
 │   ├── ResponsePrimitives.swift # Shared Codable response DTOs (ChatSummary, etc.)
 │   └── SendPayload.swift       # Send payload variants (text/file) and build result
@@ -101,17 +115,26 @@ Sources/iMessageMax/
     ├── AppleScript.swift       # AppleScript automation runner (ScriptRunning protocol)
     ├── AsyncTimeout.swift      # Dispatch-backed sleep (launchd-safe; never sleep Swift tasks)
     ├── AttachmentPathPolicy.swift # Validates attachment paths stay inside allowed roots
+    ├── AttachmentSource.swift  # Opens outbound attachments without following symlinks
     ├── AutomationPermission.swift # Automation permission probes (mockable for tests)
+    ├── BalloonBundle.swift     # Messages balloon bundle identifiers used in SQL
+    ├── ChatIdentifier.swift    # Parses `123` / `chat123` chat ids
     ├── ChatSummaryQueries.swift # Batched query layer for list/overview tools (avoids N+1)
     ├── ClientErrorMessages.swift # User-facing error message constants
+    ├── DeliveryDisposition.swift # How far a send got: completed, not_started, may_have_completed
     ├── DisplayNameGenerator.swift # Group chat display name generation from participant names
     ├── FormatUtils.swift       # Deterministic JSON encoding helpers
     ├── HostBindingPolicy.swift # Loopback-only HTTP bind validation
     ├── IdentityDisplayFormatter.swift # Handle/contact name display formatting
+    ├── Log.swift               # Timestamped stderr diagnostics (stdout stays clean for stdio)
     ├── MessageTextExtractor.swift # Extract text from plain or typedstream attributedBody
     ├── PreviewResolvers.swift  # Message preview summary resolution
+    ├── SecurePath.swift        # Lexical normalization and symlink rejection for outbound paths
     ├── SummaryPreviewFormatter.swift # Formats truncated text previews
-    └── TimeUtils.swift         # ISO/relative time formatting
+    ├── TimelineCursor.swift    # Keyset cursor for message timelines
+    ├── TimeUtils.swift         # ISO/relative time formatting
+    ├── ToolErrorMapping.swift  # Shared DatabaseError to tool-error mapping
+    └── UnansweredHeuristics.swift # Rules for "awaiting reply" in get_unread and list_chats
 ```
 
 ### Dependencies
@@ -176,13 +199,23 @@ curl -X POST http://localhost:8080 \
 ### CLI options
 
 ```
-USAGE: imessage-max [--http] [--host <host>] [--port <port>] [--version]
+USAGE: imessage-max [--http] [--host <host>] [--port <port>] [--allow-external-bind]
+                    [--contacts-policy <auto|request|skip>] [--request-contacts-access]
 
 OPTIONS:
-  --http                  Run in HTTP mode instead of stdio
-  --host <host>           HTTP host (default: 127.0.0.1 for security); non-loopback hosts additionally require --allow-external-bind
-  --port <port>           HTTP port (default: 8080)
-  --version               Show version
+  --http                  Run with HTTP transport instead of stdio
+  --host <host>           Host for HTTP transport (default: 127.0.0.1)
+  --port <port>           Port for HTTP transport (default: 8080)
+  --allow-external-bind   Allow a non-loopback host (exposes iMessage data to
+                          the network; no authentication is provided)
+  --contacts-policy <p>   When Contacts access is undetermined: auto (prompt
+                          only from a terminal), request, or skip.
+                          IMESSAGE_MAX_CONTACTS_POLICY=request|skip applies
+                          when auto.
+  --request-contacts-access
+                          Ask macOS for Contacts access once, print the
+                          status, and exit. Run it from a terminal.
+  --version               Show the version
   -h, --help              Show help
 ```
 
@@ -190,7 +223,7 @@ OPTIONS:
 
 ```bash
 # Run unit tests
-swift test
+make test
 
 # Test MCP protocol manually
 echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}' | ./imessage-max

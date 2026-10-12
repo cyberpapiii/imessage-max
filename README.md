@@ -8,17 +8,14 @@ An MCP (Model Context Protocol) server for iMessage. It lets AI agents read, sea
 
 Written in Swift. One binary, no runtime dependencies.
 
-## Distribution status
+## Distribution
 
-The project now ships a single Swift implementation:
-- GitHub releases
-- Homebrew
+One Swift implementation, under `swift/`, shipped as:
+- GitHub releases (arm64, ad-hoc signed)
+- Homebrew (`cyberpapiii/tap`)
 - source builds
-- Codex plugin metadata
-- Claude Desktop MCPB metadata
-
-The old Python package has been retired and removed from the repository.
-Everything current lives under `swift/`.
+- Codex plugin metadata (`.codex-plugin/`)
+- Claude Desktop MCPB metadata (`mcpb/`)
 
 ## Features
 
@@ -440,8 +437,9 @@ diagnose()  # Returns: database status, contacts count, permissions, capabilitie
 
 Before a release, work through:
 
-- [docs/validation/2026-04-09-release-checklist.md](docs/validation/2026-04-09-release-checklist.md)
-- [docs/validation/2026-03-13-send-manual-validation.md](docs/validation/2026-03-13-send-manual-validation.md)
+- [docs/RELEASING.md](docs/RELEASING.md), the release procedure
+- [docs/validation/2026-04-09-release-checklist.md](docs/validation/2026-04-09-release-checklist.md), live spot checks
+- [swift/Tests/iMessageMaxTests/SendManualValidation.md](swift/Tests/iMessageMaxTests/SendManualValidation.md), manual send checks in Messages.app
 
 Additional send note:
 - Sends execute immediately when the destination is exact; there is no confirmation gate. Ambiguous destinations are refused with `status: "ambiguous"`. The `confirm` parameter is deprecated and ignored (kept only for compatibility). Authorization happens in the user's conversation with the agent and in the client's tool-approval UI, not server-side.
@@ -489,7 +487,7 @@ Examples:
 
 ### Contacts showing as phone numbers
 
-Run `diagnose` to check status. If `contacts_authorized` is false:
+Run `diagnose` and read `contacts.status`. If it is `denied` or `not_determined`:
 - Add the `imessage-max` binary to System Settings → Privacy & Security → Contacts
 
 If `diagnose` reports `contacts.status: "not_requested_headless"`, run `imessage-max --request-contacts-access` from a terminal. Names refresh within 30 s of a Contacts change and are dropped as soon as access is revoked; no restart needed.

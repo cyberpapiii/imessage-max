@@ -1,6 +1,6 @@
 # Release checklist
 
-Use this checklist before shipping a new build, publishing a release, or updating the Homebrew package.
+Use this checklist before shipping a new build, publishing a release, or updating the Homebrew package. The release procedure itself (version bump, tag, Formula, tap) is in [docs/RELEASING.md](../RELEASING.md).
 
 It is short on purpose. It catches what is easiest to miss in a local macOS MCP project: permissions, stale services, broken send flows, attachment handling, and live protocol behavior.
 
@@ -9,15 +9,13 @@ It is short on purpose. It catches what is easiest to miss in a local macOS MCP 
 From `swift/`:
 
 ```bash
-swift test
-swift build -c release
+make release-check
 make install
 make status
 ```
 
 Expected:
-- tests pass cleanly
-- release build succeeds
+- `make release-check` builds, passes the suite, and reports the five version sites agree
 - `make install` restarts the service successfully
 - `make status` shows the expected version, signature, and healthy server
 
@@ -99,8 +97,9 @@ Expected:
 
 Use the detailed checklist in:
 
-- `docs/validation/2026-03-13-send-manual-validation.md`
 - `swift/Tests/iMessageMaxTests/SendManualValidation.md`
+
+`docs/validation/2026-03-13-send-manual-validation.md` is the dated log of one past run, kept for reference.
 
 Minimum release-level send checks:
 - text send to a known 1:1 contact
@@ -122,7 +121,7 @@ Before shipping, confirm the public docs still match the running server:
 Quick search:
 
 ```bash
-rg -n "11 tools|Update.swift|python implementation|cursor" README.md swift/README.md AGENTS.md docs
+rg -n "1[012] tools|MCP Router|four version sites|contacts_authorized" README.md swift/README.md AGENTS.md mcpb docs/RELEASING.md
 ```
 
 ## 8. Final release questions
