@@ -149,6 +149,22 @@ enum GetContext {
             ))
         }
 
+        // Reject malformed ids before touching chat.db, so a bad id reads as
+        // invalid_id even when the database cannot be opened.
+        if let msgIdStr = messageId {
+            if parseMessageId(msgIdStr) == nil {
+                return .failure(GetContextError(
+                    error: "invalid_id",
+                    message: "Invalid message ID format: \(msgIdStr)"
+                ))
+            }
+        } else if let cId = chatId, ChatIdentifier.parseRowId(cId) == nil {
+            return .failure(GetContextError(
+                error: "invalid_id",
+                message: "Invalid chat ID format: \(cId)"
+            ))
+        }
+
         try? await resolver.initialize()
 
         do {
