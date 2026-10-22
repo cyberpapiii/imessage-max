@@ -11,12 +11,13 @@ enum AutomationPermission {
     /// using AEDeterminePermissionToAutomateTarget against "com.apple.MobileSMS".
     ///
     /// This is a non-prompting read-only TCC check (askUserIfNeeded: false).
+    /// Explicit setup requests opt in to prompting; ordinary diagnose calls do not.
     /// Returns:
     ///   - (true, "authorized"): permission is granted
     ///   - (false, "denied"): TCC explicitly denied (errAEEventNotPermitted)
     ///   - (false, "not_determined"): TCC entry not yet established
     ///   - (false, "messages_not_found"): descriptor could not be created
-    static func checkAutomationPermission() -> (ok: Bool, status: String) {
+    static func checkAutomationPermission(askUserIfNeeded: Bool = false) -> (ok: Bool, status: String) {
         guard let bundleIDData = "com.apple.MobileSMS".data(using: .utf8) else {
             return (false, "messages_not_found")
         }
@@ -32,15 +33,28 @@ enum AutomationPermission {
             &targetDesc,
             typeWildCard,
             typeWildCard,
-            false
+            askUserIfNeeded
         )
+        return status(for: permStatus)
+    }
+
+    @concurrent
+    static func requestAccess() async -> (ok: Bool, status: String) {
+        checkAutomationPermission(askUserIfNeeded: true)
+    }
+
+    static func status(for permStatus: OSStatus) -> (ok: Bool, status: String) {
         switch permStatus {
         case noErr:
             return (true, "authorized")
         case OSStatus(errAEEventNotPermitted):
             return (false, "denied")
-        default:
+        case OSStatus(procNotFound):
+            return (false, "messages_not_running")
+        case OSStatus(errAEEventWouldRequireUserConsent):
             return (false, "not_determined")
+        default:
+            return (false, "check_failed_\(permStatus)")
         }
     }
 }

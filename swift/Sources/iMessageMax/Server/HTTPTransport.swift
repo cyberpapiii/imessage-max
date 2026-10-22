@@ -31,6 +31,7 @@ public actor HTTPTransport: Transport {
     private let sseManager: SSEConnectionManager
     private let database: Database
     private let resolver: ContactResolver
+    private let setupPermissions: SetupPermissionService
 
     // Request correlation: maps JSON-RPC id to continuation for response
     private let pendingRequests: PendingRequestRegistry
@@ -67,7 +68,8 @@ public actor HTTPTransport: Transport {
         maxSessions: Int = 512,
         cleanupInterval: Duration = .seconds(300),
         sessionTimeout: TimeInterval = 3600,
-        sseKeepAliveInterval: Duration = .seconds(30)
+        sseKeepAliveInterval: Duration = .seconds(30),
+        setupPermissions: SetupPermissionService? = nil
     ) {
         self.host = host
         self.port = port
@@ -77,6 +79,7 @@ public actor HTTPTransport: Transport {
         self.pendingRequests = PendingRequestRegistry(timeout: requestTimeout)
         self.database = database
         self.resolver = resolver
+        self.setupPermissions = setupPermissions ?? SetupPermissionService(resolver: resolver)
         self.logger =
             logger
             ?? Logger(
@@ -830,6 +833,9 @@ public actor HTTPTransport: Transport {
         router.post("/") { request, context in
             try await self.handlePost(request: request, context: context)
         }
+        router.post("/setup/permissions") { request, context in
+            try await self.handleSetupPermission(request: request)
+        }
         router.get("/") { request, context in
             try await self.handleGet(request: request, context: context)
         }
@@ -845,6 +851,39 @@ public actor HTTPTransport: Transport {
             ),
             logger: logger
         )
+    }
+
+    private func handleSetupPermission(request: Request) async throws -> Response {
+        guard HostBindingPolicy.isLoopback(host) else { return Response(status: .notFound) }
+        // Browser requests are never setup requests, including loopback origins.
+        // The explicit header forces a browser preflight; no CORS is offered.
+        guard request.headers[HTTPField.Name("Origin")!] == nil,
+              request.headers[HTTPField.Name("X-iMessage-Max-Setup")!] == "permission-request-v1" else {
+            return Response(status: .forbidden)
+        }
+        guard request.headers[.contentType]?.lowercased() == "application/json" else {
+            return Response(status: .unsupportedMediaType)
+        }
+        let data: Data
+        switch try await Self.collectBodyDrainingOverflow(request.body,
+            declaredLength: request.headers[.contentLength].flatMap(Int.init),
+            maxBytes: 256, drainLimit: 1024, deadline: .seconds(5)) {
+        case .complete(let body): data = body
+        case .tooLarge: return Response(status: .contentTooLarge)
+        case .timedOut: return Response(status: .requestTimeout)
+        }
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: String],
+              json.count == 1, let name = json["permission"], let permission = SetupPermission(rawValue: name) else {
+            return Response(status: .badRequest)
+        }
+        do {
+            let result = try await setupPermissions.request(permission)
+            let body = try JSONEncoder().encode(result)
+            return Response(status: .ok, headers: [.contentType: "application/json", .cacheControl: "no-store"],
+                body: .init(byteBuffer: .init(bytes: body)))
+        } catch SetupPermissionService.RequestError.alreadyRequesting {
+            return Response(status: .conflict)
+        }
     }
 
     private nonisolated func acceptsStreamableHTTP(_ accept: String) -> Bool {

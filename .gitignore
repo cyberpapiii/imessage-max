@@ -23,6 +23,9 @@ mcp-publisher
 # Package.resolved is tracked on purpose for reproducible release builds.
 swift/.build/
 swift/.swiftpm/
+macos/.build/
+macos/.swiftpm/
+dist/
 *.xcodeproj
 *.xcworkspace
 xcuserdata/

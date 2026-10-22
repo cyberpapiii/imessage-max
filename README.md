@@ -4,6 +4,8 @@
 
 # iMessage Max
 
+Want a simple Mac control panel? The [native menu bar companion](macos/README.md) checks setup, manages the local service, and shares assistant connection details.
+
 An MCP (Model Context Protocol) server for iMessage. It lets AI agents read, search, and send your messages, resolving phone numbers to contact names along the way.
 
 Written in Swift. One binary, no runtime dependencies.

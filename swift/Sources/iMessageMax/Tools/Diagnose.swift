@@ -356,7 +356,7 @@ enum DiagnoseTool {
             ),
             "perm_full_disk":        Capability(state: permFullDiskState, fix: permFullDiskFix),
             "perm_contacts":         Capability(state: permContactsState, fix: permContactsFix),
-            "perm_automation":       Capability(state: permAutomationState, fix: permAutomationFix),
+            "perm_automation":       Capability(state: permAutomationState, fix: permAutomationFix, detail: automationStatus),
             "rich_backend":          Capability(state: "unavailable"),
         ]
 

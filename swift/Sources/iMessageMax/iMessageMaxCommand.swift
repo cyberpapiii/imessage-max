@@ -28,6 +28,9 @@ struct iMessageMax: AsyncParsableCommand {
     @Flag(name: .long, help: "Ask macOS for Contacts access once, print the resulting status, and exit. Run this from a terminal; the server never prompts when it has no terminal.")
     var requestContactsAccess = false
 
+    @Flag(name: .long, help: "Ask macOS for Automation access to Messages once, without sending a message, print the resulting status, and exit.")
+    var requestMessagesAccess = false
+
     func validate() throws {
         if http, let message = HostBindingPolicy.validationError(host: host, allowExternalBind: allowExternalBind) {
             throw ValidationError(message)
@@ -35,6 +38,12 @@ struct iMessageMax: AsyncParsableCommand {
     }
 
     mutating func run() async throws {
+        if requestMessagesAccess {
+            let (_, status) = await AutomationPermission.requestAccess()
+            print("Messages automation: \(status)")
+            return
+        }
+
         if requestContactsAccess {
             let resolver = ContactResolver()
             await resolver.requestAccessIfAllowed(policy: .requestIfNeeded)
