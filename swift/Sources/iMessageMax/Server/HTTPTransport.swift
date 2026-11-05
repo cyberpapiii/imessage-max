@@ -367,12 +367,12 @@ actor HTTPTransport {
         }
 
         let body: Data
-        switch ToolCallDispatch.render(execution) {
+        switch execution {
         case .unknownTool:
             body = JSONRPC.error(id: id, ToolCallDispatch.unknownToolError(name))
-        case .completed(let outcome):
+        case .completed(let content, let isError):
             do {
-                body = try JSONRPC.success(id: id, result: ToolCallDispatch.resultJSON(outcome))
+                body = try JSONRPC.success(id: id, result: ToolCallDispatch.resultJSON(content: content, isError: isError))
             } catch {
                 Log.error("legacy tools/call serialization failed for \(name)")
                 return errorResponse(.internalServerError, ClientErrorMessages.internalError)
