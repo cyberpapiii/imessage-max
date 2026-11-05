@@ -111,13 +111,6 @@ enum FormatUtils {
         return String(decoding: buffer, as: UTF8.self)
     }
 
-    static func encodeJSONObject(_ value: Any) throws -> String {
-        var buffer: [UInt8] = []
-        buffer.reserveCapacity(256)
-        try appendOrderedJSON(value, to: &buffer)
-        return String(decoding: buffer, as: UTF8.self)
-    }
-
     private static func appendOrderedJSON(_ value: Any, to out: inout [UInt8]) throws {
         switch value {
         case is NSNull:

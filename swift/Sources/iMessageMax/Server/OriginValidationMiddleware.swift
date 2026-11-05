@@ -12,12 +12,8 @@ struct OriginValidationMiddleware<Context: RequestContext>: RouterMiddleware {
     /// The address the server listens on. Requests may name it, or loopback.
     let boundHost: String
 
-    /// Whether to require an Origin header (strict mode)
-    let requireOrigin: Bool
-
-    init(boundHost: String = ServiceDefaults.host, requireOrigin: Bool = false) {
+    init(boundHost: String = ServiceDefaults.host) {
         self.boundHost = boundHost
-        self.requireOrigin = requireOrigin
     }
 
     func handle(
@@ -25,14 +21,13 @@ struct OriginValidationMiddleware<Context: RequestContext>: RouterMiddleware {
         context: Context,
         next: (Request, Context) async throws -> Response
     ) async throws -> Response {
+        // Non-browser clients send no Origin; that is allowed.
         if let origin = request.headers[.origin] {
             guard let host = URL(string: origin)?.host,
                 HostBindingPolicy.isAllowedRequestHost(host, boundHost: boundHost)
             else {
                 return forbidden("Origin not allowed")
             }
-        } else if requireOrigin {
-            return forbidden("Origin header required")
         }
 
         // Host validation is mandatory. swift-http-types strips the Host header

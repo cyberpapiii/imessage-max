@@ -117,21 +117,6 @@ final class OriginHostParsingTests: XCTestCase {
         let status = try await status(forAuthority: "[fd00::5]:8080", middleware: middleware)
         XCTAssertEqual(status, .ok)
     }
-
-    func testRequireOriginRejectsMissingOrigin() async throws {
-        let middleware = OriginValidationMiddleware<BasicRequestContext>(requireOrigin: true)
-        let response = try await middleware.handle(
-            makeRequest(authority: "localhost", origin: nil),
-            context: makeContext()
-        ) { _, _ in
-            XCTFail("A missing Origin in strict mode should not reach the next handler")
-            return Response(status: .ok)
-        }
-        XCTAssertEqual(response.head.status, .forbidden)
-
-        let body = try await bodyString(of: response)
-        XCTAssertTrue(body.contains("Origin header required"), "body: \(body)")
-    }
 }
 
 // MARK: - Body collection helpers

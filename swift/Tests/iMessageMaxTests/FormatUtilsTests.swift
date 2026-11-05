@@ -88,17 +88,4 @@ final class FormatUtilsTests: XCTestCase {
         // The literal above must itself be valid JSON, or the pin is meaningless.
         XCTAssertNoThrow(try JSONSerialization.jsonObject(with: Data(output.utf8)))
     }
-
-    func testEncodeJSONObjectMatchesEncodableOrdering() throws {
-        let object: [String: Any] = [
-            "zebra": "z",
-            "id": 7,
-            "text": "t/\"\\",
-            "nested": ["ts": "now", "aardvark": [1, 2.5, true, NSNull()]],
-        ]
-        XCTAssertEqual(
-            try FormatUtils.encodeJSONObject(object),
-            "{\"id\":7,\"text\":\"t/\\\"\\\\\",\"nested\":{\"ts\":\"now\",\"aardvark\":[1,2.5,true,null]},\"zebra\":\"z\"}"
-        )
-    }
 }
