@@ -485,6 +485,53 @@ final class SendToolExecuteTests: XCTestCase {
 
     // The confirm flag is inert: explicit true and explicit false produce the
     // identical "confirmed" outcome.
+    // Before payloads were validated up front, the file went out and the text
+    // then failed its length check, which reported partial_failure.
+    func testOverlongTextAfterFileFailsBeforeAnythingIsSent() async throws {
+        let fixture = try makeSendFixture()
+        let stub = StubScriptRunner()
+        let tool = SendTool(db: fixture.database(), resolver: makeSeededResolver(), runner: stub)
+
+        do {
+            _ = try await tool.execute(args: [
+                "to": .string("+15550000001"),
+                "file_paths": .array([.string("/tmp/a.jpg")]),
+                "text": .string(String(repeating: "a", count: 20_001)),
+            ])
+            XCTFail("Expected ToolError for an overlong message")
+        } catch let error as ToolError {
+            let json = try decodeJSONDictionary(from: error.content)
+            XCTAssertEqual(json["status"] as? String, "failed")
+            XCTAssertEqual(json["error"] as? String, "Message too long (max 20,000 chars)")
+            XCTAssertEqual(json["disposition"] as? String, "not_started")
+            XCTAssertEqual(json["retry_safe"] as? Bool, true)
+        }
+        XCTAssertTrue(stub.invocations.isEmpty, "Nothing may be dispatched when any payload is invalid")
+    }
+
+    func testOverlongRecipientHandleFailsBeforeAnythingIsSent() async throws {
+        let fixture = try makeSendFixture()
+        let longEmail = String(repeating: "a", count: 95) + "@x.com"
+        try fixture.insertHandle(rowId: 3, handle: longEmail)
+        let stub = StubScriptRunner()
+        let tool = SendTool(db: fixture.database(), resolver: makeSeededResolver(), runner: stub)
+
+        do {
+            _ = try await tool.execute(args: [
+                "to": .string(longEmail),
+                "file_paths": .array([.string("/tmp/a.jpg")]),
+                "text": .string("hi"),
+            ])
+            XCTFail("Expected ToolError for an overlong recipient")
+        } catch let error as ToolError {
+            let json = try decodeJSONDictionary(from: error.content)
+            XCTAssertEqual(json["status"] as? String, "failed")
+            XCTAssertEqual(json["error"] as? String, "Recipient too long")
+            XCTAssertEqual(json["disposition"] as? String, "not_started")
+        }
+        XCTAssertTrue(stub.invocations.isEmpty)
+    }
+
     func testConfirmFlagIsInert() async throws {
         for (confirmValue, rowId, guid) in [(true, 120, "msg-guid-inert-true"), (false, 121, "msg-guid-inert-false")] {
             let fixture = try makeSendFixture()

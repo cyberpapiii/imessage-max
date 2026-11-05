@@ -13,6 +13,9 @@ enum SendPayload: Sendable, Equatable {
         case failure(String)
     }
 
+    /// Every payload is validated here, before anything is dispatched, so an
+    /// invalid text after a file fails the whole send instead of leaving the
+    /// file sent and reporting partial_failure.
     static func build(
         text: String?,
         filePaths: [String]?
@@ -26,6 +29,9 @@ enum SendPayload: Sendable, Equatable {
         }
 
         if let text, !text.isEmpty {
+            guard text.count <= 20_000 else {
+                return .failure("Message too long (max 20,000 chars)")
+            }
             payloads.append(.text(text))
         }
 
@@ -34,14 +40,6 @@ enum SendPayload: Sendable, Equatable {
         }
 
         return .success(payloads)
-    }
-
-    /// Set when this payload must be refused before it reaches Messages.
-    var validationError: SendError? {
-        if case .text(let body) = self, body.count > 20_000 {
-            return .invalidParams("Message too long (max 20,000 chars)")
-        }
-        return nil
     }
 
     /// Client-facing description, for the partial-failure breakdown.
@@ -103,7 +101,7 @@ enum SendTarget: Sendable, Equatable {
         }
     }
 
-    /// Set when this target must be refused before anything reaches Messages.
+    /// Set when this target must be refused before any payload is dispatched.
     var validationError: SendError? {
         switch self {
         case .participant(let handle, _):

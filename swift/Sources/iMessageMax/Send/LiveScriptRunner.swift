@@ -26,10 +26,6 @@ struct LiveScriptRunner: ScriptRunning {
     }
 
     func sendBlocking(_ payload: SendPayload, to target: SendTarget) -> Result<Void, SendFailure> {
-        if let invalid = target.validationError ?? payload.validationError {
-            return .failure(SendFailure(invalid, disposition: .notStarted))
-        }
-
         switch payload {
         case .text(let body):
             return dispatch(payload.scriptKind, body, to: target, sentFileName: "")

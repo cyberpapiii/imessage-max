@@ -34,6 +34,30 @@ final class SendPayloadTests: XCTestCase {
         }
     }
 
+    func testBuildAcceptsTextAtTheLengthLimit() {
+        guard case .success = SendPayload.build(text: String(repeating: "a", count: 20_000), filePaths: nil) else {
+            return XCTFail("20,000 characters is within the limit")
+        }
+    }
+
+    func testBuildRejectsOverlongText() {
+        guard case .failure(let message) = SendPayload.build(text: String(repeating: "a", count: 20_001), filePaths: nil) else {
+            return XCTFail("Expected validation failure")
+        }
+        XCTAssertEqual(message, "Message too long (max 20,000 chars)")
+    }
+
+    // The text is validated with the files, before any of them is dispatched.
+    func testBuildRejectsOverlongTextAfterFiles() {
+        guard case .failure(let message) = SendPayload.build(
+            text: String(repeating: "a", count: 20_001),
+            filePaths: ["/tmp/a.png"]
+        ) else {
+            return XCTFail("Expected validation failure")
+        }
+        XCTAssertEqual(message, "Message too long (max 20,000 chars)")
+    }
+
     func testBuildIgnoresEmptyFileEntries() {
         switch SendPayload.build(text: nil, filePaths: ["", "/tmp/a.png"]) {
         case .failure(let message):

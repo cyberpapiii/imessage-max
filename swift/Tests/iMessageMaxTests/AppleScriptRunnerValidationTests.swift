@@ -158,25 +158,6 @@ final class AppleScriptRunnerValidationTests: XCTestCase {
         XCTAssertFalse(error.localizedDescription.contains("imessage-max-staging"))
     }
 
-    func testSendTextToParticipantRejectsOverlongMessage() {
-        let longMessage = String(repeating: "a", count: 20_001)
-        let result = LiveScriptRunner(stager: makeStager()).sendBlocking(
-            .text(longMessage),
-            to: .participant(handle: "+19175551234", chatId: nil)
-        )
-
-        switch result {
-        case .success:
-            XCTFail("Expected invalid params failure")
-        case .failure(let error):
-            XCTAssertEqual(
-                error.error.localizedDescription,
-                "Message too long (max 20,000 chars)"
-            )
-            XCTAssertEqual(error.disposition, .notStarted)
-        }
-    }
-
     func testDefaultStagingRootIsInPicturesDirectory() {
         XCTAssertTrue(OutgoingFileStager().root.path.hasSuffix("/Pictures/imessage-max-staging"))
     }

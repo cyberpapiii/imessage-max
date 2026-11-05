@@ -117,6 +117,9 @@ actor SendTool {
         case .ambiguous(let candidates):
             return .ambiguous(candidates: candidates)
         }
+        if let invalid = resolved.target.validationError {
+            return .error(ClientErrorMessages.sanitized(invalid))
+        }
 
         // Sends are authorized by the user's request to the agent and by
         // harness-level tool approval. The server does not gate exact sends.
