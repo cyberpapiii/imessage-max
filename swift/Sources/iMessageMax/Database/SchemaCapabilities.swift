@@ -2,11 +2,20 @@ import Foundation
 import SQLite3
 
 /// Which optional chat.db columns exist on this machine. Probed once per
-/// `Database` instance from SQLite table_info. Consult the flags when
-/// building SQL; never read a guarded column unconditionally.
+/// `Database` instance from SQLite table_info.
+///
+/// Only the columns in `Column.guardedInSQL` are protected: their SQL
+/// fragments below substitute a constant when the column is missing. Every
+/// other column is probed for `diagnose`'s `database.features` only, and
+/// several of them (item_type, group_action_type, group_title, other_handle,
+/// balloon_bundle_id, is_filtered, hide_attachment) are read unconditionally,
+/// so a schema without them fails those queries. To protect one, add a
+/// fragment here, move it into `guardedInSQL`, and use the fragment.
 struct SchemaCapabilities: Sendable, Equatable {
     /// Every optional column, as `<table>.<column>`.
     enum Column: String, CaseIterable, Sendable {
+        // Only thread_originator_guid, date_edited and associated_message_emoji
+        // are guarded in SQL (`guardedInSQL`); the rest are reported only.
         case messageThreadOriginatorGuid = "message.thread_originator_guid"
         case messageThreadOriginatorPart = "message.thread_originator_part"
         case messageDateEdited = "message.date_edited"
@@ -26,6 +35,11 @@ struct SchemaCapabilities: Sendable, Equatable {
         case chatMessageJoinMessageDate = "chat_message_join.message_date"
         case attachmentUserInfo = "attachment.user_info"
         case attachmentHideAttachment = "attachment.hide_attachment"
+
+        /// The columns whose SQL fragments fall back when they are missing.
+        static let guardedInSQL: Set<Column> = [
+            .messageThreadOriginatorGuid, .messageDateEdited, .messageAssociatedMessageEmoji,
+        ]
 
         var table: String { String(rawValue.prefix { $0 != "." }) }
         var name: String { String(rawValue.drop { $0 != "." }.dropFirst()) }
@@ -65,8 +79,8 @@ struct SchemaCapabilities: Sendable, Equatable {
         Dictionary(uniqueKeysWithValues: Column.allCases.map { ($0.rawValue, has($0)) })
     }
 
-    // MARK: SQL fragments. Same alias in the same position, so the
-    // index-based row mappers do not move.
+    // MARK: SQL fragments for the `guardedInSQL` columns. Same alias in the
+    // same position, so the index-based row mappers do not move.
 
     var threadOriginatorGuidSQL: String {
         has(.messageThreadOriginatorGuid) ? "m.thread_originator_guid" : "NULL AS thread_originator_guid"

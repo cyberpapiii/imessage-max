@@ -59,6 +59,25 @@ final class DatabaseContactsReviewRegressionTests: XCTestCase {
         XCTAssertEqual(Database.queryCountForTesting, 200)
     }
 
+    // MARK: - 10. Which optional columns SQL actually guards
+
+    /// Each guarded column has a fragment that falls back when it is missing;
+    /// the set names exactly those, so nobody assumes protection elsewhere.
+    func testGuardedColumnsAreExactlyTheOnesWithFallbackFragments() {
+        typealias Column = SchemaCapabilities.Column
+        XCTAssertEqual(Column.guardedInSQL, [.messageThreadOriginatorGuid, .messageDateEdited, .messageAssociatedMessageEmoji])
+        let fragments: [Column: KeyPath<SchemaCapabilities, String>] = [
+            .messageThreadOriginatorGuid: \.threadOriginatorGuidSQL,
+            .messageDateEdited: \.dateEditedSQL,
+            .messageAssociatedMessageEmoji: \.associatedMessageEmojiSQL,
+        ]
+        XCTAssertEqual(Set(fragments.keys), Column.guardedInSQL)
+        for (column, fragment) in fragments {
+            XCTAssertEqual(SchemaCapabilities.assumed[keyPath: fragment], "m.\(column.name)")
+            XCTAssertTrue(SchemaCapabilities.assumed.without(column)[keyPath: fragment].hasSuffix("AS \(column.name)"))
+        }
+    }
+
     func testSetupReplyCarriesTheResolverWord() async throws {
         let service = SetupPermissionService(
             resolver: ContactResolver(seedCache: [:], authorization: (false, .denied))
