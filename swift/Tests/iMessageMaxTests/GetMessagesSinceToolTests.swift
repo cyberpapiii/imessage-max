@@ -59,6 +59,18 @@ final class GetMessagesSinceToolTests: XCTestCase {
         XCTAssertEqual(json["has_more"] as? Bool, false)
     }
 
+    func testLinksAreCappedAtTenLikeGetMessages() async throws {
+        let fixture = try makeSinceFixture()
+        let text = (1...12).map { "https://l\($0).example.com" }.joined(separator: " ")
+        try fixture.insertMessage(rowId: 108, guid: "s-108", text: text, date: date(108), isFromMe: false, handleId: 1)
+        try fixture.joinChatMessage(chatId: 1, messageId: 108)
+        let tool = GetMessagesSinceTool(db: fixture.database(), resolver: makeSeededResolver())
+        let json = try decodeJSONDictionary(from: try await tool.execute(args: ["since_rowid": .int(107)]))
+        let message = try XCTUnwrap(try decodeJSONArray(json["messages"]).first)
+        XCTAssertEqual((message["links"] as? [String])?.count, 10)
+        XCTAssertEqual((message["links"] as? [String])?.last, "https://l10.example.com")
+    }
+
     func testOmittedCursorReturnsCurrentRowidOnly() async throws {
         let fixture = try makeSinceFixture()
         let tool = GetMessagesSinceTool(db: fixture.database(), resolver: makeSeededResolver())

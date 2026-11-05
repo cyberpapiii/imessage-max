@@ -10,7 +10,6 @@ private let defaultUnansweredHours = 24
 private let sessionGapHours = 4
 let sessionGapNanoseconds: Int64 = Int64(sessionGapHours) * 60 * 60 * 1_000_000_000
 private let maxMedia = 10
-private let maxLinks = 10
 
 // MARK: - Response Types
 
@@ -289,8 +288,7 @@ actor GetMessagesTool {
         let renderer = MessageRenderer(
             annotations: annotations,
             labels: people.labels(noHandle: "unknown"),
-            eventNames: await MessageRenderer.eventNames(for: messageRows, resolver: resolver),
-            linkCap: maxLinks
+            eventNames: await MessageRenderer.eventNames(for: messageRows, resolver: resolver)
         )
 
         var messages: [GetMessagesResponse.MessageInfo] = []

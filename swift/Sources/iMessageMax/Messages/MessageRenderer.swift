@@ -103,7 +103,9 @@ struct MessageRenderer {
     let labels: SenderLabels
     /// Display names for group-event targets (`message.other_handle`).
     var eventNames: [String: String] = [:]
-    var linkCap: Int? = nil
+
+    /// Links shown per message; the text itself still carries the rest.
+    static let maxLinks = 10
 
     /// Resolves the display names group events show for the people they
     /// added or removed.
@@ -114,8 +116,7 @@ struct MessageRenderer {
     func render(_ message: MessageRecord) -> RenderedMessage {
         let date = AppleTime.toDate(message.date)
         let attachments = (annotations.attachments[message.id] ?? []).map(MessageAttachmentSummary.init)
-        var links = message.text.map(Self.links(in:)) ?? []
-        if let linkCap { links = Array(links.prefix(linkCap)) }
+        let links = Array((message.text.map(Self.links(in:)) ?? []).prefix(Self.maxLinks))
         return RenderedMessage(
             id: MessageIdentifier.format(message.id),
             rowid: message.id,
