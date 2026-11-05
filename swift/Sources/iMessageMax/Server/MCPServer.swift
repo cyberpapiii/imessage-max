@@ -1,54 +1,24 @@
 import Foundation
 import MCP
 
-actor MCPServerWrapper {
-    private let server: Server
-    private let database: Database
-    private let resolver: ContactResolver
-    private let contactsPolicy: ContactsAccessPolicy.Override
-    private let catalog: ToolCatalog
+/// Process startup for both transports.
+enum ServerStartup {
+    /// Logs `Started version=… pid=… transport=…` and the database state,
+    /// then settles Contacts access in the background so the transport
+    /// answers meanwhile.
+    static func announce(
+        transport: String,
+        resolver: ContactResolver,
+        contactsPolicy: ContactsAccessPolicy.Override
+    ) {
+        Log.info("Started version=\(Version.current) pid=\(getpid()) transport=\(transport)")
 
-    init(contactsPolicy: ContactsAccessPolicy.Override = .auto) {
-        self.server = Server(
-            name: Version.name,
-            version: Version.current,
-            title: Version.title,
-            instructions: Version.instructions,
-            capabilities: Version.serverCapabilities
-        )
-        self.database = Database()
-        self.resolver = ContactResolver()
-        self.contactsPolicy = contactsPolicy
-        self.catalog = ToolCatalog(database: database, resolver: resolver)
-    }
-
-    func start(transport: any Transport) async throws {
-        await server.registerToolHandlers(catalog)
-        // Dual-era stdio: modern 2026-07-28 messages are answered by
-        // ModernDispatcher inside DualEraStdioTransport; legacy traffic
-        // continues through the SDK Server (with icon injection on send).
-        let transport = IconMetadataTransport(base: DualEraStdioTransport(base: transport, catalog: catalog))
-
-        Log.info("Started version=\(Version.current) pid=\(getpid()) transport=stdio")
-
-        // Start server in background, then do startup checks
-        // This allows MCP initialization to complete while contacts load
-        async let serverTask: () = server.start(transport: transport)
-
-        // Perform startup checks after server starts (non-blocking for MCP)
-        Task {
-            await performStartupChecks()
-        }
-
-        try await serverTask
-        await server.waitUntilCompleted()
-    }
-
-    private func performStartupChecks() async {
-        // Check database access
         let (dbOk, dbStatus) = Database.checkAccess()
         if !dbOk {
             Log.info("Database: \(dbStatus)")
+            if dbStatus == "permission_denied" {
+                Log.info(DiagnoseTool.fullDiskAccessFix())
+            }
         }
 
         let policy = ContactsAccessPolicy.resolve(
@@ -56,7 +26,25 @@ actor MCPServerWrapper {
             environment: ProcessInfo.processInfo.environment,
             isTTY: ContactsAccessPolicy.stdinIsTTY
         )
-        await resolver.requestAccessIfAllowed(policy: policy)
-        try? await resolver.refresh()
+        Task {
+            await resolver.requestAccessIfAllowed(policy: policy)
+            let contacts = await resolver.status()
+            Log.info("Contacts: authorization=\(contacts.authorization) handles=\(contacts.handleCount)")
+        }
+    }
+
+    /// The stdio server: one SDK Server for the legacy lane, the modern lane
+    /// answered beside it. Returns when stdin closes.
+    static func runStdio(contactsPolicy: ContactsAccessPolicy.Override) async throws {
+        let resolver = ContactResolver()
+        let catalog = ToolCatalog(database: Database(), resolver: resolver)
+        let server = await Version.makeServer(catalog: catalog)
+        let stdio = DualEraStdio(base: StdioTransport(), catalog: catalog)
+
+        announce(transport: "stdio", resolver: resolver, contactsPolicy: contactsPolicy)
+
+        try await stdio.start()
+        try await server.start(transport: stdio.legacy)
+        await server.waitUntilCompleted()
     }
 }

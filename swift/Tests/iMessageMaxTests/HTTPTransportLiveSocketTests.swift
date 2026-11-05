@@ -190,13 +190,9 @@ final class HTTPTransportLiveSocketTests: XCTestCase {
                 """)
             _ = try readUntilDoubleCRLF(getFd)
 
-            let exited = expectation(description: "server exits after graceful shutdown")
-            Task {
-                try? await transport.waitForTermination()
-                exited.fulfill()
-            }
-            await transport.triggerGracefulShutdownForTesting()
-            await fulfillment(of: [exited], timeout: 3)
+            let start = ContinuousClock.now
+            await transport.shutdown()
+            XCTAssertLessThan(ContinuousClock.now - start, .seconds(3), "graceful shutdown waited on the open SSE stream")
         }
     }
 
@@ -252,21 +248,23 @@ final class HTTPTransportLiveSocketTests: XCTestCase {
                 port: port,
                 catalog: makeTestCatalog(),
                 setupPermissions: makeTestSetupPermissions(),
-                requestTimeout: .seconds(5),
-                channelIdleTimeout: channelIdleTimeout,
-                cleanupInterval: .milliseconds(20),
-                sessionTimeout: sessionTimeout,
-                sseKeepAliveInterval: sseKeepAliveInterval
+                configuration: .init(
+                    requestTimeout: .seconds(5),
+                    channelIdleTimeout: channelIdleTimeout,
+                    cleanupInterval: .milliseconds(20),
+                    sessionTimeout: sessionTimeout,
+                    sseKeepAliveInterval: sseKeepAliveInterval
+                )
             )
             do {
                 try await transport.connect(gracefulShutdownSignals: [])
                 await AsyncTimeout.sleep(.milliseconds(200))
                 do {
                     try await body(transport, port)
-                    await transport.disconnect()
+                    await transport.shutdown()
                     return
                 } catch {
-                    await transport.disconnect()
+                    await transport.shutdown()
                     throw error
                 }
             } catch {

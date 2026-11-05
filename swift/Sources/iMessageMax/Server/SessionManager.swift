@@ -1,5 +1,4 @@
 import Foundation
-import Logging
 import MCP
 
 /// Outcome of createSession: capacity refusal and startup failure need
@@ -16,7 +15,6 @@ enum SessionCreationResult {
 /// Each session has its own Server instance, enabling clean reconnection.
 /// When a client reconnects, they get a new session with a fresh Server.
 actor SessionManager {
-    /// Complete session state including Server instance
     final class MCPSessionState: @unchecked Sendable {
         let id: String
         let server: Server
@@ -39,7 +37,6 @@ actor SessionManager {
         }
     }
 
-    /// Active sessions keyed by session ID
     private var sessions: [String: MCPSessionState] = [:]
 
     /// Slots claimed by in-flight `createSession` calls. The cap is checked
@@ -47,10 +44,8 @@ actor SessionManager {
     /// cannot both pass the count check, await registration, and both insert.
     private var reservedSlots = 0
 
-    /// Session timeout duration (1 hour by default)
     private let sessionTimeout: TimeInterval
 
-    /// Maximum number of concurrent sessions
     private let maxSessions: Int
 
     /// Idle span after which a session is reclaimed to admit a new client
@@ -62,15 +57,13 @@ actor SessionManager {
     /// a `swift test --parallel` worker for five minutes.
     private let cleanupInterval: Duration
 
-    /// Task for periodic cleanup
     private var cleanupTask: Task<Void, Never>?
 
-    private let catalog: ToolCatalog
+    /// Builds each session's SDK Server.
+    private let makeServer: @Sendable () async -> Server
 
-    /// Callback to route Server responses back to HTTP
     private var responseHandler: ((String, Data) async -> Void)?
 
-    /// Callback when sessions are terminated (for SSE cleanup)
     private var sessionTerminationHandler: ((String) async -> Void)?
 
     /// - Parameters:
@@ -88,29 +81,43 @@ actor SessionManager {
     ///     it so cancelled `asyncAfter` work does not occupy a parallel
     ///     worker until the five-minute deadline.
     init(
-        catalog: ToolCatalog,
+        makeServer: @escaping @Sendable () async -> Server,
         sessionTimeout: TimeInterval = 3600,
         maxSessions: Int = 512,
         reclaimableIdle: TimeInterval = 300,
         cleanupInterval: Duration = .seconds(300)
     ) {
-        self.catalog = catalog
+        self.makeServer = makeServer
         self.sessionTimeout = sessionTimeout
         self.maxSessions = maxSessions
         self.reclaimableIdle = reclaimableIdle
         self.cleanupInterval = cleanupInterval
     }
 
+    init(
+        catalog: ToolCatalog,
+        sessionTimeout: TimeInterval = 3600,
+        maxSessions: Int = 512,
+        reclaimableIdle: TimeInterval = 300,
+        cleanupInterval: Duration = .seconds(300)
+    ) {
+        self.init(
+            makeServer: { await Version.makeServer(catalog: catalog) },
+            sessionTimeout: sessionTimeout,
+            maxSessions: maxSessions,
+            reclaimableIdle: reclaimableIdle,
+            cleanupInterval: cleanupInterval
+        )
+    }
+
     deinit {
         cleanupTask?.cancel()
     }
 
-    /// Sets the response handler for routing Server responses
     func setResponseHandler(_ handler: @escaping (String, Data) async -> Void) {
         self.responseHandler = handler
     }
 
-    /// Sets the session termination handler (for SSE cleanup on timeout)
     func setSessionTerminationHandler(_ handler: @escaping (String) async -> Void) {
         self.sessionTerminationHandler = handler
     }
@@ -119,7 +126,7 @@ actor SessionManager {
     ///
     /// This is the key to supporting reconnection - each session gets a fresh Server.
     func createSession(
-        protocolVersion: String = MCPProtocolVersion.defaultAssumed
+        protocolVersion: String = LegacyProtocol.latest
     ) async -> SessionCreationResult {
         if sessions.count >= maxSessions {
             await reclaimIdleSessions()
@@ -131,28 +138,14 @@ actor SessionManager {
         reservedSlots += 1
         defer { reservedSlots -= 1 }
 
-        // Start cleanup task on first session creation
         if cleanupTask == nil {
             startCleanupTask()
         }
 
         let sessionId = UUID().uuidString
 
-        // Create per-session Server instance
-        let server = Server(
-            name: Version.name,
-            version: Version.current,
-            title: Version.title,
-            instructions: Version.instructions,
-            capabilities: Version.serverCapabilities
-        )
-
-        // Register tools on this server instance
-        await server.registerToolHandlers(catalog)
-
-        // Create message stream for this session
-        var continuation: AsyncThrowingStream<Data, Error>.Continuation!
-        let messageStream = AsyncThrowingStream<Data, Error> { continuation = $0 }
+        let server = await makeServer()
+        let (messageStream, continuation) = AsyncThrowingStream<Data, Error>.makeStream()
 
         let session = MCPSessionState(
             id: sessionId,
@@ -161,17 +154,12 @@ actor SessionManager {
             messageContinuation: continuation
         )
 
-        // Create per-session transport adapter
-        let adapter = SessionTransportAdapter(
-            sessionId: sessionId,
-            messageStream: messageStream,
-            responseHandler: { [weak self] data in
-                await self?.handleServerResponse(sessionId: sessionId, data: data)
-            }
-        )
+        let transport = LegacyLaneTransport(inbound: messageStream) { [weak self] data in
+            await self?.handleServerResponse(sessionId: sessionId, data: data)
+        }
 
         do {
-            try await server.start(transport: adapter)
+            try await server.start(transport: transport)
         } catch {
             session.messageContinuation.finish()
             Log.error("session Server.start failed: \(error)")
@@ -186,7 +174,6 @@ actor SessionManager {
         return .created(session)
     }
 
-    /// Routes an incoming message to the appropriate session's Server
     func routeMessage(sessionId: String, data: Data) async -> Bool {
         guard let session = sessions[sessionId] else {
             return false
@@ -197,18 +184,15 @@ actor SessionManager {
         return true
     }
 
-    /// Handles response from a session's Server
     private func handleServerResponse(sessionId: String, data: Data) async {
         await responseHandler?(sessionId, data)
     }
 
-    /// Validates a session ID and returns the session if valid
     func validate(sessionId: String) async -> MCPSessionState? {
         guard let session = sessions[sessionId] else {
             return nil
         }
 
-        // Check if session has expired
         if Date().timeIntervalSince(session.lastActivity) > sessionTimeout {
             await terminateSession(sessionId: sessionId)
             return nil
@@ -217,7 +201,6 @@ actor SessionManager {
         return session
     }
 
-    /// Updates the last activity time for a session
     func touch(sessionId: String) {
         guard let session = sessions[sessionId] else { return }
         session.lastActivity = Date()
@@ -238,7 +221,6 @@ actor SessionManager {
         return delivered
     }
 
-    /// Returns the negotiated protocol version for a session.
     func protocolVersion(for sessionId: String) -> String? {
         sessions[sessionId]?.protocolVersion
     }
@@ -265,22 +247,10 @@ actor SessionManager {
         Task { await sessionTerminationHandler?(sessionId) }
     }
 
-    /// Returns all active session IDs
     func activeSessionIds() -> [String] {
         return Array(sessions.keys)
     }
 
-    func registerMethodHandlerForTesting<M: MCP.Method>(
-        sessionId: String,
-        _ method: M.Type,
-        handler: @escaping @Sendable (M.Parameters) async throws -> M.Result
-    ) async -> Bool {
-        guard let server = sessions[sessionId]?.server else { return false }
-        await server.withMethodHandler(method, handler: handler)
-        return true
-    }
-
-    /// Returns session count for monitoring
     var sessionCount: Int {
         sessions.count
     }
@@ -330,51 +300,5 @@ actor SessionManager {
         for id in expiredIds {
             await terminateSession(sessionId: id)
         }
-    }
-}
-
-// MARK: - Per-Session Transport Adapter
-
-/// A lightweight Transport adapter that bridges a session to its Server instance.
-///
-/// Each session has its own adapter, enabling independent Server lifecycles.
-actor SessionTransportAdapter: Transport {
-    private let sessionId: String
-    private let messageStream: AsyncThrowingStream<Data, Error>
-    private let responseHandler: (Data) async -> Void
-    private var isConnected = true
-
-    /// Logger for transport events (required by Transport protocol)
-    nonisolated let logger: Logger
-
-    init(
-        sessionId: String,
-        messageStream: AsyncThrowingStream<Data, Error>,
-        responseHandler: @escaping (Data) async -> Void
-    ) {
-        self.sessionId = sessionId
-        self.messageStream = messageStream
-        self.responseHandler = responseHandler
-        self.logger = Logger(
-            label: "mcp.transport.session.\(sessionId.prefix(8))",
-            factory: { _ in SwiftLogNoOpLogHandler() }
-        )
-    }
-
-    func connect() async throws {
-        // Already connected via messageStream
-    }
-
-    func disconnect() async {
-        isConnected = false
-    }
-
-    func send(_ data: Data) async throws {
-        guard isConnected else { return }
-        await responseHandler(IconMetadata.injectServerIcons(into: data))
-    }
-
-    func receive() -> AsyncThrowingStream<Data, Error> {
-        return messageStream
     }
 }

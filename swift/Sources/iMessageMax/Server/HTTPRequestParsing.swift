@@ -1,6 +1,19 @@
 import Foundation
+import HTTPTypes
 import Hummingbird
 import NIOCore
+
+extension HTTPField.Name {
+    static let mcpSessionId = HTTPField.Name("Mcp-Session-Id")!
+    static let mcpProtocolVersion = HTTPField.Name("MCP-Protocol-Version")!
+    /// 2026-07-28 request-metadata header.
+    static let mcpMethod = HTTPField.Name("Mcp-Method")!
+    /// 2026-07-28 request-metadata header.
+    static let mcpName = HTTPField.Name("Mcp-Name")!
+    static let origin = HTTPField.Name("Origin")!
+    static let connection = HTTPField.Name("Connection")!
+    static let setupRequest = HTTPField.Name("X-iMessage-Max-Setup")!
+}
 
 enum HTTPRequestParsing {
     /// Largest request body accepted on POST. Same 512 KB bound the old
@@ -90,5 +103,18 @@ enum HTTPRequestParsing {
     static func acceptsStreamableHTTP(_ accept: String) -> Bool {
         if accept.contains("*/*") { return true }
         return accept.contains("application/json") && accept.contains("text/event-stream")
+    }
+
+    /// Decodes the `=?base64?...?=` sentinel format the spec defines for
+    /// header values that cannot be carried as plain ASCII.
+    static func decodeBase64Sentinel(_ value: String) -> String {
+        guard value.hasPrefix("=?base64?"), value.hasSuffix("?="),
+            value.count > 11
+        else { return value }
+        let inner = String(value.dropFirst("=?base64?".count).dropLast("?=".count))
+        guard let data = Data(base64Encoded: inner),
+            let decoded = String(data: data, encoding: .utf8)
+        else { return value }
+        return decoded
     }
 }

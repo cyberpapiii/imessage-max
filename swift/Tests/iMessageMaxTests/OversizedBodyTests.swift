@@ -11,8 +11,8 @@ import NIOCore
 /// loop then blocked on channel close with reads back-pressured off, leaking
 /// one server FD per oversized request.
 final class OversizedBodyTests: XCTestCase {
-    private let maxBytes = HTTPTransport.maxRequestBodyBytes
-    private let drainLimit = HTTPTransport.overLimitDrainBytes
+    private let maxBytes = HTTPRequestParsing.maxRequestBodyBytes
+    private let drainLimit = HTTPRequestParsing.overLimitDrainBytes
 
     /// The core regression: on overflow the helper keeps consuming the body
     /// stream to the end. If it stops early, the producer below suspends on
@@ -29,7 +29,7 @@ final class OversizedBodyTests: XCTestCase {
             source.finish()
         }
 
-        let result = try await HTTPTransport.collectBodyDrainingOverflow(
+        let result = try await HTTPRequestParsing.collectBodyDrainingOverflow(
             body,
             declaredLength: chunk.readableBytes * chunkCount,
             maxBytes: maxBytes,
@@ -57,7 +57,7 @@ final class OversizedBodyTests: XCTestCase {
             source.finish()
         }
 
-        let result = try await HTTPTransport.collectBodyDrainingOverflow(
+        let result = try await HTTPRequestParsing.collectBodyDrainingOverflow(
             body,
             declaredLength: 4096,
             maxBytes: maxBytes,
@@ -78,7 +78,7 @@ final class OversizedBodyTests: XCTestCase {
         let (body, source) = RequestBody.makeStream()
         defer { source.finish() }
 
-        let result = try await HTTPTransport.collectBodyDrainingOverflow(
+        let result = try await HTTPRequestParsing.collectBodyDrainingOverflow(
             body,
             declaredLength: drainLimit + 1,
             maxBytes: maxBytes,
@@ -99,13 +99,12 @@ final class OversizedBodyTests: XCTestCase {
             port: 0,
             catalog: makeTestCatalog(),
             setupPermissions: makeTestSetupPermissions(),
-            requestTimeout: .seconds(5),
-            cleanupInterval: .milliseconds(20)
+            configuration: .init(requestTimeout: .seconds(5), cleanupInterval: .milliseconds(20))
         )
-        let app = await transport.makeApplicationForTesting()
+        let app = await transport.application()
 
         try await app.test(TestingSetup.router) { client in
-            let oversized = ByteBuffer(repeating: 0x7A, count: HTTPTransport.maxRequestBodyBytes + 1)
+            let oversized = ByteBuffer(repeating: 0x7A, count: HTTPRequestParsing.maxRequestBodyBytes + 1)
             let response = try await client.executeRequest(
                 uri: "/",
                 method: HTTPRequest.Method.post,

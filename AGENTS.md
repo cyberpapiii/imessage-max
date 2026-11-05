@@ -108,23 +108,26 @@ swift/
 ├── Sources/iMessageMax/
 │   ├── iMessageMaxCommand.swift # Entry point
 │   ├── Server/
-│   │   ├── MCPServer.swift     # Server lifecycle (stdio)
+│   │   ├── MCPServer.swift     # Startup for both transports, the stdio server
+│   │   ├── JSONRPC.swift       # Message parse, era rule, error codes, envelopes, era log line
 │   │   ├── HTTPTransport.swift # HTTP Streamable transport (dual-era)
 │   │   ├── ModernProtocol.swift # MCP 2026-07-28 stateless dispatcher
-│   │   ├── DualEraStdioTransport.swift # stdio era router
+│   │   ├── DualEraStdio.swift  # stdio era router
+│   │   ├── LegacyLaneTransport.swift # Transport under every SDK Server; adds server icons
 │   │   ├── SessionManager.swift # Per-session Server instances (legacy)
 │   │   ├── SSEConnection.swift # Server-Sent Events
-│   │   ├── HTTPRequestParsing.swift # Header and body parsing helpers
+│   │   ├── HTTPRequestParsing.swift # Header names, header and body parsing helpers
 │   │   ├── PendingRequestRegistry.swift # Request/response correlation and timeouts
 │   │   ├── MessageWatcher.swift # chat.db watcher for live inbox notifications
-│   │   ├── LiveInboxState.swift # Watcher state reported by diagnose
 │   │   ├── NewMessagesNotification.swift # notifications/imessage/new_messages payload
 │   │   ├── OriginValidationMiddleware.swift
-│   │   ├── ToolRegistry.swift  # Tool registration
+│   │   ├── ToolCatalog.swift   # The tools a process serves, handed to every lane
 │   │   ├── ToolCallDispatch.swift # tools/call routing
+│   │   ├── ToolFailure.swift   # A tool's error answer
 │   │   ├── ServerExtensions.swift # Server helpers
-│   │   ├── IconMetadata.swift  # icon/_meta for tools/list
-│   │   └── Version.swift       # Version.current, the source of truth
+│   │   ├── SetupPermissionService.swift # Native setup route for permission prompts
+│   │   ├── IconMetadata.swift  # Embedded icons, the serverInfo icon injection
+│   │   └── Version.swift       # Version.current (source of truth), protocol versions, SDK Server factory
 │   ├── Database/               # SQLite wrapper, query builder, schema capability probe
 │   ├── Models/                 # AttachmentType, ChatIdentity, GroupEvent, Reactions, ResponsePrimitives, SendPayload
 │   ├── Tools/                  # 13 MCP tools across 17 files
@@ -153,7 +156,8 @@ The server serves two MCP protocol eras concurrently on both transports
   stdio bundle, and Codex all use it. Do not remove it without verified
   proof that every real client has migrated.
 
-Era selection is body-driven only. Real legacy clients (plug) send
+Era selection is body-driven only (`JSONRPCMessage.era`, the one rule
+both transports use). Real legacy clients (plug) send
 `Mcp-Method` and `MCP-Protocol-Version` headers on legacy session
 traffic, so header presence must never route a request to the modern
 lane. The regression test for this is
@@ -184,10 +188,10 @@ npx @modelcontextprotocol/conformance@0.2.0-alpha.11 server --url http://127.0.0
   --suite active --expected-failures docs/conformance-baseline.yml
 ```
 
-Rollback: the modern lane is additive. Reverting
-`ModernProtocol.swift`, `DualEraStdioTransport.swift`, and the era branch
-in `HTTPTransport.handlePost` / `MCPServer.start` restores the previous
-legacy-only behavior byte-for-byte.
+Rollback: the modern lane is additive, but it is no longer a few
+self-contained files. Removing it means routing every message to the legacy
+lane in `HTTPTransport.handlePost` and `DualEraStdio.start` (and dropping
+`ModernProtocol.swift`); the shared JSON-RPC and startup code stays.
 
 ### HTTP transport architecture
 
@@ -265,7 +269,7 @@ Sleeping Swift tasks abort intermittently inside the launchd-run service
 (`swift_task_dealloc` / "freed pointer was not the last allocation").
 Use Dispatch timers instead: `AsyncTimeout.sleep` for tool code, or the
 cancellable `DispatchSourceTimer` pattern in
-`HTTPTransport.storePendingRequest` (not `asyncAfter`: a cancelled
+`PendingRequestRegistry.store` (not `asyncAfter`: a cancelled
 asyncAfter work item stays enqueued until its deadline and retains each
 request's timeout timer under load). This crashed production on
 2026-06-11 (send-confirmation timeout path); do not reintroduce.

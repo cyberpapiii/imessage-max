@@ -8,7 +8,7 @@ import NIOCore
 final class SetupPermissionTests: XCTestCase {
     func testSetupRequiresExplicitNativeRequest() async throws {
         let transport = setupTestTransport()
-        let app = await transport.makeApplicationForTesting()
+        let app = await transport.application()
         try await app.test(TestingSetup.router) { client in
             let response = try await client.executeRequest(uri: "/setup/permissions", method: .post,
                 headers: [.contentType: "application/json"],
@@ -19,7 +19,7 @@ final class SetupPermissionTests: XCTestCase {
 
     func testSetupRejectsBrowserOriginEvenOnLoopback() async throws {
         let transport = setupTestTransport()
-        let app = await transport.makeApplicationForTesting()
+        let app = await transport.application()
         try await app.test(TestingSetup.router) { client in
             let response = try await client.executeRequest(uri: "/setup/permissions", method: .post,
                 headers: [.contentType: "application/json", HTTPField.Name("Origin")!: "http://localhost:8080",
@@ -37,7 +37,7 @@ final class SetupPermissionTests: XCTestCase {
     }
 
     func testNativeRequestReturnsActualServiceIdentity() async throws {
-        let app = await setupTestTransport().makeApplicationForTesting()
+        let app = await setupTestTransport().application()
         try await app.test(TestingSetup.router) { client in
             let response = try await client.executeRequest(uri: "/setup/permissions", method: .post,
                 headers: setupHeaders(), body: ByteBuffer(string: "{\"permission\":\"automation\"}"))
@@ -50,7 +50,7 @@ final class SetupPermissionTests: XCTestCase {
     }
 
     func testNativeRequestRejectsUnknownPermissionAndExtraKeys() async throws {
-        let app = await setupTestTransport().makeApplicationForTesting()
+        let app = await setupTestTransport().application()
         try await app.test(TestingSetup.router) { client in
             for json in ["{\"permission\":\"full_disk\"}", "{\"permission\":\"contacts\",\"extra\":\"x\"}", "[]"] {
                 let response = try await client.executeRequest(uri: "/setup/permissions", method: .post,
@@ -61,7 +61,7 @@ final class SetupPermissionTests: XCTestCase {
     }
 
     func testNoSetupOnExternalListener() async throws {
-        let app = await setupTestTransport(host: "0.0.0.0").makeApplicationForTesting()
+        let app = await setupTestTransport(host: "0.0.0.0").application()
         try await app.test(TestingSetup.router) { client in
             let response = try await client.executeRequest(uri: "/setup/permissions", method: .post,
                 headers: setupHeaders(), body: ByteBuffer(string: "{\"permission\":\"automation\"}"))
@@ -70,7 +70,7 @@ final class SetupPermissionTests: XCTestCase {
     }
 
     func testNativeRequestRejectsOversizedBody() async throws {
-        let app = await setupTestTransport().makeApplicationForTesting()
+        let app = await setupTestTransport().application()
         try await app.test(TestingSetup.router) { client in
             let response = try await client.executeRequest(uri: "/setup/permissions", method: .post,
                 headers: setupHeaders(), body: ByteBuffer(string: String(repeating: "x", count: 300)))

@@ -131,8 +131,6 @@ enum FormatUtils {
             } else {
                 out.append(contentsOf: number.stringValue.utf8)
             }
-        case let bool as Bool:
-            out.append(contentsOf: (bool ? "true" : "false").utf8)
         case let array as [Any]:
             out.append(UInt8(ascii: "["))
             for (index, item) in array.enumerated() {

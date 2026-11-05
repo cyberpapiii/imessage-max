@@ -84,7 +84,6 @@ final class MessageWatcherTests: XCTestCase {
         defer { watcher.stop() }
 
         let walPath = fixture.path + "-wal"
-        let before = watcher.watchedIdentitiesForTesting()[walPath]
 
         try fixture.execute("PRAGMA wal_checkpoint(TRUNCATE);")
         let aside = fixture.path + "-wal.aside"
@@ -98,12 +97,9 @@ final class MessageWatcherTests: XCTestCase {
         }
         defer { try? FileManager.default.removeItem(atPath: aside) }
 
-        watcher.pollNowForTesting()
-        let after = watcher.watchedIdentitiesForTesting()[walPath]
-        if before != nil {
-            XCTAssertNotEqual(before, after, "expected -wal identity to change after rotation")
-        }
-        XCTAssertTrue(collected.withLock { $0.contains(7) }, "insert after rotation was not reported")
+        // The fallback poll is 30 s out, so only file events can report this.
+        let reported = await waitUntil { collected.withLock { $0.contains(7) } }
+        XCTAssertTrue(reported, "insert after rotation was not reported")
     }
 
     /// chat.db unreadable at startup must not switch live notifications off
@@ -127,20 +123,20 @@ final class MessageWatcherTests: XCTestCase {
         watcher.start()
         defer { watcher.stop() }
         XCTAssertTrue(watcher.isRunning)
-        XCTAssertFalse(LiveInboxState.isRunning, "not live until chat.db has been read")
+        XCTAssertFalse(watcher.isLive, "not live until chat.db has been read")
 
         let fixture = try makeWalFixture()
         try fixture.insertMessage(rowId: 3, guid: "late-3", text: "old", date: 1, isFromMe: false, handleId: 1)
         // A WAL database copied without its -shm cannot be opened read-only.
         try fixture.execute("PRAGMA journal_mode=DELETE;")
         try FileManager.default.copyItem(atPath: fixture.path, toPath: path)
-        watcher.pollNowForTesting()
+        watcher.pollNow()
         XCTAssertEqual(collected.withLock { $0 }, [], "the first read only seeds")
-        XCTAssertTrue(LiveInboxState.isRunning)
+        XCTAssertTrue(watcher.isLive)
 
         let late = try ToolTestDatabase(attachingTo: path)
         try late.insertMessage(rowId: 4, guid: "late-4", text: "new", date: 2, isFromMe: false, handleId: 1)
-        watcher.pollNowForTesting()
+        watcher.pollNow()
         XCTAssertEqual(collected.withLock { $0 }, [4])
     }
 
@@ -168,12 +164,12 @@ final class MessageWatcherTests: XCTestCase {
             try? FileManager.default.removeItem(atPath: fixture.path + suffix)
         }
         _ = try FileManager.default.replaceItemAt(fixture.url, withItemAt: replacement.url)
-        watcher.pollNowForTesting()
+        watcher.pollNow()
         XCTAssertEqual(collected.withLock { $0 }, [], "a smaller maximum is a reset, not new mail")
 
         let reopened = try ToolTestDatabase(attachingTo: fixture.path)
         try reopened.insertMessage(rowId: 3, guid: "new-3", text: "after", date: 2, isFromMe: false, handleId: 1)
-        watcher.pollNowForTesting()
+        watcher.pollNow()
         XCTAssertEqual(collected.withLock { $0 }, [3])
     }
 
@@ -191,6 +187,7 @@ final class MessageWatcherTests: XCTestCase {
         watcher.stop()
         watcher.stop()
         XCTAssertFalse(watcher.isRunning)
+        XCTAssertFalse(watcher.isLive)
 
         try fixture.insertMessage(rowId: 9, guid: "w-9", text: "late", date: 3, isFromMe: false, handleId: 1)
         let fired = await waitUntil(.seconds(1)) { !collected.withLock { $0.isEmpty } }

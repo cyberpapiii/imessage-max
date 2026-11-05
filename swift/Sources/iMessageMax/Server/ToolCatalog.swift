@@ -42,9 +42,7 @@ final class ToolCatalog: @unchecked Sendable {
     init(_ definitions: [ToolDefinition]) {
         tools = definitions.map(\.tool)
         handlers = Dictionary(definitions.map { ($0.tool.name, $0.handler) }) { _, last in last }
-        if let data = try? JSONEncoder().encode(tools),
-            let json = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
-        {
+        if let json = JSONRPC.jsonValue(encoding: tools) as? [[String: Any]] {
             toolsJSON = json
         } else {
             Log.error("tool catalog encode failed; modern tools/list will be empty")
@@ -52,7 +50,13 @@ final class ToolCatalog: @unchecked Sendable {
         }
     }
 
-    convenience init(database: Database, resolver: ContactResolver) {
+    /// `liveInbox` reports whether new-message notifications are flowing;
+    /// only the HTTP lane runs the watcher behind them.
+    convenience init(
+        database: Database,
+        resolver: ContactResolver,
+        liveInbox: @escaping @Sendable () -> Bool = { false }
+    ) {
         self.init([
             FindChatTool.definition(db: database, resolver: resolver),
             GetChatDetailsTool.definition(db: database, resolver: resolver),
@@ -66,7 +70,7 @@ final class ToolCatalog: @unchecked Sendable {
             ListAttachments.definition(db: database, resolver: resolver),
             GetAttachment.definition(db: database, resolver: resolver),
             SendTool.definition(db: database, resolver: resolver),
-            DiagnoseTool.definition(db: database, resolver: resolver),
+            DiagnoseTool.definition(db: database, resolver: resolver, liveInbox: liveInbox),
         ])
     }
 

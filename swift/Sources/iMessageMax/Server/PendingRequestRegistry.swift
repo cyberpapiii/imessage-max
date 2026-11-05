@@ -61,7 +61,7 @@ actor PendingRequestRegistry {
     func timeout(sessionId: String, id: String) {
         if let continuation = remove(sessionId: sessionId, id: id) {
             continuation.resume(
-                throwing: MCPError.serverError(code: -32000, message: "Request timeout")
+                throwing: MCPError.serverError(code: JSONRPCErrorCode.serverError.rawValue, message: "Request timeout")
             )
         }
     }
@@ -72,7 +72,7 @@ actor PendingRequestRegistry {
             guard let entry = entries.removeValue(forKey: key) else { continue }
             entry.timer.cancel()
             entry.continuation.resume(
-                throwing: MCPError.serverError(code: -32000, message: "Session terminated")
+                throwing: MCPError.serverError(code: JSONRPCErrorCode.serverError.rawValue, message: "Session terminated")
             )
         }
     }

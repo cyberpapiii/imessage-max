@@ -82,7 +82,7 @@ struct DiagnoseResult: Codable {
 enum DiagnoseTool {
     // MARK: - Tool Registration
 
-    static func definition(db: Database, resolver: ContactResolver) -> ToolDefinition {
+    static func definition(db: Database, resolver: ContactResolver, liveInbox: @escaping LiveInboxProbe) -> ToolDefinition {
         let inputSchema: Value = .object([
             "type": "object",
             "properties": .object([:]),
@@ -122,7 +122,7 @@ enum DiagnoseTool {
             let result = try await execute(
                 resolver: resolver,
                 schemaProbe: { try? db.schema() },
-                liveInboxProbe: { LiveInboxState.isRunning }
+                liveInboxProbe: liveInbox
             )
             return [.plainText(try FormatUtils.encodeJSON(result))]
         }
@@ -158,7 +158,7 @@ enum DiagnoseTool {
         dbProbe: DatabaseProbe = { Database.checkAccess() },
         automationProbe: AutomationProbe = { AutomationPermission.checkAutomationPermission() },
         schemaProbe: SchemaProbe = { nil },
-        liveInboxProbe: LiveInboxProbe = { LiveInboxState.isRunning },
+        liveInboxProbe: LiveInboxProbe = { false },
         usageDescriptionProbe: UsageDescriptionProbe = { ContactResolver.usageDescriptionEmbedded }
     ) async throws -> DiagnoseResult {
         let processId = ProcessInfo.processInfo.processIdentifier
@@ -348,7 +348,7 @@ enum DiagnoseTool {
             "edit_unsend":           Capability(state: "unsupported"),
             "live_inbox":            Capability(
                 state: liveInboxProbe() ? "supported" : "unavailable",
-                detail: "notifications/imessage/new_messages over the legacy session SSE stream; stateless clients poll get_messages_since"
+                detail: "\(NewMessagesNotification.name) over the legacy session SSE stream; stateless clients poll get_messages_since"
             ),
             "perm_full_disk":        Capability(state: permFullDiskState, fix: permFullDiskFix),
             "perm_contacts":         Capability(state: permContactsState, fix: permContactsFix),
