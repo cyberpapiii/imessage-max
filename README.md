@@ -507,7 +507,8 @@ executable and the steps:
    earlier code signature looks present but does not work; `make
    setup-signing` gives the binary a stable identity so rebuilds keep it.
 3. The grant applies only to newly launched processes. Relaunch:
-   `launchctl kickstart -k gui/$(id -u)/local.imessage-max` or `cd swift && make restart`.
+   `cd swift && make restart` (launchctl bootout, then bootstrap; `kickstart -k`
+   can hit the launchd crash throttle).
 4. Bisect from a terminal: `sqlite3 -readonly ~/Library/Messages/chat.db 'pragma quick_check;'`.
    `ok` means your terminal has access and the server process does not;
    `unable to open database file` means the grant is missing for your user.

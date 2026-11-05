@@ -38,11 +38,7 @@ struct SetupStep: View {
         case .contacts:
           if diagnosis.contacts.authorized {
             heading("Names need another look")
-            line(
-              diagnosis.contacts.status == "skipped_ci"
-                ? "Contact loading is disabled in the service environment. Remove its CI setting, then restart iMessage Max."
-                : "Contacts access is allowed, but the names did not load. Restart iMessage Max and check again."
-            )
+            line("Contacts access is allowed, but the names did not load. Restart iMessage Max and check again.")
             buttons {
               Button("Restart and check") { model.perform(.restart) }
                 .buttonStyle(MaxButtonStyle(primary: true)).disabled(model.busy != nil)

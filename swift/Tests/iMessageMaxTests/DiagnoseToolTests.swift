@@ -73,7 +73,8 @@ final class DiagnoseToolTests: XCTestCase {
 
         XCTAssertTrue(fix.contains("Full Disk Access"), fix)
         XCTAssertTrue(fix.contains("toggle it off and on"), fix)
-        XCTAssertTrue(fix.contains("launchctl kickstart -k gui/$(id -u)/local.imessage-max"), fix)
+        XCTAssertTrue(fix.contains("make restart"), fix)
+        XCTAssertFalse(fix.contains("kickstart"), "kickstart hits the launchd crash throttle")
         XCTAssertTrue(fix.contains("pragma quick_check"), fix)
         XCTAssertTrue(fix.contains("newly launched"), fix)
         XCTAssertEqual(result.capabilities["perm_full_disk"]?.fix, fix,
