@@ -254,4 +254,37 @@ final class ToolsReviewRegressionTests: XCTestCase {
         let alice = try await call("find_chat", ["participants": ["Alice"], "limit": 3], db: db, contacts: aliceAndBob)
         XCTAssertEqual(try decodeJSONArray(alice["chats"]).compactMap { $0["id"] as? String }, ["chat12", "chat11", "chat10"])
     }
+
+    // MARK: - get_active_conversations
+
+    func testActiveConversationsFindsQualifyingChatsBehindNewerThinOnes() async throws {
+        let db = try ToolTestDatabase(name: "active")
+        let base = now() - 120 * minute
+        var id = 0
+        func exchange(_ chat: Int, at: Int64, rounds: Int) throws {
+            for r in 0..<rounds {
+                for me in [true, false] {
+                    id += 1
+                    try db.insertMessage(rowId: id, guid: "A\(id)", text: "t\(id)", date: base + (at + Int64(r)) * minute,
+                                         isFromMe: me, handleId: me ? nil : chat)
+                    try db.joinChatMessage(chatId: chat, messageId: id)
+                }
+            }
+        }
+        for chat in 1...6 {
+            try db.insertHandle(rowId: chat, handle: "+1555000000\(chat)")
+            try db.insertChat(rowId: chat, guid: "iMessage;-;\(chat)")
+            try db.joinChatHandle(chatId: chat, handleId: chat)
+        }
+        try exchange(1, at: 0, rounds: 2)
+        try exchange(2, at: 5, rounds: 2)
+        for chat in 3...6 { try exchange(chat, at: Int64(20 + chat), rounds: 1) }
+
+        let one = try await call("get_active_conversations", ["limit": 1, "min_exchanges": 2], db: db)
+        XCTAssertEqual(try decodeJSONArray(one["conversations"]).compactMap { $0["id"] as? String }, ["chat2"])
+        XCTAssertEqual(one["more"] as? Bool, true)
+        let all = try await call("get_active_conversations", ["limit": 2, "min_exchanges": 2], db: db)
+        XCTAssertEqual(try decodeJSONArray(all["conversations"]).compactMap { $0["id"] as? String }, ["chat2", "chat1"])
+        XCTAssertEqual(all["more"] as? Bool, false)
+    }
 }

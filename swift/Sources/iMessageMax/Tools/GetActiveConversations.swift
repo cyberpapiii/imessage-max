@@ -144,15 +144,16 @@ enum GetActiveConversations {
             .where("m.date >= ?", windowStartApple)
             .where(SQLFragments.notReaction())
             .groupBy("c.ROWID")
-            .having("my_count >= 1 AND their_count >= 1")
+            // An exchange needs a message each way, so the qualifying count
+            // is the smaller side; minExchanges is at least 1.
+            .having("my_count >= ? AND their_count >= ?", clampedMinExchanges, clampedMinExchanges)
         if let filterGroup = isGroup {
             query.having(filterGroup
                 ? SQLFragments.isGroup(count: "participant_count")
                 : SQLFragments.isDirect(count: "participant_count"))
         }
-        // Fetch more than limit to account for filtering
-        let fetchLimit = clampedLimit * 3
-        query.orderBy("last_in_window DESC").limit(fetchLimit)
+        // One row past the page says whether more chats qualify.
+        query.orderBy("last_in_window DESC", "c.ROWID DESC").limit(clampedLimit + 1)
         let (sql, params) = query.build()
 
         let chatRows = try database.query(sql, params: params) { row -> ChatActivityRow in
@@ -169,14 +170,7 @@ enum GetActiveConversations {
             )
         }
 
-        // Apply min_exchanges and the limit first so the batched lookups
-        // cover exactly the chats returned.
-        var includedRows: [ChatActivityRow] = []
-        for row in chatRows {
-            guard includedRows.count < clampedLimit else { break }
-            guard min(row.myCount, row.theirCount) >= clampedMinExchanges else { continue }
-            includedRows.append(row)
-        }
+        let includedRows = Array(chatRows.prefix(clampedLimit))
 
         // last_in_window is the newest qualifying date the activity query
         // already computed, which is exactly the message the preview wants.
@@ -216,8 +210,8 @@ enum GetActiveConversations {
             conversations: conversations,
             total: conversations.count,
             windowHours: clampedHours,
-            // Cursor pagination not implemented; never advertise more pages.
-            more: false,
+            // No cursor: more says raising limit would show more chats.
+            more: chatRows.count > clampedLimit,
             cursor: nil
         )
     }
