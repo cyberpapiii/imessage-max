@@ -2,7 +2,7 @@
 
 > **Type:** Design spike. Prototype is throwaway and must not be merged.
 > **Plan:** `plans/077-spike-one-call-catch-up-sweep.md`
-> **Branch:** `advisor/077-spike-catch-up-sweep` (from `main` at `bec239e`)
+> **Branch:** `advisor/077-spike-catch-up-sweep` (from `main` at `bec239e`); deleted 2026-11-05 with its prototype. This doc is what was kept.
 > **Measurement date:** 2026-09-02 (filename keeps the plan's 2026-09-01 date)
 > **Database:** one operator's `~/Library/Messages/chat.db`, 7-day window, read-only. Re-measure before any implementation plan.
 
