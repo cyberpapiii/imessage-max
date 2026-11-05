@@ -1,0 +1,81 @@
+import XCTest
+import MCP
+@testable import iMessageMax
+
+/// Regressions for the second read-tool review.
+final class ToolsReview2RegressionTests: XCTestCase {
+    private let base: Int64 = 700_000_000_000_000_000
+
+    private func ids(_ json: [String: Any], _ key: String = "messages") throws -> [String] {
+        try decodeJSONArray(json[key]).compactMap { $0["id"] as? String }
+    }
+
+    // MARK: - get_messages_since pages without skipping rows
+
+    func testSinceFullPageEndingOnABatchsLastRowStillReportsMore() async throws {
+        let f = try ToolTestDatabase(name: "since-full-batch")
+        try f.insertHandle(rowId: 1, handle: "+15550000001")
+        try f.insertChat(rowId: 1, guid: "iMessage;-;+15550000001")
+        try f.insertChat(rowId: 2, guid: "SMS;-;spam", isFiltered: 1)
+        // limit 31 reads a first batch of 32 rows; one of them is hidden, so
+        // the 31st kept row is the batch's last.
+        try f.insertMessage(rowId: 1, guid: "h", text: "spam", date: base, isFromMe: false, handleId: 1)
+        try f.joinChatMessage(chatId: 2, messageId: 1)
+        for row in 2...40 {
+            try f.insertMessage(rowId: row, guid: "g\(row)", text: "m\(row)", date: base + Int64(row), isFromMe: false, handleId: 1)
+            try f.joinChatMessage(chatId: 1, messageId: row)
+        }
+
+        let first = try await callTool("get_messages_since", ["since_rowid": 0, "limit": 31], database: f.database())
+        XCTAssertEqual(try ids(first).count, 31)
+        XCTAssertEqual(first["has_more"] as? Bool, true)
+        XCTAssertEqual(first["next_rowid"] as? Int, 32)
+
+        let second = try await callTool("get_messages_since", ["since_rowid": 32, "limit": 31], database: f.database())
+        XCTAssertEqual(try ids(second), (33...40).map { "msg_\($0)" })
+        XCTAssertEqual(second["has_more"] as? Bool, false)
+    }
+
+    // MARK: - A message's chat
+
+    func testSinceChatFilterMatchesAMessageWhoseHomeChatIsAnother() async throws {
+        let f = try ToolTestDatabase(name: "since-second-chat")
+        try f.insertHandle(rowId: 1, handle: "+15550000001")
+        try f.insertChat(rowId: 1, guid: "iMessage;-;+15550000001")
+        try f.insertChat(rowId: 2, guid: "SMS;-;+15550000001", serviceName: "SMS")
+        try f.insertMessage(rowId: 1, guid: "g1", text: "in both", date: base, isFromMe: false, handleId: 1)
+        try f.joinChatMessage(chatId: 1, messageId: 1)
+        try f.joinChatMessage(chatId: 2, messageId: 1)
+
+        let json = try await callTool("get_messages_since", ["since_rowid": 0, "chat_id": "chat2"], database: f.database())
+        let messages = try decodeJSONArray(json["messages"])
+        XCTAssertEqual(messages.compactMap { $0["id"] as? String }, ["msg_1"])
+        XCTAssertEqual((messages.first?["chat"] as? [String: Any])?["id"] as? String, "chat2")
+
+        let unfiltered = try await callTool("get_messages_since", ["since_rowid": 0], database: f.database())
+        let home = try decodeJSONArray(unfiltered["messages"]).first?["chat"] as? [String: Any]
+        XCTAssertEqual(home?["id"] as? String, "chat1")
+    }
+
+    func testContextAndAttachmentNameTheMessagesHomeChat() async throws {
+        let f = try ToolTestDatabase(name: "home-chat")
+        try f.insertHandle(rowId: 1, handle: "+15550000001")
+        // The higher chat id is inserted first, so an unordered pick lands on it.
+        try f.insertChat(rowId: 9, guid: "SMS;-;+15550000001", serviceName: "SMS")
+        try f.insertChat(rowId: 3, guid: "iMessage;-;+15550000001")
+        try f.insertMessage(rowId: 1, guid: "g1", text: "\u{FFFC}", date: base, isFromMe: false, handleId: 1)
+        try f.joinChatMessage(chatId: 9, messageId: 1)
+        try f.joinChatMessage(chatId: 3, messageId: 1)
+        try f.insertAttachment(rowId: 1, filename: "/nonexistent/a.pdf", mimeType: "application/pdf", uti: "com.adobe.pdf")
+        try f.joinMessageAttachment(messageId: 1, attachmentId: 1)
+
+        let context = try await callTool("get_context", ["message_id": "msg_1"], database: f.database())
+        XCTAssertEqual((context["chat"] as? [String: Any])?["id"] as? String, "chat3")
+
+        for sort in ["recent_first", "largest_first"] {
+            let listed = try await callTool("list_attachments", ["sort": .string(sort)], database: f.database())
+            let chat = try decodeJSONArray(listed["messages"]).first?["chat"] as? [String: Any]
+            XCTAssertEqual(chat?["id"] as? String, "chat3", sort)
+        }
+    }
+}

@@ -131,6 +131,7 @@ actor GetMessagesSinceTool {
         // Chats, as filtered_hidden counts in every other tool.
         var hiddenChats: Set<Int64> = []
         var hasMore = false
+        var exhausted = false
         var scanFrom = sinceRowid
 
         while kept.count < limit && !stalled && scanFrom < currentRowid {
@@ -142,7 +143,10 @@ actor GetMessagesSinceTool {
                 chatFilter: chatFilter,
                 limit: batchLimit
             )
-            if rows.isEmpty { break }
+            if rows.isEmpty {
+                exhausted = true
+                break
+            }
 
             for row in rows {
                 if kept.count == limit {
@@ -173,7 +177,14 @@ actor GetMessagesSinceTool {
             }
             if hasMore || stalled { break }
             scanFrom = Int(rows.last!.message.id)
-            if rows.count < batchLimit { break }
+            if rows.count < batchLimit {
+                exhausted = true
+                break
+            }
+        }
+        // A page that filled on a batch's last row never looked past it.
+        if kept.count == limit && !exhausted && consumed < currentRowid {
+            hasMore = true
         }
 
         let nextRowid = hasMore ? consumed : currentRowid
@@ -236,24 +247,23 @@ actor GetMessagesSinceTool {
         chatFilter: Int64?,
         limit: Int
     ) throws -> [SinceScanRow] {
+        // A message in the filtered chat is listed under that chat.
+        let chat = chatFilter.map(String.init) ?? SQLFragments.homeChat()
         let query = QueryBuilder()
             .selectMessages(
                 schema,
-                "(SELECT MIN(cmj.chat_id) FROM chat_message_join cmj WHERE cmj.message_id = m.ROWID) AS chat_id",
+                "\(chat) AS chat_id",
                 "c.display_name AS chat_display_name",
                 "c.is_filtered AS chat_is_filtered"
             )
             .from("message m")
             .joinMessageHandles()
-            .leftJoin("chat c ON c.ROWID = (SELECT MIN(cmj2.chat_id) FROM chat_message_join cmj2 WHERE cmj2.message_id = m.ROWID)")
+            .leftJoin("chat c ON c.ROWID = \(chat)")
             .where("m.ROWID > ?", sinceRowid)
             .where("m.ROWID <= ?", currentRowid)
             .where(SQLFragments.notReaction())
         if let chatFilter {
-            query.where(
-                "(SELECT MIN(cmj3.chat_id) FROM chat_message_join cmj3 WHERE cmj3.message_id = m.ROWID) = ?",
-                chatFilter
-            )
+            query.where(SQLFragments.messageInChat(), chatFilter)
         }
         query.orderBy("m.ROWID ASC").limit(limit)
 

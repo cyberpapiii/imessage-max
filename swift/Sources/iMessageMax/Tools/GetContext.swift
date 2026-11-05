@@ -143,7 +143,7 @@ enum GetContext {
 
         switch target {
         case .message(let numericId):
-            guard let found = try database.query("\(targetQuery)\nWHERE m.ROWID = ?", params: [numericId], map: MessageInChat.init).first else {
+            guard let found = try database.query("\(targetQuery)\nWHERE m.ROWID = ? AND c.ROWID = \(SQLFragments.homeChat())", params: [numericId], map: MessageInChat.init).first else {
                 throw ToolFailure("not_found", ClientErrorMessages.messageNotFound)
             }
             targetResult = found

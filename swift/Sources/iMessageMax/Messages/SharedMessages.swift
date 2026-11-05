@@ -109,21 +109,20 @@ enum SharedMessages {
         // subqueries that keep the result one row per message on their own.
         let ranksBySize = sort == .largestFirst
         let query = QueryBuilder()
+        // One row per message: a message in the filtered chat is listed
+        // under that chat, any other under its home chat.
+        let chat = chatId.map(String.init) ?? SQLFragments.homeChat()
 
         if ranksBySize {
             query
                 .selectMessages(schema, MessageInChat.chatColumns, "MAX(COALESCE(a.total_bytes, 0)) as max_attachment_size")
                 .from("message m")
-                .join("chat_message_join cmj ON m.ROWID = cmj.message_id")
-                .join("chat c ON cmj.chat_id = c.ROWID")
+                .join("chat c ON c.ROWID = \(chat)")
                 .joinMessageHandles()
                 .join("message_attachment_join maj ON m.ROWID = maj.message_id")
                 .join("attachment a ON maj.attachment_id = a.ROWID")
                 .where(SQLFragments.notReaction())
                 .where(SQLFragments.shownAttachment("a"))
-            if let chatId {
-                query.where("c.ROWID = ?", chatId)
-            }
             if let pred = AttachmentType.sqlPredicate(for: typeFilter, alias: "a") {
                 query.where("(\(pred))")
             }
@@ -135,25 +134,16 @@ enum SharedMessages {
                  JOIN attachment a ON maj.attachment_id = a.ROWID
                  WHERE maj.message_id = m.ROWID AND \(SQLFragments.shownAttachment("a"))\(typeClause)) as max_attachment_size
                 """
-            // A message can belong to more than one chat, so picking the chat
-            // with a subquery keeps the result one row per message without the
-            // GROUP BY that joining chat_message_join would require.
-            var chatPick = "SELECT cmj.chat_id FROM chat_message_join cmj"
-                + " WHERE cmj.message_id = m.ROWID"
-            var chatPickParams: [Any] = []
-            if let chatId {
-                chatPick += " AND cmj.chat_id = ?"
-                chatPickParams.append(chatId)
-            }
-            chatPick += " ORDER BY cmj.chat_id LIMIT 1"
-
             query
                 .selectMessages(schema, MessageInChat.chatColumns, sizeSelect)
                 .from("message m")
-                .join("chat c ON c.ROWID = (\(chatPick))", params: chatPickParams)
+                .join("chat c ON c.ROWID = \(chat)")
                 .joinMessageHandles()
                 .where(SQLFragments.notReaction())
                 .where(SQLFragments.hasAttachment(ofType: typeFilter))
+        }
+        if let chatId {
+            query.where(SQLFragments.messageInChat(), chatId)
         }
 
         if let sender {
