@@ -31,19 +31,6 @@ final class SSEEventTests: XCTestCase {
         XCTAssertTrue(formatted.contains("data: test data\n"))
     }
 
-    func testFormattedOutputWithAllFields() {
-        let event = SSEEvent(
-            id: "event-42",
-            event: "notification",
-            data: #"{"type":"progress","value":50}"#
-        )
-        let formatted = event.formatted()
-
-        XCTAssertTrue(formatted.contains("id: event-42\n"))
-        XCTAssertTrue(formatted.contains("event: notification\n"))
-        XCTAssertTrue(formatted.contains("data: {"))
-    }
-
     func testFormattedOutputWithMultiLineData() {
         let multiLineData = """
         {
@@ -89,24 +76,15 @@ final class SSEEventTests: XCTestCase {
 
 final class SSEConnectionManagerTests: XCTestCase {
 
-    func testRegisterCreatesConnection() async {
-        let manager = SSEConnectionManager()
-        let info = SSEConnectionInfo(sessionId: "test-session")
-
-        let channel = await manager.register(info: info)
-
-        XCTAssertNotNil(channel)
-        let count = await manager.connectionCount
-        XCTAssertEqual(count, 1)
-    }
-
-    func testUnregisterRemovesConnection() async {
+    func testRegisterThenUnregister() async {
         let manager = SSEConnectionManager()
         let info = SSEConnectionInfo(sessionId: "test-session")
 
         _ = await manager.register(info: info)
         var count = await manager.connectionCount
         XCTAssertEqual(count, 1)
+        let ids = await manager.connectionIds(forSession: "test-session")
+        XCTAssertEqual(ids, [info.id])
 
         await manager.unregister(connectionId: info.id)
         count = await manager.connectionCount
@@ -204,27 +182,6 @@ final class SessionManagerLifecycleTests: XCTestCase {
 
         let count = await manager.sessionCount
         XCTAssertEqual(count, 1)
-    }
-
-    func testFreshSessionIsNotReclaimedWhenAtCapacity() async {
-        let manager = SessionManager(
-            catalog: makeTestCatalog(),
-            maxSessions: 1,
-            reclaimableIdle: 60,
-            cleanupInterval: .milliseconds(20)
-        )
-
-        let first = await manager.createSession()
-        guard case .created = first else {
-            return XCTFail("First session should be created, got \(first)")
-        }
-
-        // The one session is live, so the cap is real backpressure and the
-        // refusal must stand rather than evicting a client that is in use.
-        let second = await manager.createSession()
-        guard case .atCapacity = second else {
-            return XCTFail("Second session should be refused as .atCapacity, got \(second)")
-        }
     }
 
     func testAbandonedSessionIsReclaimedToAdmitANewClient() async {

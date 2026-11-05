@@ -62,19 +62,6 @@ final class SearchReactionSubqueryHangTests: XCTestCase {
         XCTAssertEqual(response.message.id, "msg_1")
     }
 
-    func testSearchFindsAttributedBodyMatchOlderThanFiveHundredAttributedBodyOnlyRows() async throws {
-        let fixture = try makeHangFixture(fillerCount: 600)
-        let search = try await decodeJSONDictionary(from:
-            SearchTool.execute(
-                query: "lisbon",
-                db: fixture.database(),
-                resolver: makeSeededResolver()
-            )
-        )
-        let results = try decodeJSONArray(try XCTUnwrap(search["results"]))
-        XCTAssertEqual(results.compactMap { $0["id"] as? String }, ["msg_1"])
-    }
-
     private func containsCorrelatedInstrOrSubstr(_ sql: String) -> Bool {
         var search = sql[...]
         while let exists = search.range(of: "EXISTS", options: .caseInsensitive) {

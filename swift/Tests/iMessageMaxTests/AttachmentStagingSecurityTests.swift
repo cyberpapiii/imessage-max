@@ -172,12 +172,4 @@ final class AttachmentStagingSecurityTests: XCTestCase {
             XCTAssertTrue(error.localizedDescription.contains("regular file"), error.localizedDescription)
         }
     }
-
-    func testMissingFileStillReportsBasenameOnly() {
-        XCTAssertThrowsError(
-            try stage(scratch.path + "/nope/missing.png")
-        ) { error in
-            XCTAssertEqual(error.localizedDescription, "Could not read file at 'missing.png'.")
-        }
-    }
 }

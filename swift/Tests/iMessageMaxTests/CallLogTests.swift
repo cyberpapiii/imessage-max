@@ -45,13 +45,6 @@ final class CallLogTests: XCTestCase {
         XCTAssertTrue(line.contains(" lane=legacy-stdio outcome=unknown_tool "), line)
     }
 
-    func testLogLinesCarryAUTCTimestamp() {
-        XCTAssertEqual(
-            Log.format(.info, "Database: ok", at: Date(timeIntervalSince1970: 1_790_000_000.25)),
-            "2026-09-21T14:13:20.250Z [imessage-max] INFO Database: ok\n"
-        )
-    }
-
     /// Runs one call and returns the single line it logged.
     private func callLine(
         name: String,

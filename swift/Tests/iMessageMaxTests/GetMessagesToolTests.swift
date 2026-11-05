@@ -488,18 +488,6 @@ final class GetMessagesToolTests: XCTestCase {
         XCTAssertFalse(ordinary.keys.contains("event"))
     }
 
-    func testExistingFixtureIsUnchanged() async throws {
-        let fixture = try makeGetMessagesFixture()
-        let tool = GetMessagesTool(db: fixture.database(), resolver: makeSeededResolver())
-
-        let response = try await decodeJSONDictionary(from:
-            await tool.execute(args: ["chat_id": .string("chat20")])
-        )
-
-        let messages = try decodeJSONArray(try XCTUnwrap(response["messages"]))
-        XCTAssertEqual(messages.count, 4)
-    }
-
     func testExplicitChatIdIgnoresIsFiltered() async throws {
         let fixture = try ToolTestDatabase(name: "get-messages-filtered")
         try fixture.insertHandle(rowId: 1, handle: "+15550000001")

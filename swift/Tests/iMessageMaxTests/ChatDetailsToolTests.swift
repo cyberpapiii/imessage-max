@@ -3,13 +3,6 @@ import MCP
 @testable import iMessageMax
 
 final class ChatDetailsToolTests: XCTestCase {
-    func testToolRegistryIncludesGetChatDetails() async {
-        let catalog = ToolCatalog(database: Database(), resolver: ContactResolver(seedCache: [:]))
-
-        let names = Set(catalog.tools.map(\.name))
-        XCTAssertTrue(names.contains("get_chat_details"))
-    }
-
     func testGetChatDetailsReturnsThreadFactsWithoutMessages() async throws {
         let fixture = try makeChatDetailsFixture()
         let resolver = makeChatDetailsResolver()

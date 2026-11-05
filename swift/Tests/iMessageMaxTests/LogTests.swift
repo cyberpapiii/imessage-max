@@ -16,5 +16,9 @@ final class LogTests: XCTestCase {
             Log.format(.error, "session Server.start failed: boom", at: epoch),
             "1970-01-01T00:00:00.000Z [imessage-max] ERROR session Server.start failed: boom\n"
         )
+        XCTAssertEqual(
+            Log.format(.info, "Database: ok", at: Date(timeIntervalSince1970: 1_790_000_000.25)),
+            "2026-09-21T14:13:20.250Z [imessage-max] INFO Database: ok\n"
+        )
     }
 }

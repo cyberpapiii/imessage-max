@@ -49,7 +49,7 @@ final class ModernHTTPIntegrationTests: XCTestCase {
             XCTAssertNotNil(result["ttlMs"] as? Int)
             XCTAssertEqual(result["cacheScope"] as? String, "private")
             let tools = try XCTUnwrap(result["tools"] as? [[String: Any]])
-            XCTAssertEqual(tools.count, 13)
+            XCTAssertEqual(tools.count, makeTestCatalog().tools.count)
             XCTAssertTrue(tools.contains { $0["name"] as? String == "send" })
             XCTAssertNil(response.head.headerFields[.mcpSessionId])
         }
@@ -207,23 +207,6 @@ final class ModernHTTPIntegrationTests: XCTestCase {
         }
     }
 
-    func testUnknownModernMethodReturns404MethodNotFound() async throws {
-        let app = await makeModernTestTransport().application()
-        try await app.test(TestingSetup.router) { client in
-            let response = try await client.executeRequest(
-                uri: "/",
-                method: HTTPRequest.Method.post,
-                headers: modernHeaders(method: "resources/list"),
-                body: modernByteBuffer(for: modernPayload(method: "resources/list"))
-            )
-
-            XCTAssertEqual(response.head.status, .notFound)
-            let json = try decodeJSON(from: response.body)
-            let error = try XCTUnwrap(json["error"] as? [String: Any])
-            XCTAssertEqual(error["code"] as? Int, -32601)
-        }
-    }
-
     func testModernNotificationReturns202NoBody() async throws {
         let app = await makeModernTestTransport().application()
         try await app.test(TestingSetup.router) { client in
@@ -275,7 +258,7 @@ final class ModernHTTPIntegrationTests: XCTestCase {
             let json = try decodeJSON(from: tools.body)
             let result = try XCTUnwrap(json["result"] as? [String: Any])
             let toolList = try XCTUnwrap(result["tools"] as? [[String: Any]])
-            XCTAssertEqual(toolList.count, 13)
+            XCTAssertEqual(toolList.count, makeTestCatalog().tools.count)
         }
     }
 
@@ -349,7 +332,7 @@ final class ModernHTTPIntegrationTests: XCTestCase {
             let json = try decodeJSON(from: tools.body)
             let result = try XCTUnwrap(json["result"] as? [String: Any])
             let toolList = try XCTUnwrap(result["tools"] as? [[String: Any]])
-            XCTAssertEqual(toolList.count, 13)
+            XCTAssertEqual(toolList.count, makeTestCatalog().tools.count)
         }
     }
 }

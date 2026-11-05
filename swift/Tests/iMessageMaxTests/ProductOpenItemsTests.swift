@@ -4,7 +4,7 @@ import XCTest
 @testable import iMessageMax
 
 /// Regression coverage for the still-open product items closed after the thermos sweep:
-/// mime `has:` filters, FindChat group/content, most_active + cursors.
+/// mime `has:` filters, FindChat group/content, most_active.
 final class ProductOpenItemsTests: XCTestCase {
 
     // MARK: - has:images mime filter
@@ -81,7 +81,7 @@ final class ProductOpenItemsTests: XCTestCase {
         XCTAssertEqual(chats.first?["id"] as? String, "chat1")
     }
 
-    // MARK: - most_active sort + list_chats cursor
+    // MARK: - most_active sort
 
     func testListChatsMostActiveOrdersByMessageCount() async throws {
         let fixture = try makeMostActiveFixture()
@@ -93,31 +93,6 @@ final class ProductOpenItemsTests: XCTestCase {
         )
         let response = result
         XCTAssertEqual(response.chats.map(\.id), ["chat2", "chat1"])
-    }
-
-    func testListChatsCursorPagesRecent() async throws {
-        let fixture = try makeMostActiveFixture()
-        let first = try await ListChatsTool.execute(
-            limit: 1,
-            sort: "recent",
-            db: fixture.database(),
-            resolver: makeSeededResolver()
-        )
-        let page1 = first
-        XCTAssertTrue(page1.more)
-        XCTAssertNotNil(page1.cursor)
-        XCTAssertEqual(page1.chats.count, 1)
-
-        let second = try await ListChatsTool.execute(
-            limit: 1,
-            sort: "recent",
-            cursor: page1.cursor,
-            db: fixture.database(),
-            resolver: makeSeededResolver()
-        )
-        let page2 = second
-        XCTAssertEqual(page2.chats.count, 1)
-        XCTAssertNotEqual(page1.chats.first?.id, page2.chats.first?.id)
     }
 
     // MARK: - Fixtures

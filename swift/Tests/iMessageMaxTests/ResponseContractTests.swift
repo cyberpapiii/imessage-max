@@ -193,18 +193,4 @@ final class ResponseContractTests: XCTestCase {
         XCTAssertNil(first["text"])
         XCTAssertNil(response["people"])
     }
-
-    func testSendResponseUsesNestedChat() throws {
-        let response = SendResponse.sent(
-            deliveredTo: ["Contact A"],
-            chat: ChatReference(id: "chat42", name: "Project Group")
-        )
-
-        let encoded = try decodeJSONDictionary(from: try FormatUtils.encodeJSON(response))
-        XCTAssertNotNil(encoded["chat"])
-        XCTAssertNil(encoded["success"])
-        XCTAssertNil(encoded["message_id"])
-        XCTAssertEqual(encoded["disposition"] as? String, "completed")
-        XCTAssertEqual(encoded["retry_safe"] as? Bool, false)
-    }
 }

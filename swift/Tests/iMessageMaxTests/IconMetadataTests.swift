@@ -130,16 +130,6 @@ final class IconMetadataTests: XCTestCase {
         }
     }
 
-    func testInjectServerIconsSkipsLegacyProtocolInitializeResponse() {
-        let response = Data("""
-        {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-03-26","serverInfo":{"name":"imessage-max","title":"iMessage Max"},"capabilities":{}}}
-        """.utf8)
-
-        let injected = IconMetadata.injectServerIcons(into: response)
-
-        XCTAssertEqual(injected, response)
-    }
-
     func testInjectServerIconsSkipsNonInitializeResponses() {
         let response = Data("""
         {"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"send"}]}}

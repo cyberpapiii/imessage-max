@@ -26,4 +26,13 @@ final class ToolRegistryTests: XCTestCase {
             "send",
         ])
     }
+
+    func testSendSchemaDoesNotAdvertiseReplyTo() throws {
+        let send = try XCTUnwrap(makeTestCatalog().tools.first { $0.name == "send" })
+        guard case .object(let schema) = send.inputSchema,
+              case .object(let properties) = schema["properties"] else {
+            return XCTFail("Expected send inputSchema.properties to be an object")
+        }
+        XCTAssertNil(properties["reply_to"], "send schema must not advertise reply_to")
+    }
 }

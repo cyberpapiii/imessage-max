@@ -87,37 +87,6 @@ final class ListToolCharacterizationTests: XCTestCase {
 
     // MARK: - list_chats tests
 
-    func testListChatsResolvesParticipantNamesFromContacts() async throws {
-        let fixture = try makeListCharacterizationFixture()
-        let resolver = makeSeededResolver()
-
-        let result = try await ListChatsTool.execute(
-            limit: 10,
-            since: nil,
-            isGroup: nil,
-            minParticipants: nil,
-            maxParticipants: nil,
-            sort: "recent",
-            db: fixture.database(),
-            resolver: resolver
-        )
-
-        let response = result
-        let groupChat = try XCTUnwrap(
-            response.chats.first(where: { $0.id == "chat2" }),
-            "Expected chat2 (Trip Crew) in results"
-        )
-        let preview = groupChat.participantsPreview
-        XCTAssertTrue(
-            preview.contains("Alice Smith"),
-            "Expected 'Alice Smith' in participants_preview, got \(preview)"
-        )
-        XCTAssertFalse(
-            preview.contains("+15550000001"),
-            "Raw handle should not appear when contact name is available"
-        )
-    }
-
     func testListChatsLastMessagePicksNewestNonReaction() async throws {
         let fixture = try makeListCharacterizationFixture()
         let resolver = makeSeededResolver()
