@@ -106,11 +106,6 @@ enum FindChatTool {
         }
     }
 
-    struct ErrorResponse: Codable {
-        let error: String
-        let message: String
-    }
-
     // MARK: - Tool Registration
 
     static func definition(db database: Database, resolver: ContactResolver) -> ToolDefinition {
@@ -141,125 +136,111 @@ enum FindChatTool {
         let params = Parameters(from: arguments)
 
         guard params.participants != nil || params.name != nil || params.containsRecent != nil else {
-            let error = ErrorResponse(
-                error: "validation_error",
-                message: "At least one of participants, name, or contains_recent required"
-            )
-            throw ToolError(content: [.plainText(try FormatUtils.encodeJSON(error))])
+            throw ToolFailure("validation_error", "At least one of participants, name, or contains_recent required")
         }
 
         // Initialize contacts if available
         try? await resolver.initialize()
 
-        do {
-            var results: [ChatResult] = []
-            var filteredHidden: Int? = params.includeFiltered ? nil : 0
+        var results: [ChatResult] = []
+        var filteredHidden: Int? = params.includeFiltered ? nil : 0
 
-            if let participants = params.participants, !participants.isEmpty {
-                let handleGroups = await buildHandleGroups(participants: participants, resolver: resolver)
-                if !handleGroups.isEmpty {
-                let chats = try await findChatsByHandleGroups(
+        if let participants = params.participants, !participants.isEmpty {
+            let handleGroups = await buildHandleGroups(participants: participants, resolver: resolver)
+            if !handleGroups.isEmpty {
+            let chats = try await findChatsByHandleGroups(
+                database: database,
+                handleGroups: handleGroups,
+                isGroup: params.isGroup,
+                includeFiltered: params.includeFiltered,
+                limit: params.limit,
+                resolver: resolver
+            )
+            results.append(contentsOf: try await buildChatResults(
+                database: database,
+                chats: chats,
+                resolver: resolver,
+                matchType: "participants"
+            ))
+            if !params.includeFiltered {
+                filteredHidden = try countFilteredHiddenByHandleGroups(
                     database: database,
                     handleGroups: handleGroups,
-                    isGroup: params.isGroup,
-                    includeFiltered: params.includeFiltered,
-                    limit: params.limit,
-                    resolver: resolver
+                    isGroup: params.isGroup
                 )
-                results.append(contentsOf: try await buildChatResults(
-                    database: database,
-                    chats: chats,
-                    resolver: resolver,
-                    matchType: "participants"
-                ))
-                if !params.includeFiltered {
-                    filteredHidden = try countFilteredHiddenByHandleGroups(
-                        database: database,
-                        handleGroups: handleGroups,
-                        isGroup: params.isGroup
-                    )
-                }
-                }
             }
+            }
+        }
 
-            if let name = params.name, results.isEmpty {
-                let chats = try await findChatsByName(
+        if let name = params.name, results.isEmpty {
+            let chats = try await findChatsByName(
+                database: database,
+                name: name,
+                limit: params.limit,
+                isGroup: params.isGroup,
+                includeFiltered: params.includeFiltered,
+                resolver: resolver
+            )
+            results.append(contentsOf: try await buildChatResults(
+                database: database,
+                chats: chats,
+                resolver: resolver,
+                matchType: "name"
+            ))
+            if !params.includeFiltered {
+                filteredHidden = try countFilteredHiddenByName(
                     database: database,
                     name: name,
                     limit: params.limit,
-                    isGroup: params.isGroup,
-                    includeFiltered: params.includeFiltered,
-                    resolver: resolver
+                    isGroup: params.isGroup
                 )
-                results.append(contentsOf: try await buildChatResults(
-                    database: database,
-                    chats: chats,
-                    resolver: resolver,
-                    matchType: "name"
-                ))
-                if !params.includeFiltered {
-                    filteredHidden = try countFilteredHiddenByName(
-                        database: database,
-                        name: name,
-                        limit: params.limit,
-                        isGroup: params.isGroup
-                    )
-                }
             }
+        }
 
-            if let containsRecent = params.containsRecent, results.isEmpty {
-                let chats = try findChatsByContent(
+        if let containsRecent = params.containsRecent, results.isEmpty {
+            let chats = try findChatsByContent(
+                database: database,
+                content: containsRecent,
+                limit: params.limit,
+                isGroup: params.isGroup,
+                includeFiltered: params.includeFiltered
+            )
+            results.append(contentsOf: try await buildChatResults(
+                database: database,
+                chats: chats,
+                resolver: resolver,
+                matchType: "content"
+            ))
+            if !params.includeFiltered {
+                filteredHidden = try countFilteredHiddenByContent(
                     database: database,
                     content: containsRecent,
                     limit: params.limit,
-                    isGroup: params.isGroup,
-                    includeFiltered: params.includeFiltered
+                    isGroup: params.isGroup
                 )
-                results.append(contentsOf: try await buildChatResults(
-                    database: database,
-                    chats: chats,
-                    resolver: resolver,
-                    matchType: "content"
-                ))
-                if !params.includeFiltered {
-                    filteredHidden = try countFilteredHiddenByContent(
-                        database: database,
-                        content: containsRecent,
-                        limit: params.limit,
-                        isGroup: params.isGroup
-                    )
-                }
             }
-
-            var seen = Set<String>()
-            var uniqueResults: [ChatResult] = []
-            for result in results {
-                if !seen.contains(result.id) {
-                    seen.insert(result.id)
-                    uniqueResults.append(result)
-                    if uniqueResults.count >= params.limit {
-                        break
-                    }
-                }
-            }
-
-            // No cursor on find_chat; never advertise more pages.
-            let response = Response(
-                chats: uniqueResults,
-                more: false,
-                filteredHidden: filteredHidden
-            )
-
-            return [.plainText(try FormatUtils.encodeJSON(response))]
-
-        } catch let dbError as DatabaseError {
-            let mapped = ToolErrorMapping.map(dbError, context: "find_chat")
-            let error = ErrorResponse(error: mapped.code, message: mapped.message)
-            throw ToolError(content: [.plainText(try FormatUtils.encodeJSON(error))])
-        } catch {
-            let errorResp = ErrorResponse(error: "internal_error", message: ClientErrorMessages.sanitized(error))
-            throw ToolError(content: [.plainText(try FormatUtils.encodeJSON(errorResp))])
         }
+
+        var seen = Set<String>()
+        var uniqueResults: [ChatResult] = []
+        for result in results {
+            if !seen.contains(result.id) {
+                seen.insert(result.id)
+                uniqueResults.append(result)
+                if uniqueResults.count >= params.limit {
+                    break
+                }
+            }
+        }
+
+        // No cursor on find_chat; never advertise more pages.
+        let response = Response(
+            chats: uniqueResults,
+            more: false,
+            filteredHidden: filteredHidden
+        )
+
+        return [.plainText(try FormatUtils.encodeJSON(response))]
     }
 
     // MARK: - Private Helpers

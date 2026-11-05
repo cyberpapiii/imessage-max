@@ -20,20 +20,14 @@ final class ListChatsToolTests: XCTestCase {
         }
 
         func run(cursor: String?) async throws -> ListChatsResponse {
-            let result = await ListChatsTool.execute(
+            let result = try await ListChatsTool.execute(
                 limit: 1,
                 sort: "recent",
                 cursor: cursor,
                 db: fixture.database(),
                 resolver: ContactResolver(seedCache: [:])
             )
-            switch result {
-            case .success(let response):
-                return response
-            case .failure(let error):
-                XCTFail("list_chats failed: \(error)")
-                throw XCTSkip("list_chats failed")
-            }
+            return result
         }
 
         Database.queryCountForTesting = 0
@@ -62,15 +56,13 @@ final class ListChatsToolTests: XCTestCase {
             try fixture.joinChatHandle(chatId: chatId, handleId: 1)
         }
 
-        let result = await ListChatsTool.execute(
+        let result = try await ListChatsTool.execute(
             limit: 1,
             sort: "recent",
             db: fixture.database(),
             resolver: ContactResolver(seedCache: [:])
         )
-        guard case .success(let page) = result else {
-            return XCTFail("list_chats failed: \(result)")
-        }
+        let page = result
         XCTAssertEqual(page.chats.count, 1)
         // The contract: more and cursor agree. At 639529e this is
         // more == true, cursor == nil.
@@ -115,16 +107,14 @@ final class ListChatsToolTests: XCTestCase {
         )
         try fixture.joinChatMessage(chatId: 11, messageId: 101)
 
-        let result = await ListChatsTool.execute(
+        let result = try await ListChatsTool.execute(
             limit: 5,
             sort: "recent",
             cursor: nil,
             db: fixture.database(),
             resolver: ContactResolver(seedCache: [:])
         )
-        guard case .success(let page) = result else {
-            return XCTFail("list_chats failed: \(result)")
-        }
+        let page = result
 
         let renameChat = try XCTUnwrap(page.chats.first(where: { $0.id == "chat10" }))
         XCTAssertEqual(renameChat.lastMessage?.text, "renamed the group to Trip")
@@ -162,29 +152,25 @@ final class ListChatsToolTests: XCTestCase {
             try fixture.joinChatMessage(chatId: chatId, messageId: chatId)
         }
 
-        let hidden = await ListChatsTool.execute(
+        let hidden = try await ListChatsTool.execute(
             limit: 10,
             sort: "recent",
             db: fixture.database(),
             resolver: ContactResolver(seedCache: [:])
         )
-        guard case .success(let defaultResponse) = hidden else {
-            return XCTFail("list_chats failed: \(hidden)")
-        }
+        let defaultResponse = hidden
         XCTAssertEqual(defaultResponse.chats.map(\.id), ["chat1"])
         XCTAssertEqual(defaultResponse.filteredHidden, 2)
         XCTAssertEqual(defaultResponse.totalChats, 1)
 
-        let shown = await ListChatsTool.execute(
+        let shown = try await ListChatsTool.execute(
             limit: 10,
             sort: "recent",
             includeFiltered: true,
             db: fixture.database(),
             resolver: ContactResolver(seedCache: [:])
         )
-        guard case .success(let included) = shown else {
-            return XCTFail("list_chats include_filtered failed: \(shown)")
-        }
+        let included = shown
         XCTAssertEqual(Set(included.chats.map(\.id)), Set(["chat1", "chat2", "chat3"]))
         XCTAssertNil(included.filteredHidden)
     }

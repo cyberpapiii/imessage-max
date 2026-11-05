@@ -47,7 +47,7 @@ final class GetMessagesToolTests: XCTestCase {
                 "participants": .array([.string("Bob")]),
             ])
             XCTFail("Expected ambiguous participant error")
-        } catch let error as ToolError {
+        } catch let error as ToolFailure {
             let payload = try decodeJSONDictionary(from: error.content)
             XCTAssertEqual(payload["error"] as? String, "ambiguous_participants")
         }
@@ -322,7 +322,7 @@ final class GetMessagesToolTests: XCTestCase {
             do {
                 _ = try await tool.execute(args: ["chat_id": .string(wildcard)])
                 XCTFail("chat_id \(wildcard.debugDescription) must not resolve to a chat")
-            } catch let error as ToolError {
+            } catch let error as ToolFailure {
                 let payload = try decodeJSONDictionary(from: error.content)
                 XCTAssertEqual(
                     payload["error"] as? String, "chat_not_found",

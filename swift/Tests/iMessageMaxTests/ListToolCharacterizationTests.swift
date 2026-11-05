@@ -91,7 +91,7 @@ final class ListToolCharacterizationTests: XCTestCase {
         let fixture = try makeListCharacterizationFixture()
         let resolver = makeSeededResolver()
 
-        let result = await ListChatsTool.execute(
+        let result = try await ListChatsTool.execute(
             limit: 10,
             since: nil,
             isGroup: nil,
@@ -102,31 +102,27 @@ final class ListToolCharacterizationTests: XCTestCase {
             resolver: resolver
         )
 
-        switch result {
-        case .failure(let error):
-            XCTFail("list_chats failed: \(error.message)")
-        case .success(let response):
-            let groupChat = try XCTUnwrap(
-                response.chats.first(where: { $0.id == "chat2" }),
-                "Expected chat2 (Trip Crew) in results"
-            )
-            let preview = groupChat.participantsPreview
-            XCTAssertTrue(
-                preview.contains("Alice Smith"),
-                "Expected 'Alice Smith' in participants_preview, got \(preview)"
-            )
-            XCTAssertFalse(
-                preview.contains("+15550000001"),
-                "Raw handle should not appear when contact name is available"
-            )
-        }
+        let response = result
+        let groupChat = try XCTUnwrap(
+            response.chats.first(where: { $0.id == "chat2" }),
+            "Expected chat2 (Trip Crew) in results"
+        )
+        let preview = groupChat.participantsPreview
+        XCTAssertTrue(
+            preview.contains("Alice Smith"),
+            "Expected 'Alice Smith' in participants_preview, got \(preview)"
+        )
+        XCTAssertFalse(
+            preview.contains("+15550000001"),
+            "Raw handle should not appear when contact name is available"
+        )
     }
 
     func testListChatsLastMessagePicksNewestNonReaction() async throws {
         let fixture = try makeListCharacterizationFixture()
         let resolver = makeSeededResolver()
 
-        let result = await ListChatsTool.execute(
+        let result = try await ListChatsTool.execute(
             limit: 10,
             since: nil,
             isGroup: nil,
@@ -137,33 +133,29 @@ final class ListToolCharacterizationTests: XCTestCase {
             resolver: resolver
         )
 
-        switch result {
-        case .failure(let error):
-            XCTFail("list_chats failed: \(error.message)")
-        case .success(let response):
-            let dmChat = try XCTUnwrap(
-                response.chats.first(where: { $0.id == "chat1" }),
-                "Expected chat1 (DM) in results"
-            )
-            let lastMsg = try XCTUnwrap(dmChat.lastMessage, "Expected last_message on DM chat")
-            XCTAssertEqual(
-                lastMsg.text,
-                "hello from alice",
-                "last_message should be the newest non-reaction, not the reaction"
-            )
-            XCTAssertEqual(
-                lastMsg.from,
-                "Alice Smith",
-                "last_message.from should be the resolved contact name"
-            )
-        }
+        let response = result
+        let dmChat = try XCTUnwrap(
+            response.chats.first(where: { $0.id == "chat1" }),
+            "Expected chat1 (DM) in results"
+        )
+        let lastMsg = try XCTUnwrap(dmChat.lastMessage, "Expected last_message on DM chat")
+        XCTAssertEqual(
+            lastMsg.text,
+            "hello from alice",
+            "last_message should be the newest non-reaction, not the reaction"
+        )
+        XCTAssertEqual(
+            lastMsg.from,
+            "Alice Smith",
+            "last_message.from should be the resolved contact name"
+        )
     }
 
     func testListChatsAwaitingReplyTrueWhenLastMessageFromThem() async throws {
         let fixture = try makeListCharacterizationFixture()
         let resolver = makeSeededResolver()
 
-        let result = await ListChatsTool.execute(
+        let result = try await ListChatsTool.execute(
             limit: 10,
             since: nil,
             isGroup: nil,
@@ -174,23 +166,19 @@ final class ListToolCharacterizationTests: XCTestCase {
             resolver: resolver
         )
 
-        switch result {
-        case .failure(let error):
-            XCTFail("list_chats failed: \(error.message)")
-        case .success(let response):
-            let dmChat = try XCTUnwrap(response.chats.first(where: { $0.id == "chat1" }))
-            XCTAssertEqual(dmChat.awaitingReply, true, "DM should be awaiting_reply when last message is from them")
+        let response = result
+        let dmChat = try XCTUnwrap(response.chats.first(where: { $0.id == "chat1" }))
+        XCTAssertEqual(dmChat.awaitingReply, true, "DM should be awaiting_reply when last message is from them")
 
-            let groupChat = try XCTUnwrap(response.chats.first(where: { $0.id == "chat2" }))
-            XCTAssertNotEqual(groupChat.awaitingReply, true, "Group should not be awaiting_reply when last message is from me")
-        }
+        let groupChat = try XCTUnwrap(response.chats.first(where: { $0.id == "chat2" }))
+        XCTAssertNotEqual(groupChat.awaitingReply, true, "Group should not be awaiting_reply when last message is from me")
     }
 
     func testListChatsGroupFlagAndParticipantCount() async throws {
         let fixture = try makeListCharacterizationFixture()
         let resolver = makeSeededResolver()
 
-        let result = await ListChatsTool.execute(
+        let result = try await ListChatsTool.execute(
             limit: 10,
             since: nil,
             isGroup: nil,
@@ -201,17 +189,13 @@ final class ListToolCharacterizationTests: XCTestCase {
             resolver: resolver
         )
 
-        switch result {
-        case .failure(let error):
-            XCTFail("list_chats failed: \(error.message)")
-        case .success(let response):
-            let groupChat = try XCTUnwrap(response.chats.first(where: { $0.id == "chat2" }))
-            XCTAssertEqual(groupChat.group, true, "Chat with 3 participants should be flagged as group")
-            XCTAssertEqual(groupChat.participantCount, 3, "Trip Crew should report 3 participants")
+        let response = result
+        let groupChat = try XCTUnwrap(response.chats.first(where: { $0.id == "chat2" }))
+        XCTAssertEqual(groupChat.group, true, "Chat with 3 participants should be flagged as group")
+        XCTAssertEqual(groupChat.participantCount, 3, "Trip Crew should report 3 participants")
 
-            let dmChat = try XCTUnwrap(response.chats.first(where: { $0.id == "chat1" }))
-            XCTAssertNil(dmChat.group, "DM should not have group flag set")
-        }
+        let dmChat = try XCTUnwrap(response.chats.first(where: { $0.id == "chat1" }))
+        XCTAssertNil(dmChat.group, "DM should not have group flag set")
     }
 
     // MARK: - get_active_conversations tests
@@ -377,16 +361,14 @@ final class ListToolCharacterizationTests: XCTestCase {
     func testListChatsMostActiveIsNotInflatedByParticipantCount() async throws {
         let fixture = try makeFanOutFixture()
 
-        let result = await ListChatsTool.execute(
+        let result = try await ListChatsTool.execute(
             limit: 10,
             sort: "most_active",
             db: fixture.database(),
             resolver: makeSeededResolver()
         )
 
-        guard case .success(let response) = result else {
-            return XCTFail("list_chats failed")
-        }
+        let response = result
 
         XCTAssertEqual(
             response.chats.map(\.id),
@@ -493,7 +475,7 @@ final class ListToolCharacterizationTests: XCTestCase {
         Database.queryCountForTesting = 0
         defer { Database.queryCountForTesting = nil }
 
-        let result = await ListChatsTool.execute(
+        let result = try await ListChatsTool.execute(
             limit: 12,
             since: nil,
             isGroup: nil,
@@ -503,9 +485,7 @@ final class ListToolCharacterizationTests: XCTestCase {
             db: fixture.database(),
             resolver: makeSeededResolver()
         )
-        guard case .success(let response) = result else {
-            return XCTFail("list_chats failed")
-        }
+        let response = result
         XCTAssertEqual(response.chats.count, 12)
         let queryCount = try XCTUnwrap(Database.queryCountForTesting)
         // 10 queries for one page of 12 named 6-handle chats:

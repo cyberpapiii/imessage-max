@@ -26,7 +26,7 @@ final class ListChatsRecentScanTests: XCTestCase {
         isGroup: Bool? = nil,
         cursor: String? = nil
     ) async throws -> ListChatsResponse {
-        let result = await ListChatsTool.execute(
+        let result = try await ListChatsTool.execute(
             limit: limit,
             isGroup: isGroup,
             sort: "recent",
@@ -34,13 +34,7 @@ final class ListChatsRecentScanTests: XCTestCase {
             db: fixture.database(),
             resolver: ContactResolver(seedCache: [:])
         )
-        switch result {
-        case .success(let response):
-            return response
-        case .failure(let error):
-            XCTFail("list_chats failed: \(error)")
-            throw XCTSkip("list_chats failed")
-        }
+        return result
     }
 
     func testRecentSortOrdersChatsByTheirNewestMessage() async throws {

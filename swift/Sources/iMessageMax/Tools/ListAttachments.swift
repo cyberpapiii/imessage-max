@@ -17,15 +17,6 @@ struct ListAttachmentsResponse: Codable {
 }
 
 /// Error result
-struct ListAttachmentsError: LocalizedError, Codable {
-    let error: String
-    let message: String
-
-    var errorDescription: String? {
-        message
-    }
-}
-
 /// List attachments tool implementation
 final class ListAttachments {
     private let db: Database
@@ -103,7 +94,7 @@ final class ListAttachments {
             let cursor = arguments?["cursor"]?.stringValue
 
             let tool = ListAttachments(db: db, resolver: resolver)
-            let result = await tool.execute(
+            let result = try await tool.execute(
                 chatId: chatId,
                 fromPerson: fromPerson,
                 type: type,
@@ -114,12 +105,7 @@ final class ListAttachments {
                 cursor: cursor
             )
 
-            switch result {
-            case .success(let response):
-                return [.plainText(try FormatUtils.encodeJSON(response))]
-            case .failure(let error):
-                throw ToolError(content: [.plainText(try FormatUtils.encodeJSON(error))])
-            }
+            return [.plainText(try FormatUtils.encodeJSON(result))]
         }
     }
 
@@ -141,7 +127,7 @@ final class ListAttachments {
         limit: Int = 50,
         sort: String = "recent_first",
         cursor: String? = nil
-    ) async -> Result<ListAttachmentsResponse, ListAttachmentsError> {
+    ) async throws -> ListAttachmentsResponse {
         // Validate and constrain inputs
         let effectiveLimit = max(1, min(limit, 100))
         let effectiveSort = AttachmentSort(rawValue: sort) ?? .recentFirst
@@ -157,48 +143,34 @@ final class ListAttachments {
             // Continue without contact resolution
         }
 
-        do {
-            let numericChatId: Int64?
-            if let chatId {
-                guard let cid = ChatIdentifier.parseRowId(chatId) else {
-                    return .failure(ListAttachmentsError(
-                        error: "invalid_id",
-                        message: "Invalid chat ID format: \(chatId)"
-                    ))
-                }
-                numericChatId = cid
-            } else {
-                numericChatId = nil
+        let numericChatId: Int64?
+        if let chatId {
+            guard let cid = ChatIdentifier.parseRowId(chatId) else {
+                throw ToolFailure("invalid_id", "Invalid chat ID format: \(chatId)")
             }
-
-            let timelineCursor = cursor.flatMap(TimelineCursor.decode)
-            let (sharedMessages, hasMore, nextCursor) = try await browseSharedMessages(
-                chatId: numericChatId,
-                fromPerson: fromPerson,
-                typeFilter: typeFilter,
-                since: since,
-                before: before,
-                limit: effectiveLimit,
-                sort: effectiveSort,
-                cursor: timelineCursor
-            )
-
-            return .success(ListAttachmentsResponse(
-                messages: sharedMessages,
-                total: sharedMessages.count,
-                more: hasMore,
-                cursor: nextCursor
-            ))
-
-        } catch let error as DatabaseError {
-            let mapped = ToolErrorMapping.map(error, context: "list_attachments")
-            return .failure(ListAttachmentsError(error: mapped.code, message: mapped.message))
-        } catch {
-            return .failure(ListAttachmentsError(
-                error: "internal_error",
-                message: ClientErrorMessages.sanitized(error)
-            ))
+            numericChatId = cid
+        } else {
+            numericChatId = nil
         }
+
+        let timelineCursor = cursor.flatMap(TimelineCursor.decode)
+        let (sharedMessages, hasMore, nextCursor) = try await browseSharedMessages(
+            chatId: numericChatId,
+            fromPerson: fromPerson,
+            typeFilter: typeFilter,
+            since: since,
+            before: before,
+            limit: effectiveLimit,
+            sort: effectiveSort,
+            cursor: timelineCursor
+        )
+
+        return ListAttachmentsResponse(
+            messages: sharedMessages,
+            total: sharedMessages.count,
+            more: hasMore,
+            cursor: nextCursor
+        )
     }
 
     // MARK: - Private Helpers

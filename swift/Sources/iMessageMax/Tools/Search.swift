@@ -142,11 +142,6 @@ struct SearchGroupedResponse: Codable {
 }
 
 /// Error response for search
-struct SearchError: Error, Codable {
-    let error: String
-    let message: String
-}
-
 /// Implementation of the search tool
 enum SearchTool {
     // MARK: - Tool Registration
@@ -290,7 +285,7 @@ enum SearchTool {
             let matchAll = arguments?["match_all"]?.boolValue ?? false
             let fuzzy = arguments?["fuzzy"]?.boolValue ?? false
 
-            let result = await execute(
+            let result = try await execute(
                 query: query,
                 fromPerson: fromPerson,
                 inChat: inChat,
@@ -312,12 +307,7 @@ enum SearchTool {
                 resolver: resolver
             )
 
-            switch result {
-            case .success(let json):
-                return [.plainText(json)]
-            case .failure(let error):
-                throw ToolError(content: [.plainText(try FormatUtils.encodeJSON(error))])
-            }
+            return [.plainText(result)]
         }
     }
 
@@ -342,7 +332,7 @@ enum SearchTool {
         includeFiltered: Bool = false,
         db: Database = Database(),
         resolver: ContactResolver
-    ) async -> Result<String, SearchError> {
+    ) async throws -> String {
         // Validate inputs
         let hasFilter = fromPerson != nil || inChat != nil || isGroup != nil ||
                         has != nil || since != nil || before != nil || unanswered
@@ -350,10 +340,7 @@ enum SearchTool {
                        !(query?.trimmingCharacters(in: .whitespaces).isEmpty ?? true)
 
         if !hasQuery && !hasFilter {
-            return .failure(SearchError(
-                error: "invalid_query",
-                message: "Query or at least one filter required"
-            ))
+            throw ToolFailure("invalid_query", "Query or at least one filter required")
         }
 
         // Clamp limit
@@ -365,26 +352,49 @@ enum SearchTool {
         // Initialize contacts
         try? await resolver.initialize()
 
-        do {
-            // Build and execute query
-            // Over-fetch when Swift still has to apply word/fuzzy/unanswered
-            // filters. attributedBody is prefiltered in SQL via instr.
-            let fetchLimit = (hasQuery || unanswered) ? max(500, clampedLimit * 10) : clampedLimit
+        // Build and execute query
+        // Over-fetch when Swift still has to apply word/fuzzy/unanswered
+        // filters. attributedBody is prefiltered in SQL via instr.
+        let fetchLimit = (hasQuery || unanswered) ? max(500, clampedLimit * 10) : clampedLimit
 
-            let senderFilter = await resolveFromPersonFilter(fromPerson, resolver: resolver)
+        let senderFilter = await resolveFromPersonFilter(fromPerson, resolver: resolver)
 
-            // Split query into words (minimum 2 chars each to avoid noise)
-            let searchWords: [String]
-            if hasQuery, let searchQuery = query?.trimmingCharacters(in: .whitespaces).lowercased(), !searchQuery.isEmpty {
-                searchWords = searchQuery.split(separator: " ")
-                    .map(String.init)
-                    .filter { $0.count >= 2 }
-            } else {
-                searchWords = []
-            }
+        // Split query into words (minimum 2 chars each to avoid noise)
+        let searchWords: [String]
+        if hasQuery, let searchQuery = query?.trimmingCharacters(in: .whitespaces).lowercased(), !searchQuery.isEmpty {
+            searchWords = searchQuery.split(separator: " ")
+                .map(String.init)
+                .filter { $0.count >= 2 }
+        } else {
+            searchWords = []
+        }
 
-            let schema = try db.schema()
-            let (sql, params) = buildQuery(
+        let schema = try db.schema()
+        let (sql, params) = buildQuery(
+            query: query,
+            fromPerson: senderFilter,
+            inChat: inChat,
+            isGroup: isGroup,
+            has: has,
+            since: since,
+            before: before,
+            cursor: cursor.flatMap(TimelineCursor.decode),
+            limit: fetchLimit,
+            sort: sortOrder,
+            unanswered: unanswered,
+            terms: searchWords,
+            matchAll: matchAll,
+            fuzzy: fuzzy,
+            includeFiltered: includeFiltered,
+            schema: schema
+        )
+
+        let filteredHidden: Int?
+        if includeFiltered {
+            filteredHidden = nil
+        } else {
+            filteredHidden = try countFilteredHidden(
+                db: db,
                 query: query,
                 fromPerson: senderFilter,
                 inChat: inChat,
@@ -392,130 +402,99 @@ enum SearchTool {
                 has: has,
                 since: since,
                 before: before,
-                cursor: cursor.flatMap(TimelineCursor.decode),
-                limit: fetchLimit,
-                sort: sortOrder,
                 unanswered: unanswered,
                 terms: searchWords,
                 matchAll: matchAll,
-                fuzzy: fuzzy,
-                includeFiltered: includeFiltered,
-                schema: schema
+                fuzzy: fuzzy
             )
+        }
 
-            let filteredHidden: Int?
-            if includeFiltered {
-                filteredHidden = nil
-            } else {
-                filteredHidden = try countFilteredHidden(
-                    db: db,
-                    query: query,
-                    fromPerson: senderFilter,
-                    inChat: inChat,
-                    isGroup: isGroup,
-                    has: has,
-                    since: since,
-                    before: before,
-                    unanswered: unanswered,
-                    terms: searchWords,
-                    matchAll: matchAll,
-                    fuzzy: fuzzy
-                )
-            }
+        var rows = try db.query(sql, params: params) { row in
+            SearchRow(
+                msgId: row.int(0),
+                text: row.string(1),
+                attributedBody: row.blob(2),
+                date: row.optionalInt(3),
+                isFromMe: row.int(4) != 0,
+                senderHandle: row.string(5),
+                chatId: row.int(6),
+                chatDisplayName: row.string(7),
+                guid: row.string(8) ?? "",
+                threadOriginatorGuid: row.string(9),
+                dateEdited: row.optionalInt(10) ?? 0,
+                hasReactions: false,
+                hasReplies: row.int(11) != 0
+            )
+        }
 
-            var rows = try db.query(sql, params: params) { row in
-                SearchRow(
-                    msgId: row.int(0),
-                    text: row.string(1),
-                    attributedBody: row.blob(2),
-                    date: row.optionalInt(3),
-                    isFromMe: row.int(4) != 0,
-                    senderHandle: row.string(5),
-                    chatId: row.int(6),
-                    chatDisplayName: row.string(7),
-                    guid: row.string(8) ?? "",
-                    threadOriginatorGuid: row.string(9),
-                    dateEdited: row.optionalInt(10) ?? 0,
-                    hasReactions: false,
-                    hasReplies: row.int(11) != 0
-                )
-            }
+        // Word/fuzzy filter on extracted text (SQL instr is a prefilter).
+        // Supports multi-word search: OR (any word) by default, AND (all words) with matchAll=true
+        // With fuzzy=true, also matches words within 1-2 edits (handles typos)
+        if hasQuery, !searchWords.isEmpty {
+            rows = rows.filter { row in
+                let extractedText = MessageTextExtractor.extract(text: row.text, attributedBody: row.attributedBody)
+                guard let text = extractedText?.lowercased() else { return false }
 
-            // Word/fuzzy filter on extracted text (SQL instr is a prefilter).
-            // Supports multi-word search: OR (any word) by default, AND (all words) with matchAll=true
-            // With fuzzy=true, also matches words within 1-2 edits (handles typos)
-            if hasQuery, !searchWords.isEmpty {
-                rows = rows.filter { row in
-                    let extractedText = MessageTextExtractor.extract(text: row.text, attributedBody: row.attributedBody)
-                    guard let text = extractedText?.lowercased() else { return false }
+                // Split message text into words for fuzzy matching
+                let textWords = text.split(whereSeparator: { !$0.isLetter && !$0.isNumber })
+                    .map(String.init)
 
-                    // Split message text into words for fuzzy matching
-                    let textWords = text.split(whereSeparator: { !$0.isLetter && !$0.isNumber })
-                        .map(String.init)
-
-                    if matchAll {
-                        // AND logic: all search words must be present
-                        return searchWords.allSatisfy { searchWord in
-                            wordMatches(searchWord: searchWord, in: text, textWords: textWords, fuzzy: fuzzy)
-                        }
-                    } else {
-                        // OR logic: any word matches
-                        return searchWords.contains { searchWord in
-                            wordMatches(searchWord: searchWord, in: text, textWords: textWords, fuzzy: fuzzy)
-                        }
+                if matchAll {
+                    // AND logic: all search words must be present
+                    return searchWords.allSatisfy { searchWord in
+                        wordMatches(searchWord: searchWord, in: text, textWords: textWords, fuzzy: fuzzy)
+                    }
+                } else {
+                    // OR logic: any word matches
+                    return searchWords.contains { searchWord in
+                        wordMatches(searchWord: searchWord, in: text, textWords: textWords, fuzzy: fuzzy)
                     }
                 }
             }
-
-            // Filter for unanswered if requested
-            if unanswered {
-                rows = try UnansweredHeuristics.filterUnanswered(
-                    db: db,
-                    rows: rows,
-                    hours: clampedUnansweredHours,
-                    limit: clampedLimit,
-                    text: { MessageTextExtractor.extract(text: $0.text, attributedBody: $0.attributedBody) },
-                    date: \.date,
-                    chatId: \.chatId
-                )
-            }
-
-            // Trim to requested limit after filtering
-            if rows.count > clampedLimit {
-                rows = Array(rows.prefix(clampedLimit))
-            }
-
-            // Build response
-            let jsonString: String
-            if responseFormat == .groupedByChat {
-                jsonString = try await buildGroupedResponse(
-                    db: db,
-                    rows: rows,
-                    query: query,
-                    limit: clampedLimit,
-                    resolver: resolver,
-                    filteredHidden: filteredHidden
-                )
-            } else {
-                jsonString = try await buildFlatResponse(
-                    db: db,
-                    rows: rows,
-                    query: query,
-                    limit: clampedLimit,
-                    includeContext: includeContext,
-                    resolver: resolver,
-                    filteredHidden: filteredHidden
-                )
-            }
-
-            return .success(jsonString)
-
-        } catch let dbError as DatabaseError {
-            let mapped = ToolErrorMapping.map(dbError, context: "search")
-            return .failure(SearchError(error: mapped.code, message: mapped.message))
-        } catch {
-            return .failure(SearchError(error: "internal_error", message: ClientErrorMessages.sanitized(error)))
         }
+
+        // Filter for unanswered if requested
+        if unanswered {
+            rows = try UnansweredHeuristics.filterUnanswered(
+                db: db,
+                rows: rows,
+                hours: clampedUnansweredHours,
+                limit: clampedLimit,
+                text: { MessageTextExtractor.extract(text: $0.text, attributedBody: $0.attributedBody) },
+                date: \.date,
+                chatId: \.chatId
+            )
+        }
+
+        // Trim to requested limit after filtering
+        if rows.count > clampedLimit {
+            rows = Array(rows.prefix(clampedLimit))
+        }
+
+        // Build response
+        let jsonString: String
+        if responseFormat == .groupedByChat {
+            jsonString = try await buildGroupedResponse(
+                db: db,
+                rows: rows,
+                query: query,
+                limit: clampedLimit,
+                resolver: resolver,
+                filteredHidden: filteredHidden
+            )
+        } else {
+            jsonString = try await buildFlatResponse(
+                db: db,
+                rows: rows,
+                query: query,
+                limit: clampedLimit,
+                includeContext: includeContext,
+                resolver: resolver,
+                filteredHidden: filteredHidden
+            )
+        }
+
+        return jsonString
     }
 
 }

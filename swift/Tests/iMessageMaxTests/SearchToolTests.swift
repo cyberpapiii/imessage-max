@@ -841,7 +841,7 @@ final class SearchToolTests: XCTestCase {
         try fixture.execute("ALTER TABLE message DROP COLUMN thread_originator_guid")
         try fixture.execute("ALTER TABLE message DROP COLUMN date_edited")
         try fixture.execute("ALTER TABLE message DROP COLUMN associated_message_emoji")
-        let result = await SearchTool.execute(
+        let result = try await SearchTool.execute(
             query: "costa trip",
             cursor: nil,
             limit: 10,
@@ -855,14 +855,7 @@ final class SearchToolTests: XCTestCase {
             db: fixture.database(),
             resolver: makeSeededResolver()
         )
-        let json: String
-        switch result {
-        case .success(let text):
-            json = text
-        case .failure(let error):
-            XCTFail("Unexpected search error: \(error)")
-            return
-        }
+        let json = result
         let decoded = try decodeJSONDictionary(from: json)
         let results = try decodeJSONArray(decoded["results"])
         XCTAssertEqual(Set(results.compactMap { $0["id"] as? String }), Set(["msg_200", "msg_250", "msg_300"]))
@@ -871,14 +864,8 @@ final class SearchToolTests: XCTestCase {
     }
 }
 
-func decodeSearchResponse(_ result: Result<String, SearchError>) throws -> [String: Any] {
-    switch result {
-    case .success(let json):
-        return try decodeJSONDictionary(from: json)
-    case .failure(let error):
-        XCTFail("Unexpected search error: \(error)")
-        return [:]
-    }
+func decodeSearchResponse(_ json: String) throws -> [String: Any] {
+    try decodeJSONDictionary(from: json)
 }
 
 func makeSearchFixture() throws -> ToolTestDatabase {

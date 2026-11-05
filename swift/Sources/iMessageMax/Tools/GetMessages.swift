@@ -107,13 +107,13 @@ struct GetMessagesResponse: Encodable {
     }
 }
 
-struct GetMessagesErrorResponse: Encodable {
+struct GetMessagesErrorResponse: Encodable, Sendable {
     let error: String
     let message: String
     let candidates: [Candidate]?
     let suggestion: String?
 
-    struct Candidate: Encodable {
+    struct Candidate: Encodable, Sendable {
         let chatId: String
         let name: String
         let participantCount: Int
@@ -198,20 +198,8 @@ actor GetMessagesTool {
     // MARK: - Execution
 
     func execute(args: [String: Value]?) async throws -> [Tool.Content] {
-        do {
-            let response = try await executeImpl(args: args)
-            return [.plainText(try FormatUtils.encodeJSON(response))]
-        } catch let error as GetMessagesToolError {
-            throw ToolError(content: [.plainText(try FormatUtils.encodeJSON(error.errorResponse))])
-        } catch {
-            let errorResponse = GetMessagesErrorResponse(
-                error: "internal_error",
-                message: ClientErrorMessages.sanitized(error),
-                candidates: nil,
-                suggestion: nil
-            )
-            throw ToolError(content: [.plainText(try FormatUtils.encodeJSON(errorResponse))])
-        }
+        let response = try await executeImpl(args: args)
+        return [.plainText(try FormatUtils.encodeJSON(response))]
     }
 
     private func executeImpl(args: [String: Value]?) async throws -> GetMessagesResponse {
@@ -238,12 +226,7 @@ actor GetMessagesTool {
             hasParticipants = false
         }
         guard chatId != nil || hasParticipants else {
-            throw GetMessagesToolError(errorResponse: GetMessagesErrorResponse(
-                error: "validation_error",
-                message: "Either chat_id or participants must be provided",
-                candidates: nil,
-                suggestion: nil
-            ))
+            throw ToolFailure("validation_error", "Either chat_id or participants must be provided")
         }
 
         try await resolver.initialize()
@@ -253,12 +236,7 @@ actor GetMessagesTool {
         }
 
         guard let numericChatId = parseChatId(chatId) else {
-            throw GetMessagesToolError(errorResponse: GetMessagesErrorResponse(
-                error: "chat_not_found",
-                message: ClientErrorMessages.chatNotFound(chatId ?? "nil"),
-                candidates: nil,
-                suggestion: nil
-            ))
+            throw ToolFailure("chat_not_found", ClientErrorMessages.chatNotFound(chatId ?? "nil"))
         }
 
         let chatInfo = try getChatInfo(chatId: numericChatId)

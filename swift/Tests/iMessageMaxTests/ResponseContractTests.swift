@@ -7,15 +7,13 @@ final class ResponseContractTests: XCTestCase {
         let fixture = try makeOverviewFixture()
         let resolver = makeOverviewResolver()
 
-        let result = await ListChatsTool.execute(
+        let result = try await ListChatsTool.execute(
             limit: 5,
             db: fixture.database(),
             resolver: resolver
         )
 
-        guard case .success(let response) = result else {
-            return XCTFail("Expected list_chats success")
-        }
+        let response = result
 
         guard let first = response.chats.first else {
             return XCTFail("Expected chat")
@@ -78,10 +76,8 @@ final class ResponseContractTests: XCTestCase {
         let resolver = makeOverviewResolver()
         let tool = ListAttachments(db: fixture.database(), resolver: resolver)
 
-        let result = await tool.execute(type: "image", limit: 5)
-        guard case .success(let response) = result else {
-            return XCTFail("Expected list_attachments success")
-        }
+        let result = try await tool.execute(type: "image", limit: 5)
+        let response = result
 
         guard let first = response.messages.first else {
             return XCTFail("Expected shared message row")
@@ -116,15 +112,13 @@ final class ResponseContractTests: XCTestCase {
 
     func testGetContextUsesMessageFieldNotTarget() async throws {
         let fixture = try makeGetMessagesFixture()
-        let result = await GetContext.execute(
+        let result = try await GetContext.execute(
             messageId: "msg_200",
             database: fixture.database(),
             resolver: makeSeededResolver()
         )
 
-        guard case .success(let response) = result else {
-            return XCTFail("Expected get_context success")
-        }
+        let response = result
 
         let encoded = try decodeJSONDictionary(from: try FormatUtils.encodeJSON(response))
         XCTAssertNotNil(encoded["message"])
@@ -133,15 +127,13 @@ final class ResponseContractTests: XCTestCase {
 
     func testGetContextGeneratesHumanChatNameForUnnamedChats() async throws {
         let fixture = try makeGetMessagesFixture()
-        let result = await GetContext.execute(
+        let result = try await GetContext.execute(
             messageId: "msg_200",
             database: fixture.database(),
             resolver: makeSeededResolver()
         )
 
-        guard case .success(let response) = result else {
-            return XCTFail("Expected get_context success")
-        }
+        let response = result
 
         XCTAssertEqual(response.chat.id, "chat20")
         let chatName = try XCTUnwrap(response.chat.name)
@@ -153,7 +145,7 @@ final class ResponseContractTests: XCTestCase {
 
     func testGetContextMirrorsReactionReplyAndEditFields() async throws {
         let fixture = try makeGetMessagesFixture()
-        let result = await GetContext.execute(
+        let result = try await GetContext.execute(
             messageId: "msg_202",
             before: 5,
             after: 5,
@@ -161,9 +153,7 @@ final class ResponseContractTests: XCTestCase {
             resolver: makeSeededResolver()
         )
 
-        guard case .success(let response) = result else {
-            return XCTFail("Expected get_context success")
-        }
+        let response = result
 
         let encoded = try decodeJSONDictionary(from: try FormatUtils.encodeJSON(response))
         let message = try XCTUnwrap(encoded["message"] as? [String: Any])

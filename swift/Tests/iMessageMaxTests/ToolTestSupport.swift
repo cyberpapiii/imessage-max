@@ -299,3 +299,18 @@ func makeTestCatalog() -> ToolCatalog {
 func makeTestSetupPermissions() -> SetupPermissionService {
     SetupPermissionService(contactsRequest: { (true, "authorized") }, automationRequest: { (true, "authorized") })
 }
+
+/// Runs a tool call that should fail and returns the JSON error body the
+/// client would receive.
+func toolFailureBody<T>(
+    file: StaticString = #filePath, line: UInt = #line,
+    _ call: () async throws -> T
+) async throws -> [String: Any] {
+    do {
+        _ = try await call()
+        XCTFail("expected a tool failure", file: file, line: line)
+        return [:]
+    } catch let failure as ToolFailure {
+        return try decodeJSONDictionary(from: failure.content)
+    }
+}

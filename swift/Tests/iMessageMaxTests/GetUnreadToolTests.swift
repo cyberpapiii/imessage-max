@@ -40,8 +40,8 @@ final class GetUnreadToolTests: XCTestCase {
             _ = try await tool.execute(
                 params: GetUnread.Parameters(chatId: hostile, since: "all", format: .summary, limit: 5)
             )
-            XCTFail("expected ToolError")
-        } catch let error as ToolError {
+            XCTFail("expected ToolFailure")
+        } catch let error as ToolFailure {
             guard case .text(let text, _, _)? = error.content.first else {
                 return XCTFail("expected text content")
             }

@@ -22,4 +22,26 @@ enum DatabaseError: LocalizedError {
             return "Query cancelled"
         }
     }
+
+    var clientCode: String {
+        switch self {
+        case .notFound: "database_not_found"
+        case .permissionDenied: "permission_denied"
+        case .queryFailed: "query_failed"
+        case .invalidData: "invalid_data"
+        case .cancelled: "cancelled"
+        }
+    }
+
+    /// Fixed guidance for the client. The description, which carries
+    /// filesystem paths, goes to the log under `context`.
+    func clientMessage(context: String) -> String {
+        if case .cancelled = self { return ClientErrorMessages.cancelled }
+        Log.error("\(context): \(localizedDescription)")
+        switch self {
+        case .notFound: return ClientErrorMessages.databaseNotFound
+        case .permissionDenied: return ClientErrorMessages.permissionDenied
+        case .queryFailed, .invalidData, .cancelled: return ClientErrorMessages.internalError
+        }
+    }
 }

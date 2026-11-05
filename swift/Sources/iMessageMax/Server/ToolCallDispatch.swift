@@ -55,7 +55,7 @@ enum ToolCallDispatch {
     /// never logs arguments: they carry message text and phone numbers.
     static func execute(name: String, arguments: [String: Value]?, lane: Lane, catalog: ToolCatalog) async -> Execution {
         let start = ContinuousClock.now
-        let (execution, outcome) = await run(catalog.handler(named: name), arguments: arguments)
+        let (execution, outcome) = await run(name, catalog.handler(named: name), arguments: arguments)
         let elapsed = ContinuousClock.now - start
         let ms = Double(elapsed.components.seconds) * 1000
             + Double(elapsed.components.attoseconds) / 1e15
@@ -65,7 +65,7 @@ enum ToolCallDispatch {
         return execution
     }
 
-    private static func run(_ handler: ToolHandler?, arguments: [String: Value]?) async -> (Execution, String) {
+    private static func run(_ name: String, _ handler: ToolHandler?, arguments: [String: Value]?) async -> (Execution, String) {
         guard let handler else {
             return (.unknownTool, "unknown_tool")
         }
@@ -83,9 +83,10 @@ enum ToolCallDispatch {
         } catch let error as ToolError {
             return (.completed(content: error.content, isError: true), Task.isCancelled ? "cancelled" : "tool_error")
         } catch {
-            let message = "Error: \(ClientErrorMessages.internalDetail(error, context: "Tool execution"))"
-            let outcome = Task.isCancelled || Self.isCancellation(error) ? "cancelled" : "internal_error"
-            return (.completed(content: [.plainText(message)], isError: true), outcome)
+            let outcome =
+                Task.isCancelled || Self.isCancellation(error) ? "cancelled"
+                : error is ToolFailure ? "tool_error" : "internal_error"
+            return (.completed(content: ToolFailure(error, tool: name).content, isError: true), outcome)
         }
     }
 

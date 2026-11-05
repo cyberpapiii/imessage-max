@@ -180,7 +180,7 @@ final class GetMessagesSinceToolTests: XCTestCase {
         do {
             _ = try await tool.execute(args: ["chat_id": .string("nope")])
             XCTFail("expected invalid_input")
-        } catch let error as ToolError {
+        } catch let error as ToolFailure {
             let payload = try decodeJSONDictionary(from: error.content)
             XCTAssertEqual(payload["error"] as? String, "invalid_input")
         }

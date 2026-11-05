@@ -224,10 +224,6 @@ struct AttachmentRow {
     let totalBytes: Int?
 }
 
-struct GetMessagesToolError: Error {
-    let errorResponse: GetMessagesErrorResponse
-}
-
 extension GetMessagesTool {
     func resolveParticipantsToChat(participants: [String]) async throws -> String {
         var handleGroups: [Set<String>] = []
@@ -255,12 +251,7 @@ extension GetMessagesTool {
         }
 
         guard !allHandles.isEmpty else {
-            throw GetMessagesToolError(errorResponse: GetMessagesErrorResponse(
-                error: "invalid_participants",
-                message: "Could not resolve any handles for participants: \(participants)",
-                candidates: nil,
-                suggestion: nil
-            ))
+            throw ToolFailure("invalid_participants", "Could not resolve any handles for participants: \(participants)")
         }
 
         let placeholders = allHandles.map { _ in "?" }.joined(separator: ", ")
@@ -297,7 +288,7 @@ extension GetMessagesTool {
         if exactMatches.count == 1 {
             return "chat\(exactMatches[0].id)"
         } else if !exactMatches.isEmpty {
-            throw GetMessagesToolError(errorResponse: GetMessagesErrorResponse(
+            throw ToolFailure(code: "ambiguous_participants", body: GetMessagesErrorResponse(
                 error: "ambiguous_participants",
                 message: "Multiple chats found with participants: \(participants)",
                 candidates: exactMatches.prefix(5).map { row in
@@ -312,7 +303,7 @@ extension GetMessagesTool {
         } else if rows.count == 1 {
             return "chat\(rows[0].id)"
         } else if !rows.isEmpty {
-            throw GetMessagesToolError(errorResponse: GetMessagesErrorResponse(
+            throw ToolFailure(code: "ambiguous_participants", body: GetMessagesErrorResponse(
                 error: "ambiguous_participants",
                 message: "Multiple chats found with participants: \(participants)",
                 candidates: rows.prefix(5).map { row in
@@ -325,12 +316,7 @@ extension GetMessagesTool {
                 suggestion: "Did you mean the \(rows[0].participantCount)-person chat or a different one?"
             ))
         } else {
-            throw GetMessagesToolError(errorResponse: GetMessagesErrorResponse(
-                error: "chat_not_found",
-                message: "No chat found with participants: \(participants)",
-                candidates: nil,
-                suggestion: nil
-            ))
+            throw ToolFailure("chat_not_found", "No chat found with participants: \(participants)")
         }
     }
 
@@ -348,12 +334,7 @@ extension GetMessagesTool {
         }
 
         guard let info = rows.first else {
-            throw GetMessagesToolError(errorResponse: GetMessagesErrorResponse(
-                error: "chat_not_found",
-                message: ClientErrorMessages.chatNotFound("chat\(chatId)"),
-                candidates: nil,
-                suggestion: nil
-            ))
+            throw ToolFailure("chat_not_found", ClientErrorMessages.chatNotFound("chat\(chatId)"))
         }
 
         return info

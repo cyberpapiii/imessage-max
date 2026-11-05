@@ -136,8 +136,7 @@ final class URLPreviewBalloonTests: XCTestCase {
     func testListAttachmentsSkipsHiddenPayload() async throws {
         let fixture = try makeBalloonFixture()
         let tool = ListAttachments(db: fixture.database(), resolver: makeSeededResolver())
-        let result = await tool.execute(chatId: "chat1")
-        let response = try result.get()
+        let response = try await tool.execute(chatId: "chat1")
         XCTAssertEqual(response.messages.count, 0)
     }
 
@@ -166,7 +165,7 @@ final class URLPreviewBalloonTests: XCTestCase {
         XCTAssertNil(balloon["attachments"])
 
         let list = ListAttachments(db: fixture.database(), resolver: makeSeededResolver())
-        let listed = try await list.execute(chatId: "chat1").get()
+        let listed = try await list.execute(chatId: "chat1")
         XCTAssertEqual(listed.messages.count, 1)
         XCTAssertEqual(listed.messages.first?.attachments.first?.id, "att7002")
     }

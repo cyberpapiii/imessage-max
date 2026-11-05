@@ -110,7 +110,7 @@ final class ListAttachmentsQueryTests: XCTestCase {
         cursor: String? = nil
     ) async throws -> ListAttachmentsResponse {
         let tool = ListAttachments(db: fixture.database(), resolver: makeSeededResolver())
-        let result = await tool.execute(
+        let result = try await tool.execute(
             chatId: chatId,
             fromPerson: fromPerson,
             type: type,
@@ -120,12 +120,7 @@ final class ListAttachmentsQueryTests: XCTestCase {
             sort: sort,
             cursor: cursor
         )
-        switch result {
-        case .success(let response):
-            return response
-        case .failure(let error):
-            throw error
-        }
+        return result
     }
 
     private func ids(_ response: ListAttachmentsResponse) -> [String] {

@@ -24,13 +24,7 @@ enum ClientErrorMessages {
         guard let dbError = error as? DatabaseError else {
             return error.localizedDescription
         }
-        Log.error("database error: \(dbError.localizedDescription)")
-        switch dbError {
-        case .permissionDenied: return permissionDenied
-        case .notFound: return databaseNotFound
-        case .queryFailed, .invalidData: return internalError
-        case .cancelled: return cancelled
-        }
+        return dbError.clientMessage(context: "database error")
     }
 
     /// Client-safe rendering of an error that may embed internal filesystem

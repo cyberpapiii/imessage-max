@@ -107,22 +107,14 @@ final class AttachmentPathContainmentTests: XCTestCase {
         )
 
         let tool = GetAttachment(db: fixtureDB.database())
-        let result = await tool.execute(
-            attachmentId: "att99",
-            variant: "vision",
-            allowedRoots: [allowedRoot.path]
-        )
-
-        switch result {
-        case .success:
-            XCTFail("Expected attachment_path_invalid error for out-of-root path")
-        case .error(let type, let message, _):
-            XCTAssertEqual(type, "attachment_path_invalid")
-            XCTAssertFalse(
-                message.contains(outsideFile.path),
-                "Error message must not contain the attacker-supplied file path"
-            )
+        let body = try await toolFailureBody {
+            try await tool.execute(attachmentId: "att99", variant: "vision", allowedRoots: [allowedRoot.path])
         }
+        XCTAssertEqual(body["error"] as? String, "attachment_path_invalid")
+        XCTAssertFalse(
+            (body["message"] as? String ?? "").contains(outsideFile.path),
+            "Error message must not contain the attacker-supplied file path"
+        )
     }
 
     func testGetMessagesDoesNotProbeOutOfRootPaths() async throws {

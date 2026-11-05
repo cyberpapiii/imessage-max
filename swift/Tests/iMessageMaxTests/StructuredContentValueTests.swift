@@ -60,11 +60,11 @@ final class StructuredContentValueTests: XCTestCase {
         )
         try fixture.joinChatMessage(chatId: 10, messageId: 1)
 
-        let result = await ListChatsTool.execute(
+        let result = try await ListChatsTool.execute(
             db: fixture.database(),
             resolver: ContactResolver(seedCache: [:])
         )
-        guard case .success(let response) = result else { return XCTFail("execute failed") }
+        let response = result
         try assertMatchesDecoder(try FormatUtils.encodeJSON(response))
     }
 }

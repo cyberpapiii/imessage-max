@@ -58,11 +58,6 @@ struct ConversationActivity: Codable {
     }
 }
 
-struct ActiveConversationsError: Codable {
-    let error: String
-    let message: String
-}
-
 enum GetActiveConversations {
     // MARK: - Tool Registration
 
@@ -108,28 +103,15 @@ enum GetActiveConversations {
             let isGroup = arguments?["is_group"]?.boolValue
             let limit = arguments?["limit"]?.intValue ?? 10
 
-            do {
-                let result = try await execute(
-                    hours: hours,
-                    minExchanges: minExchanges,
-                    isGroup: isGroup,
-                    limit: limit,
-                    database: db,
-                    resolver: resolver
-                )
-
-                return [.plainText(try FormatUtils.encodeJSON(result))]
-            } catch let error as DatabaseError {
-                let mapped = ToolErrorMapping.map(error, context: "get_active_conversations")
-                let payload = ActiveConversationsError(error: mapped.code, message: mapped.message)
-                throw ToolError(content: [.plainText(try FormatUtils.encodeJSON(payload))])
-            } catch {
-                let payload = ActiveConversationsError(
-                    error: "internal_error",
-                    message: ClientErrorMessages.sanitized(error)
-                )
-                throw ToolError(content: [.plainText(try FormatUtils.encodeJSON(payload))])
-            }
+            let result = try await execute(
+                hours: hours,
+                minExchanges: minExchanges,
+                isGroup: isGroup,
+                limit: limit,
+                database: db,
+                resolver: resolver
+            )
+            return [.plainText(try FormatUtils.encodeJSON(result))]
         }
     }
 

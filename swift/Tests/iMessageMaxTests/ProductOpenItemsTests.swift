@@ -85,43 +85,37 @@ final class ProductOpenItemsTests: XCTestCase {
 
     func testListChatsMostActiveOrdersByMessageCount() async throws {
         let fixture = try makeMostActiveFixture()
-        let result = await ListChatsTool.execute(
+        let result = try await ListChatsTool.execute(
             limit: 10,
             sort: "most_active",
             db: fixture.database(),
             resolver: makeSeededResolver()
         )
-        guard case .success(let response) = result else {
-            return XCTFail("list_chats failed")
-        }
+        let response = result
         XCTAssertEqual(response.chats.map(\.id), ["chat2", "chat1"])
     }
 
     func testListChatsCursorPagesRecent() async throws {
         let fixture = try makeMostActiveFixture()
-        let first = await ListChatsTool.execute(
+        let first = try await ListChatsTool.execute(
             limit: 1,
             sort: "recent",
             db: fixture.database(),
             resolver: makeSeededResolver()
         )
-        guard case .success(let page1) = first else {
-            return XCTFail("page1 failed")
-        }
+        let page1 = first
         XCTAssertTrue(page1.more)
         XCTAssertNotNil(page1.cursor)
         XCTAssertEqual(page1.chats.count, 1)
 
-        let second = await ListChatsTool.execute(
+        let second = try await ListChatsTool.execute(
             limit: 1,
             sort: "recent",
             cursor: page1.cursor,
             db: fixture.database(),
             resolver: makeSeededResolver()
         )
-        guard case .success(let page2) = second else {
-            return XCTFail("page2 failed")
-        }
+        let page2 = second
         XCTAssertEqual(page2.chats.count, 1)
         XCTAssertNotEqual(page1.chats.first?.id, page2.chats.first?.id)
     }

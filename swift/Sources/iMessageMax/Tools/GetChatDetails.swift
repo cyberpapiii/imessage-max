@@ -15,11 +15,6 @@ struct GetChatDetailsResponse: Codable {
     }
 }
 
-struct GetChatDetailsError: Codable {
-    let error: String
-    let message: String
-}
-
 enum GetChatDetailsTool {
     static let name = "get_chat_details"
 
@@ -64,82 +59,70 @@ enum GetChatDetailsTool {
         resolver: ContactResolver
     ) async throws -> [Tool.Content] {
         guard let chatId = arguments?["chat_id"]?.stringValue else {
-            let error = GetChatDetailsError(error: "validation_error", message: "chat_id is required")
-            throw ToolError(content: [.plainText(try FormatUtils.encodeJSON(error))])
+            throw ToolFailure("validation_error", "chat_id is required")
         }
         let includeShared = arguments?["include_shared_summary"]?.boolValue ?? true
 
         try? await resolver.initialize()
 
-        do {
-            guard let numericChatId = ChatIdentifier.parseRowId(chatId) else {
-                throw try chatNotFound(chatId)
-            }
-            guard let chatRow = try loadChatRow(chatId: numericChatId, database: database) else {
-                throw try chatNotFound(chatId)
-            }
-            let participants = try await loadParticipants(chatId: numericChatId, resolver: resolver, database: database)
-            let identity = ChatIdentity(
-                mcpId: "chat\(numericChatId)",
-                guid: chatRow.guid,
-                explicitName: chatRow.displayName,
-                participants: participants
-            )
-            let chatSummary = try ChatSummaryBuilder.buildSummary(
-                db: database,
-                chatId: numericChatId,
-                identity: identity
-            )
-
-            let lastMessageResult = try await loadLastMessage(chatId: numericChatId, resolver: resolver, database: database)
-            let state = try loadState(
-                chatId: numericChatId,
-                lastMessageAwaitingReply: lastMessageResult.awaitingReply,
-                database: database
-            )
-
-            let shared: [SharedMessageItem]?
-            if includeShared {
-                let page = try await ListAttachments(db: database, resolver: resolver).browseSharedMessages(
-                    chatId: numericChatId,
-                    fromPerson: nil,
-                    typeFilter: nil,
-                    since: nil,
-                    before: nil,
-                    limit: 5,
-                    sort: .recentFirst,
-                    cursor: nil
-                )
-                shared = page.messages
-            } else {
-                shared = nil
-            }
-
-            let response = GetChatDetailsResponse(
-                chat: chatSummary,
-                participants: IdentityDisplayFormatter.participants(identity.participants),
-                identity: ChatDetailsIdentity(
-                    guid: identity.guid,
-                    explicitName: identity.explicitName,
-                    isNamed: identity.isNamed,
-                    aliases: identity.aliases
-                ),
-                state: state,
-                lastMessage: lastMessageResult.summary,
-                shared: shared
-            )
-
-            return [.plainText(try FormatUtils.encodeJSON(response))]
-        } catch let error as ToolError {
-            throw error
-        } catch let error as DatabaseError {
-            let mapped = ToolErrorMapping.map(error, context: "get_chat_details")
-            let payload = GetChatDetailsError(error: mapped.code, message: mapped.message)
-            throw ToolError(content: [.plainText(try FormatUtils.encodeJSON(payload))])
-        } catch {
-            let payload = GetChatDetailsError(error: "internal_error", message: ClientErrorMessages.sanitized(error))
-            throw ToolError(content: [.plainText(try FormatUtils.encodeJSON(payload))])
+        guard let numericChatId = ChatIdentifier.parseRowId(chatId) else {
+            throw ToolFailure.chatNotFound(chatId)
         }
+        guard let chatRow = try loadChatRow(chatId: numericChatId, database: database) else {
+            throw ToolFailure.chatNotFound(chatId)
+        }
+        let participants = try await loadParticipants(chatId: numericChatId, resolver: resolver, database: database)
+        let identity = ChatIdentity(
+            mcpId: "chat\(numericChatId)",
+            guid: chatRow.guid,
+            explicitName: chatRow.displayName,
+            participants: participants
+        )
+        let chatSummary = try ChatSummaryBuilder.buildSummary(
+            db: database,
+            chatId: numericChatId,
+            identity: identity
+        )
+
+        let lastMessageResult = try await loadLastMessage(chatId: numericChatId, resolver: resolver, database: database)
+        let state = try loadState(
+            chatId: numericChatId,
+            lastMessageAwaitingReply: lastMessageResult.awaitingReply,
+            database: database
+        )
+
+        let shared: [SharedMessageItem]?
+        if includeShared {
+            let page = try await ListAttachments(db: database, resolver: resolver).browseSharedMessages(
+                chatId: numericChatId,
+                fromPerson: nil,
+                typeFilter: nil,
+                since: nil,
+                before: nil,
+                limit: 5,
+                sort: .recentFirst,
+                cursor: nil
+            )
+            shared = page.messages
+        } else {
+            shared = nil
+        }
+
+        let response = GetChatDetailsResponse(
+            chat: chatSummary,
+            participants: IdentityDisplayFormatter.participants(identity.participants),
+            identity: ChatDetailsIdentity(
+                guid: identity.guid,
+                explicitName: identity.explicitName,
+                isNamed: identity.isNamed,
+                aliases: identity.aliases
+            ),
+            state: state,
+            lastMessage: lastMessageResult.summary,
+            shared: shared
+        )
+
+        return [.plainText(try FormatUtils.encodeJSON(response))]
     }
 
     private struct ChatRow {
@@ -150,11 +133,6 @@ enum GetChatDetailsTool {
     private struct LastMessageResult {
         let summary: LastMessageSummary?
         let awaitingReply: Bool?
-    }
-
-    private static func chatNotFound(_ chatId: String) throws -> ToolError {
-        let error = GetChatDetailsError(error: "chat_not_found", message: ClientErrorMessages.chatNotFound(chatId))
-        return ToolError(content: [.plainText(try FormatUtils.encodeJSON(error))])
     }
 
     private static func loadChatRow(chatId: Int64, database: Database) throws -> ChatRow? {

@@ -69,11 +69,6 @@ struct UnreadSummaryResponse: Codable {
     }
 }
 
-struct UnreadError: Codable {
-    let error: String
-    let message: String
-}
-
 struct UnreadChatSummary: Codable {
     let chat: ChatSummary
     let unreadCount: Int
@@ -157,19 +152,8 @@ final class GetUnread {
             )
 
             let tool = GetUnread(database: db, contactResolver: resolver)
-            do {
-                let result = try await tool.execute(params: params)
-                return [.plainText(try FormatUtils.encodeJSON(result))]
-            } catch let error as ToolError {
-                throw error
-            } catch let error as DatabaseError {
-                let mapped = ToolErrorMapping.map(error, context: "get_unread")
-                let payload = UnreadError(error: mapped.code, message: mapped.message)
-                throw ToolError(content: [.plainText(try FormatUtils.encodeJSON(payload))])
-            } catch {
-                let payload = UnreadError(error: "internal_error", message: ClientErrorMessages.sanitized(error))
-                throw ToolError(content: [.plainText(try FormatUtils.encodeJSON(payload))])
-            }
+            let result = try await tool.execute(params: params)
+            return [.plainText(try FormatUtils.encodeJSON(result))]
         }
     }
 
@@ -208,8 +192,7 @@ final class GetUnread {
         if let chatId = params.chatId {
             numericChatId = ChatIdentifier.parseRowId(chatId)
             if numericChatId == nil {
-                let payload = UnreadError(error: "chat_not_found", message: ClientErrorMessages.chatNotFound(chatId))
-                throw ToolError(content: [.plainText(try FormatUtils.encodeJSON(payload))])
+                throw ToolFailure.chatNotFound(chatId)
             }
         }
 

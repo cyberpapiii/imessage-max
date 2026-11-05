@@ -51,7 +51,7 @@ final class ArgumentClampTests: XCTestCase {
         let handler = try XCTUnwrap(catalog.handler(named: name), "\(name) should be registered")
         do {
             return try decodeJSONDictionary(from: try await handler(arguments))
-        } catch let error as ToolError {
+        } catch let error as ToolFailure {
             return try decodeJSONDictionary(from: error.content)
         }
     }
@@ -75,7 +75,7 @@ final class ArgumentClampTests: XCTestCase {
     func testSearchExecuteWithHugeUnansweredHoursReturns() async throws {
         let fixture = try makeFixture()
 
-        let result = await SearchTool.execute(
+        let result = try await SearchTool.execute(
             query: "hello",
             unanswered: true,
             unansweredHours: Int.max,

@@ -48,8 +48,8 @@ final class ChatDetailsToolTests: XCTestCase {
                 database: fixture.database(),
                 resolver: makeChatDetailsResolver()
             )
-            XCTFail("expected ToolError")
-        } catch let error as ToolError {
+            XCTFail("expected ToolFailure")
+        } catch let error as ToolFailure {
             guard case .text(let text, _, _)? = error.content.first else {
                 return XCTFail("expected text content")
             }

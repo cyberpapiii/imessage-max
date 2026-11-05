@@ -70,19 +70,14 @@ final class GetAttachmentToolTests: XCTestCase {
         defer { try? FileManager.default.removeItem(atPath: dbPath) }
 
         let tool = GetAttachment(db: Database(path: dbPath))
-        let result = await tool.execute(attachmentId: "att1", variant: "vision", allowedRoots: [FileManager.default.temporaryDirectory.path])
+        let image = try await tool.execute(attachmentId: "att1", variant: "vision", allowedRoots: [FileManager.default.temporaryDirectory.path])
 
-        switch result {
-        case .success(let metadata, let imageData, let mimeType):
-            XCTAssertEqual(mimeType, "image/jpeg")
-            XCTAssertEqual(metadata.id, "att1")
-            XCTAssertEqual(metadata.type, "image")
-            XCTAssertEqual(metadata.name, "attachment-large.jpg")
-            XCTAssertTrue(metadata.available)
-            XCTAssertFalse(imageData.isEmpty)
-        case .error(let type, let message, _):
-            XCTFail("Expected image success, got \(type): \(message)")
-        }
+        XCTAssertEqual(image.mimeType, "image/jpeg")
+        XCTAssertEqual(image.metadata.id, "att1")
+        XCTAssertEqual(image.metadata.type, "image")
+        XCTAssertEqual(image.metadata.name, "attachment-large.jpg")
+        XCTAssertTrue(image.metadata.available)
+        XCTAssertFalse(image.imageData.isEmpty)
     }
 
     func testExecuteReturnsUnsupportedTypeForVideoAttachment() async throws {
@@ -96,16 +91,14 @@ final class GetAttachmentToolTests: XCTestCase {
         defer { try? FileManager.default.removeItem(atPath: dbPath) }
 
         let tool = GetAttachment(db: Database(path: dbPath))
-        let result = await tool.execute(attachmentId: "2", variant: "full", allowedRoots: [FileManager.default.temporaryDirectory.path])
-
-        switch result {
-        case .success:
-            XCTFail("Expected unsupported video error")
-        case .error(let type, let message, let details):
-            XCTAssertEqual(type, "unsupported_type")
-            XCTAssertTrue(message.contains("Video attachments are not yet supported"))
-            XCTAssertEqual(details?["type"] as? String, "video")
+        let body = try await toolFailureBody {
+            try await tool.execute(attachmentId: "2", variant: "full", allowedRoots: [FileManager.default.temporaryDirectory.path])
         }
+
+        XCTAssertEqual(body["error"] as? String, "unsupported_type")
+        XCTAssertTrue((body["message"] as? String ?? "").contains("Video attachments are not yet supported"))
+        XCTAssertEqual(body["type"] as? String, "video")
+        XCTAssertEqual(body["size"] as? Int, 5)
     }
 
     func testUnnamedDMChatNameUsesResolvedParticipant() async throws {
@@ -142,23 +135,18 @@ final class GetAttachmentToolTests: XCTestCase {
             db: fixture.database(),
             resolver: ContactResolver(seedCache: ["+15550000022": "Sukhmani Kular"])
         )
-        let result = await tool.execute(
+        let image = try await tool.execute(
             attachmentId: "att7",
             variant: "thumb",
             allowedRoots: [FileManager.default.temporaryDirectory.path]
         )
 
-        switch result {
-        case .success(let metadata, _, _):
-            XCTAssertEqual(metadata.chat?.id, "chat22")
-            XCTAssertEqual(
-                metadata.chat?.name,
-                "Sukhmani Kular",
-                "Unnamed DM should use the resolved participant name, not chat{rowid}"
-            )
-        case .error(let type, let message, _):
-            XCTFail("Expected image success, got \(type): \(message)")
-        }
+        XCTAssertEqual(image.metadata.chat?.id, "chat22")
+        XCTAssertEqual(
+            image.metadata.chat?.name,
+            "Sukhmani Kular",
+            "Unnamed DM should use the resolved participant name, not chat{rowid}"
+        )
     }
 
     func testExecuteReturnsOffloadedErrorWhenImageFileIsMissing() async throws {
@@ -171,15 +159,13 @@ final class GetAttachmentToolTests: XCTestCase {
         defer { try? FileManager.default.removeItem(atPath: dbPath) }
 
         let tool = GetAttachment(db: Database(path: dbPath))
-        let result = await tool.execute(attachmentId: "att3", variant: "thumb", allowedRoots: [FileManager.default.temporaryDirectory.path])
-
-        switch result {
-        case .success:
-            XCTFail("Expected offloaded attachment error")
-        case .error(let type, let message, _):
-            XCTAssertEqual(type, "attachment_offloaded")
-            XCTAssertTrue(message.contains("offloaded") || message.contains("iCloud"))
+        let body = try await toolFailureBody {
+            try await tool.execute(attachmentId: "att3", variant: "thumb", allowedRoots: [FileManager.default.temporaryDirectory.path])
         }
+
+        XCTAssertEqual(body["error"] as? String, "attachment_offloaded")
+        let message = body["message"] as? String ?? ""
+        XCTAssertTrue(message.contains("offloaded") || message.contains("iCloud"))
     }
 }
 

@@ -93,17 +93,8 @@ actor GetMessagesSinceTool {
     }
 
     func execute(args: [String: Value]?) async throws -> [Tool.Content] {
-        do {
-            let response = try await executeImpl(args: args ?? [:])
-            return [.plainText(try FormatUtils.encodeJSON(response))]
-        } catch let error as ToolError {
-            throw error
-        } catch {
-            throw ToolError(content: [.plainText(try FormatUtils.encodeJSON([
-                "error": "internal_error",
-                "message": ClientErrorMessages.sanitized(error),
-            ]))])
-        }
+        let response = try await executeImpl(args: args ?? [:])
+        return [.plainText(try FormatUtils.encodeJSON(response))]
     }
 
     private func executeImpl(args: [String: Value]) async throws -> GetMessagesSinceResponse {
@@ -112,10 +103,7 @@ actor GetMessagesSinceTool {
         var chatFilter: Int64?
         if let rawChat = args["chat_id"]?.stringValue {
             guard let parsed = ChatIdentifier.parseRowId(rawChat) else {
-                throw ToolError(content: [.plainText(try FormatUtils.encodeJSON([
-                    "error": "invalid_input",
-                    "message": "Invalid chat_id: \(rawChat)",
-                ]))])
+                throw ToolFailure("invalid_input", "Invalid chat_id: \(rawChat)")
             }
             chatFilter = parsed
         }

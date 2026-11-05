@@ -49,7 +49,7 @@ final class SearchReactionSubqueryHangTests: XCTestCase {
         XCTAssertEqual(results.first?["reactions"] as? [String], ["❤️ Alice Smith"])
 
         let contextStart = ContinuousClock.now
-        let context = await GetContext.execute(
+        let context = try await GetContext.execute(
             messageId: "msg_1",
             before: 5,
             after: 5,
@@ -58,12 +58,8 @@ final class SearchReactionSubqueryHangTests: XCTestCase {
         )
         let contextElapsed = ContinuousClock.now - contextStart
         XCTAssertLessThan(contextElapsed, .seconds(2), "get_context took \(contextElapsed)")
-        switch context {
-        case .success(let response):
-            XCTAssertEqual(response.message.id, "msg_1")
-        case .failure(let error):
-            XCTFail("get_context failed: \(error)")
-        }
+        let response = context
+        XCTAssertEqual(response.message.id, "msg_1")
     }
 
     func testSearchFindsAttributedBodyMatchOlderThanFiveHundredAttributedBodyOnlyRows() async throws {
