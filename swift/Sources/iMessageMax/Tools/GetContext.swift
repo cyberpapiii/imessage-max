@@ -3,30 +3,11 @@ import Foundation
 import MCP
 
 struct GetContextResponse: Codable {
-    let chat: ChatInfo
+    let chat: ChatReference
     let people: [String: PersonInfo]
     let message: ContextMessage
     let before: [ContextMessage]
     let after: [ContextMessage]
-
-    struct ContextMessage: Codable {
-        let id: String
-        let from: String
-        let text: String?
-        let ago: String?
-        let ts: String?
-        let reactions: [String]?
-        let replyTo: String?
-        let replyCount: Int?
-        let edited: Bool?
-
-        enum CodingKeys: String, CodingKey {
-            case id, from, text, ago, ts, reactions
-            case replyTo = "reply_to"
-            case replyCount = "reply_count"
-            case edited
-        }
-    }
 
     struct PersonInfo: Codable {
         let name: String
@@ -37,11 +18,6 @@ struct GetContextResponse: Codable {
             case name, handle
             case isMe = "is_me"
         }
-    }
-
-    struct ChatInfo: Codable {
-        let id: String
-        let name: String
     }
 }
 
@@ -279,37 +255,21 @@ enum GetContext {
             }
         }
 
-        func formatMessage(_ row: MessageRecord) async -> GetContextResponse.ContextMessage {
-            let msgDate = AppleTime.toDate(row.date)
-            return GetContextResponse.ContextMessage(
-                id: MessageIdentifier.format(row.id),
-                from: await getPersonKey(isFromMe: row.isFromMe, handle: row.senderHandle),
-                text: row.text,
-                ago: TimeUtils.formatCompactRelative(msgDate),
-                ts: TimeUtils.formatISO(msgDate),
-                reactions: MessageRenderer.reactions(
-                    annotations.reactions[row.guid] ?? [],
-                    reactorName: { handle in
-                        if let handle {
-                            return handleToKey[handle] ?? "unknown"
-                        }
-                        return "me"
-                    }
-                ),
-                replyTo: annotations.replyTo(row),
-                replyCount: annotations.replyCount(row),
-                edited: row.isEdited ? true : nil
+        for row in [targetResult.message] + beforeRows + afterRows {
+            _ = await getPersonKey(isFromMe: row.isFromMe, handle: row.senderHandle)
+        }
+        let renderer = MessageRenderer(
+            annotations: annotations,
+            labels: SenderLabels(
+                me: "me",
+                noHandle: handleToKey["unknown"] ?? "unknown",
+                names: handleToKey,
+                missingSender: .handle,
+                missingReactor: .label("unknown")
             )
-        }
-
-        let targetMessage = await formatMessage(targetResult.message)
-        var beforeMessages: [GetContextResponse.ContextMessage] = []
-        for row in beforeRows {
-            beforeMessages.append(await formatMessage(row))
-        }
-        var afterMessages: [GetContextResponse.ContextMessage] = []
-        for row in afterRows {
-            afterMessages.append(await formatMessage(row))
+        )
+        func context(_ rows: [MessageRecord]) -> [ContextMessage] {
+            rows.map { ContextMessage(renderer.render($0), showAgo: true) }
         }
 
         let chatName = try await displayNameForChat(
@@ -320,14 +280,11 @@ enum GetContext {
         )
 
         let response = GetContextResponse(
-            chat: GetContextResponse.ChatInfo(
-                id: ChatIdentifier.format(targetChatId),
-                name: chatName
-            ),
+            chat: ChatReference(id: ChatIdentifier.format(targetChatId), name: chatName),
             people: people,
-            message: targetMessage,
-            before: beforeMessages,
-            after: afterMessages
+            message: ContextMessage(renderer.render(targetResult.message), showAgo: true),
+            before: context(beforeRows),
+            after: context(afterRows)
         )
 
         return response

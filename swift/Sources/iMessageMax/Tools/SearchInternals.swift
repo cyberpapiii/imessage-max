@@ -319,60 +319,40 @@ extension SearchTool {
             include: [.reactions, .replies],
             db: db
         )
-        var reactorNames: [String: String] = [:]
-        for recs in annotations.reactions.values {
-            for reaction in recs {
-                guard let handle = reaction.fromHandle, reactorNames[handle] == nil else { continue }
-                reactorNames[handle] = await IdentityDisplayFormatter.displayName(
-                    handle: handle, resolver: resolver
-                )
-            }
-        }
-        let reactorName: (String?) -> String = { handle in
-            guard let handle else { return "Me" }
-            return reactorNames[handle] ?? handle
-        }
-
-        func contextMessages(_ records: [MessageRecord]) async -> [SearchContextMessage]? {
-            var messages: [SearchContextMessage] = []
-            for record in records {
-                messages.append(await formatContextMessage(row: record, annotations: annotations, reactorName: reactorName, resolver: resolver))
-            }
-            return messages.isEmpty ? nil : messages
+        let records = rows.map(\.message) + contextRows
+        let renderer = MessageRenderer(
+            annotations: annotations,
+            labels: await SenderLabels.displayNames(
+                me: "Me", unknown: "Unknown", for: records, annotations: annotations, resolver: resolver
+            )
+        )
+        func contextMessages(_ records: [MessageRecord]) -> [ContextMessage]? {
+            records.isEmpty ? nil : records.map { ContextMessage(renderer.render($0), showAgo: false) }
         }
 
         for searchRow in rows {
-            let row = searchRow.message
-            let msgDate = AppleTime.toDate(row.date)
-            let senderName = await resolveSenderName(
-                isFromMe: row.isFromMe,
-                handle: row.senderHandle,
-                resolver: resolver
-            )
-
+            let message = renderer.render(searchRow.message)
             let chatName = identityByChat[searchRow.chatId]?.displayName ?? DisplayNameGenerator.fromNames([])
 
             var result = SearchResult(
-                id: MessageIdentifier.format(row.id),
+                id: message.id,
                 chat: ChatReference(id: ChatIdentifier.format(searchRow.chatId), name: chatName),
-                from: senderName,
-                excerpt: makeExcerpt(text: row.text, query: query),
-                ago: TimeUtils.formatCompactRelative(msgDate),
-                ts: TimeUtils.formatISO(msgDate),
+                from: message.from,
+                excerpt: makeExcerpt(text: message.text, query: query),
+                ago: message.ago,
+                ts: message.ts,
                 contextBefore: nil,
                 contextAfter: nil,
-                reactions: MessageRenderer.reactions(
-                    annotations.reactions[row.guid] ?? [],
-                    reactorName: reactorName
-                ),
-                replyTo: annotations.replyTo(row),
-                replyCount: annotations.replyCount(row),
-                edited: row.isEdited ? true : nil
+                reactions: message.reactions,
+                replyTo: message.replyTo,
+                replyCount: message.replyCount,
+                edited: message.edited
             )
 
-            if let date = row.date, let window = windows[MessageWindow.Anchor(chatId: searchRow.chatId, date: date)] {
-                result.contextBefore = await contextMessages(window.before)
-                result.contextAfter = await contextMessages(window.after)
+            if let date = searchRow.message.date,
+               let window = windows[MessageWindow.Anchor(chatId: searchRow.chatId, date: date)] {
+                result.contextBefore = contextMessages(window.before)
+                result.contextAfter = contextMessages(window.after)
             }
 
             results.append(result)
@@ -405,15 +385,15 @@ extension SearchTool {
             resolver: resolver
         )
         let summaryByChat = page.mapValues(\.summary)
+        let renderer = MessageRenderer(
+            annotations: .none,
+            labels: await SenderLabels.displayNames(me: "Me", unknown: "Unknown", for: rows.map(\.message), resolver: resolver)
+        )
 
         for searchRow in rows {
             let row = searchRow.message
+            let message = renderer.render(row)
             let chatId = searchRow.chatId
-            let senderName = await resolveSenderName(
-                isFromMe: row.isFromMe,
-                handle: row.senderHandle,
-                resolver: resolver
-            )
             let msgDate = AppleTime.toDate(row.date)
 
             guard let chatSummary = summaryByChat[chatId] else { continue }
@@ -450,10 +430,10 @@ extension SearchTool {
 
             if chat.results.count < 3 {
                 chat.results.append(SearchSampleMessage(
-                    id: MessageIdentifier.format(row.id),
-                    from: senderName,
-                    excerpt: makeExcerpt(text: row.text, query: query),
-                    ts: TimeUtils.formatISO(msgDate)
+                    id: message.id,
+                    from: message.from,
+                    excerpt: makeExcerpt(text: message.text, query: query),
+                    ts: message.ts
                 ))
             }
 
@@ -489,31 +469,6 @@ extension SearchTool {
             filteredHidden: filteredHidden
         )
         return try FormatUtils.encodeJSON(response)
-    }
-
-    static func formatContextMessage(
-        row: MessageRecord,
-        annotations: MessageAnnotations,
-        reactorName: (String?) -> String,
-        resolver: ContactResolver
-    ) async -> SearchContextMessage {
-        SearchContextMessage(
-            id: MessageIdentifier.format(row.id),
-            from: await resolveSenderName(
-                isFromMe: row.isFromMe,
-                handle: row.senderHandle,
-                resolver: resolver
-            ),
-            text: row.text,
-            ts: TimeUtils.formatISO(AppleTime.toDate(row.date)),
-            reactions: MessageRenderer.reactions(
-                annotations.reactions[row.guid] ?? [],
-                reactorName: reactorName
-            ),
-            replyTo: annotations.replyTo(row),
-            replyCount: annotations.replyCount(row),
-            edited: row.isEdited ? true : nil
-        )
     }
 
     /// Excerpt is centred on the first query match. A URL that straddles the
@@ -571,18 +526,6 @@ extension SearchTool {
         let excerpt = nsText.substring(to: min(excerptLength, nsText.length))
         let head = nsText.length > excerptLength ? excerpt + "..." : excerpt
         return withWindowPrefix(head)
-    }
-
-    static func resolveSenderName(
-        isFromMe: Bool,
-        handle: String?,
-        resolver: ContactResolver
-    ) async -> String {
-        if isFromMe {
-            return "Me"
-        }
-        guard let handle else { return "Unknown" }
-        return await IdentityDisplayFormatter.displayName(handle: handle, resolver: resolver)
     }
 
     /// Each distinct chat in `rows`, named as the first row for it names it.

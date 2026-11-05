@@ -308,24 +308,9 @@ extension GetMessagesTool {
                 sessionStartTs = row.date.flatMap { AppleTime.toDate($0) }.flatMap { TimeUtils.formatISO($0) }
             }
 
-            let msg = updatedMessages[idx]
-            updatedMessages[idx] = GetMessagesResponse.MessageInfo(
-                id: msg.id,
-                ts: msg.ts,
-                text: msg.text,
-                from: msg.from,
-                reactions: msg.reactions,
-                media: msg.media,
-                attachments: msg.attachments,
-                links: msg.links,
-                sessionId: sessionId,
-                sessionStart: sessionStart ? true : nil,
-                sessionGapHours: sessionGapHours,
-                event: msg.event,
-                replyTo: msg.replyTo,
-                replyCount: msg.replyCount,
-                edited: msg.edited
-            )
+            updatedMessages[idx].sessionId = sessionId
+            updatedMessages[idx].sessionStart = sessionStart ? true : nil
+            updatedMessages[idx].sessionGapHours = sessionGapHours
         }
 
         sessions.append(GetMessagesResponse.SessionInfo(

@@ -215,29 +215,24 @@ final class ListAttachments {
             typeFilter: typeFilter
         )
 
-        var chatNameCache: [Int64: String] = [:]
+        var chats: [ChatPage.Chat] = []
+        var seen: Set<Int64> = []
+        for row in pageRows where seen.insert(row.chatId).inserted {
+            chats.append(ChatPage.Chat(id: row.chatId, explicitName: row.chatName))
+        }
+        let identities = try await ChatPage.identities(chats, db: db, resolver: resolver)
+        let labels = await SenderLabels.displayNames(
+            me: "Me", unknown: "Unknown", for: pageRows.map(\.message), resolver: resolver
+        )
         var results: [SharedMessageItem] = []
 
         for row in pageRows {
             let attachments = attachmentsByMessage[row.message.id] ?? []
             guard !attachments.isEmpty else { continue }
 
-            let senderName: String
-            if row.message.isFromMe {
-                senderName = "Me"
-            } else if let handle = row.message.senderHandle {
-                senderName = await IdentityDisplayFormatter.displayName(handle: handle, resolver: resolver)
-            } else {
-                senderName = "Unknown"
-            }
-
             let chatReference = ChatReference(
                 id: ChatIdentifier.format(row.chatId),
-                name: try await resolveChatName(
-                    chatId: row.chatId,
-                    explicitName: row.chatName,
-                    cache: &chatNameCache
-                )
+                name: identities[row.chatId]?.displayName ?? DisplayNameGenerator.fromNames([])
             )
 
             let attachmentTypes = attachments.map(\.type)
@@ -252,7 +247,7 @@ final class ListAttachments {
                 SharedMessageItem(
                     messageId: MessageIdentifier.format(row.message.id),
                     chat: chatReference,
-                    from: senderName,
+                    from: labels.sender(row.message),
                     messagePreview: messagePreview,
                     sharedSummary: SummaryPreviewFormatter.sharedSummary(for: attachmentTypes),
                     ts: TimeUtils.formatISO(date),
@@ -443,35 +438,4 @@ final class ListAttachments {
         }
         return byMessage
     }
-
-    func resolveChatName(
-        chatId: Int64,
-        explicitName: String?,
-        cache: inout [Int64: String]
-    ) async throws -> String {
-        if let cached = cache[chatId] {
-            return cached
-        }
-
-        let trimmed = explicitName?.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let trimmed, !trimmed.isEmpty {
-            cache[chatId] = trimmed
-            return trimmed
-        }
-
-        let rows = try await ChatSummaryQueries.participants(
-            db: db,
-            chatId: chatId,
-            resolver: resolver
-        )
-        let name = ChatIdentity.from(
-            chatId: chatId,
-            guid: nil,
-            explicitName: explicitName,
-            rows: rows
-        ).displayName
-        cache[chatId] = name
-        return name
-    }
-
 }

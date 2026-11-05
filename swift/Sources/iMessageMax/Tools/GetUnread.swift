@@ -253,44 +253,29 @@ final class GetUnread {
             ? nil
             : try getFilteredHiddenCount(chatId: chatId, sinceApple: sinceApple)
 
-        let uniqueChatIds = Array(Set(rows.map(\.chatId)))
-        let participantsByChat = try await ChatSummaryQueries.participantsByChat(
-            db: database,
-            chatIds: uniqueChatIds,
-            resolver: contactResolver
+        var chats: [ChatPage.Chat] = []
+        var seen: Set<Int64> = []
+        for row in rows where seen.insert(row.chatId).inserted {
+            chats.append(ChatPage.Chat(id: row.chatId, explicitName: row.chatDisplayName))
+        }
+        let identities = try await ChatPage.identities(chats, db: database, resolver: contactResolver)
+        let renderer = MessageRenderer(
+            annotations: .none,
+            labels: await SenderLabels.displayNames(
+                me: "Me", unknown: "Unknown", for: rows.map(\.message), resolver: contactResolver
+            )
         )
 
-        var unreadMessages: [UnreadMessageItem] = []
-
-        for row in rows {
-            let msgChatId = row.chatId
-            let senderHandle = row.message.senderHandle
-
-            let identity = ChatIdentity.from(
-                chatId: msgChatId,
-                guid: nil,
-                explicitName: row.chatDisplayName,
-                rows: participantsByChat[msgChatId] ?? []
-            )
-
-            let msgDate = AppleTime.toDate(row.message.date)
-
-            let senderName: String
-            if let handle = senderHandle {
-                senderName = await IdentityDisplayFormatter.displayName(handle: handle, resolver: contactResolver)
-            } else {
-                senderName = "Unknown"
-            }
-
-            unreadMessages.append(
-                UnreadMessageItem(
-                    id: MessageIdentifier.format(row.message.id),
-                    chat: ChatReference(id: identity.mcpId, name: identity.displayName),
-                    from: senderName,
-                    text: row.message.text,
-                    ago: TimeUtils.formatCompactRelative(msgDate),
-                    ts: TimeUtils.formatISO(msgDate)
-                )
+        let unreadMessages = rows.map { row in
+            let message = renderer.render(row.message)
+            let name = identities[row.chatId]?.displayName ?? DisplayNameGenerator.fromNames([])
+            return UnreadMessageItem(
+                id: message.id,
+                chat: ChatReference(id: ChatIdentifier.format(row.chatId), name: name),
+                from: message.from,
+                text: message.text,
+                ago: message.ago,
+                ts: message.ts
             )
         }
 

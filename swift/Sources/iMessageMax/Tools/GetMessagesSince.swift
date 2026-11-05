@@ -10,7 +10,7 @@ struct GetMessagesSinceResponse: Encodable {
         let text: String?
         let ts: String
         let reactions: [String]?
-        let attachments: [GetMessagesResponse.AttachmentSummary]?
+        let attachments: [MessageAttachmentSummary]?
         let links: [String]?
         let replyTo: String?
         let replyCount: Int?
@@ -189,94 +189,42 @@ actor GetMessagesSinceTool {
             db: db
         )
 
-        let chatIds = Array(Set(kept.compactMap(\.chatId)))
-        let participantsByChat = try await ChatSummaryQueries.participantsByChat(
-            db: db, chatIds: chatIds, resolver: resolver
+        var chats: [ChatPage.Chat] = []
+        var seen: Set<Int64> = []
+        for row in kept where seen.insert(row.chatId ?? 0).inserted {
+            chats.append(ChatPage.Chat(id: row.chatId ?? 0, explicitName: row.chatDisplayName))
+        }
+        let identities = try await ChatPage.identities(chats, db: db, resolver: resolver)
+
+        let renderer = MessageRenderer(
+            annotations: annotations,
+            labels: await SenderLabels.displayNames(
+                me: "me", unknown: "unknown", for: messages, annotations: annotations, resolver: resolver
+            ),
+            eventNames: await MessageRenderer.eventNames(for: messages, resolver: resolver)
         )
 
-        var otherHandleNames: [String: String] = [:]
-        for handle in Set(messages.compactMap(\.otherHandle)) {
-            otherHandleNames[handle] = await IdentityDisplayFormatter.displayName(
-                handle: handle, resolver: resolver
-            )
-        }
-
-        var items: [GetMessagesSinceResponse.Item] = []
-        for scanned in kept {
-            let row = scanned.message
+        let items = kept.map { scanned in
             let chatId = scanned.chatId ?? 0
-            let identity = ChatIdentity.from(
-                chatId: chatId,
-                guid: nil,
-                explicitName: scanned.chatDisplayName,
-                rows: participantsByChat[chatId] ?? []
+            let message = renderer.render(scanned.message)
+            return GetMessagesSinceResponse.Item(
+                id: message.id,
+                rowid: Int(message.rowid),
+                chat: ChatReference(
+                    id: ChatIdentifier.format(chatId),
+                    name: identities[chatId]?.displayName ?? DisplayNameGenerator.fromNames([])
+                ),
+                from: message.from,
+                text: message.text,
+                ts: message.ts ?? "",
+                reactions: message.reactions,
+                attachments: message.attachments,
+                links: message.links,
+                replyTo: message.replyTo,
+                replyCount: message.replyCount,
+                edited: message.edited,
+                event: message.event
             )
-
-            let from: String
-            if row.isFromMe {
-                from = "me"
-            } else if let handle = row.senderHandle {
-                from = await IdentityDisplayFormatter.displayName(handle: handle, resolver: resolver)
-            } else {
-                from = "unknown"
-            }
-
-            var reactions: [String]?
-            if let rowReactions = annotations.reactions[row.guid] {
-                var reactorNames: [String: String] = [:]
-                for reaction in rowReactions {
-                    guard let handle = reaction.fromHandle, reactorNames[handle] == nil else { continue }
-                    reactorNames[handle] = await IdentityDisplayFormatter.displayName(
-                        handle: handle, resolver: resolver
-                    )
-                }
-                reactions = MessageRenderer.reactions(rowReactions) { handle in
-                    guard let handle else { return "me" }
-                    return reactorNames[handle] ?? handle
-                }
-            }
-
-            var attachments: [GetMessagesResponse.AttachmentSummary]?
-            if let rowAttachments = annotations.attachments[row.id] {
-                attachments = rowAttachments.map {
-                    GetMessagesResponse.AttachmentSummary(
-                        id: AttachmentIdentifier.format($0.id),
-                        type: AttachmentType.from(mimeType: $0.mimeType, uti: $0.uti).rawValue,
-                        filename: $0.filename?.components(separatedBy: "/").last,
-                        size: $0.totalBytes
-                    )
-                }
-                if attachments?.isEmpty == true { attachments = nil }
-            }
-
-            var links: [String]?
-            if let text = row.text {
-                let extracted = MessageRenderer.links(in: text)
-                if !extracted.isEmpty { links = extracted }
-            }
-
-            let ts = row.date.flatMap { AppleTime.toDate($0) }.flatMap { TimeUtils.formatISO($0) } ?? ""
-
-            items.append(GetMessagesSinceResponse.Item(
-                id: MessageIdentifier.format(row.id),
-                rowid: Int(row.id),
-                chat: ChatReference(id: identity.mcpId, name: identity.displayName),
-                from: from,
-                text: row.text,
-                ts: ts,
-                reactions: reactions,
-                attachments: attachments,
-                links: links,
-                replyTo: annotations.replyTo(row),
-                replyCount: annotations.replyCount(row),
-                edited: row.isEdited ? true : nil,
-                event: GroupEvent.classify(
-                    itemType: row.itemType,
-                    groupActionType: row.groupActionType,
-                    groupTitle: row.groupTitle,
-                    otherHandleName: row.otherHandle.flatMap { otherHandleNames[$0] }
-                )
-            ))
         }
 
         return GetMessagesSinceResponse(

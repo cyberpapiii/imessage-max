@@ -22,8 +22,8 @@ struct SearchResult: Codable {
     let excerpt: String
     let ago: String?
     let ts: String?
-    var contextBefore: [SearchContextMessage]?
-    var contextAfter: [SearchContextMessage]?
+    var contextBefore: [ContextMessage]?
+    var contextAfter: [ContextMessage]?
     let reactions: [String]?
     let replyTo: String?
     let replyCount: Int?
@@ -34,25 +34,6 @@ struct SearchResult: Codable {
         case contextBefore = "context_before"
         case contextAfter = "context_after"
         case reactions
-        case replyTo = "reply_to"
-        case replyCount = "reply_count"
-        case edited
-    }
-}
-
-/// Context message for search results
-struct SearchContextMessage: Codable {
-    let id: String
-    let from: String
-    let text: String?
-    let ts: String?
-    let reactions: [String]?
-    let replyTo: String?
-    let replyCount: Int?
-    let edited: Bool?
-
-    enum CodingKeys: String, CodingKey {
-        case id, from, text, ts, reactions
         case replyTo = "reply_to"
         case replyCount = "reply_count"
         case edited

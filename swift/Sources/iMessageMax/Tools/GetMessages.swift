@@ -15,7 +15,7 @@ private let maxLinks = 10
 // MARK: - Response Types
 
 struct GetMessagesResponse: Encodable {
-    let chat: ChatInfo
+    let chat: ChatReference
     let people: [String: String]
     let messages: [MessageInfo]
     let sessions: [SessionInfo]
@@ -26,11 +26,6 @@ struct GetMessagesResponse: Encodable {
     let mediaIncluded: Int?
     let suggestions: [String]?
 
-    struct ChatInfo: Encodable {
-        let id: String
-        let name: String
-    }
-
     struct MessageInfo: Encodable {
         let id: String
         let ts: String?
@@ -38,15 +33,30 @@ struct GetMessagesResponse: Encodable {
         let from: String
         let reactions: [String]?
         let media: [MediaInfo]?
-        let attachments: [AttachmentSummary]?
+        let attachments: [MessageAttachmentSummary]?
         let links: [String]?
-        let sessionId: String?
-        let sessionStart: Bool?
-        let sessionGapHours: Double?
+        var sessionId: String?
+        var sessionStart: Bool?
+        var sessionGapHours: Double?
         let event: GroupEvent?
         let replyTo: String?
         let replyCount: Int?
         let edited: Bool?
+
+        init(_ message: RenderedMessage, media: [MediaInfo]?, attachments: [MessageAttachmentSummary]?) {
+            id = message.id
+            ts = message.ts
+            text = message.text
+            from = message.from
+            reactions = message.reactions
+            self.media = media
+            self.attachments = attachments
+            links = message.links
+            event = message.event
+            replyTo = message.replyTo
+            replyCount = message.replyCount
+            edited = message.edited
+        }
 
         private enum CodingKeys: String, CodingKey {
             case id, ts, text, from, reactions, media, attachments, links
@@ -78,13 +88,6 @@ struct GetMessagesResponse: Encodable {
             case sizeBytes = "size_bytes"
             case sizeHuman = "size_human"
         }
-    }
-
-    struct AttachmentSummary: Encodable {
-        let id: String
-        let type: String
-        let filename: String?
-        let size: Int?
     }
 
     struct SessionInfo: Encodable {
@@ -278,128 +281,62 @@ actor GetMessagesTool {
             db: db
         )
         let processor = ImageProcessor()
-
-        let uniqueOtherHandles = Set(messageRows.compactMap(\.otherHandle))
-        var otherHandleNames: [String: String] = [:]
-        for handle in uniqueOtherHandles {
-            otherHandleNames[handle] = await IdentityDisplayFormatter.displayName(
-                handle: handle, resolver: resolver
-            )
-        }
+        let renderer = MessageRenderer(
+            annotations: annotations,
+            labels: SenderLabels(
+                me: "me",
+                noHandle: "unknown",
+                names: handleToKey,
+                missingSender: .handle,
+                missingReactor: .label("unknown")
+            ),
+            eventNames: await MessageRenderer.eventNames(for: messageRows, resolver: resolver),
+            linkCap: maxLinks
+        )
 
         var messages: [GetMessagesResponse.MessageInfo] = []
         var mediaCountsByMessageId: [String: (total: Int, included: Int)] = [:]
         var mediaIncludedGlobal = 0
 
         for row in messageRows {
-            let fromKey: String
-            if row.isFromMe {
-                fromKey = "me"
-            } else if let handle = row.senderHandle {
-                fromKey = handleToKey[handle] ?? handle
-            } else {
-                fromKey = "unknown"
-            }
-
-            var reactions: [String]? = nil
-            if let rowReactions = annotations.reactions[row.guid] {
-                reactions = MessageRenderer.reactions(
-                    rowReactions,
-                    reactorName: { handle in
-                        if let handle {
-                            return handleToKey[handle] ?? "unknown"
-                        }
-                        return "me"
-                    }
-                )
-            }
-
-            var media: [GetMessagesResponse.MediaInfo]? = nil
-            var attachments: [GetMessagesResponse.AttachmentSummary]? = nil
-            let messageId = MessageIdentifier.format(row.id)
+            let rendered = renderer.render(row)
+            var media: [GetMessagesResponse.MediaInfo] = []
+            var attachments: [MessageAttachmentSummary] = []
             var messageMediaTotal = 0
-            var messageMediaIncluded = 0
 
-            if let rowAttachments = annotations.attachments[row.id] {
-                for att in rowAttachments {
-                    let attachmentType = AttachmentType.from(
-                        mimeType: att.mimeType,
-                        uti: att.uti
-                    )
-                    let attachmentId = AttachmentIdentifier.format(att.id)
-
-                    if attachmentType == .image,
-                       let path = att.filename {
-                        // chat.db paths are data, not trusted input. Contain them to allowed roots.
-                        // Out-of-root paths degrade to the AttachmentSummary fallthrough below.
-                        if let validatedPath = AttachmentPathPolicy.validatedPath(path, allowedRoots: allowedRoots) {
-                            if let metadata = processor.getMetadata(at: validatedPath) {
-                                messageMediaTotal += 1
-                                if mediaIncludedGlobal < maxMedia {
-                                    if media == nil { media = [] }
-                                    media?.append(GetMessagesResponse.MediaInfo(
-                                        type: "image",
-                                        id: attachmentId,
-                                        filename: metadata.filename,
-                                        sizeBytes: metadata.sizeBytes,
-                                        sizeHuman: FormatUtils.fileSize(metadata.sizeBytes),
-                                        dimensions: .init(width: metadata.width, height: metadata.height)
-                                    ))
-                                    messageMediaIncluded += 1
-                                    mediaIncludedGlobal += 1
-                                    continue
-                                }
-                                // Past response-wide cap: keep id-bearing summary
-                                // so get_attachment still works.
-                            }
-                        }
+            for att in annotations.attachments[row.id] ?? [] {
+                // chat.db paths are data, not trusted input: only paths inside
+                // the allowed roots are opened. Anything else, and images past
+                // the response-wide cap, stay id-bearing summaries so
+                // get_attachment still works.
+                if AttachmentType.from(mimeType: att.mimeType, uti: att.uti) == .image,
+                   let path = att.filename,
+                   let validatedPath = AttachmentPathPolicy.validatedPath(path, allowedRoots: allowedRoots),
+                   let metadata = processor.getMetadata(at: validatedPath) {
+                    messageMediaTotal += 1
+                    if mediaIncludedGlobal < maxMedia {
+                        media.append(GetMessagesResponse.MediaInfo(
+                            type: "image",
+                            id: AttachmentIdentifier.format(att.id),
+                            filename: metadata.filename,
+                            sizeBytes: metadata.sizeBytes,
+                            sizeHuman: FormatUtils.fileSize(metadata.sizeBytes),
+                            dimensions: .init(width: metadata.width, height: metadata.height)
+                        ))
+                        mediaIncludedGlobal += 1
+                        continue
                     }
-
-                    if attachments == nil { attachments = [] }
-                    attachments?.append(GetMessagesResponse.AttachmentSummary(
-                        id: attachmentId,
-                        type: attachmentType.rawValue,
-                        filename: att.filename?.components(separatedBy: "/").last,
-                        size: att.totalBytes
-                    ))
                 }
+                attachments.append(MessageAttachmentSummary(att))
             }
             if messageMediaTotal > 0 {
-                mediaCountsByMessageId[messageId] = (
-                    total: messageMediaTotal,
-                    included: messageMediaIncluded
-                )
-            }
-
-            var links: [String]? = nil
-            if let text = row.text {
-                let extractedLinks = MessageRenderer.links(in: text)
-                if !extractedLinks.isEmpty {
-                    links = Array(extractedLinks.prefix(maxLinks))
-                }
+                mediaCountsByMessageId[rendered.id] = (total: messageMediaTotal, included: media.count)
             }
 
             messages.append(GetMessagesResponse.MessageInfo(
-                id: messageId,
-                ts: row.date.flatMap { AppleTime.toDate($0) }.flatMap { TimeUtils.formatISO($0) },
-                text: row.text,
-                from: fromKey,
-                reactions: reactions,
-                media: media,
-                attachments: attachments,
-                links: links,
-                sessionId: nil,
-                sessionStart: nil,
-                sessionGapHours: nil,
-                event: GroupEvent.classify(
-                    itemType: row.itemType,
-                    groupActionType: row.groupActionType,
-                    groupTitle: row.groupTitle,
-                    otherHandleName: row.otherHandle.flatMap { otherHandleNames[$0] }
-                ),
-                replyTo: annotations.replyTo(row),
-                replyCount: annotations.replyCount(row),
-                edited: row.isEdited ? true : nil
+                rendered,
+                media: media.isEmpty ? nil : media,
+                attachments: attachments.isEmpty ? nil : attachments
             ))
         }
 
@@ -434,7 +371,7 @@ actor GetMessagesTool {
         let nextCursor = Self.nextCursor(from: messageRows, limit: limit)
 
         return GetMessagesResponse(
-            chat: .init(id: identity.mcpId, name: identity.displayName),
+            chat: ChatReference(id: identity.mcpId, name: identity.displayName),
             people: people,
             messages: finalMessages,
             sessions: finalSessions,
