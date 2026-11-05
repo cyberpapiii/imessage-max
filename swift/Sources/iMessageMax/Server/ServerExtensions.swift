@@ -1,4 +1,3 @@
-// Sources/iMessageMax/Server/ServerExtensions.swift
 import Foundation
 import MCP
 import Synchronization

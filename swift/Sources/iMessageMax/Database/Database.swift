@@ -1,4 +1,3 @@
-// Sources/iMessageMax/Database/Database.swift
 import Foundation
 import SQLite3
 import Synchronization

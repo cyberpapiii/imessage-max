@@ -1,4 +1,3 @@
-// Sources/iMessageMax/Utilities/TimeUtils.swift
 import Foundation
 
 enum TimeUtils {

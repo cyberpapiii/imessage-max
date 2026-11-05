@@ -1,4 +1,3 @@
-// Sources/iMessageMax/Database/Errors.swift
 import Foundation
 
 enum DatabaseError: LocalizedError {

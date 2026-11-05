@@ -1,4 +1,3 @@
-// Sources/iMessageMax/Enrichment/ImageProcessor.swift
 import Foundation
 import CoreImage
 import CoreGraphics

@@ -1,4 +1,3 @@
-// Sources/iMessageMax/Contacts/ContactResolver.swift
 import Contacts
 import Foundation
 import IMessageMaxContract

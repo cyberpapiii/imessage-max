@@ -1,4 +1,3 @@
-// Sources/iMessageMax/Database/SchemaCapabilities.swift
 import Foundation
 import SQLite3
 

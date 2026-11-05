@@ -1,4 +1,3 @@
-// Sources/iMessageMax/Database/AppleTime.swift
 import Foundation
 
 /// Lengths the relative-time parser and formatter agree on.

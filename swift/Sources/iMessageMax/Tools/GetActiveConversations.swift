@@ -1,4 +1,3 @@
-// Sources/iMessageMax/Tools/GetActiveConversations.swift
 import Foundation
 import MCP
 

@@ -1,4 +1,3 @@
-// Sources/iMessageMax/Server/ToolCallDispatch.swift
 import Foundation
 import MCP
 

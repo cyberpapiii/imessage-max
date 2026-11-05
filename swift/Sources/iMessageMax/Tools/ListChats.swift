@@ -1,4 +1,3 @@
-// Sources/iMessageMax/Tools/ListChats.swift
 import Foundation
 import MCP
 

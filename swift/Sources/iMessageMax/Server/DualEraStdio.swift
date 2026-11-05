@@ -1,5 +1,3 @@
-// Sources/iMessageMax/Server/DualEraStdio.swift
-//
 // The stdio lane. Reads messages from `base` (stdin/stdout in production),
 // answers modern (MCP 2026-07-28) ones directly, and forwards everything
 // else, unparseable input included, untouched to the SDK Server through

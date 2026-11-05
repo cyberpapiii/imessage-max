@@ -1,4 +1,3 @@
-// Sources/iMessageMax/Utilities/FormatUtils.swift
 import Foundation
 
 enum FormatUtils {

@@ -1,4 +1,3 @@
-// Sources/iMessageMax/Utilities/DisplayNameGenerator.swift
 import Foundation
 
 enum DisplayNameGenerator {

@@ -1,4 +1,3 @@
-// Sources/iMessageMax/Tools/Diagnose.swift
 import Foundation
 import IMessageMaxContract
 import MCP

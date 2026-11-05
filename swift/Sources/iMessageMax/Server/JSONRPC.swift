@@ -1,5 +1,3 @@
-// Sources/iMessageMax/Server/JSONRPC.swift
-//
 // The JSON-RPC layer both transports share: one parse per inbound message,
 // one era rule, one error-code table, one envelope builder, one era log line.
 import Foundation

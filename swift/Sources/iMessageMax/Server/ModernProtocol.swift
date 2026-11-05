@@ -1,5 +1,3 @@
-// Sources/iMessageMax/Server/ModernProtocol.swift
-//
 // Modern-era (MCP 2026-07-28) dispatcher. The pinned swift-sdk speaks the
 // legacy initialize/session protocol only, so the stateless per-request era
 // is implemented here, independent of transport. Era selection is

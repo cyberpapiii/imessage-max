@@ -1,4 +1,3 @@
-// Sources/iMessageMax/Tools/FindChat.swift
 import Foundation
 import MCP
 
