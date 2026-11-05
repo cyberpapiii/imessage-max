@@ -21,6 +21,9 @@ struct GetContextResponse: Codable {
 }
 
 enum GetContext {
+    static let before = IntArgument(name: "before", defaultValue: 5, range: 0...50)
+    static let after = IntArgument(name: "after", defaultValue: 10, range: 0...50)
+
     /// Stands in for a received message's NULL sender handle in `people`.
     private static let noHandle = "unknown"
 
@@ -44,11 +47,11 @@ enum GetContext {
                 ]),
                 "before": .object([
                     "type": "integer",
-                    "description": "Number of messages before the target (default 5, max 50)",
+                    "description": "Number of messages before the target (\(before.defaultAndMax))",
                 ]),
                 "after": .object([
                     "type": "integer",
-                    "description": "Number of messages after the target (default 10, max 50)",
+                    "description": "Number of messages after the target (\(after.defaultAndMax))",
                 ]),
             ]),
             "additionalProperties": false,
@@ -70,8 +73,8 @@ enum GetContext {
             let messageId = arguments?["message_id"]?.stringValue
             let chatId = arguments?["chat_id"]?.stringValue
             let contains = arguments?["contains"]?.stringValue
-            let before = arguments?["before"]?.intValue ?? 5
-            let after = arguments?["after"]?.intValue ?? 10
+            let before = Self.before.read(arguments)
+            let after = Self.after.read(arguments)
 
             let result = try await execute(
                 messageId: messageId,
@@ -96,8 +99,8 @@ enum GetContext {
         database: Database,
         resolver: ContactResolver
     ) async throws -> GetContextResponse {
-        let beforeCount = max(0, min(before, 50))
-        let afterCount = max(0, min(after, 50))
+        let beforeCount = Self.before.clamp(before)
+        let afterCount = Self.after.clamp(after)
 
         if messageId == nil && (chatId == nil || contains == nil) {
             throw ToolFailure("invalid_params", "Either message_id OR (chat_id + contains) is required")

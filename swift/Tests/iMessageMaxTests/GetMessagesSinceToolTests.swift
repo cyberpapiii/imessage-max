@@ -199,9 +199,9 @@ final class GetMessagesSinceToolTests: XCTestCase {
     }
 
     func testLimitIsClamped() {
-        XCTAssertEqual(GetMessagesSinceTool.clampLimit(0), 1)
-        XCTAssertEqual(GetMessagesSinceTool.clampLimit(9999), 500)
-        XCTAssertEqual(GetMessagesSinceTool.clampLimit(nil), 100)
+        XCTAssertEqual(GetMessagesSinceTool.limit.read(["limit": 0]), 1)
+        XCTAssertEqual(GetMessagesSinceTool.limit.read(["limit": 9999]), 500)
+        XCTAssertEqual(GetMessagesSinceTool.limit.read(nil), 100)
     }
 
     func testQueryCountIsBounded() async throws {

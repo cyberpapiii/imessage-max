@@ -64,6 +64,8 @@ struct UnreadChatSummary: Encodable {
 }
 
 final class GetUnread {
+    static let limit = IntArgument(name: "limit", defaultValue: 50, range: 1...100)
+
     private let database: Database
     private let contactResolver: ContactResolver
 
@@ -93,7 +95,7 @@ final class GetUnread {
                 ]),
                 "limit": .object([
                     "type": "integer",
-                    "description": "Max messages (default 50, max 100)",
+                    "description": "Max messages (\(Self.limit.defaultAndMax))",
                 ]),
                 "include_filtered": .object([
                     "type": "boolean",
@@ -119,7 +121,7 @@ final class GetUnread {
             let chatId = arguments?["chat_id"]?.stringValue
             let since = arguments?["since"]?.stringValue ?? "7d"
             let formatStr = arguments?["format"]?.stringValue ?? "summary"
-            let limit = arguments?["limit"]?.intValue ?? 50
+            let limit = Self.limit.read(arguments)
             let includeFiltered = arguments?["include_filtered"]?.boolValue ?? false
 
             let format = UnreadFormat(rawValue: formatStr) ?? .summary
@@ -154,7 +156,7 @@ final class GetUnread {
             self.chatId = chatId
             self.since = since
             self.format = format
-            self.limit = max(1, min(limit, 100))
+            self.limit = GetUnread.limit.clamp(limit)
             self.includeFiltered = includeFiltered
         }
     }

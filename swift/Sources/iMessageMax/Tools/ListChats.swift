@@ -43,6 +43,8 @@ struct ChatInfoDetails: Encodable {
 
 /// Implementation of the list_chats tool
 enum ListChatsTool {
+    static let limit = IntArgument(name: "limit", defaultValue: 20, range: 1...100)
+
     // MARK: - Tool Registration
 
     static func definition(db: Database, resolver: ContactResolver) -> ToolDefinition {
@@ -51,7 +53,7 @@ enum ListChatsTool {
             "properties": .object([
                 "limit": .object([
                     "type": "integer",
-                    "description": "Max chats to return (default 20, max 100)",
+                    "description": "Max chats to return (\(limit.defaultAndMax))",
                 ]),
                 "since": .object([
                     "type": "string",
@@ -99,7 +101,7 @@ enum ListChatsTool {
                 openWorldHint: false
             )
         ) { arguments in
-            let limit = arguments?["limit"]?.intValue ?? 20
+            let limit = Self.limit.read(arguments)
             let since = arguments?["since"]?.stringValue
             let isGroup = arguments?["is_group"]?.boolValue
             let includeFiltered = arguments?["include_filtered"]?.boolValue ?? false
@@ -147,7 +149,7 @@ enum ListChatsTool {
         db: Database,
         resolver: ContactResolver
     ) async throws -> ListChatsResponse {
-        let clampedLimit = max(1, min(limit, 100))
+        let clampedLimit = Self.limit.clamp(limit)
 
         let sortOrder = ListChatsSort(rawValue: sort) ?? .recent
 

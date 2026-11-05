@@ -51,6 +51,10 @@ struct ConversationActivity: Encodable {
 }
 
 enum GetActiveConversations {
+    static let hours = IntArgument(name: "hours", defaultValue: 24, range: 1...168)
+    static let minExchanges = IntArgument(name: "min_exchanges", defaultValue: 2, range: 1...100)
+    static let limit = IntArgument(name: "limit", defaultValue: 10, range: 1...50)
+
     // MARK: - Tool Registration
 
     static func definition(db: Database, resolver: ContactResolver) -> ToolDefinition {
@@ -59,11 +63,11 @@ enum GetActiveConversations {
             "properties": .object([
                 "hours": .object([
                     "type": "integer",
-                    "description": "Time window to consider for recent activity (default 24, max 168 = 1 week)",
+                    "description": "Time window to consider for recent activity (\(hours.defaultAndMax) = 1 week)",
                 ]),
                 "min_exchanges": .object([
                     "type": "integer",
-                    "description": "Minimum back-and-forth exchanges to qualify as active (default 2)",
+                    "description": "Minimum back-and-forth exchanges to qualify as active (default \(minExchanges.defaultValue))",
                 ]),
                 "is_group": .object([
                     "type": "boolean",
@@ -71,7 +75,7 @@ enum GetActiveConversations {
                 ]),
                 "limit": .object([
                     "type": "integer",
-                    "description": "Max recent active conversations to return (default 10, max 50)",
+                    "description": "Max recent active conversations to return (\(limit.defaultAndMax))",
                 ]),
             ]),
             "additionalProperties": false,
@@ -90,10 +94,10 @@ enum GetActiveConversations {
                 openWorldHint: false
             )
         ) { arguments in
-            let hours = arguments?["hours"]?.intValue ?? 24
-            let minExchanges = arguments?["min_exchanges"]?.intValue ?? 2
+            let hours = Self.hours.read(arguments)
+            let minExchanges = Self.minExchanges.read(arguments)
             let isGroup = arguments?["is_group"]?.boolValue
-            let limit = arguments?["limit"]?.intValue ?? 10
+            let limit = Self.limit.read(arguments)
 
             let result = try await execute(
                 hours: hours,
@@ -115,9 +119,9 @@ enum GetActiveConversations {
         database: Database,
         resolver: ContactResolver
     ) async throws -> ActiveConversationsResult {
-        let clampedHours = max(1, min(hours, 168))  // 1 hour to 1 week
-        let clampedMinExchanges = max(1, min(minExchanges, 100))
-        let clampedLimit = max(1, min(limit, 50))
+        let clampedHours = Self.hours.clamp(hours)
+        let clampedMinExchanges = Self.minExchanges.clamp(minExchanges)
+        let clampedLimit = Self.limit.clamp(limit)
 
         let now = Date()
         let windowStart = now.addingTimeInterval(-Double(clampedHours) * Seconds.hour)

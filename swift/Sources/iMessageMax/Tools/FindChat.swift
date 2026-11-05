@@ -4,6 +4,8 @@ import MCP
 
 /// Find chats by participants, name, or recent content.
 enum FindChatTool {
+    static let limit = IntArgument(name: "limit", defaultValue: 5, range: 1...50)
+
     static let name = "find_chat"
     static let description = "Find a specific chat by participants, name, or recent content when you already have a targeted conversation in mind. Use returned chat ids for follow-up tool calls; when explaining results to the user, refer to chats by name, not by id."
 
@@ -35,7 +37,7 @@ enum FindChatTool {
             ]),
             "limit": .object([
                 "type": "integer",
-                "description": "Maximum results to return (default 5)",
+                "description": "Maximum results to return (default \(limit.defaultValue))",
                 "default": .int(5),
             ]),
         ]),
@@ -58,7 +60,7 @@ enum FindChatTool {
             self.containsRecent = arguments?["contains_recent"]?.stringValue
             self.isGroup = arguments?["is_group"]?.boolValue
             self.includeFiltered = arguments?["include_filtered"]?.boolValue ?? false
-            self.limit = max(1, min(arguments?["limit"]?.intValue ?? 5, 50))
+            self.limit = FindChatTool.limit.read(arguments)
         }
     }
 

@@ -3,9 +3,6 @@ import MCP
 
 // MARK: - Constants
 
-private let defaultLimit = 50
-private let maxLimit = 200
-private let defaultUnansweredHours = 24
 private let sessionGapHours = 4
 let sessionGapNanoseconds: Int64 = Int64(sessionGapHours) * 60 * 60 * 1_000_000_000
 private let maxMedia = 10
@@ -130,6 +127,8 @@ struct GetMessagesErrorResponse: Encodable, Sendable {
 // MARK: - Tool Implementation
 
 actor GetMessagesTool {
+    static let limit = IntArgument(name: "limit", defaultValue: 50, range: 1...200)
+
     let db: Database
     let resolver: ContactResolver
     private let allowedRoots: [String]
@@ -169,7 +168,7 @@ actor GetMessagesTool {
                     ),
                     "since": .string(description: "Time bound (ISO, relative like '24h', or 'yesterday')"),
                     "before": .string(description: "Upper time bound"),
-                    "limit": .integer(description: "Maximum messages to return (default 50, max 200)"),
+                    "limit": .integer(description: "Maximum messages to return (\(Self.limit.defaultAndMax))"),
                     "from_person": .string(description: "Filter to messages from specific person (or 'me')"),
                     "contains": .string(description: "Text search within messages"),
                     "has": .string(
@@ -179,7 +178,7 @@ actor GetMessagesTool {
                     "include_reactions": .boolean(description: "Include reaction data (default true)"),
                     "cursor": .string(description: "Pagination cursor for continuing retrieval"),
                     "unanswered": .boolean(description: "Only return my messages that didn't receive a reply"),
-                    "unanswered_hours": .integer(description: "Window in hours to check for replies (default 24)"),
+                    "unanswered_hours": .integer(description: "Window in hours to check for replies (default \(IntArgument.unansweredHours.defaultValue))"),
                     "session": .string(description: "Filter to specific session ID (e.g., 'session_1')")
                 ]
             ),
@@ -210,14 +209,14 @@ actor GetMessagesTool {
         let participants = args["participants"]?.arrayValue?.compactMap { $0.stringValue }
         let since = args["since"]?.stringValue
         let before = args["before"]?.stringValue
-        let limit = max(1, min(args["limit"]?.intValue ?? defaultLimit, maxLimit))
+        let limit = Self.limit.read(args)
         let fromPerson = args["from_person"]?.stringValue
         let contains = args["contains"]?.stringValue
         let has = args["has"]?.stringValue
         let includeReactions = args["include_reactions"]?.boolValue ?? true
         let cursor = args["cursor"]?.stringValue
         let unanswered = args["unanswered"]?.boolValue ?? false
-        let unansweredHours = max(1, min(args["unanswered_hours"]?.intValue ?? defaultUnansweredHours, 24 * 365))
+        let unansweredHours = IntArgument.unansweredHours.read(args)
         let sessionFilter = args["session"]?.stringValue
 
         let hasParticipants: Bool

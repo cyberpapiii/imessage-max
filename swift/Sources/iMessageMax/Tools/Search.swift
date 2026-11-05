@@ -115,6 +115,8 @@ struct SearchGroupedResponse: Codable {
 }
 
 enum SearchTool {
+    static let limit = IntArgument(name: "limit", defaultValue: 20, range: 1...100)
+
     // MARK: - Tool Registration
 
     static func definition(db: Database, resolver: ContactResolver) -> ToolDefinition {
@@ -170,7 +172,7 @@ enum SearchTool {
                 ]),
                 "limit": .object([
                     "type": "integer",
-                    "description": "Max results (default 20, max 100)",
+                    "description": "Max results (\(limit.defaultAndMax))",
                     "default": .int(20)
                 ]),
                 "sort": .object([
@@ -197,7 +199,7 @@ enum SearchTool {
                 ]),
                 "unanswered_hours": .object([
                     "type": "integer",
-                    "description": "Window in hours to check for replies (default 24)",
+                    "description": "Window in hours to check for replies (default \(IntArgument.unansweredHours.defaultValue))",
                     "default": .int(24)
                 ])
             ]),
@@ -247,12 +249,12 @@ enum SearchTool {
             let since = arguments?["since"]?.stringValue
             let before = arguments?["before"]?.stringValue
             let cursor = arguments?["cursor"]?.stringValue
-            let limit = arguments?["limit"]?.intValue ?? 20
+            let limit = Self.limit.read(arguments)
             let sort = arguments?["sort"]?.stringValue ?? "recent_first"
             let format = arguments?["format"]?.stringValue ?? "flat"
             let includeContext = arguments?["include_context"]?.boolValue ?? false
             let unanswered = arguments?["unanswered"]?.boolValue ?? false
-            let unansweredHours = arguments?["unanswered_hours"]?.intValue ?? 24
+            let unansweredHours = IntArgument.unansweredHours.read(arguments)
             let matchAll = arguments?["match_all"]?.boolValue ?? false
             let fuzzy = arguments?["fuzzy"]?.boolValue ?? false
 
@@ -312,8 +314,8 @@ enum SearchTool {
             throw ToolFailure("invalid_query", "Query or at least one filter required")
         }
 
-        let clampedLimit = max(1, min(limit, 100))
-        let clampedUnansweredHours = max(1, min(unansweredHours, 24 * 365))
+        let clampedLimit = Self.limit.clamp(limit)
+        let clampedUnansweredHours = IntArgument.unansweredHours.clamp(unansweredHours)
         let sortOrder = SearchSort(rawValue: sort) ?? .recentFirst
         let responseFormat = SearchFormat(rawValue: format) ?? .flat
 

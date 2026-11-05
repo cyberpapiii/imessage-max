@@ -44,8 +44,7 @@ struct GetMessagesSinceResponse: Encodable {
 
 actor GetMessagesSinceTool {
     static let unresolvedJoinGrace: TimeInterval = 30
-    static let defaultLimit = 100
-    static let maxLimit = 500
+    static let limit = IntArgument(name: "limit", defaultValue: 100, range: 1...500)
 
     private let db: Database
     private let resolver: ContactResolver
@@ -53,10 +52,6 @@ actor GetMessagesSinceTool {
     init(db: Database, resolver: ContactResolver) {
         self.db = db
         self.resolver = resolver
-    }
-
-    static func clampLimit(_ raw: Int?) -> Int {
-        max(1, min(raw ?? defaultLimit, maxLimit))
     }
 
     static func definition(db: Database, resolver: ContactResolver) -> ToolDefinition {
@@ -74,7 +69,7 @@ actor GetMessagesSinceTool {
                 properties: [
                     "since_rowid": .integer(description: "Exclusive ROWID cursor. Omit or pass -1 to return the current cursor only."),
                     "chat_id": .string(description: "Restrict to one chat (chat123 or 123)"),
-                    "limit": .integer(description: "Maximum messages to return (default 100, max 500)"),
+                    "limit": .integer(description: "Maximum messages to return (\(limit.defaultAndMax))"),
                     "include_filtered": .boolean(description: "Include junk / unknown-sender chats (default false)"),
                     "include_reactions": .boolean(description: "Attach reaction strings to returned messages (default true)"),
                 ]
@@ -122,7 +117,7 @@ actor GetMessagesSinceTool {
         }
 
         let sinceRowid = rawSince ?? currentRowid
-        let limit = Self.clampLimit(args["limit"]?.intValue)
+        let limit = Self.limit.read(args)
         let includeFiltered = args["include_filtered"]?.boolValue ?? false
         let includeReactions = args["include_reactions"]?.boolValue ?? true
         let schema = try db.schema()

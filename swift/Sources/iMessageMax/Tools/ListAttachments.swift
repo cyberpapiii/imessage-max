@@ -15,6 +15,8 @@ struct ListAttachmentsResponse: Codable {
 }
 
 final class ListAttachments {
+    static let limit = IntArgument(name: "limit", defaultValue: 50, range: 1...100)
+
     private let db: Database
     private let resolver: ContactResolver
 
@@ -52,7 +54,7 @@ final class ListAttachments {
                 ]),
                 "limit": .object([
                     "type": "integer",
-                    "description": "Max results (default 50, max 100)",
+                    "description": "Max results (\(Self.limit.defaultAndMax))",
                 ]),
                 "sort": .object([
                     "type": "string",
@@ -85,7 +87,7 @@ final class ListAttachments {
             let type = arguments?["type"]?.stringValue
             let since = arguments?["since"]?.stringValue
             let before = arguments?["before"]?.stringValue
-            let limit = arguments?["limit"]?.intValue ?? 50
+            let limit = Self.limit.read(arguments)
             let sort = arguments?["sort"]?.stringValue ?? "recent_first"
             let cursor = arguments?["cursor"]?.stringValue
 
@@ -115,7 +117,7 @@ final class ListAttachments {
         sort: String = "recent_first",
         cursor: String? = nil
     ) async throws -> ListAttachmentsResponse {
-        let effectiveLimit = max(1, min(limit, 100))
+        let effectiveLimit = Self.limit.clamp(limit)
         let effectiveSort = AttachmentSort(rawValue: sort) ?? .recentFirst
 
         let validTypes = Set(["image", "video", "audio", "pdf", "document", "any"])
