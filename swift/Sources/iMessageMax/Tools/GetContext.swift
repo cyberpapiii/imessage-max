@@ -112,12 +112,23 @@ enum GetContext {
 
         // Reject malformed ids before touching chat.db, so a bad id reads as
         // invalid_id even when the database cannot be opened.
+        enum Target {
+            case message(Int64)
+            case text(String, inChat: Int64)
+        }
+        let target: Target
         if let msgIdStr = messageId {
-            if MessageIdentifier.parse(msgIdStr) == nil {
+            guard let numericId = MessageIdentifier.parse(msgIdStr) else {
                 throw ToolFailure("invalid_id", "Invalid message ID format: \(msgIdStr)")
             }
-        } else if let cId = chatId, ChatIdentifier.parseRowId(cId) == nil {
-            throw ToolFailure("invalid_id", "Invalid chat ID format: \(cId)")
+            target = .message(numericId)
+        } else if let cId = chatId, let searchText = contains {
+            guard let numericChatId = ChatIdentifier.parseRowId(cId) else {
+                throw ToolFailure("invalid_id", "Invalid chat ID format: \(cId)")
+            }
+            target = .text(searchText, inChat: numericChatId)
+        } else {
+            throw ToolFailure("invalid_params", "chat_id and contains are required")
         }
 
         let schema = try database.schema()
@@ -130,55 +141,48 @@ enum GetContext {
             """
         let targetResult: MessageInChat
 
-        if let msgIdStr = messageId {
-            guard let numericId = MessageIdentifier.parse(msgIdStr) else {
-                throw ToolFailure("invalid_id", "Invalid message ID format: \(msgIdStr)")
-            }
+        switch target {
+        case .message(let numericId):
             guard let found = try database.query("\(targetQuery)\nWHERE m.ROWID = ?", params: [numericId], map: MessageInChat.init).first else {
                 throw ToolFailure("not_found", ClientErrorMessages.messageNotFound)
             }
             targetResult = found
 
-        } else {
-            guard let cId = chatId, let searchText = contains else {
-                throw ToolFailure("invalid_params", "chat_id and contains are required")
-            }
-
-            guard let numericChatId = ChatIdentifier.parseRowId(cId) else {
-                throw ToolFailure("invalid_id", "Invalid chat ID format: \(cId)")
-            }
-
-            // Page newest-first through the chat. LIKE prefilters rows with
-            // plain text; rows whose text is NULL (attributedBody-only) are
-            // always admitted so the Swift decode can check them. LIKE is
-            // ASCII-case-insensitive; the Swift check below is the one
-            // that decides, so the prefilter can only remove non-matches.
+        case .text(let searchText, let numericChatId):
+            // Page newest-first through the rows that may contain the text;
+            // the decoded-text check below is the one that decides.
             let pageSize = 500
             let scanCap = 5000
-            let pattern = "%\(QueryBuilder.escapeLike(searchText))%"
+            let match = SQLFragments.textMayContain(searchText)
             let searchLower = searchText.lowercased()
             var scanned = 0
-            var offset = 0
+            var resumeAfter: TimelineCursor?
             var foundRow: MessageInChat?
             var exhausted = false
 
             while foundRow == nil && !exhausted && scanned < scanCap {
-                let rows = try database.query(
-                    """
+                var sql = """
                     \(targetQuery)
                     WHERE c.ROWID = ?
                       AND \(SQLFragments.notReaction())
-                      AND (m.text LIKE ? ESCAPE '\\' OR (m.text IS NULL AND m.attributedBody IS NOT NULL))
-                    ORDER BY m.date DESC
-                    LIMIT ? OFFSET ?
-                    """,
-                    params: [numericChatId, pattern, pageSize, offset],
-                    map: MessageInChat.init
-                )
+                      AND \(match.sql)
+                    """
+                var params: [Any] = [numericChatId] + match.bindings
+                if let resumeAfter {
+                    sql += "\n  AND \(resumeAfter.olderThanSQL)"
+                    params += resumeAfter.olderThanParams
+                }
+                sql += "\nORDER BY m.date DESC, m.ROWID DESC\nLIMIT ?"
+                params.append(pageSize)
+
+                let rows = try database.query(sql, params: params, map: MessageInChat.init)
                 scanned += rows.count
-                offset += pageSize
-                exhausted = rows.count < pageSize
                 foundRow = rows.first { $0.message.text?.lowercased().contains(searchLower) ?? false }
+                if let last = rows.last?.message, let date = last.date, rows.count == pageSize {
+                    resumeAfter = TimelineCursor(date: date, messageId: last.id)
+                } else {
+                    exhausted = true
+                }
             }
 
             guard let found = foundRow else {

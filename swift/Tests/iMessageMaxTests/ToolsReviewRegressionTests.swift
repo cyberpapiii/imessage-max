@@ -146,4 +146,45 @@ final class ToolsReviewRegressionTests: XCTestCase {
         )
         XCTAssertEqual(found.ids, ["msg_1"])
     }
+
+    // MARK: - One text-contains rule
+
+    /// `fillerCount` attributedBody-only rows newer than one attributedBody
+    /// row holding "Lisbon", in chat 1; chat 2 has nothing.
+    private func blobFixture(fillerCount: Int) throws -> ToolTestDatabase {
+        let db = try ToolTestDatabase(name: "blob-contains")
+        try db.insertHandle(rowId: 1, handle: "+15550000001")
+        try db.insertChat(rowId: 1, guid: "iMessage;-;+15550000001")
+        try db.joinChatHandle(chatId: 1, handleId: 1)
+        let base = now() - Int64(fillerCount + 10) * minute
+        try db.execute("BEGIN")
+        try db.insertMessage(
+            rowId: 1, guid: "HIT", date: base, isFromMe: false, handleId: 1,
+            attributedBody: typedstreamBlob(payload: Array("off to Lisbon".utf8))
+        )
+        try db.joinChatMessage(chatId: 1, messageId: 1)
+        for i in 2...(fillerCount + 1) {
+            try db.insertMessage(
+                rowId: i, guid: "F\(i)", date: base + Int64(i) * minute, isFromMe: false, handleId: 1,
+                attributedBody: typedstreamBlob(payload: Array("filler \(i)".utf8))
+            )
+            try db.joinChatMessage(chatId: 1, messageId: i)
+        }
+        try db.execute("COMMIT")
+        return db
+    }
+
+    func testGetContextFindsBlobTextBehindMoreThanTheScanCapOfBlobRows() async throws {
+        let db = try blobFixture(fillerCount: 5_200)
+        let context = try await call("get_context", ["chat_id": "chat1", "contains": "lisbon"], db: db)
+        let message = try XCTUnwrap(context["message"] as? [String: Any])
+        XCTAssertEqual(message["id"] as? String, "msg_1")
+    }
+
+    func testFindChatContainsRecentSeesPastTwoHundredBlobRows() async throws {
+        let db = try blobFixture(fillerCount: 300)
+        let found = try await call("find_chat", ["contains_recent": "Lisbon"], db: db)
+        let chats = try decodeJSONArray(found["chats"])
+        XCTAssertEqual(chats.compactMap { $0["id"] as? String }, ["chat1"])
+    }
 }

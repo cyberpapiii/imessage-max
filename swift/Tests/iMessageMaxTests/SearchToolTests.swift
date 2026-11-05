@@ -767,7 +767,8 @@ final class SearchToolTests: XCTestCase {
         let directs = try await ids(false)
         let all = try await ids(nil)
         XCTAssertEqual(groups, Set(["msg_3"]))
-        XCTAssertEqual(directs, Set(["msg_2"]))
+        // A chat with no handles left is a DM, as in every other tool.
+        XCTAssertEqual(directs, Set(["msg_1", "msg_2"]))
         XCTAssertEqual(all, Set(["msg_1", "msg_2", "msg_3"]))
     }
 

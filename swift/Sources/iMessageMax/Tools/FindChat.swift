@@ -184,7 +184,7 @@ enum FindChatTool {
                 content: containsRecent,
                 limit: params.limit,
                 isGroup: params.isGroup,
-                includeFiltered: params.includeFiltered
+                chatPredicate: params.includeFiltered ? "1" : SQLFragments.shownChat()
             )
             results.append(contentsOf: try await buildChatResults(
                 database: database,
@@ -193,12 +193,13 @@ enum FindChatTool {
                 matchType: "content"
             ))
             if !params.includeFiltered {
-                filteredHidden = try countFilteredHiddenByContent(
+                filteredHidden = try findChatsByContent(
                     database: database,
                     content: containsRecent,
                     limit: params.limit,
-                    isGroup: params.isGroup
-                )
+                    isGroup: params.isGroup,
+                    chatPredicate: SQLFragments.hiddenChat()
+                ).count
             }
         }
 
@@ -475,17 +476,17 @@ enum FindChatTool {
         }
     }
 
+    /// Chats whose newest candidate rows contain `content`, newest first.
+    /// The scan covers the most recent rows that may contain the text, and
+    /// the decoded text decides.
     private static func findChatsByContent(
         database: Database,
         content: String,
         limit: Int,
         isGroup: Bool?,
-        includeFiltered: Bool
+        chatPredicate: String
     ) throws -> [ChatRow] {
-        let escaped = QueryBuilder.escapeLike(content)
-        let groupSQL = groupFilterSQL(isGroup: isGroup)
-        let filterSQL = filteredSQL(includeFiltered: includeFiltered)
-        // Over-fetch: attributedBody matches are confirmed in Swift after typedstream extract.
+        let match = SQLFragments.textMayContain(content)
         let fetchLimit = min(max(limit * 10, 50), 200)
         let sql = """
             SELECT c.ROWID as id, c.guid, c.display_name, m.text, m.attributedBody
@@ -493,34 +494,26 @@ enum FindChatTool {
             JOIN chat_message_join cmj ON c.ROWID = cmj.chat_id
             JOIN message m ON cmj.message_id = m.ROWID
             WHERE \(SQLFragments.notReaction())
-              AND (
-                m.text LIKE ? ESCAPE '\\'
-                OR (m.text IS NULL AND m.attributedBody IS NOT NULL)
-              )
-              \(groupSQL)
-              \(filterSQL)
-            ORDER BY m.date DESC
+              AND \(match.sql)
+              \(groupFilterSQL(isGroup: isGroup))
+              AND \(chatPredicate)
+            ORDER BY m.date DESC, m.ROWID DESC
             LIMIT ?
             """
 
-        let rows = try database.query(sql, params: ["%\(escaped)%", fetchLimit]) { row in
+        let rows = try database.query(sql, params: match.bindings + [fetchLimit]) { row in
             (
-                id: row.int(0),
-                guid: row.string(1),
-                displayName: row.string(2),
-                text: row.string(3),
-                attributedBody: row.blob(4)
+                chat: ChatRow(id: row.int(0), guid: row.string(1), displayName: row.string(2)),
+                text: MessageTextExtractor.extract(text: row.string(3), attributedBody: row.blob(4))
             )
         }
 
         let needle = content.lowercased()
         var seen = Set<Int64>()
         var chats: [ChatRow] = []
-        for row in rows {
-            let extracted = MessageTextExtractor.extract(text: row.text, attributedBody: row.attributedBody)
-            guard let extracted, extracted.lowercased().contains(needle) else { continue }
-            if seen.insert(row.id).inserted {
-                chats.append(ChatRow(id: row.id, guid: row.guid, displayName: row.displayName))
+        for row in rows where row.text?.lowercased().contains(needle) == true {
+            if seen.insert(row.chat.id).inserted {
+                chats.append(row.chat)
                 if chats.count >= limit { break }
             }
         }
@@ -577,48 +570,6 @@ enum FindChatTool {
             Int(row.int(0))
         }
         return rows.first ?? 0
-    }
-
-    private static func countFilteredHiddenByContent(
-        database: Database,
-        content: String,
-        limit: Int,
-        isGroup: Bool?
-    ) throws -> Int {
-        let escaped = QueryBuilder.escapeLike(content)
-        let groupSQL = groupFilterSQL(isGroup: isGroup)
-        let fetchLimit = min(max(limit * 10, 50), 200)
-        let sql = """
-            SELECT c.ROWID as id, m.text, m.attributedBody
-            FROM chat c
-            JOIN chat_message_join cmj ON c.ROWID = cmj.chat_id
-            JOIN message m ON cmj.message_id = m.ROWID
-            WHERE \(SQLFragments.notReaction())
-              AND (
-                m.text LIKE ? ESCAPE '\\'
-                OR (m.text IS NULL AND m.attributedBody IS NOT NULL)
-              )
-              \(groupSQL)
-              \(filteredHiddenSQL())
-            ORDER BY m.date DESC
-            LIMIT ?
-            """
-        let rows = try database.query(sql, params: ["%\(escaped)%", fetchLimit]) { row in
-            (
-                id: row.int(0),
-                text: row.string(1),
-                attributedBody: row.blob(2)
-            )
-        }
-        let needle = content.lowercased()
-        var seen = Set<Int64>()
-        for row in rows {
-            let extracted = MessageTextExtractor.extract(text: row.text, attributedBody: row.attributedBody)
-            guard let extracted, extracted.lowercased().contains(needle) else { continue }
-            seen.insert(row.id)
-            if seen.count >= limit { break }
-        }
-        return seen.count
     }
 
     private static func buildChatResults(

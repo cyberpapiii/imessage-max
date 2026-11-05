@@ -252,10 +252,9 @@ final class GetContextToolTests: XCTestCase {
 
     func testContainsMissBeyondCapIsNotFoundInWindow() async throws {
         let fixture = try makeLongChatFixture(messageCount: 5100)
-        // Cap counts post-prefilter candidates. Plain-text misses exhaust in
-        // one page; attributedBody-only rows are always admitted, which is
-        // how a chat actually hits the 5000 cap.
-        try fixture.execute("UPDATE message SET text = NULL, attributedBody = X'01'")
+        // Cap counts post-prefilter candidates: blobs holding the term's
+        // bytes pass the SQL prefilter but decode to no text.
+        try fixture.execute("UPDATE message SET text = NULL, attributedBody = CAST('zzz-never' AS BLOB)")
         let result = await capture { try await GetContext.execute(
             chatId: "chat50",
             contains: "zzz-never",

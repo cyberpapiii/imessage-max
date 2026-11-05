@@ -58,26 +58,16 @@ extension SearchTool {
             if fuzzy || terms.isEmpty {
                 builder.where("(m.text IS NOT NULL OR m.attributedBody IS NOT NULL)")
             } else {
-                // LIKE on text (ASCII case-insensitive) plus instr on the
-                // typedstream blob so attributedBody-only rows do not all
-                // pass and steal the fetchLimit window. instr is
-                // case-sensitive; bind lower / titled / upper UTF-8.
-                // Cap at 8; leftover terms stay in the Swift word filter.
-                let capped = Array(terms.prefix(8))
-                let likeClauses = capped.map { _ in "m.text LIKE ? ESCAPE '\\'" }
-                let blobClauses = capped.map { _ in
-                    "(instr(m.attributedBody, ?) > 0 OR instr(m.attributedBody, ?) > 0 OR instr(m.attributedBody, ?) > 0)"
-                }
+                // Each term's textMayContain, joined as match_all asks, so
+                // attributedBody-only rows without the words never fill the
+                // fetch window. Capped at 8 terms; the Swift word filter
+                // still checks every term.
+                let matches = terms.prefix(8).map { SQLFragments.textMayContain($0) }
                 let joiner = matchAll ? " AND " : " OR "
-                let condition = "((\(likeClauses.joined(separator: joiner))) OR (\(blobClauses.joined(separator: joiner))))"
-                var bindings: [Any] = capped.map { "%\(QueryBuilder.escapeLike($0))%" }
-                for term in capped {
-                    let titled = term.prefix(1).uppercased() + term.dropFirst()
-                    bindings.append(Data(term.utf8))
-                    bindings.append(Data(titled.utf8))
-                    bindings.append(Data(term.uppercased().utf8))
-                }
-                builder.where(condition, params: bindings)
+                builder.where(
+                    "(\(matches.map(\.sql).joined(separator: joiner)))",
+                    params: matches.flatMap(\.bindings)
+                )
             }
         }
 
