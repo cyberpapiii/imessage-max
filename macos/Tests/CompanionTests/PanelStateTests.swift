@@ -1,4 +1,5 @@
 import Foundation
+import IMessageMaxContract
 import MaxBrand
 import MaxCore
 import Testing
@@ -7,7 +8,7 @@ import Testing
 
 private let home = URL(fileURLWithPath: "/tmp/max-home")
 
-private func inspection(loaded: Bool, installed: Bool = true, diagnosis: Diagnosis? = nil) throws
+private func inspection(loaded: Bool, installed: Bool = true, diagnosis: DiagnoseResult? = nil) throws
   -> ServiceInspection
 {
   let plist = try PropertyListSerialization.data(
@@ -21,14 +22,14 @@ private func inspection(loaded: Bool, installed: Bool = true, diagnosis: Diagnos
 }
 
 private func diagnosis(contacts: Bool = true, automation: String = "supported") throws
-  -> Diagnosis
+  -> DiagnoseResult
 {
   try JSONDecoder().decode(
-    Diagnosis.self,
+    DiagnoseResult.self,
     from: Data(
       """
       {"version":"1.8.0","process_id":1,"status":"ok",
-      "database":{"accessible":true,"status":"accessible"},
+      "database":{"path":"~/Library/Messages/chat.db","accessible":true,"status":"accessible"},
       "contacts":{"authorized":\(contacts),"status":"\(contacts ? "authorized" : "denied")"},
       "capabilities":{"perm_automation":{"state":"\(automation)"},"send_text_dm":{"state":"supported"}}}
       """.utf8))

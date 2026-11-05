@@ -1,17 +1,18 @@
 import Foundation
+import IMessageMaxContract
 
 public struct ServiceConfiguration: Sendable {
-  public static let label = "local.imessage-max"
+  public static let label = ServiceDefaults.launchdLabel
   public let binary: URL
   public let endpoint: URL
   public let plist: URL
   public let isInstalled: Bool
 
   public init(data: Data?, home: URL) throws {
-    plist = home.appendingPathComponent("Library/LaunchAgents/\(Self.label).plist")
+    plist = home.appendingPathComponent(ServiceDefaults.launchAgentPath)
     isInstalled = data != nil
-    var host = "127.0.0.1"
-    var port = 8080
+    var host = ServiceDefaults.host
+    var port = ServiceDefaults.port
     if let data {
       guard
         let values = try PropertyListSerialization.propertyList(from: data, format: nil)
@@ -19,21 +20,21 @@ public struct ServiceConfiguration: Sendable {
         values["Label"] as? String == Self.label,
         let args = values["ProgramArguments"] as? [String], let executable = args.first,
         executable.hasPrefix("/"),
-        URL(fileURLWithPath: executable).lastPathComponent == "imessage-max",
-        args.contains("--http"), values["Program"] == nil
+        URL(fileURLWithPath: executable).lastPathComponent == ServiceDefaults.executableName,
+        args.contains(ServerOption.http.flag), values["Program"] == nil
       else { throw CoreError.invalidConfiguration }
       binary = URL(fileURLWithPath: executable)
       var index = 1
-      var seen: Set<String> = []
+      var seen: Set<ServerOption> = []
       while index < args.count {
         let parts = args[index].split(
           separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
-        let option = String(parts[0])
-        guard seen.insert(option).inserted else { throw CoreError.invalidConfiguration }
-        switch option {
-        case "--http", "--allow-external-bind":
+        guard let option = ServerOption(flag: String(parts[0])),
+          seen.insert(option).inserted
+        else { throw CoreError.invalidConfiguration }
+        if !option.takesValue {
           guard parts.count == 1 else { throw CoreError.invalidConfiguration }
-        case "--host", "--port", "--contacts-policy":
+        } else {
           let value: String
           if parts.count == 2 {
             value = String(parts[1])
@@ -42,26 +43,28 @@ public struct ServiceConfiguration: Sendable {
             guard args.indices.contains(index) else { throw CoreError.invalidConfiguration }
             value = args[index]
           }
-          if option == "--host" {
-            host = value
-          } else if option == "--port" {
+          switch option {
+          case .host: host = value
+          case .port:
             guard let parsed = Int(value), (1...65535).contains(parsed) else {
               throw CoreError.invalidConfiguration
             }
             port = parsed
-          } else if !["auto", "request", "skip"].contains(value) {
-            throw CoreError.invalidConfiguration
+          case .contactsPolicy:
+            guard ContactsPolicyOption(rawValue: value) != nil else {
+              throw CoreError.invalidConfiguration
+            }
+          case .http, .allowExternalBind: break
           }
-        default: throw CoreError.invalidConfiguration
         }
         index += 1
       }
-      guard seen.contains("--http") else { throw CoreError.invalidConfiguration }
+      guard seen.contains(.http) else { throw CoreError.invalidConfiguration }
     } else {
       binary = home.appendingPathComponent(
-        "Library/Application Support/iMessage Max/bin/imessage-max")
+        "Library/Application Support/iMessage Max/bin/\(ServiceDefaults.executableName)")
     }
-    guard ["127.0.0.1", "localhost", "::1"].contains(host) else {
+    guard ServiceDefaults.loopbackHosts.contains(host) else {
       throw CoreError.invalidConfiguration
     }
     var url = URLComponents()
