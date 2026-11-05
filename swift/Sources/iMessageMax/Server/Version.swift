@@ -50,12 +50,26 @@ enum LegacyProtocol {
     static let supported = MCP.Version.supported
     static let latest = MCP.Version.latest
 
-    /// Revisions whose HTTP sessions must send `MCP-Protocol-Version` on
-    /// every request after `initialize`.
-    static let requiresHeaderAfterInitialize: Set<String> = [latest, "2025-06-18"]
+    /// The first revision whose HTTP sessions must send
+    /// `MCP-Protocol-Version` on every request after `initialize`.
+    static let headerRequiredSince = "2025-06-18"
+
+    /// The first revision that defines `serverInfo.icons`.
+    static let serverIconsSince = "2025-11-25"
+
+    /// Revisions are dates, so string order is release order, and a revision
+    /// a later SDK adds keeps the rule without an edit here.
+    static func requiresHeaderAfterInitialize(_ version: String) -> Bool {
+        version >= headerRequiredSince
+    }
+
+    static func definesServerIcons(_ version: String) -> Bool {
+        version >= serverIconsSince
+    }
 
     /// The revision the SDK answers an `initialize` with: the requested one
-    /// when supported, otherwise the latest.
+    /// when supported, otherwise the latest. Mirrors the SDK's
+    /// `Version.negotiate(clientRequestedVersion:)`, which is internal there.
     static func negotiate(_ requested: String?) -> String {
         guard let requested, supported.contains(requested) else { return latest }
         return requested

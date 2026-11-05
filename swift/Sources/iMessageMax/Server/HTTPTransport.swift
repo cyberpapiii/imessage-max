@@ -571,7 +571,7 @@ actor HTTPTransport {
         guard !isInitialize,
             let sessionId = request.headers[.mcpSessionId],
             let negotiated = await sessionManager.protocolVersion(for: sessionId),
-            LegacyProtocol.requiresHeaderAfterInitialize.contains(negotiated)
+            LegacyProtocol.requiresHeaderAfterInitialize(negotiated)
         else {
             return nil
         }

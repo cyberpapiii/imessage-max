@@ -47,13 +47,14 @@ enum IconMetadata {
         JSONRPC.jsonValue(encoding: icons) as? [[String: Any]] ?? []
 
     /// Adds `serverInfo.icons` to the SDK's `initialize` result. The pinned
-    /// SDK's Server cannot carry icons, and only the latest legacy revision
-    /// defines the field.
+    /// SDK's Server cannot carry icons, and only revisions from
+    /// `LegacyProtocol.serverIconsSince` on define the field.
     static func injectServerIcons(into data: Data) -> Data {
         guard data.contains(serverInfoMarker),
               var object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               var result = object["result"] as? [String: Any],
-              result["protocolVersion"] as? String == LegacyProtocol.latest,
+              let version = result["protocolVersion"] as? String,
+              LegacyProtocol.definesServerIcons(version),
               var serverInfo = result["serverInfo"] as? [String: Any],
               serverInfo["icons"] == nil else {
             return data
