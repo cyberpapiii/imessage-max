@@ -63,8 +63,6 @@ enum GetChatDetailsTool {
         }
         let includeShared = arguments?["include_shared_summary"]?.boolValue ?? true
 
-        try? await resolver.initialize()
-
         guard let numericChatId = ChatIdentifier.parseRowId(chatId) else {
             throw ToolFailure.chatNotFound(chatId)
         }

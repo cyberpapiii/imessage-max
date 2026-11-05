@@ -363,9 +363,6 @@ actor SendTool {
             return .error(message)
         }
 
-        // Initialize contacts resolver
-        try? await resolver.initialize()
-
         let resolution = await sendResolver.resolve(chatId: chatId, to: to)
         let resolved: SendResolution.ResolvedTarget
         switch resolution {

@@ -60,7 +60,7 @@ final class GetContextToolTests: XCTestCase {
     }
 
     func testMissingArgumentsIsInvalidParams() async throws {
-        let missingBoth = await capture { try await GetContext.execute() }
+        let missingBoth = await capture { try await GetContext.execute(database: Database(), resolver: ContactResolver(seedCache: [:])) }
         try assertFailure(
             missingBoth,
             error: "invalid_params",
@@ -69,7 +69,7 @@ final class GetContextToolTests: XCTestCase {
 
         // First guard fires when contains is set and chat_id is not:
         // chatId == nil makes (chatId == nil || contains == nil) true.
-        let containsOnly = await capture { try await GetContext.execute(contains: "x") }
+        let containsOnly = await capture { try await GetContext.execute(contains: "x", database: Database(), resolver: ContactResolver(seedCache: [:])) }
         try assertFailure(
             containsOnly,
             error: "invalid_params",
@@ -77,7 +77,7 @@ final class GetContextToolTests: XCTestCase {
         )
 
         // Second string is reachable only when message_id is also present.
-        let containsWithMessageId = await capture { try await GetContext.execute(messageId: "msg_1", contains: "x") }
+        let containsWithMessageId = await capture { try await GetContext.execute(messageId: "msg_1", contains: "x", database: Database(), resolver: ContactResolver(seedCache: [:])) }
         try assertFailure(
             containsWithMessageId,
             error: "invalid_params",
@@ -86,7 +86,7 @@ final class GetContextToolTests: XCTestCase {
     }
 
     func testInvalidMessageIdIsInvalidId() async throws {
-        let result = await capture { try await GetContext.execute(messageId: "nope") }
+        let result = await capture { try await GetContext.execute(messageId: "nope", database: Database(), resolver: ContactResolver(seedCache: [:])) }
         try assertFailure(result, error: "invalid_id")
     }
 
@@ -105,7 +105,7 @@ final class GetContextToolTests: XCTestCase {
     }
 
     func testInvalidChatIdWithContainsIsInvalidId() async throws {
-        let result = await capture { try await GetContext.execute(chatId: "chat_abc", contains: "x") }
+        let result = await capture { try await GetContext.execute(chatId: "chat_abc", contains: "x", database: Database(), resolver: ContactResolver(seedCache: [:])) }
         try assertFailure(result, error: "invalid_id")
     }
 

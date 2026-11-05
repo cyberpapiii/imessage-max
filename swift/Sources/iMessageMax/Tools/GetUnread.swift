@@ -87,7 +87,7 @@ final class GetUnread {
     private let database: Database
     private let contactResolver: ContactResolver
 
-    init(database: Database = Database(), contactResolver: ContactResolver = ContactResolver()) {
+    init(database: Database, contactResolver: ContactResolver) {
         self.database = database
         self.contactResolver = contactResolver
     }
@@ -180,7 +180,6 @@ final class GetUnread {
     }
 
     func execute(params: Parameters) async throws -> any Encodable {
-        try await contactResolver.initialize()
 
         // "all" means no time filter
         var sinceApple: Int64?

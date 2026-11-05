@@ -330,7 +330,7 @@ enum SearchTool {
         matchAll: Bool = false,
         fuzzy: Bool = false,
         includeFiltered: Bool = false,
-        db: Database = Database(),
+        db: Database,
         resolver: ContactResolver
     ) async throws -> String {
         // Validate inputs
@@ -348,9 +348,6 @@ enum SearchTool {
         let clampedUnansweredHours = max(1, min(unansweredHours, 24 * 365))
         let sortOrder = SearchSort(rawValue: sort) ?? .recentFirst
         let responseFormat = SearchFormat(rawValue: format) ?? .flat
-
-        // Initialize contacts
-        try? await resolver.initialize()
 
         // Build and execute query
         // Over-fetch when Swift still has to apply word/fuzzy/unanswered

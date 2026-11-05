@@ -30,9 +30,9 @@ struct GetAttachment {
     private let resolver: ContactResolver
 
     init(
-        db: Database = Database(),
+        db: Database,
         imageProcessor: ImageProcessor = ImageProcessor(),
-        resolver: ContactResolver = ContactResolver()
+        resolver: ContactResolver
     ) {
         self.db = db
         self.imageProcessor = imageProcessor

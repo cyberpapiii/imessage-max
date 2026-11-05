@@ -8,14 +8,12 @@ import XCTest
 final class DiagnoseToolTests: XCTestCase {
     private static let dbAccessible: DatabaseProbe = { (true, "accessible") }
     private static let dbDenied: DatabaseProbe = { (false, "permission_denied") }
-    private static let contactsAuthorized: ContactsProbe = { (true, "authorized") }
     private static let automationGranted: AutomationProbe = { (true, "authorized") }
 
     private func encodedResponse(dbProbe: DatabaseProbe) async throws -> (DiagnoseResult, String) {
         let result = try await DiagnoseTool.execute(
             resolver: ContactResolver(seedCache: [:]),
             dbProbe: dbProbe,
-            contactsProbe: DiagnoseToolTests.contactsAuthorized,
             automationProbe: DiagnoseToolTests.automationGranted
         )
         return (result, try FormatUtils.encodeJSON(result))
@@ -37,29 +35,6 @@ final class DiagnoseToolTests: XCTestCase {
             )
             XCTAssertTrue(result.database.path.hasSuffix("/Library/Messages/chat.db"))
         }
-    }
-
-    /// CI=true makes ContactResolver.initialize skip contact loading. diagnose
-    /// must say so instead of reporting an authorized, empty, "ready" store.
-    func testCIGuardIsVisibleInDiagnose() async throws {
-        let previous = ProcessInfo.processInfo.environment["CI"]
-        setenv("CI", "true", 1)
-        defer {
-            if let previous { setenv("CI", previous, 1) } else { unsetenv("CI") }
-        }
-
-        let result = try await DiagnoseTool.execute(
-            resolver: ContactResolver(),
-            dbProbe: DiagnoseToolTests.dbAccessible,
-            contactsProbe: DiagnoseToolTests.contactsAuthorized,
-            automationProbe: DiagnoseToolTests.automationGranted
-        )
-
-        XCTAssertEqual(result.contacts.status, "skipped_ci")
-        XCTAssertEqual(result.contacts.loaded, 0)
-        XCTAssertNotNil(result.contacts.fix)
-        XCTAssertEqual(result.status, "needs_setup",
-                       "an empty contact store is not a ready server")
     }
 
     /// diagnose must probe on every call, never on first call only.
@@ -111,7 +86,6 @@ final class DiagnoseToolTests: XCTestCase {
         let result = try await DiagnoseTool.execute(
             resolver: ContactResolver(seedCache: [:]),
             dbProbe: DiagnoseToolTests.dbAccessible,
-            contactsProbe: DiagnoseToolTests.contactsAuthorized,
             automationProbe: DiagnoseToolTests.automationGranted,
             schemaProbe: { SchemaCapabilities(base: .assumed, messageDateEdited: false) }
         )
@@ -125,7 +99,6 @@ final class DiagnoseToolTests: XCTestCase {
         let result = try await DiagnoseTool.execute(
             resolver: ContactResolver(seedCache: [:]),
             dbProbe: DiagnoseToolTests.dbDenied,
-            contactsProbe: DiagnoseToolTests.contactsAuthorized,
             automationProbe: DiagnoseToolTests.automationGranted,
             schemaProbe: {
                 XCTFail("must not probe a denied database")
@@ -155,7 +128,6 @@ final class DiagnoseToolTests: XCTestCase {
         let result = try await DiagnoseTool.execute(
             resolver: resolver,
             dbProbe: DiagnoseToolTests.dbAccessible,
-            contactsProbe: { (false, "not_determined") },
             automationProbe: DiagnoseToolTests.automationGranted,
             usageDescriptionProbe: { true }
         )
@@ -172,9 +144,8 @@ final class DiagnoseToolTests: XCTestCase {
     /// keeps today's wording and the `unverified` capability state.
     func testNotDeterminedWithoutSkipIsUnchanged() async throws {
         let result = try await DiagnoseTool.execute(
-            resolver: ContactResolver(seedCache: [:]),
+            resolver: ContactResolver(seedCache: [:], authorization: (false, "not_determined")),
             dbProbe: DiagnoseToolTests.dbAccessible,
-            contactsProbe: { (false, "not_determined") },
             automationProbe: DiagnoseToolTests.automationGranted,
             usageDescriptionProbe: { true }
         )
@@ -201,7 +172,6 @@ final class DiagnoseToolTests: XCTestCase {
         let result = try await DiagnoseTool.execute(
             resolver: resolver,
             dbProbe: DiagnoseToolTests.dbAccessible,
-            contactsProbe: { (false, "not_determined") },
             automationProbe: DiagnoseToolTests.automationGranted,
             usageDescriptionProbe: { false }
         )

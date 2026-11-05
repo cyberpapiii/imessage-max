@@ -206,18 +206,12 @@ enum ListChatsTool {
         sort: String = "recent",
         cursor: String? = nil,
         includeFiltered: Bool = false,
-        db: Database = Database(),
+        db: Database,
         resolver: ContactResolver
     ) async throws -> ListChatsResponse {
         let clampedLimit = max(1, min(limit, 100))
 
         let sortOrder = ListChatsSort(rawValue: sort) ?? .recent
-
-        do {
-            try await resolver.initialize()
-        } catch {
-            // Continue without contacts - not a fatal error
-        }
 
         let sinceApple = since.flatMap(AppleTime.parse)
 

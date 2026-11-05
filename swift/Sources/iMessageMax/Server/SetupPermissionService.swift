@@ -35,13 +35,12 @@ actor SetupPermissionService {
     init(resolver: ContactResolver) {
         contactsRequest = {
             await resolver.requestAccessIfAllowed(policy: .requestIfNeeded)
-            let permission = ContactResolver.authorizationStatus()
-            if permission.authorized {
-                await resolver.invalidate()
-                do { try await resolver.initialize() }
-                catch { return (permission.authorized, "authorized_load_failed") }
+            await resolver.invalidate()
+            let contacts = await resolver.status()
+            if contacts.authorized, contacts.loadFailed {
+                return (true, "\(contacts.authorization)_load_failed")
             }
-            return (permission.authorized, permission.status)
+            return (contacts.authorized, contacts.authorization)
         }
         automationRequest = { await AutomationPermission.requestAccess() }
     }

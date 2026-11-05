@@ -29,13 +29,11 @@ actor ContactResolver {
     private var cache: [String: String] = [:]
     private var isInitialized = false
     private var loadedAt: TimeInterval = -.infinity
+    private var checkedAt: TimeInterval = -.infinity
     private var invalidated = false
     private var lastAuthorized = false
     private var hasLastGoodCache = false
-    /// True when `initialize` returned early because `CI=true` was set.
-    /// Surfaced by diagnose so an operator with CI exported in their shell
-    /// can see why no names resolve.
-    private var skippedForCI = false
+    private var lastLoadFailed = false
     /// True when authorization was notDetermined and the policy said not to
     /// prompt. Surfaced by diagnose as `not_requested_headless`.
     private var accessRequestSkippedHeadless = false
@@ -50,35 +48,15 @@ actor ContactResolver {
         )
     }
 
-    init(seedCache: [String: String]) {
-        self.init(
-            source: Source(
-                authorization: { (true, "authorized") },
-                load: { seedCache },
-                requestAccess: { true }
-            ),
-            refreshInterval: .infinity,
-            now: { 0 },
-            seedCache: seedCache
-        )
-    }
-
     init(
         source: Source,
         refreshInterval: TimeInterval,
         now: @escaping () -> TimeInterval,
-        seedCache: [String: String]? = nil,
         observeChanges: Bool = false
     ) {
         self.source = source
         self.refreshInterval = refreshInterval
         self.now = now
-        if let seedCache {
-            self.cache = seedCache
-            self.isInitialized = true
-            self.lastAuthorized = true
-            self.hasLastGoodCache = true
-        }
         if observeChanges {
             changeObserver = NotificationCenter.default.addObserver(
                 forName: .CNContactStoreDidChange, object: nil, queue: nil
@@ -94,7 +72,7 @@ actor ContactResolver {
 
     // MARK: - Authorization
 
-    static func authorizationStatus() -> (authorized: Bool, status: String) {
+    private static func authorizationStatus() -> (authorized: Bool, status: String) {
         let status = CNContactStore.authorizationStatus(for: .contacts)
         switch status {
         case .authorized: return (true, "authorized")
@@ -111,6 +89,10 @@ actor ContactResolver {
     /// links without the embedded Info.plist; `make build` adds it.
     static var usageDescriptionEmbedded: Bool {
         Bundle.main.object(forInfoDictionaryKey: "NSContactsUsageDescription") != nil
+    }
+
+    func authorization() -> (authorized: Bool, status: String) {
+        source.authorization()
     }
 
     func requestAccessIfAllowed(policy: ContactsAccessPolicy) async {
@@ -130,20 +112,13 @@ actor ContactResolver {
         invalidated = true
     }
 
-    // MARK: - Initialization
+    // MARK: - Loading
 
-    func initialize() throws {
-        // GitHub-hosted macos runners report Contacts as authorized, then
-        // `enumerateContacts` talks to AddressBook over XPC. The daemon is
-        // not running, so Core Data retries for minutes per call and
-        // `swift test` never finishes (serial run 33573931260: one
-        // list_attachments test took 298s, then the next never returned).
-        if ProcessInfo.processInfo.environment["CI"] == "true" {
-            skippedForCI = true
-            isInitialized = true
-            return
-        }
-
+    /// Reloads names when the cache expired, Contacts changed, or
+    /// authorization changed. Throws only when names have never loaded, so a
+    /// transient AddressBook failure does not blank names that were good.
+    func refresh() throws {
+        checkedAt = now()
         let (authorized, _) = source.authorization()
         let expired = now() - loadedAt >= refreshInterval
         let authorizationChanged = authorized != lastAuthorized
@@ -153,6 +128,7 @@ actor ContactResolver {
         loadedAt = now()
         lastAuthorized = authorized
         isInitialized = true
+        lastLoadFailed = false
 
         guard authorized else {
             // Revoked or never granted: never serve names we are no longer allowed to have.
@@ -164,12 +140,19 @@ actor ContactResolver {
             cache = try source.load()
             hasLastGoodCache = true
         } catch {
-            // Keep the last good cache; a transient AddressBook failure must
-            // not fail five tools every 30 s. First-ever failure still throws
-            // so diagnose can report `<status>_load_failed`.
-            Log.warning("Contacts: refresh failed, keeping \(cache.count) cached names")
-            if !hasLastGoodCache { throw error }
+            Log.warning("Contacts: refresh failed, keeping \(cache.count) cached names: \(error.localizedDescription)")
+            if !hasLastGoodCache {
+                lastLoadFailed = true
+                throw error
+            }
         }
+    }
+
+    /// Lookups refresh at most once a second, so a page that resolves many
+    /// handles asks macOS for the authorization status once.
+    private func refreshIfStale() {
+        guard invalidated || now() - checkedAt >= 1 else { return }
+        try? refresh()
     }
 
     private static func loadNames(from store: CNContactStore) throws -> [String: String] {
@@ -209,6 +192,7 @@ actor ContactResolver {
     // MARK: - Resolution
 
     func resolve(_ handle: String) -> String? {
+        refreshIfStale()
         if let name = cache[handle] { return name }
         if let normalized = PhoneUtils.normalizeToE164(handle),
            let name = cache[normalized]
@@ -224,6 +208,7 @@ actor ContactResolver {
     func searchByName(_ query: String) -> [(handle: String, name: String)] {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard q.count >= 2 else { return [] }
+        refreshIfStale()
         let queryWords = q.split(separator: " ").map(String.init)
         return cache.compactMap { handle, name in
             let nameWords = name.lowercased().split(whereSeparator: { $0 == " " || $0 == "-" }).map(String.init)
@@ -232,7 +217,23 @@ actor ContactResolver {
         }
     }
 
-    func getStats() -> (initialized: Bool, handleCount: Int, skippedForCI: Bool, accessRequestSkippedHeadless: Bool) {
-        (isInitialized, cache.count, skippedForCI, accessRequestSkippedHeadless)
+    struct Status: Sendable {
+        let authorized: Bool
+        let authorization: String
+        let handleCount: Int
+        let loadFailed: Bool
+        let accessRequestSkippedHeadless: Bool
+    }
+
+    func status() -> Status {
+        try? refresh()
+        let (authorized, authorization) = source.authorization()
+        return Status(
+            authorized: authorized,
+            authorization: authorization,
+            handleCount: cache.count,
+            loadFailed: lastLoadFailed,
+            accessRequestSkippedHeadless: accessRequestSkippedHeadless
+        )
     }
 }

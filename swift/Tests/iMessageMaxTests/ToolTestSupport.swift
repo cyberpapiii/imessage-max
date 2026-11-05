@@ -314,3 +314,21 @@ func toolFailureBody<T>(
         return try decodeJSONDictionary(from: failure.content)
     }
 }
+
+extension ContactResolver {
+    /// A resolver that never touches CNContactStore.
+    init(
+        seedCache: [String: String],
+        authorization: (authorized: Bool, status: String) = (true, "authorized")
+    ) {
+        self.init(
+            source: Source(
+                authorization: { authorization },
+                load: { seedCache },
+                requestAccess: { authorization.authorized }
+            ),
+            refreshInterval: .infinity,
+            now: { 0 }
+        )
+    }
+}

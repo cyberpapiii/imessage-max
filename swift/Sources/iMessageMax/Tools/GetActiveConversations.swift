@@ -120,7 +120,7 @@ enum GetActiveConversations {
         minExchanges: Int = 2,
         isGroup: Bool? = nil,
         limit: Int = 10,
-        database: Database = Database(),
+        database: Database,
         resolver: ContactResolver
     ) async throws -> ActiveConversationsResult {
         let clampedHours = max(1, min(hours, 168))  // 1 hour to 1 week
@@ -130,8 +130,6 @@ enum GetActiveConversations {
         let now = Date()
         let windowStart = now.addingTimeInterval(-Double(clampedHours) * 3600)
         let windowStartApple = AppleTime.fromDate(windowStart)
-
-        try await resolver.initialize()
 
         let query = QueryBuilder()
             .select(

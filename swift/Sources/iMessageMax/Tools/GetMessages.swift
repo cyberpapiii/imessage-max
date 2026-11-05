@@ -229,8 +229,6 @@ actor GetMessagesTool {
             throw ToolFailure("validation_error", "Either chat_id or participants must be provided")
         }
 
-        try await resolver.initialize()
-
         if chatId == nil, let participants = participants {
             chatId = try await resolveParticipantsToChat(participants: participants)
         }

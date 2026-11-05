@@ -98,7 +98,6 @@ actor GetMessagesSinceTool {
     }
 
     private func executeImpl(args: [String: Value]) async throws -> GetMessagesSinceResponse {
-        try await resolver.initialize()
 
         var chatFilter: Int64?
         if let rawChat = args["chat_id"]?.stringValue {

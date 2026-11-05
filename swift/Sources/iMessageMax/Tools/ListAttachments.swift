@@ -22,7 +22,7 @@ final class ListAttachments {
     private let db: Database
     private let resolver: ContactResolver
 
-    init(db: Database = Database(), resolver: ContactResolver = ContactResolver()) {
+    init(db: Database, resolver: ContactResolver) {
         self.db = db
         self.resolver = resolver
     }
@@ -135,13 +135,6 @@ final class ListAttachments {
         // Validate type filter
         let validTypes = Set(["image", "video", "audio", "pdf", "document", "any"])
         let typeFilter: String? = if let t = type, validTypes.contains(t) { t } else { nil }
-
-        // Initialize contact resolver
-        do {
-            try await resolver.initialize()
-        } catch {
-            // Continue without contact resolution
-        }
 
         let numericChatId: Int64?
         if let chatId {

@@ -179,12 +179,12 @@ actor SendResolver {
 
     private func resolveContactName(_ name: String) async -> SendResolution.Result {
         // Search the resolver first: a seeded/test cache needs no Contacts
-        // access, and on live machines the cache is what initialize()
+        // access, and on live machines the cache is what refresh()
         // populated anyway. Authorization only matters when nothing matched.
         // It distinguishes "you can't search" from "no such contact".
         let matches = await resolver.searchByName(name)
         if matches.isEmpty {
-            let (authorized, _) = ContactResolver.authorizationStatus()
+            let (authorized, _) = await resolver.authorization()
             guard authorized else {
                 return .failure("Cannot search by name without contacts access")
             }

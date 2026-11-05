@@ -67,8 +67,7 @@ struct iMessageMax: AsyncParsableCommand {
             }
             let resolver = ContactResolver()
             await resolver.requestAccessIfAllowed(policy: .requestIfNeeded)
-            let (_, status) = ContactResolver.authorizationStatus()
-            print("Contacts authorization: \(status)")
+            print("Contacts authorization: \(await resolver.authorization().status)")
             return
         }
 
@@ -107,9 +106,8 @@ struct iMessageMax: AsyncParsableCommand {
             Task {
                 let policy = resolvedPolicy
                 await resolver.requestAccessIfAllowed(policy: policy)
-                try? await resolver.initialize()
-                let stats = await resolver.getStats()
-                Log.info("Contacts: initialized=\(stats.initialized) handles=\(stats.handleCount)")
+                let contacts = await resolver.status()
+                Log.info("Contacts: authorization=\(contacts.authorization) handles=\(contacts.handleCount)")
             }
             let watcher = MessageWatcher(databasePath: Database.defaultPath) { rowid in
                 Task { await transport.notifyNewMessages(maxRowid: rowid) }

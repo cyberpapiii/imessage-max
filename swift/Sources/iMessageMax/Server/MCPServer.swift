@@ -57,6 +57,6 @@ actor MCPServerWrapper {
             isTTY: ContactsAccessPolicy.stdinIsTTY
         )
         await resolver.requestAccessIfAllowed(policy: policy)
-        try? await resolver.initialize()
+        try? await resolver.refresh()
     }
 }

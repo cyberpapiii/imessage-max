@@ -139,9 +139,6 @@ enum FindChatTool {
             throw ToolFailure("validation_error", "At least one of participants, name, or contains_recent required")
         }
 
-        // Initialize contacts if available
-        try? await resolver.initialize()
-
         var results: [ChatResult] = []
         var filteredHidden: Int? = params.includeFiltered ? nil : 0
 

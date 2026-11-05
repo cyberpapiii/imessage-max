@@ -115,8 +115,8 @@ enum GetContext {
         contains: String? = nil,
         before: Int = 5,
         after: Int = 10,
-        database: Database = Database(),
-        resolver: ContactResolver = ContactResolver()
+        database: Database,
+        resolver: ContactResolver
     ) async throws -> GetContextResponse {
         let beforeCount = max(0, min(before, 50))
         let afterCount = max(0, min(after, 50))
@@ -138,8 +138,6 @@ enum GetContext {
         } else if let cId = chatId, ChatIdentifier.parseRowId(cId) == nil {
             throw ToolFailure("invalid_id", "Invalid chat ID format: \(cId)")
         }
-
-        try? await resolver.initialize()
 
         let schema = try database.schema()
         let targetResult: (msgId: Int64, text: String?, attributedBody: Data?, date: Int64, isFromMe: Bool, senderHandle: String?, chatId: Int64, chatName: String?, guid: String, threadOriginatorGuid: String?, dateEdited: Int64)

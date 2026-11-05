@@ -22,9 +22,6 @@ struct Capability: Codable, Equatable {
 /// Probe type for database accessibility checks. Injectable so tests stay hermetic.
 typealias DatabaseProbe = @Sendable () -> (ok: Bool, status: String)
 
-/// Probe type for contacts authorization checks. Injectable so tests stay hermetic.
-typealias ContactsProbe = @Sendable () -> (authorized: Bool, status: String)
-
 /// Whether this executable carries NSContactsUsageDescription in an embedded Info.plist.
 typealias UsageDescriptionProbe = @Sendable () -> Bool
 
@@ -154,13 +151,11 @@ enum DiagnoseTool {
             + "'unable to open database file' means the user lacks it everywhere."
     }
 
-    /// All three probes are injectable for testability. CI runners return
-    /// "not_determined" for automation and may lack Full Disk Access, so tests
-    /// MUST inject rather than call the real probes.
+    /// CI runners report "not_determined" for automation and may lack Full
+    /// Disk Access, so tests inject these probes instead of the real ones.
     static func execute(
         resolver: ContactResolver,
         dbProbe: DatabaseProbe = { Database.checkAccess() },
-        contactsProbe: ContactsProbe = { ContactResolver.authorizationStatus() },
         automationProbe: AutomationProbe = { AutomationPermission.checkAutomationPermission() },
         schemaProbe: SchemaProbe = { nil },
         liveInboxProbe: LiveInboxProbe = { LiveInboxState.isRunning },
@@ -182,39 +177,31 @@ enum DiagnoseTool {
             }
         }
 
-        let (contactsAuthorized, authorizationStatus) = contactsProbe()
+        let contacts = await resolver.status()
+        let contactsAuthorized = contacts.authorized
+        let authorizationStatus = contacts.authorization
 
         var contactsStatus = authorizationStatus
         var contactsLoaded: Int? = nil
         var contactsFix: String? = nil
 
         if contactsAuthorized {
-            do {
-                try await resolver.initialize()
-                let stats = await resolver.getStats()
-                contactsLoaded = stats.handleCount
-                if stats.skippedForCI {
-                    contactsStatus = "skipped_ci"
-                    contactsFix = "CI=true is set in this process's environment, so contact "
-                        + "loading was skipped and no names will resolve. Unset CI to load contacts."
-                }
-            } catch {
+            if contacts.loadFailed {
                 contactsStatus = "\(authorizationStatus)_load_failed"
                 // CNContactStore errors routinely embed local paths and the
-                // username; the detail goes to stderr, the client gets a
-                // fixed string.
-                contactsFix = "Contacts permission is granted, but "
-                    + ClientErrorMessages.internalDetail(error, context: "loading contacts")
+                // username; the resolver logged the detail.
+                contactsFix = "Contacts permission is granted, but loading contacts failed. Check the server log for details."
+            } else {
+                contactsLoaded = contacts.handleCount
             }
         } else {
-            let stats = await resolver.getStats()
             if authorizationStatus == "not_determined", !usageDescriptionProbe() {
                 contactsStatus = "missing_usage_description"
                 contactsFix = "This executable was built without its embedded Info.plist, so macOS "
                     + "cannot prompt for or record a Contacts grant for it. Rebuild with `make build` "
                     + "(or `make sign`), not a bare `swift build`, then run "
                     + "`imessage-max --request-contacts-access` once."
-            } else if authorizationStatus == "not_determined", stats.accessRequestSkippedHeadless {
+            } else if authorizationStatus == "not_determined", contacts.accessRequestSkippedHeadless {
                 contactsStatus = "not_requested_headless"
                 contactsFix = "This process has no terminal, so it did not ask for Contacts access. "
                     + "Run `imessage-max --request-contacts-access` once (from a terminal or any "
@@ -229,7 +216,7 @@ enum DiagnoseTool {
 
         let (automationOk, automationStatus) = automationProbe()
 
-        let allGood = dbOk && contactsAuthorized && contactsStatus != "skipped_ci"
+        let allGood = dbOk && contactsAuthorized
         let overallStatus = allGood ? "ready" : "needs_setup"
 
         // MARK: - Capability derivation (design §2.4)
@@ -315,9 +302,7 @@ enum DiagnoseTool {
         let permContactsState: String
         let permContactsFix: String?
         switch contactsStatus {
-        case "authorized", "limited", "skipped_ci":
-            // skipped_ci means permission is granted but the CI guard skipped
-            // loading; that is a contacts.fix concern, not a permission gate.
+        case "authorized", "limited":
             permContactsState = "supported"
             permContactsFix = nil
         case "denied", "restricted", "not_requested_headless", "missing_usage_description":

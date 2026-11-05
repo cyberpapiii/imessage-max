@@ -106,7 +106,7 @@ final class AttachmentPathContainmentTests: XCTestCase {
             uti: "public.jpeg"
         )
 
-        let tool = GetAttachment(db: fixtureDB.database())
+        let tool = GetAttachment(db: fixtureDB.database(), resolver: ContactResolver(seedCache: [:]))
         let body = try await toolFailureBody {
             try await tool.execute(attachmentId: "att99", variant: "vision", allowedRoots: [allowedRoot.path])
         }
