@@ -34,4 +34,4 @@ Shared domain vocabulary for this project: entities, named processes, and status
 
 ## Diagnostics
 
-- **Capability contract**: The fixed set of state-based capability keys the diagnose tool reports, each describing what the install can actually do right now (supported, permission-gated, degraded, unverified, unsupported, unavailable) rather than a binary healthy/unhealthy verdict. When a capability cannot be probed, for example when the target application is not running, it reports "unverified" instead of guessing.
+- **Capability contract**: The fixed set of state-based capability keys the diagnose tool reports, each describing what the install can actually do right now (supported, permission-gated, degraded, unverified, unsupported, unavailable) rather than a binary healthy/unhealthy verdict. When a capability cannot be probed, for example when the target application is not running, it reports "unverified" instead of guessing. The keys and state words live in `contract/Sources/IMessageMaxContract/`, shared by the server and the companion app.

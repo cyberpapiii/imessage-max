@@ -16,7 +16,7 @@ Connection, Details & help, and Preferences are pages that slide in inside the s
 
 ## Build and install
 
-Requires macOS 15 or newer and the repository's Swift toolchain. The companion is a separate Swift 6 package with no third-party dependencies.
+Requires macOS 15 or newer and the repository's Swift toolchain. The companion is a separate Swift 6 package with no third-party dependencies; it imports the repository's `contract/` package for the wire types and words it shares with the server.
 
 From the repository root:
 

@@ -65,6 +65,9 @@ make test                               # same as `swift test`
 make test FILTER=HTTPTransportTests     # same filter via the Makefile
 ```
 
+The wire contract shared with the companion app has its own tests:
+`cd contract && swift test`.
+
 `swift test --filter` takes a substring of the test class or method name, so
 `--filter LaunchdSafetyTests` runs just that class and
 `--filter testNoTaskSleepInServiceSources` runs the single case.
@@ -104,6 +107,11 @@ curl -X POST http://localhost:8080 \
 ### Directory structure
 
 ```
+contract/                       # IMessageMaxContract: diagnose and setup wire types,
+                                # capability keys, status words, defaults (host, port,
+                                # launchd label), CLI flags, protocol version. Imported by
+                                # swift/ and macos/; edit a wire word here, not in either app.
+macos/                          # Companion menu bar app (MaxCore, MaxBrand, iMessageMaxMenu)
 swift/
 ├── Sources/iMessageMax/
 │   ├── iMessageMaxCommand.swift # Entry point
@@ -124,16 +132,19 @@ swift/
 │   │   ├── ToolCatalog.swift   # The tools a process serves, handed to every lane
 │   │   ├── ToolCallDispatch.swift # tools/call routing
 │   │   ├── ToolFailure.swift   # A tool's error answer
+│   │   ├── IntArgument.swift   # An integer argument's default and bounds, for schema text and clamp
 │   │   ├── ServerExtensions.swift # Server helpers
 │   │   ├── SetupPermissionService.swift # Native setup route for permission prompts
 │   │   ├── IconMetadata.swift  # Embedded icons, the serverInfo icon injection
 │   │   └── Version.swift       # Version.current (source of truth), protocol versions, SDK Server factory
-│   ├── Database/               # SQLite wrapper, query builder, schema capability probe
-│   ├── Models/                 # AttachmentType, ChatIdentity, GroupEvent, Reactions, ResponsePrimitives, SendPayload
-│   ├── Tools/                  # 13 MCP tools across 17 files
-│   ├── Contacts/               # CNContactStore resolver, headless access policy
+│   ├── Database/               # SQLite wrapper, query builder, SQLFragments (chat.db rules), schema probe
+│   ├── Models/                 # Identifiers (chat/msg_/att id codecs), ChatIdentity, GroupEvent, Reactions, ResponsePrimitives
+│   ├── Messages/               # One message row, renderer, people map, context window, sender filter
+│   ├── Tools/                  # One file per MCP tool (plus GetMessagesInternals, SearchInternals)
+│   ├── Send/                   # send tool: resolver, AppleScript template, file stager, verifier
+│   ├── Contacts/               # CNContactStore resolver (refreshes itself), headless access policy
 │   ├── Enrichment/             # Image processor (thumbnail, vision, full variants)
-│   └── Utilities/              # AppleScript runner, AsyncTimeout, path policies, cursors, Log.swift
+│   └── Utilities/              # ChatPage (chat summaries), AsyncTimeout, path policies, cursors, Log.swift
 ├── Tests/
 ├── launchd/                    # launchd plist template (local.imessage-max)
 └── Package.swift
