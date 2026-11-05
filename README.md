@@ -433,7 +433,7 @@ diagnose()  # Returns: database status, contacts count, permissions, capabilitie
 
 `database.features` lists which optional `chat.db` columns exist on this Mac, keyed `table.column` (for example `message.date_edited`). When one is `false`, the tools that read it degrade instead of failing: no `reply_to` or `reply_count` without `message.thread_originator_guid`, no `edited` without `message.date_edited`, no custom-emoji reaction text without `message.associated_message_emoji`.
 
-`contacts.status` is one of `authorized`, `limited`, `denied`, `restricted`, `not_determined`, `not_requested_headless`, `skipped_ci`, or `<status>_load_failed`. A headless process that skipped the prompt reports `not_requested_headless` and the fix names `--request-contacts-access`.
+`contacts.status` is one of `authorized`, `limited`, `denied`, `restricted`, `not_determined`, `not_requested_headless`, or `<status>_load_failed`. A headless process that skipped the prompt reports `not_requested_headless` and the fix names `--request-contacts-access`.
 
 ## Release checks
 
