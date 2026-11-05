@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'swift/**'
+      - 'contract/**'
       - 'scripts/**'
       - 'script/**'
       - 'macos/**'
@@ -17,6 +18,7 @@ on:
     branches: [main]
     paths:
       - 'swift/**'
+      - 'contract/**'
       - 'scripts/**'
       - 'script/**'
       - 'macos/**'
@@ -100,3 +102,8 @@ jobs:
 
       - name: Run tests
         run: swift test --skip-build
+
+      # The wire contract both packages above build against.
+      - name: Contract tests
+        working-directory: contract
+        run: swift test
