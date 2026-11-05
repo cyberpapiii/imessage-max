@@ -94,13 +94,7 @@ actor GetMessagesSinceTool {
 
     private func executeImpl(args: [String: Value]) async throws -> GetMessagesSinceResponse {
 
-        var chatFilter: Int64?
-        if let rawChat = args["chat_id"]?.stringValue {
-            guard let parsed = ChatIdentifier.parseRowId(rawChat) else {
-                throw ToolFailure("invalid_input", "Invalid chat_id: \(rawChat)")
-            }
-            chatFilter = parsed
-        }
+        let chatFilter = try args["chat_id"]?.stringValue.map { try ChatIdentifier.resolve($0, db: db) }
 
         let currentRowid = Int(try db.query("SELECT COALESCE(MAX(ROWID), 0) FROM message") { $0.int(0) }.first ?? 0)
         let rawSince = args["since_rowid"]?.intValue

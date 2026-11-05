@@ -324,6 +324,7 @@ enum SearchTool {
         let fetchLimit = (hasQuery || unanswered) ? max(500, clampedLimit * 10) : clampedLimit
 
         let senderFilter = await SenderFilter.resolve(fromPerson, resolver: resolver)
+        let chatFilter = try inChat.map { try ChatIdentifier.resolve($0, db: db) }
 
         // Single characters match nearly everything, so they are dropped.
         let searchWords: [String]
@@ -336,7 +337,7 @@ enum SearchTool {
         }
 
         let schema = try db.schema()
-        func fetch(inChat: String?, includeFiltered: Bool, cursor: TimelineCursor?) throws -> [MessageInChat] {
+        func fetch(inChat: Int64?, includeFiltered: Bool, cursor: TimelineCursor?) throws -> [MessageInChat] {
             let (sql, params) = buildQuery(
                 query: query,
                 fromPerson: senderFilter,
@@ -404,7 +405,7 @@ enum SearchTool {
                 db: db,
                 query: query,
                 fromPerson: senderFilter,
-                inChat: inChat,
+                inChat: chatFilter,
                 isGroup: isGroup,
                 has: has,
                 since: since,
@@ -420,7 +421,7 @@ enum SearchTool {
                 var resumeAfter: TimelineCursor?
                 while true {
                     let page = try fetch(
-                        inChat: ChatIdentifier.format(chatId), includeFiltered: true, cursor: resumeAfter
+                        inChat: chatId, includeFiltered: true, cursor: resumeAfter
                     )
                     if try !confirmed(page, limit: 1).isEmpty {
                         count += 1
@@ -436,7 +437,7 @@ enum SearchTool {
         let filteredHidden = includeFiltered ? nil : try hiddenChatsWithMatch()
 
         let fetched = try fetch(
-            inChat: inChat, includeFiltered: includeFiltered, cursor: cursor.flatMap(TimelineCursor.decode)
+            inChat: chatFilter, includeFiltered: includeFiltered, cursor: cursor.flatMap(TimelineCursor.decode)
         )
         let rows = try confirmed(fetched, limit: clampedLimit)
         let nextCursor = TimelineCursor.next(

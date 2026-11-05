@@ -38,11 +38,6 @@ extension GetMessagesTool {
         ))
     }
 
-    func parseChatId(_ chatId: String?) -> Int? {
-        guard let chatId = chatId else { return nil }
-        return try? ChatIdentifier.resolve(chatId, db: db).map { Int($0) }
-    }
-
     func getChatInfo(chatId: Int) throws -> String? {
         let rows = try db.query(
             "SELECT display_name FROM chat WHERE ROWID = ?",

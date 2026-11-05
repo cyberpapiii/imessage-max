@@ -148,9 +148,10 @@ final class GetContextToolTests: XCTestCase {
         )
     }
 
-    func testInvalidChatIdWithContainsIsInvalidId() async throws {
-        let result = await capture { try await GetContext.execute(chatId: "chat_abc", contains: "x", database: Database(), resolver: ContactResolver(seedCache: [:])) }
-        try assertFailure(result, error: "invalid_id")
+    func testUnresolvableChatIdWithContainsIsChatNotFound() async throws {
+        let fixture = try makeGetMessagesFixture()
+        let result = await capture { try await GetContext.execute(chatId: "chat_abc", contains: "x", database: fixture.database(), resolver: ContactResolver(seedCache: [:])) }
+        try assertFailure(result, error: "chat_not_found")
     }
 
     func testContainsFindsNewestMatchWithinWindow() async throws {

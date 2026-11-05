@@ -78,4 +78,61 @@ final class ToolsReview2RegressionTests: XCTestCase {
             XCTAssertEqual(chat?["id"] as? String, "chat3", sort)
         }
     }
+
+    // MARK: - One chat-id resolver
+
+    private func twoChatFixture() throws -> ToolTestDatabase {
+        let f = try ToolTestDatabase(name: "chat-ids")
+        try f.insertHandle(rowId: 1, handle: "+15550000001")
+        try f.insertChat(rowId: 1, guid: "iMessage;+;chat-trip-old", displayName: "Old Trip")
+        try f.insertChat(rowId: 2, guid: "iMessage;+;chat-trip-new", displayName: "New Trip")
+        for chat in 1...2 {
+            try f.joinChatHandle(chatId: chat, handleId: 1)
+            try f.insertMessage(rowId: chat, guid: "g\(chat)", text: "trip hello", date: base + Int64(chat), isFromMe: false, handleId: 1)
+            try f.joinChatMessage(chatId: chat, messageId: chat)
+        }
+        return f
+    }
+
+    func testEveryChatIdArgumentAnswersChatNotFoundForAnUnknownChat() async throws {
+        let f = try twoChatFixture()
+        let calls: [(String, [String: Value])] = [
+            ("get_messages", ["chat_id": "chat99"]),
+            ("get_messages_since", ["since_rowid": 0, "chat_id": "chat99"]),
+            ("get_context", ["chat_id": "chat99", "contains": "trip"]),
+            ("list_attachments", ["chat_id": "chat99"]),
+            ("get_unread", ["chat_id": "chat99"]),
+            ("get_chat_details", ["chat_id": "chat99"]),
+            ("search", ["query": "trip", "in_chat": "chat99"]),
+            ("search", ["query": "trip", "in_chat": "no-such-guid"]),
+            ("get_messages_since", ["since_rowid": 0, "chat_id": "no-such-guid"]),
+        ]
+        for (tool, args) in calls {
+            let json = try await callTool(tool, args, database: f.database())
+            XCTAssertEqual(json["error"] as? String, "chat_not_found", "\(tool) \(args)")
+        }
+    }
+
+    func testGuidSubstringNamesOneChatInEveryTool() async throws {
+        let f = try twoChatFixture()
+        let search = try await callTool("search", ["query": "trip", "in_chat": "chat-trip"], database: f.database())
+        let chats = try decodeJSONArray(search["results"]).compactMap { ($0["chat"] as? [String: Any])?["id"] as? String }
+        XCTAssertEqual(chats, ["chat2"], "a GUID substring names the most recently active chat, not every match")
+
+        let details = try await callTool("get_chat_details", ["chat_id": "chat-trip-old"], database: f.database())
+        XCTAssertEqual((details["chat"] as? [String: Any])?["id"] as? String, "chat1")
+    }
+
+    func testChatIdLookupDoesNotHideDatabaseErrors() async throws {
+        let missing = Database(path: "/nonexistent/\(UUID().uuidString)/chat.db")
+        let tool = GetMessagesTool(db: missing, resolver: ContactResolver(seedCache: [:]))
+        do {
+            _ = try await tool.execute(args: ["chat_id": "iMessage;-;+1555"])
+            XCTFail("expected the database error")
+        } catch let failure as ToolFailure {
+            XCTAssertNotEqual(failure.code, "chat_not_found")
+        } catch {
+            XCTAssertTrue(error is DatabaseError, "\(error)")
+        }
+    }
 }

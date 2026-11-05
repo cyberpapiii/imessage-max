@@ -5,7 +5,7 @@ extension SearchTool {
         to builder: QueryBuilder,
         query: String?,
         fromPerson: SenderFilter?,
-        inChat: String?,
+        inChat: Int64?,
         isGroup: Bool?,
         has: String?,
         since: String?,
@@ -72,12 +72,8 @@ extension SearchTool {
             builder.where(after.sql, params: after.params)
         }
 
-        if let chatStr = inChat {
-            if let chatId = ChatIdentifier.parseRowId(chatStr) {
-                builder.where("c.ROWID = ?", chatId)
-            } else {
-                builder.where("c.guid LIKE ? ESCAPE '\\'", "%\(QueryBuilder.escapeLike(chatStr))%")
-            }
+        if let inChat {
+            builder.where("c.ROWID = ?", inChat)
         }
 
         if let sender = unanswered ? .me : fromPerson {
@@ -101,7 +97,7 @@ extension SearchTool {
     static func buildQuery(
         query: String?,
         fromPerson: SenderFilter?,
-        inChat: String?,
+        inChat: Int64?,
         isGroup: Bool?,
         has: String?,
         since: String?,
@@ -155,7 +151,7 @@ extension SearchTool {
         db: Database,
         query: String?,
         fromPerson: SenderFilter?,
-        inChat: String?,
+        inChat: Int64?,
         isGroup: Bool?,
         has: String?,
         since: String?,
@@ -184,7 +180,7 @@ extension SearchTool {
     static func filteredHiddenQuery(
         query: String?,
         fromPerson: SenderFilter?,
-        inChat: String?,
+        inChat: Int64?,
         isGroup: Bool?,
         has: String?,
         since: String?,

@@ -110,8 +110,8 @@ enum GetContext {
             throw ToolFailure("invalid_params", "chat_id is required when using contains")
         }
 
-        // Reject malformed ids before touching chat.db, so a bad id reads as
-        // invalid_id even when the database cannot be opened.
+        // Reject a malformed message id before touching chat.db, so it reads
+        // as invalid_id even when the database cannot be opened.
         enum Target {
             case message(Int64)
             case text(String, inChat: Int64)
@@ -123,10 +123,7 @@ enum GetContext {
             }
             target = .message(numericId)
         } else if let cId = chatId, let searchText = contains {
-            guard let numericChatId = ChatIdentifier.parseRowId(cId) else {
-                throw ToolFailure("invalid_id", "Invalid chat ID format: \(cId)")
-            }
-            target = .text(searchText, inChat: numericChatId)
+            target = .text(searchText, inChat: try ChatIdentifier.resolve(cId, db: database))
         } else {
             throw ToolFailure("invalid_params", "chat_id and contains are required")
         }

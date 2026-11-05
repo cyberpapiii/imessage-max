@@ -171,13 +171,7 @@ final class GetUnread {
             sinceApple = AppleTime.parse(params.since)
         }
 
-        var numericChatId: Int64?
-        if let chatId = params.chatId {
-            numericChatId = ChatIdentifier.parseRowId(chatId)
-            if numericChatId == nil {
-                throw ToolFailure.chatNotFound(chatId)
-            }
-        }
+        let numericChatId = try params.chatId.map { try ChatIdentifier.resolve($0, db: database) }
 
         switch params.format {
         case .summary:
