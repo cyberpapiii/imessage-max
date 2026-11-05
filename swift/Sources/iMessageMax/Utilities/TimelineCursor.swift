@@ -16,6 +16,24 @@ struct TimelineCursor: Equatable {
         return encode(date: last.date, messageId: last.id)
     }
 
+    /// The cursor for a page Swift filtered after the query: `fetched` is
+    /// what a query limited to `fetchLimit` returned, `kept` what survived,
+    /// in the same order. A full page resumes after its last kept row, since
+    /// the rows behind it may not have been checked. A short page from a
+    /// full fetch resumes after the last row fetched, since every row up to
+    /// there was checked and dropped; only a short fetch ends the timeline.
+    static func next(
+        kept: [MessageRecord],
+        limit: Int,
+        fetched: [MessageRecord],
+        fetchLimit: Int
+    ) -> String? {
+        if kept.count >= limit {
+            return next(after: kept.prefix(limit).last, pageFull: true)
+        }
+        return next(after: fetched.last, pageFull: fetched.count >= fetchLimit)
+    }
+
     static func decode(_ raw: String) -> TimelineCursor? {
         let parts = raw.split(separator: ":")
         guard parts.count == 2,

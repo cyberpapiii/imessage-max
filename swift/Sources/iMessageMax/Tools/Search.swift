@@ -375,7 +375,8 @@ enum SearchTool {
             )
         }
 
-        var rows = try db.query(sql, params: params, map: MessageInChat.init)
+        let fetched = try db.query(sql, params: params, map: MessageInChat.init)
+        var rows = fetched
 
         // The SQL LIKE/instr terms only prefilter; this word match decides.
         if hasQuery, !searchWords.isEmpty {
@@ -412,6 +413,10 @@ enum SearchTool {
         if rows.count > clampedLimit {
             rows = Array(rows.prefix(clampedLimit))
         }
+        let nextCursor = TimelineCursor.next(
+            kept: rows.map(\.message), limit: clampedLimit,
+            fetched: fetched.map(\.message), fetchLimit: fetchLimit
+        )
 
         let jsonString: String
         if responseFormat == .groupedByChat {
@@ -419,7 +424,7 @@ enum SearchTool {
                 db: db,
                 rows: rows,
                 query: query,
-                limit: clampedLimit,
+                nextCursor: nextCursor,
                 resolver: resolver,
                 filteredHidden: filteredHidden
             )
@@ -428,7 +433,7 @@ enum SearchTool {
                 db: db,
                 rows: rows,
                 query: query,
-                limit: clampedLimit,
+                nextCursor: nextCursor,
                 includeContext: includeContext,
                 resolver: resolver,
                 filteredHidden: filteredHidden
