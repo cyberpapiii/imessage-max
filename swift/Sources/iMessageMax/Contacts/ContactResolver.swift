@@ -7,7 +7,7 @@ actor ContactResolver {
     /// CNContactStore (mirrors imsg's ContactCatalogSource). Closures run
     /// inside the actor; `@unchecked` because CNContactStore is not Sendable.
     struct Source: @unchecked Sendable {
-        let authorization: () -> (authorized: Bool, status: String)
+        let authorization: () -> (authorized: Bool, status: PermissionStatus)
         let load: () throws -> [String: String]
         let requestAccess: () async -> Bool
 
@@ -71,15 +71,15 @@ actor ContactResolver {
 
     // MARK: - Authorization
 
-    private static func authorizationStatus() -> (authorized: Bool, status: String) {
+    private static func authorizationStatus() -> (authorized: Bool, status: PermissionStatus) {
         let status = CNContactStore.authorizationStatus(for: .contacts)
         switch status {
-        case .authorized: return (true, PermissionStatus.authorized.rawValue)
-        case .denied: return (false, PermissionStatus.denied.rawValue)
-        case .restricted: return (false, PermissionStatus.restricted.rawValue)
-        case .notDetermined: return (false, PermissionStatus.notDetermined.rawValue)
-        case .limited: return (true, PermissionStatus.limited.rawValue)
-        @unknown default: return (false, "unknown")
+        case .authorized: return (true, .authorized)
+        case .denied: return (false, .denied)
+        case .restricted: return (false, .restricted)
+        case .notDetermined: return (false, .notDetermined)
+        case .limited: return (true, .limited)
+        @unknown default: return (false, .unknown)
         }
     }
 
@@ -90,13 +90,13 @@ actor ContactResolver {
         Bundle.main.object(forInfoDictionaryKey: "NSContactsUsageDescription") != nil
     }
 
-    func authorization() -> (authorized: Bool, status: String) {
+    func authorization() -> (authorized: Bool, status: PermissionStatus) {
         source.authorization()
     }
 
     func requestAccessIfAllowed(policy: ContactsAccessPolicy) async {
         let (_, status) = source.authorization()
-        guard status == PermissionStatus.notDetermined.rawValue else { return }
+        guard status == .notDetermined else { return }
         switch policy {
         case .requestIfNeeded:
             let granted = await source.requestAccess()
@@ -220,7 +220,7 @@ actor ContactResolver {
 
     struct Status: Sendable {
         let authorized: Bool
-        let authorization: String
+        let authorization: PermissionStatus
         let handleCount: Int
         let loadFailed: Bool
         let accessRequestSkippedHeadless: Bool

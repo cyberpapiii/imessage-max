@@ -67,6 +67,8 @@ public struct PermissionStatus: WireWord {
   /// Automation: Messages.app is not running, so TCC cannot be asked.
   public static let messagesNotRunning: Self = "messages_not_running"
   public static let messagesNotFound: Self = "messages_not_found"
+  /// Contacts: an authorization state newer than this server knows.
+  public static let unknown: Self = "unknown"
 
   /// Contacts is granted but the store failed to load.
   public static func loadFailed(_ authorization: Self) -> Self {

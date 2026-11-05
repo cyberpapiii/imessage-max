@@ -111,7 +111,7 @@ enum DiagnoseTool {
 
         let contacts = await resolver.status()
         let contactsAuthorized = contacts.authorized
-        let authorizationStatus = PermissionStatus(rawValue: contacts.authorization)
+        let authorizationStatus = contacts.authorization
 
         var contactsStatus = authorizationStatus
         var contactsLoaded: Int? = nil

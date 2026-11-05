@@ -1,4 +1,5 @@
 import Foundation
+import IMessageMaxContract
 import SQLite3
 import XCTest
 import MCP
@@ -319,7 +320,7 @@ extension ContactResolver {
     /// A resolver that never touches CNContactStore.
     init(
         seedCache: [String: String],
-        authorization: (authorized: Bool, status: String) = (true, "authorized")
+        authorization: (authorized: Bool, status: PermissionStatus) = (true, "authorized")
     ) {
         self.init(
             source: Source(

@@ -1,3 +1,4 @@
+import IMessageMaxContract
 import XCTest
 @testable import iMessageMax
 
@@ -6,7 +7,7 @@ final class ContactResolverTests: XCTestCase {
         var loads = 0
         var requested = false
         var authorized = true
-        var status = "authorized"
+        var status: PermissionStatus = "authorized"
         var names: [String: String] = [:]
         var failNext = false
         var clock: TimeInterval = 0
