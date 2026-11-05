@@ -11,7 +11,7 @@ enum ToolCallDispatch {
     /// A finished call, already rendered as JSON-ready Foundation objects.
     struct Outcome {
         let content: [[String: Any]]
-        let structuredContent: Any?
+        let structuredContent: [String: Any]?
         let isError: Bool
     }
 
@@ -99,7 +99,7 @@ enum ToolCallDispatch {
             return .completed(
                 Outcome(
                     content: contentJSON(content),
-                    structuredContent: isError ? nil : structuredContentJSON(from: content),
+                    structuredContent: isError ? nil : structuredContent(from: content),
                     isError: isError
                 )
             )
@@ -119,13 +119,15 @@ enum ToolCallDispatch {
         return json
     }
 
-    /// A single JSON-object text content doubles as structuredContent.
-    static func structuredContentJSON(from content: [Tool.Content]) -> Any? {
+    /// A single JSON-object text content doubles as structuredContent, on
+    /// every lane. The spec requires an object there, so any other JSON text
+    /// (an array, a bare string) gets none.
+    static func structuredContent(from content: [Tool.Content]) -> [String: Any]? {
         guard content.count == 1,
             case .text(let text, _, _) = content[0],
-            let json = try? JSONSerialization.jsonObject(with: Data(text.utf8))
+            let object = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any]
         else { return nil }
-        return json
+        return object
     }
 
     static func decodeArguments(_ raw: Any?) -> [String: Value]? {

@@ -112,21 +112,10 @@ extension Server {
             case .completed(let content, isError: false):
                 return CallTool.Result(
                     content: content,
-                    structuredContent: Self.structuredContent(from: content)
+                    structuredContent: ToolCallDispatch.structuredContent(from: content).flatMap(Self.structuredValue(from:))
                 )
             }
         }
-    }
-
-    private nonisolated static func structuredContent(from content: [Tool.Content]) -> Value? {
-        guard content.count == 1,
-            case .text(let text, _, _) = content[0],
-            let object = try? JSONSerialization.jsonObject(with: Data(text.utf8))
-        else {
-            return nil
-        }
-
-        return structuredValue(from: object)
     }
 
     /// Builds the same `Value` that decoding the text with `JSONDecoder`
