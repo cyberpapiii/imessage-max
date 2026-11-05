@@ -19,7 +19,7 @@ applies_when:
 root_cause: missing_validation
 resolution_type: code_fix
 related_components:
-  - swift/Sources/iMessageMax/Tools/Send.swift
+  - swift/Sources/iMessageMax/Send/SendTool.swift
   - swift/Sources/iMessageMax/Server/HTTPTransport.swift
   - swift/Sources/iMessageMax/Server/SSEConnection.swift
   - swift/Sources/iMessageMax/Server/SessionManager.swift

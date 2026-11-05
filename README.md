@@ -113,9 +113,10 @@ brew install imessage-max
 ```bash
 git clone https://github.com/cyberpapiii/imessage-max.git
 cd imessage-max/swift
-swift build -c release
+make build
 
-# Binary is at .build/release/imessage-max
+# Binary is at .build/arm64-apple-macosx/release/imessage-max
+# (a bare `swift build` omits the embedded Info.plist, so Contacts can't be granted)
 ```
 
 For local development, advanced setup, and the signed install workflow, see:

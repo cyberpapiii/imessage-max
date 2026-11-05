@@ -66,13 +66,14 @@ make setup-signing   # one-time: create the persistent identity
 make install         # every build: build, sign, restart launchd, verify
 ```
 
-`make install`'s `sign` step runs `codesign --force --sign "iMessage Max Dev"`,
-so each rebuild carries the same stable identity and FDA stays granted. Grant FDA
+`make install`'s `sign` step resolves the cert named `CERT_CN` ("iMessage Max Dev")
+to its SHA-1 and runs `codesign --force --sign <sha1>` (a name is ambiguous when the
+keychain holds two certs with that common name), so each rebuild carries the same stable identity and FDA stays granted. Grant FDA
 once more after the first signed build; it then sticks.
 
 ### Cert requirements (what `make setup-signing` must produce)
 
-For `codesign --sign "iMessage Max Dev"` to succeed, the cert needs both key-usage
+For `codesign` to accept the identity, the cert needs both key-usage
 extensions and an accessible private key.
 
 ```sh

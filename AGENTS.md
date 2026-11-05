@@ -30,7 +30,7 @@ Other Makefile targets:
 - `make clean` removes debug artifacts and clears logs
 - `make setup-signing` is one-time setup for a persistent code signing identity
 - `make version` checks the five version sites agree; `make release-check` runs everything that must pass before tagging (see `docs/RELEASING.md`)
-- `make install-agent` copies `swift/launchd/local.imessage-max.plist` into `~/Library/LaunchAgents/` (do not hand-write the plist)
+- `make install-agent` renders `swift/launchd/local.imessage-max.plist` (binary path and `~/` log paths filled in) into `~/Library/LaunchAgents/` and loads it (do not hand-write the plist)
 
 The server runs as a launchd service (`local.imessage-max`) on port 8080, configured at `~/Library/LaunchAgents/local.imessage-max.plist`. Install that agent with `make install-agent`. It auto-starts on login and auto-restarts on crash.
 
@@ -42,17 +42,18 @@ Clients reach it through plug (HTTP, `protocol = "legacy"`) at `http://127.0.0.1
 
 ```bash
 cd swift
-swift build -c release
+make build   # a bare `swift build` omits the embedded Info.plist, so Contacts can never be granted
+BIN=.build/arm64-apple-macosx/release/imessage-max
 
 # stdio mode (for Codex Desktop)
-./.build/release/imessage-max
+$BIN
 
 # HTTP mode (for plug, Inspector, etc.)
-./.build/release/imessage-max --http --port 8080
+$BIN --http --port 8080
 
 # one-shot Contacts prompt; re-launches itself disclaimed so the grant is
-# recorded for this executable, not the terminal (needs a `make build` binary)
-./.build/release/imessage-max --request-contacts-access
+# recorded for this executable, not the terminal
+$BIN --request-contacts-access
 ```
 
 ### Running the test suite
@@ -138,8 +139,8 @@ swift/
 │   │   ├── IconMetadata.swift  # Embedded icons, the serverInfo icon injection
 │   │   └── Version.swift       # Version.current (source of truth), protocol versions, SDK Server factory
 │   ├── Database/               # SQLite wrapper, query builder, SQLFragments (chat.db rules), schema probe
-│   ├── Models/                 # Identifiers (chat/msg_/att id codecs), ChatIdentity, GroupEvent, Reactions, ResponsePrimitives
-│   ├── Messages/               # One message row, renderer, people map, context window, sender filter
+│   ├── Models/                 # Identifiers (chat/msg_/att id codecs), ChatIdentity, GroupEvent, Reactions, AttachmentType, ResponsePrimitives
+│   ├── Messages/               # Message row and renderer, people map, context window, sender filter, participant→chat matching, reactions/attachments annotations, shared-content query
 │   ├── Tools/                  # One file per MCP tool (plus GetMessagesInternals, SearchInternals)
 │   ├── Send/                   # send tool: resolver, AppleScript template, file stager, verifier
 │   ├── Contacts/               # CNContactStore resolver (refreshes itself), headless access policy
@@ -251,7 +252,7 @@ let date = Date(timeIntervalSinceReferenceDate: TimeInterval(appleTimestamp) / 1
 Message text is often stored in `attributedBody` (binary typedstream format) instead of `text` column. Parse by:
 1. Find "NSString" or "NSMutableString" marker
 2. Skip 5 bytes after marker
-3. Read length byte (0x81 = 2-byte length, 0x82 = 3-byte length, else single byte)
+3. Read length byte (0x81 = 2-byte length, 0x82 = 3-byte length, < 0x80 = literal length; any other marker yields no text)
 4. Read UTF-8 text of that length
 
 ## Thirteen core tools
@@ -330,13 +331,15 @@ Attachments can be offloaded to iCloud. `list_attachments` includes nested attac
 | 2003 | Laughed 😂 |
 | 2004 | Emphasized ‼️ |
 | 2005 | Questioned ❓ |
-| 3000-3005 | Removal of above |
+| 2006 | Custom emoji |
+| 2007 | Sticker |
+| 3000-3007 | Removal of above |
 
 ### Token-efficient response design
 
 - Deduplicate participants (define once, reference by short key)
 - Use ISO timestamps for messages, relative for summaries
-- Short keys: `ts` not `timestamp`, `msgs` not `message_count`
+- Short keys where they are unambiguous (`ts` not `timestamp`)
 - Reactions as compact strings: `["❤️ andrew", "😂 nick"]`
 - Omit obvious fields (no `is_group: false` on 2-person chats)
 

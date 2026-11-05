@@ -2,19 +2,13 @@
 
 This note captures a few design choices that are correct for the current project shape, but easy to second-guess later if the context gets lost.
 
-## 1. Tool Handler Registry Uses A Lock, Not An Actor
+## 1. The Tool Catalog Is Immutable
 
-`ToolHandlerRegistry` in `swift/Sources/iMessageMax/Server/ServerExtensions.swift` is now a lock-guarded class instead of an actor.
-
-Why:
-- tool registration happens during startup
-- handler lookup happens on tool calls
-- the registration API is much simpler when it can stay synchronous
+`ToolCatalog` (`swift/Sources/iMessageMax/Server/ToolCatalog.swift`) is built once at startup and handed to every lane: legacy stdio, legacy HTTP sessions, and the modern dispatcher. It is `@unchecked Sendable` because it holds only `let` properties after `init`.
 
 What to remember:
-- this is safe because mutation is narrow and infrequent
-- any future code that adds new mutation paths must keep using the same lock discipline
-- if registry behavior becomes more dynamic later, revisiting an actor-based design may be worth it
+- add a tool by adding a `ToolDefinition` to the catalog's list; nothing registers tools later
+- two tools with the same name stop the process at startup instead of silently advertising one that never runs
 
 ## 2. Some Split Files Needed Slightly Wider Access
 
@@ -47,7 +41,7 @@ The install flow now does more than just build:
 - signs the binary
 - restarts the launchd service
 - verifies that the running server matches the new build
-- reveals the binary in Finder to make Full Disk Access fixes easier
+- checks that the running server can read chat.db, and prints the `open -R` command for the Full Disk Access fix when it cannot
 
 Why:
 - this project lives in the messy reality of macOS permissions and local services

@@ -118,6 +118,7 @@ curl -X POST http://localhost:8080 \
 ```
 USAGE: imessage-max [--http] [--host <host>] [--port <port>] [--allow-external-bind]
                     [--contacts-policy <auto|request|skip>] [--request-contacts-access]
+                    [--request-messages-access]
 
 OPTIONS:
   --http                  Run with HTTP transport instead of stdio
@@ -132,6 +133,10 @@ OPTIONS:
   --request-contacts-access
                           Ask macOS for Contacts access once, print the
                           status, and exit. Run it from a terminal.
+  --request-messages-access
+                          Ask macOS for Automation access to Messages once,
+                          without sending a message, print the status, and
+                          exit.
   --version               Show the version
   -h, --help              Show help
 ```
