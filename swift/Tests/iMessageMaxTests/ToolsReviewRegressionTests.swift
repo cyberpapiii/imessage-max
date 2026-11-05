@@ -287,4 +287,32 @@ final class ToolsReviewRegressionTests: XCTestCase {
         XCTAssertEqual(try decodeJSONArray(all["conversations"]).compactMap { $0["id"] as? String }, ["chat2", "chat1"])
         XCTAssertEqual(all["more"] as? Bool, false)
     }
+
+    // MARK: - get_unread
+
+    func testUnreadSummaryTotalsCountEveryChatNotJustThePage() async throws {
+        let db = try ToolTestDatabase(name: "unread-totals")
+        let base = now() - 60 * minute
+        var id = 0
+        for (chat, unread) in [(1, 3), (2, 2), (3, 1)] {
+            try db.insertHandle(rowId: chat, handle: "+1555000000\(chat)")
+            try db.insertChat(rowId: chat, guid: "iMessage;-;\(chat)")
+            try db.joinChatHandle(chatId: chat, handleId: chat)
+            for _ in 0..<unread {
+                id += 1
+                try db.insertMessage(rowId: id, guid: "U\(id)", text: "u\(id)", date: base + Int64(id) * minute,
+                                     isFromMe: false, isRead: false, handleId: chat)
+                try db.joinChatMessage(chatId: chat, messageId: id)
+            }
+        }
+
+        let summary = try await call("get_unread", ["format": "summary", "limit": 1], db: db)
+        let messages = try await call("get_unread", ["format": "messages", "limit": 1], db: db)
+        XCTAssertEqual(try decodeJSONArray(summary["chats"]).count, 1)
+        for page in [summary, messages] {
+            XCTAssertEqual(page["total_unread"] as? Int, 6)
+            XCTAssertEqual(page["chats_with_unread"] as? Int, 3)
+            XCTAssertEqual(page["more"] as? Bool, true)
+        }
+    }
 }

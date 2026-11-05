@@ -203,7 +203,7 @@ enum ChatSummaryQueries {
         }
 
         let unreadClause = onlyUnreadInbound
-            ? "\n                  AND m2.is_read = 0 AND m2.is_from_me = 0"
+            ? "\n                  AND \(SQLFragments.unreadInbound("m2"))"
             : ""
 
         // One correlated LIMIT 1 per requested chat, not a ROW_NUMBER() rank over

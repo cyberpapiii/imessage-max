@@ -140,7 +140,7 @@ enum GetChatDetailsTool {
         let activityRows = try database.query(
             """
             SELECT
-                COUNT(CASE WHEN m.is_read = 0 AND m.is_from_me = 0 THEN 1 END) as unread_count,
+                COUNT(CASE WHEN \(SQLFragments.unreadInbound()) THEN 1 END) as unread_count,
                 MIN(m.date) as first_activity,
                 MAX(m.date) as last_activity
             FROM message m
