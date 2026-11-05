@@ -525,8 +525,10 @@ actor HTTPTransport {
             return
         }
 
-        // Removing through the registry also cancels the timeout timer.
-        if let key = message.requestKey,
+        // Only a response answers a POST. A server-initiated request carries
+        // an id from the Server's own sequence, which can equal a waiting
+        // client id. Removing through the registry also cancels the timer.
+        if message.kind == .response, let key = message.requestKey,
             let pending = await pendingRequests.remove(sessionId: sessionId, id: key)
         {
             pending.resume(returning: data)
