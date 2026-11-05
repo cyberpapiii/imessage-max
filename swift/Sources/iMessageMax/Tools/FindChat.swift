@@ -64,31 +64,21 @@ enum FindChatTool {
 
     // MARK: - Response Types
 
-    struct ChatResult: Codable {
-        let id: String
-        let name: String
-        let group: Bool?
-        let participantCount: Int
-        let participantsPreview: [String]
+    typealias ChatResult = ChatListing<ChatResultDetails>
+
+    struct ChatResultDetails: Encodable {
         let lastMessage: LastMessageSummary?
         let participants: [ChatParticipant]
         let match: MatchInfo
         let identity: ChatIdentity
 
         enum CodingKeys: String, CodingKey {
-            case id
-            case name
-            case group
-            case participantCount = "participant_count"
-            case participantsPreview = "participants_preview"
             case lastMessage = "last_message"
-            case participants
-            case match
-            case identity
+            case participants, match, identity
         }
     }
 
-    struct Response: Codable {
+    struct Response: Encodable {
         let chats: [ChatResult]
         let more: Bool
         let filteredHidden: Int?
@@ -96,13 +86,6 @@ enum FindChatTool {
         enum CodingKeys: String, CodingKey {
             case chats, more
             case filteredHidden = "filtered_hidden"
-        }
-
-        func encode(to encoder: Encoder) throws {
-            var container = encoder.container(keyedBy: CodingKeys.self)
-            try container.encode(chats, forKey: .chats)
-            try container.encode(more, forKey: .more)
-            try container.encodeIfPresent(filteredHidden, forKey: .filteredHidden)
         }
     }
 
@@ -221,8 +204,8 @@ enum FindChatTool {
         var seen = Set<String>()
         var uniqueResults: [ChatResult] = []
         for result in results {
-            if !seen.contains(result.id) {
-                seen.insert(result.id)
+            if !seen.contains(result.chat.id) {
+                seen.insert(result.chat.id)
                 uniqueResults.append(result)
                 if uniqueResults.count >= params.limit {
                     break
@@ -646,56 +629,24 @@ enum FindChatTool {
         resolver: ContactResolver,
         matchType: String
     ) async throws -> [ChatResult] {
-        let chatIds = chats.map(\.id)
-        let participantsByChat = try await ChatSummaryQueries.participantsByChat(
+        let page = try await ChatPage.build(
+            chats.map { ChatPage.Chat(id: $0.id, guid: $0.guid, explicitName: $0.displayName) },
+            lastMessages: ChatPage.LastMessageOptions(agoFallback: nil),
             db: database,
-            chatIds: chatIds,
             resolver: resolver
         )
-        let lastByChat = try await ChatSummaryQueries.lastMessagesByChat(
-            db: database,
-            chatIds: chatIds,
-            resolver: resolver,
-            agoFallback: nil
-        )
-        let recentSenderChatIds = chats.compactMap { chat -> Int64? in
-            let trimmed = chat.displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
-            let isNamed = trimmed?.isEmpty == false
-            let count = (participantsByChat[chat.id] ?? []).count
-            return (isNamed && count > 4) ? chat.id : nil
-        }
-        let recentSendersByChat = try ChatSummaryQueries.recentSendersByChat(
-            db: database,
-            chatIds: recentSenderChatIds
-        )
-
-        var results: [ChatResult] = []
-        for chat in chats {
-            let identity = ChatIdentity.from(
-                chatId: chat.id,
-                guid: chat.guid,
-                explicitName: chat.displayName,
-                rows: participantsByChat[chat.id] ?? []
-            )
-
-            results.append(
+        let results = chats.compactMap { chat in
+            page[chat.id].map { entry in
                 ChatResult(
-                    id: identity.mcpId,
-                    name: identity.displayName,
-                    group: identity.participantCount > 1 ? true : nil,
-                    participantCount: identity.participantCount,
-                    participantsPreview: try ChatSummaryBuilder.participantsPreview(
-                        db: database,
-                        chatId: chat.id,
-                        identity: identity,
-                        recentSenders: recentSendersByChat[chat.id]
-                    ),
-                    lastMessage: lastByChat[chat.id]?.info,
-                    participants: IdentityDisplayFormatter.participants(identity.participants),
-                    match: MatchInfo(type: matchType),
-                    identity: identity
+                    chat: entry.summary,
+                    details: ChatResultDetails(
+                        lastMessage: entry.lastMessage?.info,
+                        participants: IdentityDisplayFormatter.participants(entry.identity.participants),
+                        match: MatchInfo(type: matchType),
+                        identity: entry.identity
+                    )
                 )
-            )
+            }
         }
         return results
     }

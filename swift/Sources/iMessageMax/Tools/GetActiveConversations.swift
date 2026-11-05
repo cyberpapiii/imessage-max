@@ -2,7 +2,7 @@
 import Foundation
 import MCP
 
-struct ActiveConversationsResult: Codable {
+struct ActiveConversationsResult: Encodable {
     let conversations: [ActiveConversation]
     let total: Int
     let windowHours: Int
@@ -18,29 +18,21 @@ struct ActiveConversationsResult: Codable {
     }
 }
 
-struct ActiveConversation: Codable {
-    let id: String
-    let name: String
-    let group: Bool?
-    let participantCount: Int
-    let participantsPreview: [String]
+typealias ActiveConversation = ChatListing<ActiveConversationDetails>
+
+struct ActiveConversationDetails: Encodable {
     let lastMessage: LastMessageSummary?
     let awaitingReply: Bool
     let activity: ConversationActivity
 
     enum CodingKeys: String, CodingKey {
-        case id
-        case name
-        case group
-        case participantCount = "participant_count"
-        case participantsPreview = "participants_preview"
         case lastMessage = "last_message"
         case awaitingReply = "awaiting_reply"
         case activity
     }
 }
 
-struct ConversationActivity: Codable {
+struct ConversationActivity: Encodable {
     let exchanges: Int
     let myMsgs: Int
     let theirMsgs: Int
@@ -172,9 +164,8 @@ enum GetActiveConversations {
             )
         }
 
-        // Pre-filter: same inclusion logic as the original loop (min-exchanges
-        // filter, then cap at clampedLimit) so the batched queries cover
-        // exactly the chats that will appear in the response.
+        // Apply min_exchanges and the limit first so the batched lookups
+        // cover exactly the chats returned.
         var includedRows: [ChatActivityRow] = []
         for row in chatRows {
             guard includedRows.count < clampedLimit else { break }
@@ -182,96 +173,38 @@ enum GetActiveConversations {
             includedRows.append(row)
         }
 
-        // Batch-fetch participants and last previews for all included chats.
-        let chatIds = includedRows.map(\.chatId)
-        let participantsByChat = try await ChatSummaryQueries.participantsByChat(
+        // last_in_window is the newest qualifying date the activity query
+        // already computed, which is exactly the message the preview wants.
+        let page = try await ChatPage.build(
+            includedRows.map { ChatPage.Chat(id: $0.chatId, explicitName: $0.displayName, newestDate: $0.lastInWindow) },
+            lastMessages: ChatPage.LastMessageOptions(
+                sinceApple: windowStartApple,
+                previewMaxLength: 80,
+                unknownSenderLabel: "Unknown",
+                agoFallback: nil
+            ),
             db: database,
-            chatIds: chatIds,
             resolver: resolver
         )
-        // last_in_window is the newest qualifying date the activity query
-        // already computed for each chat, which is exactly the message this
-        // preview is looking for.
-        var newestInWindow: [Int64: Int64] = [:]
-        for row in includedRows {
-            if let last = row.lastInWindow {
-                newestInWindow[row.chatId] = last
-            }
-        }
-        let lastMessagesByChat = try await ChatSummaryQueries.lastMessagesByChat(
-            db: database,
-            chatIds: chatIds,
-            resolver: resolver,
-            sinceApple: windowStartApple,
-            previewMaxLength: 80,
-            unknownSenderLabel: "Unknown",
-            agoFallback: nil,
-            newestDates: newestInWindow
-        )
-        let recentSenderChatIds = includedRows.compactMap { row -> Int64? in
-            let trimmed = row.displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
-            let isNamed = trimmed?.isEmpty == false
-            let count = (participantsByChat[row.chatId] ?? []).count
-            return (isNamed && count > 4) ? row.chatId : nil
-        }
-        let recentSendersByChat = try ChatSummaryQueries.recentSendersByChat(
-            db: database,
-            chatIds: recentSenderChatIds
-        )
 
-        var conversations: [ActiveConversation] = []
-
-        for row in includedRows {
-            let exchanges = min(row.myCount, row.theirCount)
-
-            let participantRows = participantsByChat[row.chatId] ?? []
-
-            let identity = ChatIdentity(
-                mcpId: ChatIdentifier.format(row.chatId),
-                guid: nil,
-                explicitName: row.displayName,
-                participants: participantRows.map {
-                    ChatIdentity.makeParticipant(handle: $0.handle, contactName: $0.name)
-                }
+        let conversations = includedRows.compactMap { row -> ActiveConversation? in
+            guard let entry = page[row.chatId] else { return nil }
+            let iso = { (date: Int64?) in date.flatMap(AppleTime.toDate).flatMap(TimeUtils.formatISO) }
+            return ActiveConversation(
+                chat: entry.summary,
+                details: ActiveConversationDetails(
+                    lastMessage: entry.lastMessage?.info,
+                    awaitingReply: row.lastFromThem.map { $0 > (row.lastFromMe ?? .min) } ?? false,
+                    activity: ConversationActivity(
+                        exchanges: min(row.myCount, row.theirCount),
+                        myMsgs: row.myCount,
+                        theirMsgs: row.theirCount,
+                        lastFromMe: iso(row.lastFromMe),
+                        lastFromThem: iso(row.lastFromThem),
+                        started: iso(row.firstInWindow)
+                    )
+                )
             )
-
-            let awaitingReply: Bool
-            if let lastFromThem = row.lastFromThem, let lastFromMe = row.lastFromMe {
-                awaitingReply = lastFromThem > lastFromMe
-            } else if row.lastFromThem != nil && row.lastFromMe == nil {
-                awaitingReply = true
-            } else {
-                awaitingReply = false
-            }
-
-            let activity = ConversationActivity(
-                exchanges: exchanges,
-                myMsgs: row.myCount,
-                theirMsgs: row.theirCount,
-                lastFromMe: row.lastFromMe.flatMap(AppleTime.toDate).flatMap(TimeUtils.formatISO),
-                lastFromThem: row.lastFromThem.flatMap(AppleTime.toDate).flatMap(TimeUtils.formatISO),
-                started: row.firstInWindow.flatMap(AppleTime.toDate).flatMap(TimeUtils.formatISO)
-            )
-
-            let lastPreview = lastMessagesByChat[row.chatId]?.info
-
-            let conversation = ActiveConversation(
-                id: identity.mcpId,
-                name: identity.displayName,
-                group: identity.participantCount > 1 ? true : nil,
-                participantCount: identity.participantCount,
-                participantsPreview: try ChatSummaryBuilder.participantsPreview(
-                    db: database,
-                    chatId: row.chatId,
-                    identity: identity,
-                    recentSenders: recentSendersByChat[row.chatId]
-                ),
-                lastMessage: lastPreview,
-                awaitingReply: awaitingReply,
-                activity: activity
-            )
-
-            conversations.append(conversation)
         }
 
         return ActiveConversationsResult(

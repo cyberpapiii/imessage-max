@@ -83,7 +83,10 @@ final class ChatSummaryQueriesTests: XCTestCase {
         let identity = try await makeIdentityFromRawJoinRows(db: db, chatId: 10, explicitName: nil)
         XCTAssertEqual(identity.participants.map(\.handle), ["+15550000001", "+15550000001", "+15550000002"])
 
-        let preview = try ChatSummaryBuilder.participantsPreview(db: db, chatId: 10, identity: identity)
+        let preview = ChatSummaryBuilder.participantsPreview(
+            identity: identity,
+            recentSenders: try ChatSummaryQueries.recentSendersByChat(db: db, chatIds: [10])[10] ?? []
+        )
 
         XCTAssertEqual(preview.count, 2)
         XCTAssertTrue(preview.contains("Bob Brown"))
@@ -108,7 +111,10 @@ final class ChatSummaryQueriesTests: XCTestCase {
         let identity = try await makeIdentityFromRawJoinRows(db: db, chatId: 10, explicitName: nil)
         XCTAssertEqual(identity.participants.map(\.handle), ["+15550000001", "+15550000001", "+15550000002"])
 
-        let preview = try ChatSummaryBuilder.participantsPreview(db: db, chatId: 10, identity: identity)
+        let preview = ChatSummaryBuilder.participantsPreview(
+            identity: identity,
+            recentSenders: try ChatSummaryQueries.recentSendersByChat(db: db, chatIds: [10])[10] ?? []
+        )
         XCTAssertFalse(
             preview.contains(where: { $0.contains("(0001)") }),
             "small-chat preview must not suffix a duplicated handle: \(preview)"
@@ -148,7 +154,10 @@ final class ChatSummaryQueriesTests: XCTestCase {
         XCTAssertEqual(identity.participants.count, 6)
         XCTAssertTrue(identity.isNamed)
 
-        let preview = try ChatSummaryBuilder.participantsPreview(db: db, chatId: 10, identity: identity)
+        let preview = ChatSummaryBuilder.participantsPreview(
+            identity: identity,
+            recentSenders: try ChatSummaryQueries.recentSendersByChat(db: db, chatIds: [10])[10] ?? []
+        )
 
         XCTAssertEqual(preview.count, 3, "unique names plus the remainder marker")
         XCTAssertEqual(preview.first, "Chris Green", "most recent sender leads the preview")
@@ -170,7 +179,10 @@ final class ChatSummaryQueriesTests: XCTestCase {
         XCTAssertTrue(identity.isNamed)
         XCTAssertEqual(identity.participantCount, 6)
 
-        let preview = try ChatSummaryBuilder.participantsPreview(db: db, chatId: 10, identity: identity)
+        let preview = ChatSummaryBuilder.participantsPreview(
+            identity: identity,
+            recentSenders: try ChatSummaryQueries.recentSendersByChat(db: db, chatIds: [10])[10] ?? []
+        )
         XCTAssertEqual(
             preview,
             ["Chris Green", "+1 (555) 000-0005", "Alice Smith", "+3 more"]
@@ -190,7 +202,10 @@ final class ChatSummaryQueriesTests: XCTestCase {
         XCTAssertFalse(identity.isNamed)
         XCTAssertEqual(identity.participantCount, 6)
 
-        let preview = try ChatSummaryBuilder.participantsPreview(db: db, chatId: 10, identity: identity)
+        let preview = ChatSummaryBuilder.participantsPreview(
+            identity: identity,
+            recentSenders: try ChatSummaryQueries.recentSendersByChat(db: db, chatIds: [10])[10] ?? []
+        )
         XCTAssertEqual(
             preview,
             ["Alice Smith", "Bob Brown", "Chris Green", "+3 more"]

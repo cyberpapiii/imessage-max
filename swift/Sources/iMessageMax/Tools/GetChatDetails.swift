@@ -69,23 +69,17 @@ enum GetChatDetailsTool {
         guard let chatRow = try loadChatRow(chatId: numericChatId, database: database) else {
             throw ToolFailure.chatNotFound(chatId)
         }
-        let participants = try await loadParticipants(chatId: numericChatId, resolver: resolver, database: database)
-        let identity = ChatIdentity(
-            mcpId: ChatIdentifier.format(numericChatId),
-            guid: chatRow.guid,
-            explicitName: chatRow.displayName,
-            participants: participants
-        )
-        let chatSummary = try ChatSummaryBuilder.buildSummary(
+        let page = try await ChatPage.build(
+            [ChatPage.Chat(id: numericChatId, guid: chatRow.guid, explicitName: chatRow.displayName)],
+            lastMessages: ChatPage.LastMessageOptions(previewMaxLength: 80, unknownSenderLabel: "Unknown", agoFallback: nil),
             db: database,
-            chatId: numericChatId,
-            identity: identity
+            resolver: resolver
         )
-
-        let lastMessageResult = try await loadLastMessage(chatId: numericChatId, resolver: resolver, database: database)
+        guard let entry = page[numericChatId] else { throw ToolFailure.chatNotFound(chatId) }
+        let identity = entry.identity
         let state = try loadState(
             chatId: numericChatId,
-            lastMessageAwaitingReply: lastMessageResult.awaitingReply,
+            lastMessageAwaitingReply: entry.lastMessage?.awaitingReply,
             database: database
         )
 
@@ -107,7 +101,7 @@ enum GetChatDetailsTool {
         }
 
         let response = GetChatDetailsResponse(
-            chat: chatSummary,
+            chat: entry.summary,
             participants: IdentityDisplayFormatter.participants(identity.participants),
             identity: ChatDetailsIdentity(
                 guid: identity.guid,
@@ -116,7 +110,7 @@ enum GetChatDetailsTool {
                 aliases: identity.aliases
             ),
             state: state,
-            lastMessage: lastMessageResult.summary,
+            lastMessage: entry.lastMessage?.info,
             shared: shared
         )
 
@@ -128,11 +122,6 @@ enum GetChatDetailsTool {
         let displayName: String?
     }
 
-    private struct LastMessageResult {
-        let summary: LastMessageSummary?
-        let awaitingReply: Bool?
-    }
-
     private static func loadChatRow(chatId: Int64, database: Database) throws -> ChatRow? {
         let rows: [ChatRow] = try database.query(
             "SELECT guid, display_name FROM chat WHERE ROWID = ?",
@@ -141,79 +130,6 @@ enum GetChatDetailsTool {
             ChatRow(guid: row.string(0), displayName: row.string(1))
         }
         return rows.first
-    }
-
-    private static func loadParticipants(
-        chatId: Int64,
-        resolver: ContactResolver,
-        database: Database
-    ) async throws -> [ChatIdentity.Participant] {
-        let rows = try await ChatSummaryQueries.participants(
-            db: database,
-            chatId: chatId,
-            resolver: resolver
-        )
-        return rows.map {
-            ChatIdentity.makeParticipant(handle: $0.handle, contactName: $0.name)
-        }
-    }
-
-    private static func loadLastMessage(
-        chatId: Int64,
-        resolver: ContactResolver,
-        database: Database
-    ) async throws -> LastMessageResult {
-        let rows = try database.query(
-            """
-            SELECT m.ROWID, m.text, m.attributedBody, m.date, m.is_from_me, h.id
-            FROM message m
-            JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
-            LEFT JOIN handle h ON m.handle_id = h.ROWID
-            WHERE cmj.chat_id = ?
-            AND \(SQLFragments.notReaction())
-            ORDER BY m.date DESC
-            LIMIT 1
-            """,
-            params: [chatId]
-        ) { row in
-            (
-                messageId: row.int(0),
-                text: row.string(1),
-                attributedBody: row.blob(2),
-                date: row.optionalInt(3),
-                isFromMe: row.int(4) == 1,
-                senderHandle: row.string(5)
-            )
-        }
-
-        guard let row = rows.first else {
-            return LastMessageResult(summary: nil, awaitingReply: nil)
-        }
-
-        let from: String
-        if row.isFromMe {
-            from = "Me"
-        } else if let handle = row.senderHandle {
-            from = await IdentityDisplayFormatter.displayName(handle: handle, resolver: resolver)
-        } else {
-            from = "Unknown"
-        }
-
-        let date = AppleTime.toDate(row.date)
-        let summary = LastMessageSummary(
-            from: from,
-            text: try MessagePreviewResolver.messageSummary(
-                db: database,
-                messageId: row.messageId,
-                text: row.text,
-                attributedBody: row.attributedBody,
-                maxLength: 80
-            ),
-            ago: TimeUtils.formatCompactRelative(date),
-            ts: TimeUtils.formatISO(date)
-        )
-
-        return LastMessageResult(summary: summary, awaitingReply: !row.isFromMe)
     }
 
     private static func loadState(

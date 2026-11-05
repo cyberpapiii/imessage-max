@@ -7,7 +7,7 @@ enum UnreadFormat: String, CaseIterable {
     case summary
 }
 
-struct UnreadMessagesResponse: Codable {
+struct UnreadMessagesResponse: Encodable {
     let messages: [UnreadMessageItem]
     let totalUnread: Int
     let chatsWithUnread: Int
@@ -23,19 +23,9 @@ struct UnreadMessagesResponse: Codable {
         case cursor
         case filteredHidden = "filtered_hidden"
     }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(messages, forKey: .messages)
-        try container.encode(totalUnread, forKey: .totalUnread)
-        try container.encode(chatsWithUnread, forKey: .chatsWithUnread)
-        try container.encode(more, forKey: .more)
-        try container.encodeIfPresent(cursor, forKey: .cursor)
-        try container.encodeIfPresent(filteredHidden, forKey: .filteredHidden)
-    }
 }
 
-struct UnreadMessageItem: Codable {
+struct UnreadMessageItem: Encodable {
     let id: String
     let chat: ChatReference
     let from: String
@@ -44,7 +34,7 @@ struct UnreadMessageItem: Codable {
     let ts: String?
 }
 
-struct UnreadSummaryResponse: Codable {
+struct UnreadSummaryResponse: Encodable {
     let chats: [UnreadChatSummary]
     let totalUnread: Int
     let chatsWithUnread: Int
@@ -58,18 +48,9 @@ struct UnreadSummaryResponse: Codable {
         case more
         case filteredHidden = "filtered_hidden"
     }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(chats, forKey: .chats)
-        try container.encode(totalUnread, forKey: .totalUnread)
-        try container.encode(chatsWithUnread, forKey: .chatsWithUnread)
-        try container.encode(more, forKey: .more)
-        try container.encodeIfPresent(filteredHidden, forKey: .filteredHidden)
-    }
 }
 
-struct UnreadChatSummary: Codable {
+struct UnreadChatSummary: Encodable {
     let chat: ChatSummary
     let unreadCount: Int
     let oldestUnread: String?
@@ -297,11 +278,11 @@ final class GetUnread {
             let msgChatId = row.chatId
             let senderHandle = row.senderHandle
 
-            let participants = participantsByChat[msgChatId] ?? []
-            let identity = makeChatIdentity(
+            let identity = ChatIdentity.from(
                 chatId: msgChatId,
+                guid: nil,
                 explicitName: row.chatDisplayName,
-                participants: participants
+                rows: participantsByChat[msgChatId] ?? []
             )
 
             let text = MessageTextExtractor.extract(text: row.text, attributedBody: row.attributedBody)
@@ -393,75 +374,27 @@ final class GetUnread {
             rows = Array(rows.prefix(limit))
         }
 
-        var totalUnread = 0
-        var chats: [UnreadChatSummary] = []
-
-        // Batched lookups: one participants query and one latest-unread query
-        // for all chats, instead of 2+ queries per unread chat.
-        let chatIds = rows.map(\.chatId)
-        let participantsByChat = try await ChatSummaryQueries.participantsByChat(
+        let page = try await ChatPage.build(
+            rows.map { ChatPage.Chat(id: $0.chatId, explicitName: $0.chatDisplayName, newestDate: $0.newestUnreadDate) },
+            lastMessages: ChatPage.LastMessageOptions(
+                sinceApple: sinceApple,
+                unknownSenderLabel: "Unknown",
+                agoFallback: nil,
+                onlyUnreadInbound: true
+            ),
             db: database,
-            chatIds: chatIds,
             resolver: contactResolver
         )
-        var newestUnreadDates: [Int64: Int64] = [:]
-        for row in rows {
-            if let newest = row.newestUnreadDate {
-                newestUnreadDates[row.chatId] = newest
-            }
-        }
-        let lastByChat = try await ChatSummaryQueries.lastMessagesByChat(
-            db: database,
-            chatIds: chatIds,
-            resolver: contactResolver,
-            sinceApple: sinceApple,
-            previewMaxLength: 50,
-            unknownSenderLabel: "Unknown",
-            agoFallback: nil,
-            onlyUnreadInbound: true,
-            newestDates: newestUnreadDates
-        )
-        let recentSenderChatIds = rows.compactMap { row -> Int64? in
-            let trimmed = row.chatDisplayName?.trimmingCharacters(in: .whitespacesAndNewlines)
-            let isNamed = trimmed?.isEmpty == false
-            let count = (participantsByChat[row.chatId] ?? []).count
-            return (isNamed && count > 4) ? row.chatId : nil
-        }
-        let recentSendersByChat = try ChatSummaryQueries.recentSendersByChat(
-            db: database,
-            chatIds: recentSenderChatIds
-        )
-
-        for row in rows {
-            let msgChatId = row.chatId
-            let unreadCount = row.unreadCount
-            totalUnread += unreadCount
-
-            let oldestDt = AppleTime.toDate(row.oldestUnreadDate)
-            let participants = participantsByChat[msgChatId] ?? []
-            let identity = makeChatIdentity(
-                chatId: msgChatId,
-                explicitName: row.chatDisplayName,
-                participants: participants
-            )
-            let summary = try ChatSummaryBuilder.buildSummary(
-                db: database,
-                chatId: msgChatId,
-                identity: identity,
-                recentSenders: recentSendersByChat[msgChatId]
-            )
-
-            let lastMessage = lastByChat[msgChatId]?.info
-
-            chats.append(
-                UnreadChatSummary(
-                    chat: summary,
-                    unreadCount: unreadCount,
-                    oldestUnread: TimeUtils.formatCompactRelative(oldestDt),
-                    lastMessage: lastMessage
-                )
+        let chats = rows.compactMap { row -> UnreadChatSummary? in
+            guard let entry = page[row.chatId] else { return nil }
+            return UnreadChatSummary(
+                chat: entry.summary,
+                unreadCount: row.unreadCount,
+                oldestUnread: TimeUtils.formatCompactRelative(AppleTime.toDate(row.oldestUnreadDate)),
+                lastMessage: entry.lastMessage?.info
             )
         }
+        let totalUnread = rows.reduce(0) { $0 + $1.unreadCount }
 
         let filteredHidden = includeFiltered
             ? nil
@@ -473,21 +406,6 @@ final class GetUnread {
             chatsWithUnread: chats.count,
             more: more,
             filteredHidden: filteredHidden
-        )
-    }
-
-    private func makeChatIdentity(
-        chatId: Int64,
-        explicitName: String?,
-        participants: [ChatSummaryQueries.Participant]
-    ) -> ChatIdentity {
-        ChatIdentity(
-            mcpId: ChatIdentifier.format(chatId),
-            guid: nil,
-            explicitName: explicitName,
-            participants: participants.map {
-                ChatIdentity.makeParticipant(handle: $0.handle, contactName: $0.name)
-            }
         )
     }
 

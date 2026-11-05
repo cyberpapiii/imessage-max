@@ -340,7 +340,7 @@ extension SearchTool {
         filteredHidden: Int?
     ) async throws -> String {
         var results: [SearchResult] = []
-        let identityByChat = try await identitiesByChat(db: db, rows: rows, resolver: resolver)
+        let identityByChat = try await ChatPage.identities(chatsInFirstAppearanceOrder(rows), db: db, resolver: resolver)
         var contextRowsByAnchor: [String: (before: [ContextRow], after: [ContextRow])] = [:]
         if includeContext {
             let anchors = rows.compactMap { row -> (chatId: Int64, date: Int64)? in
@@ -403,7 +403,7 @@ extension SearchTool {
                 resolver: resolver
             )
 
-            let chatName = identityByChat[row.chatId]?.displayName ?? "Unknown Chat"
+            let chatName = identityByChat[row.chatId]?.displayName ?? DisplayNameGenerator.fromNames([])
 
             var result = SearchResult(
                 id: MessageIdentifier.format(row.msgId),
@@ -453,23 +453,13 @@ extension SearchTool {
         filteredHidden: Int?
     ) async throws -> String {
         var chatsData: [Int64: GroupedChatData] = [:]
-        let identityByChat = try await identitiesByChat(db: db, rows: rows, resolver: resolver)
-        let recentSenderChatIds = identityByChat.compactMap { chatId, identity -> Int64? in
-            (identity.isNamed && identity.participantCount > 4) ? chatId : nil
-        }
-        let recentSendersByChat = try ChatSummaryQueries.recentSendersByChat(
+        let page = try await ChatPage.build(
+            chatsInFirstAppearanceOrder(rows),
+            lastMessages: nil,
             db: db,
-            chatIds: recentSenderChatIds
+            resolver: resolver
         )
-        var summaryByChat: [Int64: ChatSummary] = [:]
-        for (chatId, identity) in identityByChat {
-            summaryByChat[chatId] = try ChatSummaryBuilder.buildSummary(
-                db: db,
-                chatId: chatId,
-                identity: identity,
-                recentSenders: recentSendersByChat[chatId]
-            )
-        }
+        let summaryByChat = page.mapValues(\.summary)
 
         for row in rows {
             let chatId = row.chatId
@@ -854,31 +844,12 @@ extension SearchTool {
         return await IdentityDisplayFormatter.displayName(handle: handle, resolver: resolver)
     }
 
-    static func identitiesByChat(
-        db: Database,
-        rows: [SearchRow],
-        resolver: ContactResolver
-    ) async throws -> [Int64: ChatIdentity] {
-        let chatIds = Array(Set(rows.map(\.chatId)))
-        let participantsByChat = try await ChatSummaryQueries.participantsByChat(
-            db: db,
-            chatIds: chatIds,
-            resolver: resolver
-        )
-        var explicitNameByChat: [Int64: String?] = [:]
-        for row in rows where explicitNameByChat[row.chatId] == nil {
-            explicitNameByChat[row.chatId] = row.chatDisplayName
+    /// Each distinct chat in `rows`, named as the first row for it names it.
+    static func chatsInFirstAppearanceOrder(_ rows: [SearchRow]) -> [ChatPage.Chat] {
+        var seen: Set<Int64> = []
+        return rows.compactMap { row in
+            seen.insert(row.chatId).inserted ? ChatPage.Chat(id: row.chatId, explicitName: row.chatDisplayName) : nil
         }
-        var result: [Int64: ChatIdentity] = [:]
-        for chatId in chatIds {
-            result[chatId] = ChatIdentity.from(
-                chatId: chatId,
-                guid: nil,
-                explicitName: explicitNameByChat[chatId] ?? nil,
-                rows: participantsByChat[chatId] ?? []
-            )
-        }
-        return result
     }
 
     static func wordMatches(searchWord: String, in text: String, textWords: [String], fuzzy: Bool) -> Bool {

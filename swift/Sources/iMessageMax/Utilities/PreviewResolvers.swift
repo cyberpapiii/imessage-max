@@ -2,29 +2,6 @@ import Foundation
 
 enum MessagePreviewResolver {
     static func messageSummary(
-        db: Database,
-        messageId: Int64,
-        text: String?,
-        attributedBody: Data?,
-        maxLength: Int
-    ) throws -> String {
-        if let formatted = SummaryPreviewFormatter.formattedTextPreview(
-            text: text,
-            attributedBody: attributedBody,
-            maxLength: maxLength
-        ) {
-            return formatted
-        }
-
-        return messageSummary(
-            text: text,
-            attributedBody: attributedBody,
-            maxLength: maxLength,
-            attachmentTypes: try attachmentTypes(db: db, messageId: messageId)
-        )
-    }
-
-    static func messageSummary(
         text: String?,
         attributedBody: Data?,
         maxLength: Int,
@@ -39,10 +16,6 @@ enum MessagePreviewResolver {
         }
 
         return SummaryPreviewFormatter.attachmentPlaceholder(for: attachmentTypes)
-    }
-
-    static func attachmentTypes(db: Database, messageId: Int64) throws -> [AttachmentType] {
-        try attachmentTypesByMessage(db: db, messageIds: [messageId])[messageId] ?? []
     }
 
     static func attachmentTypesByMessage(
@@ -75,32 +48,23 @@ enum MessagePreviewResolver {
 }
 
 enum ChatSummaryBuilder {
-    static func buildSummary(
-        db: Database,
-        chatId: Int64,
-        identity: ChatIdentity,
-        recentSenders: [String]? = nil
-    ) throws -> ChatSummary {
+    /// Named groups of more than four show who spoke last, so they need the
+    /// chat's recent senders; every other chat previews from participants alone.
+    static func needsRecentSenders(_ identity: ChatIdentity) -> Bool {
+        identity.isNamed && identity.participantCount > 4
+    }
+
+    static func summary(identity: ChatIdentity, recentSenders: [String]) -> ChatSummary {
         ChatSummary(
             id: identity.mcpId,
             name: identity.displayName,
             group: identity.participantCount > 1 ? true : nil,
             participantCount: identity.participantCount,
-            participantsPreview: try participantsPreview(
-                db: db,
-                chatId: chatId,
-                identity: identity,
-                recentSenders: recentSenders
-            )
+            participantsPreview: participantsPreview(identity: identity, recentSenders: recentSenders)
         )
     }
 
-    static func participantsPreview(
-        db: Database,
-        chatId: Int64,
-        identity: ChatIdentity,
-        recentSenders: [String]? = nil
-    ) throws -> [String] {
+    static func participantsPreview(identity: ChatIdentity, recentSenders: [String]) -> [String] {
         let participants = identity.participants
         if participants.count <= 4 {
             return IdentityDisplayFormatter.previewNames(selected: participants, allParticipants: participants)
@@ -108,12 +72,7 @@ enum ChatSummaryBuilder {
 
         let selected: [ChatIdentity.Participant]
         if identity.isNamed {
-            let recent: [ChatIdentity.Participant]
-            if let recentSenders {
-                recent = selectRecent(handles: recentSenders, participants: participants)
-            } else {
-                recent = try recentParticipantPreviewNames(db: db, chatId: chatId, participants: participants)
-            }
+            let recent = selectRecent(handles: recentSenders, participants: participants)
             let backfill = prioritizedParticipants(participants).filter { candidate in
                 !recent.contains { $0.handle == candidate.handle }
             }
@@ -149,30 +108,6 @@ enum ChatSummaryBuilder {
             if selected.count == 3 { break }
         }
         return selected
-    }
-
-    private static func recentParticipantPreviewNames(
-        db: Database,
-        chatId: Int64,
-        participants: [ChatIdentity.Participant]
-    ) throws -> [ChatIdentity.Participant] {
-        let sql = """
-            SELECT h.id as sender_handle
-            FROM message m
-            JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
-            LEFT JOIN handle h ON m.handle_id = h.ROWID
-            WHERE cmj.chat_id = ?
-            AND \(SQLFragments.notReaction())
-            AND m.is_from_me = 0
-            AND h.id IS NOT NULL
-            ORDER BY m.date DESC
-            LIMIT 50
-            """
-
-        let handles = try db.query(sql, params: [chatId]) { row in
-            row.string(0)
-        }.compactMap { $0 }
-        return selectRecent(handles: handles, participants: participants)
     }
 
     private static func prioritizedParticipants(_ participants: [ChatIdentity.Participant]) -> [ChatIdentity.Participant] {

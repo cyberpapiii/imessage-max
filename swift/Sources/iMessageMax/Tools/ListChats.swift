@@ -9,15 +9,14 @@ enum ListChatsSort: String {
     case mostActive = "most_active"
 }
 
-/// Response structure for list_chats tool
-struct ListChatsResponse: Codable {
+struct ListChatsResponse: Encodable {
     let chats: [ChatInfo]
     let totalChats: Int?
     let totalGroups: Int?
     let totalDms: Int?
     let more: Bool
     let cursor: String?
-    let filteredHidden: Int?
+    var filteredHidden: Int? = nil
 
     enum CodingKeys: String, CodingKey {
         case chats
@@ -28,81 +27,20 @@ struct ListChatsResponse: Codable {
         case cursor
         case filteredHidden = "filtered_hidden"
     }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(chats, forKey: .chats)
-        try container.encodeIfPresent(totalChats, forKey: .totalChats)
-        try container.encodeIfPresent(totalGroups, forKey: .totalGroups)
-        try container.encodeIfPresent(totalDms, forKey: .totalDms)
-        try container.encode(more, forKey: .more)
-        try container.encodeIfPresent(cursor, forKey: .cursor)
-        try container.encodeIfPresent(filteredHidden, forKey: .filteredHidden)
-    }
-
-    init(
-        chats: [ChatInfo],
-        totalChats: Int?,
-        totalGroups: Int?,
-        totalDms: Int?,
-        more: Bool,
-        cursor: String?,
-        filteredHidden: Int? = nil
-    ) {
-        self.chats = chats
-        self.totalChats = totalChats
-        self.totalGroups = totalGroups
-        self.totalDms = totalDms
-        self.more = more
-        self.cursor = cursor
-        self.filteredHidden = filteredHidden
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        chats = try container.decode([ChatInfo].self, forKey: .chats)
-        totalChats = try container.decodeIfPresent(Int.self, forKey: .totalChats)
-        totalGroups = try container.decodeIfPresent(Int.self, forKey: .totalGroups)
-        totalDms = try container.decodeIfPresent(Int.self, forKey: .totalDms)
-        more = try container.decode(Bool.self, forKey: .more)
-        cursor = try container.decodeIfPresent(String.self, forKey: .cursor)
-        filteredHidden = try container.decodeIfPresent(Int.self, forKey: .filteredHidden)
-    }
 }
 
-/// Individual chat info in response
-struct ChatInfo: Codable {
-    let id: String
-    let name: String
-    let group: Bool?
-    let participantCount: Int
-    let participantsPreview: [String]
+typealias ChatInfo = ChatListing<ChatInfoDetails>
+
+struct ChatInfoDetails: Encodable {
     let lastMessage: LastMessageSummary?
     let awaitingReply: Bool?
 
     enum CodingKeys: String, CodingKey {
-        case id
-        case name
-        case group
-        case participantCount = "participant_count"
-        case participantsPreview = "participants_preview"
         case lastMessage = "last_message"
         case awaitingReply = "awaiting_reply"
     }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(id, forKey: .id)
-        try container.encode(name, forKey: .name)
-        try container.encodeIfPresent(lastMessage, forKey: .lastMessage)
-        try container.encodeIfPresent(awaitingReply, forKey: .awaitingReply)
-        try container.encodeIfPresent(group, forKey: .group)
-        try container.encode(participantCount, forKey: .participantCount)
-        try container.encode(participantsPreview, forKey: .participantsPreview)
-    }
 }
 
-/// Error response
 /// Implementation of the list_chats tool
 enum ListChatsTool {
     // MARK: - Tool Registration
@@ -409,75 +347,25 @@ enum ListChatsTool {
         let hasMore = fetchedRows.count > clampedLimit
         let chatRows = Array(fetchedRows.prefix(clampedLimit))
 
-        // Batch-fetch participants and last messages for all chats at once.
-        let chatIds = chatRows.map(\.id)
-        let participantsByChat = try await ChatSummaryQueries.participantsByChat(
+        // The page query already found each chat's newest message date, so the
+        // preview lookup seeks straight to it. Sorts that skip the aggregate
+        // have no date and fall back to the search.
+        let page = try await ChatPage.build(
+            chatRows.map { ChatPage.Chat(id: $0.id, guid: $0.guid, explicitName: $0.displayName, newestDate: $0.lastMessageDate) },
+            lastMessages: ChatPage.LastMessageOptions(),
             db: db,
-            chatIds: chatIds,
             resolver: resolver
         )
-        // The page query already found each chat's newest message date, so
-        // the preview lookup can seek straight to it instead of searching
-        // the chat's history again. Sorts that skip the aggregate have no
-        // dates to give and fall back to the search.
-        var newestDates: [Int64: Int64] = [:]
-        for chatRow in chatRows {
-            if let date = chatRow.lastMessageDate {
-                newestDates[chatRow.id] = date
+        let chats = chatRows.compactMap { row in
+            page[row.id].map { entry in
+                ChatInfo(
+                    chat: entry.summary,
+                    details: ChatInfoDetails(
+                        lastMessage: entry.lastMessage?.info,
+                        awaitingReply: entry.lastMessage?.awaitingReply
+                    )
+                )
             }
-        }
-        let lastMessagesByChat = try await ChatSummaryQueries.lastMessagesByChat(
-            db: db,
-            chatIds: chatIds,
-            resolver: resolver,
-            newestDates: newestDates
-        )
-        let recentSenderChatIds = chatRows.compactMap { row -> Int64? in
-            let trimmed = row.displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
-            let isNamed = trimmed?.isEmpty == false
-            let count = (participantsByChat[row.id] ?? []).count
-            return (isNamed && count > 4) ? row.id : nil
-        }
-        let recentSendersByChat = try ChatSummaryQueries.recentSendersByChat(
-            db: db,
-            chatIds: recentSenderChatIds
-        )
-
-        var chats: [ChatInfo] = []
-
-        for chatRow in chatRows {
-            let participantRows = participantsByChat[chatRow.id] ?? []
-
-            let identityParticipants = participantRows.map { p in
-                ChatIdentity.makeParticipant(handle: p.handle, contactName: p.name)
-            }
-
-            let identity = ChatIdentity(
-                mcpId: ChatIdentifier.format(chatRow.id),
-                guid: chatRow.guid,
-                explicitName: chatRow.displayName,
-                participants: identityParticipants
-            )
-            let isGroupChat = identity.participantCount > 1
-
-            let lastMsg = lastMessagesByChat[chatRow.id]
-
-            let chatInfo = ChatInfo(
-                id: identity.mcpId,
-                name: identity.displayName,
-                group: isGroupChat ? true : nil,
-                participantCount: identity.participantCount,
-                participantsPreview: try ChatSummaryBuilder.participantsPreview(
-                    db: db,
-                    chatId: chatRow.id,
-                    identity: identity,
-                    recentSenders: recentSendersByChat[chatRow.id]
-                ),
-                lastMessage: lastMsg?.info,
-                awaitingReply: lastMsg?.awaitingReply
-            )
-
-            chats.append(chatInfo)
         }
 
         let totals = cursor == nil ? try getTotals(db: db, includeFiltered: includeFiltered) : nil

@@ -12,7 +12,6 @@ enum ChatSummaryQueries {
         let service: String?
     }
 
-    /// Mirrors `ListChats.LastMessageResult` exactly.
     struct LastMessage {
         let info: LastMessageSummary
         let awaitingReply: Bool
