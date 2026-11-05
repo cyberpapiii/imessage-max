@@ -237,7 +237,7 @@ enum ListChatsTool {
         /// Builds the page query, optionally bounding the aggregate to the
         /// newest `candidateWidth` messages.
         func buildPageQuery(candidateWidth: Int?) -> (String, [Any]) {
-            var innerFilter = "m.associated_message_type = 0"
+            var innerFilter = SQLFragments.notReaction()
             var innerParams: [Any] = []
             if let sinceApple {
                 innerFilter += "\n                       AND m.date >= ?"
@@ -281,15 +281,14 @@ enum ListChatsTool {
                 "c.ROWID as id",
                 "c.guid",
                 "c.display_name",
-                "(SELECT COUNT(DISTINCT chj.handle_id) FROM chat_handle_join chj"
-                    + " WHERE chj.chat_id = c.ROWID) as participant_count",
+                "\(SQLFragments.participantCount()) as participant_count",
                 needsMessageAggregate ? "COALESCE(msg.message_count, 0) as message_count" : "0 as message_count",
                 needsMessageAggregate ? "msg.last_message_date as last_message_date" : "NULL as last_message_date"
             )
             .from("chat c")
 
             if !includeFiltered {
-                qb.where("c.is_filtered = 0")
+                qb.where(SQLFragments.shownChat())
             }
 
             if sinceApple != nil || candidateWidth != nil {
@@ -536,7 +535,7 @@ enum ListChatsTool {
 
     /// Get total counts
     private static func getTotals(db: Database, includeFiltered: Bool) throws -> (total: Int, groups: Int, dms: Int) {
-        let filter = includeFiltered ? "" : "WHERE c.is_filtered = 0"
+        let filter = includeFiltered ? "" : "WHERE \(SQLFragments.shownChat())"
         let sql = """
             SELECT
                 COUNT(*) as total,
@@ -568,13 +567,13 @@ enum ListChatsTool {
             let sql = """
                 SELECT COUNT(*)
                 FROM chat c
-                WHERE c.is_filtered != 0
+                WHERE \(SQLFragments.hiddenChat())
                   AND EXISTS (
                     SELECT 1
                     FROM chat_message_join cmj
                     JOIN message m ON m.ROWID = cmj.message_id
                     WHERE cmj.chat_id = c.ROWID
-                      AND m.associated_message_type = 0
+                      AND \(SQLFragments.notReaction())
                       AND m.date >= ?
                   )
                 """
@@ -585,7 +584,7 @@ enum ListChatsTool {
         }
 
         let rows: [Int] = try db.query(
-            "SELECT COUNT(*) FROM chat c WHERE c.is_filtered != 0",
+            "SELECT COUNT(*) FROM chat c WHERE \(SQLFragments.hiddenChat())",
             params: []
         ) { row in
             Int(row.int(0))

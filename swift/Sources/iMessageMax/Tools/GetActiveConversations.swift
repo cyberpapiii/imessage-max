@@ -135,10 +135,7 @@ enum GetActiveConversations {
             .select(
                 "c.ROWID as chat_id",
                 "c.display_name",
-                """
-                (SELECT COUNT(DISTINCT chj.handle_id) FROM chat_handle_join chj
-                 WHERE chj.chat_id = c.ROWID) as participant_count
-                """,
+                "\(SQLFragments.participantCount()) as participant_count",
                 "SUM(CASE WHEN m.is_from_me = 1 THEN 1 ELSE 0 END) as my_count",
                 "SUM(CASE WHEN m.is_from_me = 0 THEN 1 ELSE 0 END) as their_count",
                 "MAX(CASE WHEN m.is_from_me = 1 THEN m.date ELSE NULL END) as last_from_me",
@@ -150,7 +147,7 @@ enum GetActiveConversations {
             .join("chat_message_join cmj ON c.ROWID = cmj.chat_id")
             .join("message m ON cmj.message_id = m.ROWID")
             .where("m.date >= ?", windowStartApple)
-            .where("m.associated_message_type = 0")
+            .where(SQLFragments.notReaction())
             .groupBy("c.ROWID")
             .having("my_count >= 1 AND their_count >= 1")
         if let filterGroup = isGroup {

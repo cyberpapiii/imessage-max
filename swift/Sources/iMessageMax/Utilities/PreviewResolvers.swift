@@ -51,7 +51,7 @@ enum MessagePreviewResolver {
     ) throws -> [Int64: [AttachmentType]] {
         guard !messageIds.isEmpty else { return [:] }
 
-        let placeholders = messageIds.map { _ in "?" }.joined(separator: ",")
+        let placeholders = SQLFragments.placeholders(messageIds.count)
         let sql = """
             SELECT maj.message_id, a.mime_type, a.uti
             FROM attachment a
@@ -162,7 +162,7 @@ enum ChatSummaryBuilder {
             JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
             LEFT JOIN handle h ON m.handle_id = h.ROWID
             WHERE cmj.chat_id = ?
-            AND m.associated_message_type = 0
+            AND \(SQLFragments.notReaction())
             AND m.is_from_me = 0
             AND h.id IS NOT NULL
             ORDER BY m.date DESC

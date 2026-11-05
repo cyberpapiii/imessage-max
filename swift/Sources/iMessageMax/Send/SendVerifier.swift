@@ -140,7 +140,7 @@ struct SendVerifier: Sendable {
             \(joins)
             WHERE \(filter)
               AND m.is_from_me = 1
-              AND m.associated_message_type = 0
+              AND \(SQLFragments.notReaction())
               AND m.date >= ?
               AND m.date <= ?
             ORDER BY m.date ASC

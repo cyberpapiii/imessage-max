@@ -223,9 +223,7 @@ actor SendResolver {
             JOIN chat_handle_join chj ON c.ROWID = chj.chat_id
             JOIN handle h ON chj.handle_id = h.ROWID
             WHERE h.id = ?
-              AND (SELECT COUNT(DISTINCT chj2.handle_id)
-                   FROM chat_handle_join chj2
-                   WHERE chj2.chat_id = c.ROWID) = 1
+              AND \(SQLFragments.participantCount()) = 1
             ORDER BY c.ROWID DESC
             LIMIT 1
             """,
@@ -239,7 +237,7 @@ actor SendResolver {
 
     private func getLastContactTimes(handles: [String]) throws -> [String: Date] {
         guard !handles.isEmpty else { return [:] }
-        let placeholders = handles.map { _ in "?" }.joined(separator: ", ")
+        let placeholders = SQLFragments.placeholders(handles.count)
         let rows: [(String, Int64?)] = try db.query(
             """
             SELECT h.id, MAX(m.date)

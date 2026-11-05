@@ -332,7 +332,7 @@ final class ListAttachments {
                 .leftJoin("handle h ON m.handle_id = h.ROWID")
                 .join("message_attachment_join maj ON m.ROWID = maj.message_id")
                 .join("attachment a ON maj.attachment_id = a.ROWID")
-                .where("m.associated_message_type = 0")
+                .where(SQLFragments.notReaction())
                 .where("COALESCE(a.hide_attachment, 0) = 0")
             if let chatId {
                 query.where("c.ROWID = ?", chatId)
@@ -375,7 +375,7 @@ final class ListAttachments {
                 .from("message m")
                 .join("chat c ON c.ROWID = (\(chatPick))", params: chatPickParams)
                 .leftJoin("handle h ON m.handle_id = h.ROWID")
-                .where("m.associated_message_type = 0")
+                .where(SQLFragments.notReaction())
                 .where("""
                     EXISTS (SELECT 1
                             FROM message_attachment_join maj
@@ -435,7 +435,7 @@ final class ListAttachments {
     ) throws -> [Int64: [AttachmentSummary]] {
         guard !messageIds.isEmpty else { return [:] }
 
-        let placeholders = messageIds.map { _ in "?" }.joined(separator: ", ")
+        let placeholders = SQLFragments.placeholders(messageIds.count)
         let query = QueryBuilder()
             .select("maj.message_id", "a.ROWID", "a.filename", "a.mime_type", "a.uti", "a.total_bytes")
             .from("attachment a")

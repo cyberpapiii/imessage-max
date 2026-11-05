@@ -231,7 +231,7 @@ enum GetContext {
                     JOIN chat c ON cmj.chat_id = c.ROWID
                     LEFT JOIN handle h ON m.handle_id = h.ROWID
                     WHERE c.ROWID = ?
-                      AND m.associated_message_type = 0
+                      AND \(SQLFragments.notReaction())
                       AND (m.text LIKE ? ESCAPE '\\' OR (m.text IS NULL AND m.attributedBody IS NOT NULL))
                     ORDER BY m.date DESC
                     LIMIT ? OFFSET ?
@@ -289,7 +289,7 @@ enum GetContext {
             LEFT JOIN handle h ON m.handle_id = h.ROWID
             WHERE cmj.chat_id = ?
             AND m.date < ?
-            AND m.associated_message_type = 0
+            AND \(SQLFragments.notReaction())
             ORDER BY m.date DESC
             LIMIT ?
             """
@@ -324,7 +324,7 @@ enum GetContext {
             LEFT JOIN handle h ON m.handle_id = h.ROWID
             WHERE cmj.chat_id = ?
             AND m.date > ?
-            AND m.associated_message_type = 0
+            AND \(SQLFragments.notReaction())
             ORDER BY m.date ASC
             LIMIT ?
             """

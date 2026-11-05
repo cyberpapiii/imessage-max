@@ -156,11 +156,11 @@ extension SearchTool {
         if let isGroupChat = isGroup {
             if isGroupChat {
                 builder.where(
-                    "(SELECT COUNT(*) FROM chat_handle_join chj WHERE chj.chat_id = c.ROWID) > ?",
+                    "\(SQLFragments.participantCount()) > ?",
                     1)
             } else {
                 builder.where(
-                    "(SELECT COUNT(*) FROM chat_handle_join chj WHERE chj.chat_id = c.ROWID) = ?",
+                    "\(SQLFragments.participantCount()) = ?",
                     1)
             }
         }
@@ -244,7 +244,7 @@ extension SearchTool {
             terms: terms,
             matchAll: matchAll,
             fuzzy: fuzzy,
-            chatFilterPredicate: includeFiltered ? nil : "c.is_filtered = 0"
+            chatFilterPredicate: includeFiltered ? nil : SQLFragments.shownChat()
         )
 
         if sort == .oldestFirst {
@@ -324,7 +324,7 @@ extension SearchTool {
             terms: terms,
             matchAll: matchAll,
             fuzzy: fuzzy,
-            chatFilterPredicate: "c.is_filtered != 0",
+            chatFilterPredicate: SQLFragments.hiddenChat(),
             drivenFromChats: true
         )
         return builder.build()
@@ -628,7 +628,7 @@ extension SearchTool {
                 SELECT * FROM (
                   SELECT ? AS anchor_date, 'before' AS side, \(columns)
                   \(fromJoin)
-                  WHERE cmj.chat_id = ? AND m.date < ? AND m.associated_message_type = 0
+                  WHERE cmj.chat_id = ? AND m.date < ? AND \(SQLFragments.notReaction())
                   ORDER BY m.date DESC LIMIT 2
                 )
                 """)
@@ -637,7 +637,7 @@ extension SearchTool {
                 SELECT * FROM (
                   SELECT ? AS anchor_date, 'after' AS side, \(columns)
                   \(fromJoin)
-                  WHERE cmj.chat_id = ? AND m.date > ? AND m.associated_message_type = 0
+                  WHERE cmj.chat_id = ? AND m.date > ? AND \(SQLFragments.notReaction())
                   ORDER BY m.date ASC LIMIT 2
                 )
                 """)
@@ -684,7 +684,7 @@ extension SearchTool {
             FROM message m
             JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
             LEFT JOIN handle h ON m.handle_id = h.ROWID
-            WHERE cmj.chat_id = ? AND m.date < ? AND m.associated_message_type = 0
+            WHERE cmj.chat_id = ? AND m.date < ? AND \(SQLFragments.notReaction())
             ORDER BY m.date DESC LIMIT 2
             """,
             params: [chatId, msgDate]
@@ -695,7 +695,7 @@ extension SearchTool {
             FROM message m
             JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
             LEFT JOIN handle h ON m.handle_id = h.ROWID
-            WHERE cmj.chat_id = ? AND m.date > ? AND m.associated_message_type = 0
+            WHERE cmj.chat_id = ? AND m.date > ? AND \(SQLFragments.notReaction())
             ORDER BY m.date ASC LIMIT 2
             """,
             params: [chatId, msgDate]

@@ -330,7 +330,7 @@ actor GetMessagesSinceTool {
             .leftJoin("chat c ON c.ROWID = (SELECT MIN(cmj2.chat_id) FROM chat_message_join cmj2 WHERE cmj2.message_id = m.ROWID)")
             .where("m.ROWID > ?", sinceRowid)
             .where("m.ROWID <= ?", currentRowid)
-            .where("m.associated_message_type = 0")
+            .where(SQLFragments.notReaction())
         if let chatFilter {
             query.where(
                 "(SELECT MIN(cmj3.chat_id) FROM chat_message_join cmj3 WHERE cmj3.message_id = m.ROWID) = ?",

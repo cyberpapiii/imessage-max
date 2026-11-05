@@ -11,7 +11,7 @@ enum MessageAnnotations {
     static func reactionsMap(db: Database, messageGuids: [String]) throws -> [String: [Reaction]] {
         guard !messageGuids.isEmpty else { return [:] }
 
-        let placeholders = messageGuids.map { _ in "?" }.joined(separator: ", ")
+        let placeholders = SQLFragments.placeholders(messageGuids.count)
         let schema = try db.schema()
         let sql = """
             SELECT m.associated_message_guid, m.associated_message_type, h.id,
@@ -106,7 +106,7 @@ enum MessageAnnotations {
 
         let missing = Array(Set(originatorGuids.filter { !$0.isEmpty }).subtracting(pageIdByGuid.keys))
         if !missing.isEmpty {
-            let placeholders = missing.map { _ in "?" }.joined(separator: ", ")
+            let placeholders = SQLFragments.placeholders(missing.count)
             let rows = try db.query(
                 "SELECT guid, ROWID FROM message WHERE guid IN (\(placeholders))",
                 params: missing
@@ -120,7 +120,7 @@ enum MessageAnnotations {
 
         var replyCountByGuid: [String: Int] = [:]
         if !pageGuids.isEmpty {
-            let placeholders = pageGuids.map { _ in "?" }.joined(separator: ", ")
+            let placeholders = SQLFragments.placeholders(pageGuids.count)
             let rows = try db.query(
                 """
                 SELECT thread_originator_guid, COUNT(*)
@@ -254,10 +254,10 @@ extension GetMessagesTool {
             throw ToolFailure("invalid_participants", "Could not resolve any handles for participants: \(participants)")
         }
 
-        let placeholders = allHandles.map { _ in "?" }.joined(separator: ", ")
+        let placeholders = SQLFragments.placeholders(allHandles.count)
         let sql = """
             SELECT c.ROWID, c.display_name,
-                   (SELECT COUNT(DISTINCT chj.handle_id) FROM chat_handle_join chj WHERE chj.chat_id = c.ROWID) as participant_count
+                   \(SQLFragments.participantCount()) as participant_count
             FROM chat c
             JOIN chat_handle_join chj ON c.ROWID = chj.chat_id
             JOIN handle h ON chj.handle_id = h.ROWID
@@ -434,7 +434,7 @@ extension GetMessagesTool {
             .leftJoin("handle h ON m.handle_id = h.ROWID")
             .leftJoin("handle oh ON m.other_handle = oh.ROWID")
             .where("cmj.chat_id = ?", chatId)
-            .where("m.associated_message_type = 0")
+            .where(SQLFragments.notReaction())
 
         if let since = sinceApple {
             query.where("m.date >= ?", since)
@@ -614,7 +614,7 @@ enum MessageQueryHelpers {
     static func attachmentsMap(db: Database, messageIds: [Int]) throws -> [Int: [AttachmentRow]] {
         guard !messageIds.isEmpty else { return [:] }
 
-        let placeholders = messageIds.map { _ in "?" }.joined(separator: ", ")
+        let placeholders = SQLFragments.placeholders(messageIds.count)
         let sql = """
             SELECT maj.message_id, a.ROWID, a.filename, a.mime_type, a.uti, a.total_bytes
             FROM attachment a

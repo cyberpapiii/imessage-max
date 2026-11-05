@@ -282,18 +282,17 @@ enum FindChatTool {
     private static func groupFilterSQL(isGroup: Bool?) -> String {
         guard let isGroup else { return "" }
         if isGroup {
-            return " AND (SELECT COUNT(*) FROM chat_handle_join chj_g WHERE chj_g.chat_id = c.ROWID) > 1"
+            return " AND \(SQLFragments.participantCount()) > 1"
         }
-        return " AND (SELECT COUNT(*) FROM chat_handle_join chj_g WHERE chj_g.chat_id = c.ROWID) <= 1"
+        return " AND \(SQLFragments.participantCount()) <= 1"
     }
 
-    /// Shown means `is_filtered = 0` (bitmask). Never `!= 1`.
     private static func filteredSQL(includeFiltered: Bool) -> String {
-        includeFiltered ? "" : " AND c.is_filtered = 0"
+        includeFiltered ? "" : " AND \(SQLFragments.shownChat())"
     }
 
     private static func filteredHiddenSQL() -> String {
-        " AND c.is_filtered != 0"
+        " AND \(SQLFragments.hiddenChat())"
     }
 
     private static func findChatsByHandleGroups(
@@ -308,7 +307,7 @@ enum FindChatTool {
 
         // Flatten all handles for initial query
         let allHandles = handleGroups.flatMap { $0 }
-        let placeholders = allHandles.map { _ in "?" }.joined(separator: ", ")
+        let placeholders = SQLFragments.placeholders(allHandles.count)
         let groupSQL = groupFilterSQL(isGroup: isGroup)
         let filterSQL = filteredSQL(includeFiltered: includeFiltered)
 
@@ -470,7 +469,7 @@ enum FindChatTool {
         guard !matches.isEmpty, limit > 0 else { return [] }
 
         let handles = Array(Set(matches.map(\.handle)))
-        let placeholders = handles.map { _ in "?" }.joined(separator: ",")
+        let placeholders = SQLFragments.placeholders(handles.count)
         let filterSQL = filteredSQL(includeFiltered: includeFiltered)
         let sql = """
             SELECT c.ROWID as id, c.guid, c.display_name
@@ -479,7 +478,7 @@ enum FindChatTool {
             JOIN handle h ON h.ROWID = chj.handle_id
             WHERE (c.display_name IS NULL OR TRIM(c.display_name) = '')
               AND h.id IN (\(placeholders))
-              AND (SELECT COUNT(*) FROM chat_handle_join chj_g WHERE chj_g.chat_id = c.ROWID) <= 1
+              AND \(SQLFragments.participantCount()) <= 1
               \(filterSQL)
             LIMIT ?
             """
@@ -512,7 +511,7 @@ enum FindChatTool {
             FROM chat c
             JOIN chat_message_join cmj ON c.ROWID = cmj.chat_id
             JOIN message m ON cmj.message_id = m.ROWID
-            WHERE m.associated_message_type = 0
+            WHERE \(SQLFragments.notReaction())
               AND (
                 m.text LIKE ? ESCAPE '\\'
                 OR (m.text IS NULL AND m.attributedBody IS NOT NULL)
@@ -554,7 +553,7 @@ enum FindChatTool {
     ) throws -> Int {
         let allHandles = handleGroups.flatMap { $0 }
         guard !allHandles.isEmpty else { return 0 }
-        let placeholders = allHandles.map { _ in "?" }.joined(separator: ", ")
+        let placeholders = SQLFragments.placeholders(allHandles.count)
         let groupSQL = groupFilterSQL(isGroup: isGroup)
         let sql = """
             SELECT COUNT(*) FROM (
@@ -613,7 +612,7 @@ enum FindChatTool {
             FROM chat c
             JOIN chat_message_join cmj ON c.ROWID = cmj.chat_id
             JOIN message m ON cmj.message_id = m.ROWID
-            WHERE m.associated_message_type = 0
+            WHERE \(SQLFragments.notReaction())
               AND (
                 m.text LIKE ? ESCAPE '\\'
                 OR (m.text IS NULL AND m.attributedBody IS NOT NULL)

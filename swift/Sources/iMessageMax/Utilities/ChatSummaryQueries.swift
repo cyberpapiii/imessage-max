@@ -32,7 +32,7 @@ enum ChatSummaryQueries {
     ) async throws -> [Int64: [Participant]] {
         guard !chatIds.isEmpty else { return [:] }
 
-        let placeholders = chatIds.map { _ in "?" }.joined(separator: ",")
+        let placeholders = SQLFragments.placeholders(chatIds.count)
         let sql = """
             SELECT DISTINCT chj.chat_id, h.id as handle, h.service
             FROM chat_handle_join chj
@@ -97,7 +97,7 @@ enum ChatSummaryQueries {
     ) throws -> [Int64: Int] {
         guard !chatIds.isEmpty else { return [:] }
 
-        let placeholders = chatIds.map { _ in "?" }.joined(separator: ",")
+        let placeholders = SQLFragments.placeholders(chatIds.count)
         let sql = """
             SELECT chat_id, COUNT(*)
             FROM chat_handle_join
@@ -127,7 +127,7 @@ enum ChatSummaryQueries {
     ) throws -> [Int64: [String]] {
         guard !chatIds.isEmpty else { return [:] }
 
-        let placeholders = chatIds.map { _ in "?" }.joined(separator: ",")
+        let placeholders = SQLFragments.placeholders(chatIds.count)
         let sql = """
             SELECT chat_id, sender_handle FROM (
               SELECT cmj.chat_id AS chat_id,
@@ -137,7 +137,7 @@ enum ChatSummaryQueries {
               JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
               LEFT JOIN handle h ON m.handle_id = h.ROWID
               WHERE cmj.chat_id IN (\(placeholders))
-                AND m.associated_message_type = 0
+                AND \(SQLFragments.notReaction())
                 AND m.is_from_me = 0
                 AND h.id IS NOT NULL
             )
@@ -169,7 +169,7 @@ enum ChatSummaryQueries {
     ) throws -> [Int64: Int64] {
         guard !chatIds.isEmpty else { return [:] }
 
-        let placeholders = chatIds.map { _ in "?" }.joined(separator: ",")
+        let placeholders = SQLFragments.placeholders(chatIds.count)
         let sql = """
             SELECT cmj.chat_id, MAX(m.date)
             FROM chat_message_join cmj
@@ -290,7 +290,7 @@ enum ChatSummaryQueries {
                     FROM chat_message_join cmj
                     JOIN message m2 ON m2.ROWID = cmj.message_id
                     WHERE cmj.chat_id = i.chat_id
-                      AND m2.associated_message_type = 0
+                      AND \(SQLFragments.notReaction("m2"))
                       AND m2.date = i.newest_date\(unreadClause)
                     ORDER BY m2.ROWID DESC
                     LIMIT 1
@@ -310,7 +310,7 @@ enum ChatSummaryQueries {
                     FROM chat_message_join cmj
                     JOIN message m2 ON m2.ROWID = cmj.message_id
                     WHERE cmj.chat_id = i.chat_id
-                      AND m2.associated_message_type = 0\(sinceClause)\(unreadClause)
+                      AND \(SQLFragments.notReaction("m2"))\(sinceClause)\(unreadClause)
                     ORDER BY m2.date DESC, m2.ROWID DESC
                     LIMIT 1
                 )

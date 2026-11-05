@@ -238,10 +238,10 @@ final class GetUnread {
             .leftJoin("handle h ON m.handle_id = h.ROWID")
             .where("m.is_read = 0")
             .where("m.is_from_me = 0")
-            .where("m.associated_message_type = 0")
+            .where(SQLFragments.notReaction())
 
         if !includeFiltered {
-            queryBuilder = queryBuilder.where("c.is_filtered = 0")
+            queryBuilder = queryBuilder.where(SQLFragments.shownChat())
         }
 
         // Apply time window filter (default 7 days to match Messages.app)
@@ -358,10 +358,10 @@ final class GetUnread {
             .join("chat c ON cmj.chat_id = c.ROWID")
             .where("m.is_read = 0")
             .where("m.is_from_me = 0")
-            .where("m.associated_message_type = 0")
+            .where(SQLFragments.notReaction())
 
         if !includeFiltered {
-            queryBuilder = queryBuilder.where("c.is_filtered = 0")
+            queryBuilder = queryBuilder.where(SQLFragments.shownChat())
         }
 
         if let sinceApple = sinceApple {
@@ -506,10 +506,10 @@ final class GetUnread {
             .join("chat c ON cmj.chat_id = c.ROWID")
             .where("m.is_read = 0")
             .where("m.is_from_me = 0")
-            .where("m.associated_message_type = 0")
+            .where(SQLFragments.notReaction())
 
         if !includeFiltered {
-            queryBuilder = queryBuilder.where("c.is_filtered = 0")
+            queryBuilder = queryBuilder.where(SQLFragments.shownChat())
         }
 
         if let sinceApple = sinceApple {
@@ -544,8 +544,8 @@ final class GetUnread {
             .join("chat c ON cmj.chat_id = c.ROWID")
             .where("m.is_read = 0")
             .where("m.is_from_me = 0")
-            .where("m.associated_message_type = 0")
-            .where("c.is_filtered != 0")
+            .where(SQLFragments.notReaction())
+            .where(SQLFragments.hiddenChat())
 
         if let sinceApple {
             queryBuilder = queryBuilder.where("m.date >= ?", sinceApple)

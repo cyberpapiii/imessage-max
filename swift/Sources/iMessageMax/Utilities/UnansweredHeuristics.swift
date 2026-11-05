@@ -43,7 +43,7 @@ enum UnansweredHeuristics {
             AND m.date > ?
             AND m.date <= ?
             AND m.is_from_me = 0
-            AND m.associated_message_type = 0
+            AND \(SQLFragments.notReaction())
             LIMIT 1
             """,
             params: [chatId, messageDate, messageDate + windowNs]

@@ -170,7 +170,7 @@ enum GetChatDetailsTool {
             JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
             LEFT JOIN handle h ON m.handle_id = h.ROWID
             WHERE cmj.chat_id = ?
-            AND m.associated_message_type = 0
+            AND \(SQLFragments.notReaction())
             ORDER BY m.date DESC
             LIMIT 1
             """,
@@ -230,7 +230,7 @@ enum GetChatDetailsTool {
             FROM message m
             JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
             WHERE cmj.chat_id = ?
-            AND m.associated_message_type = 0
+            AND \(SQLFragments.notReaction())
             """,
             params: [chatId]
         ) { row in
