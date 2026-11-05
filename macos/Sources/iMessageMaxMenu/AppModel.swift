@@ -33,7 +33,7 @@ final class AppModel {
   @ObservationIgnored private let milestones: Milestones
   @ObservationIgnored private let prepareMessages: @MainActor () async throws -> Void
   @ObservationIgnored private let log = Logger(
-    subsystem: "com.cyberpapiii.imessage-max.menubar", category: "Service")
+    subsystem: ServiceDefaults.companionBundleID, category: "Service")
 
   /// `prepareMessages` runs before a sending check; the live app opens
   /// Messages there.
@@ -52,7 +52,7 @@ final class AppModel {
     let resources = Bundle.main.resourceURL ?? Bundle.main.bundleURL
     return AppModel(
       service: ServiceController(
-        bundledHelper: resources.appendingPathComponent("imessage-max"),
+        bundledHelper: resources.appendingPathComponent(ServiceDefaults.executableName),
         template: resources.appendingPathComponent("\(ServiceDefaults.launchdLabel).plist")),
       milestones: milestones,
       prepareMessages: { try await MessagesApp.ensureRunning() })

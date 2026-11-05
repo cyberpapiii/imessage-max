@@ -43,6 +43,7 @@ final class ServiceFilesContractTests: XCTestCase {
         XCTAssertTrue(script.contains("swift/launchd/\(plist)"), "script/build_and_run.sh template source")
         XCTAssertTrue(script.contains("Contents/Resources/\(plist)"), "script/build_and_run.sh bundled template")
         XCTAssertTrue(script.contains("Contents/Resources/\(ServiceDefaults.executableName)"), "bundled helper name")
+        XCTAssertTrue(script.contains("BUNDLE_ID=\"\(ServiceDefaults.companionBundleID)\"\n"), "companion bundle id")
     }
 
     /// Every option the companion reads back out of the plist is one the

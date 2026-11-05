@@ -61,8 +61,7 @@ public struct ServiceConfiguration: Sendable {
       }
       guard seen.contains(.http) else { throw CoreError.invalidConfiguration }
     } else {
-      binary = home.appendingPathComponent(
-        "Library/Application Support/iMessage Max/bin/\(ServiceDefaults.executableName)")
+      binary = home.appendingPathComponent(ServiceDefaults.helperInstallPath)
     }
     guard ServiceDefaults.loopbackHosts.contains(host) else {
       throw CoreError.invalidConfiguration

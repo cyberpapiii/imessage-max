@@ -12,6 +12,10 @@ public enum ServiceDefaults {
   public static let launchAgentPath = "Library/LaunchAgents/\(launchdLabel).plist"
   public static let stdoutLogPath = "Library/Logs/imessage-max.stdout.log"
   public static let stderrLogPath = "Library/Logs/imessage-max.stderr.log"
+  /// Where the companion installs its bundled helper on a fresh Mac.
+  public static let helperInstallPath = "Library/Application Support/iMessage Max/bin/\(executableName)"
+  /// The companion app's bundle identifier, also its log subsystem.
+  public static let companionBundleID = "com.cyberpapiii.imessage-max.menubar"
   /// Hosts that keep the listener local. Binding anywhere else needs
   /// `--allow-external-bind`, and the setup route is never offered there.
   public static let loopbackHosts: Set<String> = ["127.0.0.1", "::1", "localhost"]
