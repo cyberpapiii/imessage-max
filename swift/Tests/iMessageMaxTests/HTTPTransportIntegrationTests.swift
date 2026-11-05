@@ -274,9 +274,13 @@ final class HTTPTransportIntegrationTests: XCTestCase {
             configuration: .init(
                 requestTimeout: .seconds(2),
                 cleanupInterval: .milliseconds(20),
-                // Sessions are created in order: the first answers as
-                // session-a after 20 ms, the second as session-b after 40 ms.
-                makeServer: serversWithSlowMethod([("session-a", .milliseconds(20)), ("session-b", .milliseconds(40))])
+                // Sessions are created in order and answer as session-a and
+                // session-b. Neither answers until both requests are in
+                // flight, so the two same-id requests always overlap.
+                makeServer: serversWithSlowMethod(
+                    [("session-a", .zero), ("session-b", .zero)],
+                    rendezvous: Rendezvous(parties: 2)
+                )
             )
         )
         let app = await transport.application()
@@ -655,9 +659,10 @@ private struct TestSlowMethod: MCP.Method {
 }
 
 /// A Server factory whose nth Server also answers `TestSlowMethod` with the
-/// nth (source, delay).
+/// nth (source, delay), after every party has reached `rendezvous` if given.
 private func serversWithSlowMethod(
-    _ answers: [(source: String, delay: Duration)]
+    _ answers: [(source: String, delay: Duration)],
+    rendezvous: Rendezvous? = nil
 ) -> @Sendable (ToolCatalog) async -> Server {
     let created = Mutex(0)
     return { catalog in
@@ -668,10 +673,28 @@ private func serversWithSlowMethod(
         }
         let (source, delay) = answers[index]
         await server.withMethodHandler(TestSlowMethod.self) { _ in
+            await rendezvous?.arrive()
             try await Task.sleep(for: delay)
             return .init(source: source)
         }
         return server
+    }
+}
+
+/// Suspends each caller until `parties` callers have arrived.
+private actor Rendezvous {
+    private let parties: Int
+    private var waiting: [CheckedContinuation<Void, Never>] = []
+
+    init(parties: Int) { self.parties = parties }
+
+    func arrive() async {
+        if waiting.count + 1 == parties {
+            waiting.forEach { $0.resume() }
+            waiting.removeAll()
+            return
+        }
+        await withCheckedContinuation { waiting.append($0) }
     }
 }
 

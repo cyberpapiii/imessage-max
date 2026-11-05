@@ -84,22 +84,33 @@ final class MessageWatcherTests: XCTestCase {
         defer { watcher.stop() }
 
         let walPath = fixture.path + "-wal"
+        let walInode = { (try? FileManager.default.attributesOfItem(atPath: walPath)[.systemFileNumber]) as? Int }
+        try fixture.insertMessage(rowId: 6, guid: "w-6", text: "before", date: 1, isFromMe: false, handleId: 1)
+        let before = try XCTUnwrap(walInode())
+        let seeded = await waitUntil { collected.withLock { $0.contains(6) } }
+        XCTAssertTrue(seeded, "watcher did not observe ROWID 6")
+        // Leaving WAL mode needs the watcher's reads out of the way.
+        try fixture.execute("PRAGMA busy_timeout=2000;")
 
-        try fixture.execute("PRAGMA wal_checkpoint(TRUNCATE);")
-        let aside = fixture.path + "-wal.aside"
-        do {
-            if FileManager.default.fileExists(atPath: walPath) {
-                try FileManager.default.moveItem(atPath: walPath, toPath: aside)
-            }
-            try fixture.insertMessage(rowId: 7, guid: "w-7", text: "after", date: 2, isFromMe: false, handleId: 1)
-        } catch {
-            throw XCTSkip("SQLite refused the -wal rename or follow-up insert: \(error)")
-        }
-        defer { try? FileManager.default.removeItem(atPath: aside) }
+        // Leaving WAL mode checkpoints and deletes -wal; the next write in WAL
+        // mode creates a new one. Messages.app rotates it the same way when
+        // its last connection closes. (Renaming -wal under an open
+        // connection is a disk I/O error in SQLite, which made this skip.)
+        try fixture.execute("PRAGMA journal_mode=DELETE;")
+        XCTAssertNil(walInode(), "-wal should be gone outside WAL mode")
+        try fixture.execute("PRAGMA journal_mode=WAL;")
+        try fixture.insertMessage(rowId: 7, guid: "w-7", text: "after", date: 2, isFromMe: false, handleId: 1)
+        XCTAssertNotEqual(try XCTUnwrap(walInode()), before, "-wal should be a new file")
 
-        // The fallback poll is 30 s out, so only file events can report this.
+        // The fallback poll is 30 s out, so only file events can report these.
         let reported = await waitUntil { collected.withLock { $0.contains(7) } }
         XCTAssertTrue(reported, "insert after rotation was not reported")
+
+        // The new -wal already exists, so this write raises no directory
+        // event: only a source registered on the new file sees it.
+        try fixture.insertMessage(rowId: 8, guid: "w-8", text: "later", date: 3, isFromMe: false, handleId: 1)
+        let followed = await waitUntil { collected.withLock { $0.contains(8) } }
+        XCTAssertTrue(followed, "watcher did not follow the rotated -wal")
     }
 
     /// chat.db unreadable at startup must not switch live notifications off

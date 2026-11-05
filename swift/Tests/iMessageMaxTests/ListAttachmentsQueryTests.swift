@@ -205,8 +205,8 @@ final class ListAttachmentsQueryTests: XCTestCase {
                 seen.append(contentsOf: ids(page))
                 cursor = page.more ? page.cursor : nil
                 pages += 1
-                XCTAssertLessThan(pages, 10, "\(sort) paging did not terminate")
-            } while cursor != nil
+            } while cursor != nil && pages < 10
+            XCTAssertNil(cursor, "\(sort) paging did not terminate")
 
             let expected = sort == "recent_first"
                 ? ["msg_106", "msg_105", "msg_104", "msg_103", "msg_102", "msg_101"]

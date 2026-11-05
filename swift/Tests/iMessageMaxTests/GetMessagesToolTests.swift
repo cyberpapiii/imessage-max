@@ -422,7 +422,7 @@ final class GetMessagesToolTests: XCTestCase {
         try fixture.joinChatHandle(chatId: 7, handleId: 1)
 
         let base: Int64 = 1_000_000_000_000
-        for messageId in 1...3 {
+        for messageId in 1...4 {
             try fixture.insertMessage(
                 rowId: messageId,
                 guid: "null-date-\(messageId)",
@@ -433,7 +433,9 @@ final class GetMessagesToolTests: XCTestCase {
             )
             try fixture.joinChatMessage(chatId: 7, messageId: messageId)
         }
-        try fixture.execute("UPDATE message SET date = NULL WHERE ROWID = 1")
+        // Two undated rows sort last, so a page of 3 ends on one of them
+        // with one more row behind it.
+        try fixture.execute("UPDATE message SET date = NULL WHERE ROWID IN (1, 4)")
 
         let tool = GetMessagesTool(db: fixture.database(), resolver: ContactResolver(seedCache: [:]))
         let response = try await decodeJSONDictionary(from:
@@ -442,6 +444,7 @@ final class GetMessagesToolTests: XCTestCase {
                 "limit": .int(3),
             ])
         )
+        XCTAssertEqual(try decodeJSONArray(response["messages"]).count, 3)
         XCTAssertEqual(
             response["more"] as? Bool,
             response["cursor"] != nil && !(response["cursor"] is NSNull)
