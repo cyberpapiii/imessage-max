@@ -1,4 +1,3 @@
-// Sources/iMessageMax/Utilities/AutomationPermission.swift
 import AppKit
 
 /// Closure type for automation permission probes.

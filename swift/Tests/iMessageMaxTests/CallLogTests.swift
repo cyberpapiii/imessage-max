@@ -30,7 +30,7 @@ final class CallLogTests: XCTestCase {
     }
 
     func testOutcomesAreClassified() async throws {
-        register("tool_fails") { _ in throw ToolError(content: [.plainText("bad")]) }
+        register("tool_fails") { _ in throw ToolFailure("bad", "bad") }
         register("tool_throws") { _ in throw DatabaseError.queryFailed("boom") }
         register("tool_cancelled") { _ in throw DatabaseError.cancelled }
 

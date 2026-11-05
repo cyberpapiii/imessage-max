@@ -8,7 +8,7 @@ final class SendResponseTests: XCTestCase {
             chat: ChatReference(id: "chat123", name: "Rob Dezendorf")
         )
 
-        XCTAssertEqual(response.status, "sent")
+        XCTAssertEqual(response.status.rawValue, "sent")
         XCTAssertNil(response.message)
         XCTAssertEqual(response.chat?.id, "chat123")
         XCTAssertEqual(response.chat?.name, "Rob Dezendorf")
@@ -22,7 +22,7 @@ final class SendResponseTests: XCTestCase {
             chat: ChatReference(id: "chat456", name: "Project Group")
         )
 
-        XCTAssertEqual(response.status, "pending_confirmation")
+        XCTAssertEqual(response.status.rawValue, "pending_confirmation")
         XCTAssertEqual(response.message, "Attachment accepted but still pending")
         XCTAssertNil(response.error)
         XCTAssertEqual(response.chat?.name, "Project Group")
@@ -32,7 +32,7 @@ final class SendResponseTests: XCTestCase {
     func testErrorResponseUsesFailedStatus() {
         let response = SendResponse.error("Send failed")
 
-        XCTAssertEqual(response.status, "failed")
+        XCTAssertEqual(response.status.rawValue, "failed")
         XCTAssertEqual(response.error, "Send failed")
         XCTAssertNil(response.message)
     }
@@ -42,7 +42,7 @@ final class SendResponseTests: XCTestCase {
             RecipientCandidate(name: "Rob Dezendorf", handle: "+15555550123", lastContact: "today")
         ])
 
-        XCTAssertEqual(response.status, "ambiguous")
+        XCTAssertEqual(response.status.rawValue, "ambiguous")
         XCTAssertNil(response.error)
         XCTAssertEqual(response.message, "Multiple contacts match. Please specify using a phone number, email, or chat_id.")
         XCTAssertEqual(response.candidates?.count, 1)

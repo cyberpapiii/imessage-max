@@ -46,7 +46,7 @@ final class ArgumentClampTests: XCTestCase {
 
     /// Runs a tool through its registered handler (the closure that parses the
     /// raw argument dictionary) and returns the JSON body whether the tool
-    /// answered normally or threw a structured `ToolError`.
+    /// answered normally or threw a structured `ToolFailure`.
     private func callRegistered(_ name: String, in catalog: ToolCatalog, arguments: [String: Value]) async throws -> [String: Any] {
         let handler = try XCTUnwrap(catalog.handler(named: name), "\(name) should be registered")
         do {

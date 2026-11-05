@@ -2,14 +2,37 @@ import XCTest
 @testable import iMessageMax
 
 final class AppleScriptRunnerValidationTests: XCTestCase {
+    private var createdPaths: [URL] = []
+
+    override func tearDown() {
+        for url in createdPaths {
+            try? FileManager.default.removeItem(at: url)
+        }
+        createdPaths.removeAll()
+        super.tearDown()
+    }
+
+    private func makeStager() -> OutgoingFileStager {
+        let root = URL(fileURLWithPath: SecurePath.absoluteLexicalPath(FileManager.default.temporaryDirectory.path)!)
+            .appendingPathComponent("xctest-imessage-max-staging-\(UUID().uuidString)", isDirectory: true)
+        createdPaths.append(root)
+        return OutgoingFileStager(root: root)
+    }
+
+    private func stage(_ path: String, with stager: OutgoingFileStager) throws -> OutgoingFileStager.StagedFile {
+        let source = try stager.openSource(path)
+        defer { source.close() }
+        return try stager.stage(source)
+    }
+
     func testRunScriptPreservesUnicodeArguments() {
         let message = "Unicode test — “curly quotes” emoji: 🎳🔥\nLine 2"
-        let result = AppleScriptRunner.runScriptForTesting(
-            script: """
-                on run argv
-                    return item 1 of argv
-                end run
-                """,
+        let result = Osascript.run(
+            """
+            on run argv
+                return item 1 of argv
+            end run
+            """,
             arguments: [message]
         )
 
@@ -17,25 +40,26 @@ final class AppleScriptRunnerValidationTests: XCTestCase {
         case .failure(let error):
             XCTFail("Expected Unicode round-trip to succeed: \(error.localizedDescription)")
         case .success(let output):
-            XCTAssertEqual(output.trimmingCharacters(in: .newlines), message)
+            XCTAssertEqual(output.terminationStatus, 0, output.stderr)
+            XCTAssertEqual(output.stdout.trimmingCharacters(in: .newlines), message)
         }
     }
 
     func testSendFileToParticipantRejectsMissingFileBeforeAutomation() {
-        let result = AppleScriptRunner.sendFileToParticipant(
-            handle: "+19175551234",
-            filePath: "/definitely/missing/file.png"
+        let result = LiveScriptRunner(stager: makeStager()).sendBlocking(
+            .file(path: "/definitely/missing/file.png"),
+            to: .participant(handle: "+19175551234", chatId: nil)
         )
 
         switch result {
         case .success:
             XCTFail("Expected file validation to fail")
-        case .failure(let error):
+        case .failure(let failure):
             XCTAssertEqual(
-                error.localizedDescription,
+                failure.error.localizedDescription,
                 "Could not read file at 'file.png'."
             )
-            XCTAssertEqual(error.disposition, .notStarted)
+            XCTAssertEqual(failure.disposition, .notStarted)
         }
     }
 
@@ -49,7 +73,7 @@ final class AppleScriptRunnerValidationTests: XCTestCase {
         let stderr = "186:202: execution error: messages got an error: "
             + "can\u{2019}t get chat id \"any;-;+15555550123\". (-1728)"
 
-        let error = AppleScriptRunner.classifySendStderr(
+        let error = SendScript.classifyStderr(
             stderr,
             sentFileName: "",
             missingTargetError: .chatNotFound("any;-;+15555550123")
@@ -66,7 +90,7 @@ final class AppleScriptRunnerValidationTests: XCTestCase {
     }
 
     func testStraightApostropheStderrStillClassifiesAsMissingTarget() {
-        let error = AppleScriptRunner.classifySendStderr(
+        let error = SendScript.classifyStderr(
             "execution error: messages got an error: can't get participant \"x\".",
             sentFileName: "",
             missingTargetError: .recipientNotFound("x")
@@ -79,7 +103,7 @@ final class AppleScriptRunnerValidationTests: XCTestCase {
     }
 
     func testCurlyApostropheFileNotFoundStderrReportsFilenameOnly() {
-        let error = AppleScriptRunner.classifySendStderr(
+        let error = SendScript.classifyStderr(
             "execution error: the file photo.png wasn\u{2019}t found. (-43)",
             sentFileName: "photo.png",
             missingTargetError: .chatNotFound("chat1")
@@ -89,7 +113,7 @@ final class AppleScriptRunnerValidationTests: XCTestCase {
     }
 
     func testCurlyApostropheDoesNotUnderstandClassifiesAsMissingTarget() {
-        let error = AppleScriptRunner.classifySendStderr(
+        let error = SendScript.classifyStderr(
             "execution error: messages doesn\u{2019}t understand the \"send\" message. (-1708)",
             sentFileName: "",
             missingTargetError: .chatNotFound("chat1")
@@ -102,7 +126,7 @@ final class AppleScriptRunnerValidationTests: XCTestCase {
     }
 
     func testUnrecognizedStderrKeepsFirstLineClamped() {
-        let error = AppleScriptRunner.classifySendStderr(
+        let error = SendScript.classifyStderr(
             String(repeating: "z", count: 400) + "\nsecond line",
             sentFileName: "",
             missingTargetError: .chatNotFound("chat1")
@@ -119,7 +143,7 @@ final class AppleScriptRunnerValidationTests: XCTestCase {
         let stderr = "execution error: Messages got an error: Can\u{2019}t get file "
             + "\"/Users/alice/Desktop/x.jpg\". (-1728)"
 
-        let error = AppleScriptRunner.classifySendStderr(
+        let error = SendScript.classifyStderr(
             stderr,
             sentFileName: "x.jpg",
             missingTargetError: .chatNotFound("chat1")
@@ -134,47 +158,25 @@ final class AppleScriptRunnerValidationTests: XCTestCase {
         XCTAssertFalse(error.localizedDescription.contains("imessage-max-staging"))
     }
 
-    func testSendTextToParticipantRejectsOverlongMessage() {
-        let longMessage = String(repeating: "a", count: 20_001)
-        let result = AppleScriptRunner.sendTextToParticipant(
-            handle: "+19175551234",
-            message: longMessage
-        )
-
-        switch result {
-        case .success:
-            XCTFail("Expected invalid params failure")
-        case .failure(let error):
-            XCTAssertEqual(
-                error.localizedDescription,
-                "Message too long (max 20,000 chars)"
-            )
-            XCTAssertEqual(error.disposition, .notStarted)
-        }
+    func testDefaultStagingRootIsInPicturesDirectory() {
+        XCTAssertTrue(OutgoingFileStager().root.path.hasSuffix("/Pictures/imessage-max-staging"))
     }
 
-    func testPrepareTrackedOutgoingFileStagesInPicturesDirectoryWithOriginalName() throws {
+    func testStageCopiesUnderRootWithOriginalName() throws {
         let tempDir = FileManager.default.temporaryDirectory
         let sourceURL = tempDir.appendingPathComponent("imessage-max-source-test.txt")
         try "hello".write(to: sourceURL, atomically: true, encoding: .utf8)
         defer { try? FileManager.default.removeItem(at: sourceURL) }
 
-        let prepared = try AppleScriptRunner.prepareTrackedOutgoingFile(
-            sourcePath: sourceURL.path,
-            existingOutgoingTransferStatuses: { trackingName in
-                XCTAssertEqual(trackingName, "imessage-max-source-test.txt")
-                return ["finished"]
-            }
-        )
-        defer { try? FileManager.default.removeItem(at: prepared.fileURL.deletingLastPathComponent()) }
+        let stager = makeStager()
+        let prepared = try stage(sourceURL.path, with: stager)
 
         XCTAssertNotEqual(prepared.fileURL.path, sourceURL.path)
         XCTAssertEqual(prepared.fileURL.pathExtension, "txt")
         XCTAssertTrue(FileManager.default.fileExists(atPath: prepared.fileURL.path))
         XCTAssertEqual(prepared.trackingName, "imessage-max-source-test.txt")
         XCTAssertEqual(prepared.fileURL.lastPathComponent, "imessage-max-source-test.txt")
-        XCTAssertGreaterThanOrEqual(prepared.existingOutgoingTransferCount, 0)
-        XCTAssertTrue(prepared.fileURL.path.contains("/Pictures/imessage-max-staging/"))
+        XCTAssertTrue(prepared.fileURL.path.hasPrefix(stager.root.path + "/"))
     }
 
     // Plan 024: staged copies are deleted at terminal transfer states, so a
@@ -185,12 +187,8 @@ final class AppleScriptRunnerValidationTests: XCTestCase {
         try "hello".write(to: sourceURL, atomically: true, encoding: .utf8)
         defer { try? FileManager.default.removeItem(at: sourceURL) }
 
-        let prepared = try AppleScriptRunner.prepareTrackedOutgoingFile(
-            sourcePath: sourceURL.path,
-            existingOutgoingTransferStatuses: { _ in ["finished"] }
-        )
-        // Safety net if the assertions below fail before removal happens.
-        defer { try? FileManager.default.removeItem(at: prepared.fileURL.deletingLastPathComponent()) }
+        let stager = makeStager()
+        let prepared = try stage(sourceURL.path, with: stager)
 
         let stagedDirectory = prepared.fileURL.deletingLastPathComponent()
         // The UUID directory's parent is the staging root.
@@ -199,7 +197,7 @@ final class AppleScriptRunnerValidationTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: prepared.fileURL.path),
             "Precondition: the staged copy exists before removal")
 
-        AppleScriptRunner.removeStagedDirectory(for: prepared)
+        stager.remove(prepared)
 
         XCTAssertFalse(FileManager.default.fileExists(atPath: prepared.fileURL.path),
             "The staged copy must be deleted at a terminal transfer state")
@@ -211,7 +209,7 @@ final class AppleScriptRunnerValidationTests: XCTestCase {
             "The user's original file must never be touched")
     }
 
-    // The guard is what makes the helper safe: a PreparedOutgoingFile whose
+    // The guard is what makes the helper safe: a StagedFile whose
     // fileURL somehow points outside the staging root must be refused outright.
     func testRemoveStagedDirectoryRefusesPathsOutsideStagingRoot() throws {
         let outsideDirectory = FileManager.default.temporaryDirectory
@@ -222,13 +220,9 @@ final class AppleScriptRunnerValidationTests: XCTestCase {
         let outsideFile = outsideDirectory.appendingPathComponent("precious.txt")
         try "do not delete".write(to: outsideFile, atomically: true, encoding: .utf8)
 
-        let forged = AppleScriptRunner.PreparedOutgoingFile(
-            fileURL: outsideFile,
-            trackingName: "precious.txt",
-            existingOutgoingTransferCount: 0
-        )
+        let forged = OutgoingFileStager.StagedFile(fileURL: outsideFile, trackingName: "precious.txt")
 
-        AppleScriptRunner.removeStagedDirectory(for: forged)
+        makeStager().remove(forged)
 
         XCTAssertTrue(FileManager.default.fileExists(atPath: outsideFile.path),
             "The staging-root guard must refuse to delete anything outside the staging root")
@@ -237,7 +231,7 @@ final class AppleScriptRunnerValidationTests: XCTestCase {
     }
 
     func testTransferObservationFinishedWins() {
-        let observation = AppleScriptRunner.interpretTransferStatuses(["waiting", "finished"])
+        let observation = TransferMonitor.interpret(["waiting", "finished"])
 
         switch observation {
         case .finished:
@@ -248,7 +242,7 @@ final class AppleScriptRunnerValidationTests: XCTestCase {
     }
 
     func testTransferObservationFailedWins() {
-        let observation = AppleScriptRunner.interpretTransferStatuses(["waiting", "failed"])
+        let observation = TransferMonitor.interpret(["waiting", "failed"])
 
         switch observation {
         case .failed:
@@ -259,7 +253,7 @@ final class AppleScriptRunnerValidationTests: XCTestCase {
     }
 
     func testTransferObservationPendingForWaitingStatuses() {
-        let observation = AppleScriptRunner.interpretTransferStatuses(["waiting", "transferring"])
+        let observation = TransferMonitor.interpret(["waiting", "transferring"])
 
         switch observation {
         case .pending:
@@ -270,7 +264,7 @@ final class AppleScriptRunnerValidationTests: XCTestCase {
     }
 
     func testTransferObservationUnknownForEmptyStatuses() {
-        let observation = AppleScriptRunner.interpretTransferStatuses([])
+        let observation = TransferMonitor.interpret([])
 
         switch observation {
         case .unknown:

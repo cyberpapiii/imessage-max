@@ -21,13 +21,9 @@ final class AppleScriptStagingTests: XCTestCase {
         let outsideFile = outsideDirectory.appendingPathComponent("precious.txt")
         try "do not delete".write(to: outsideFile, atomically: true, encoding: .utf8)
 
-        let forged = AppleScriptRunner.PreparedOutgoingFile(
-            fileURL: outsideFile,
-            trackingName: "precious.txt",
-            existingOutgoingTransferCount: 0
-        )
+        let forged = OutgoingFileStager.StagedFile(fileURL: outsideFile, trackingName: "precious.txt")
 
-        AppleScriptRunner.removeStagedDirectory(for: forged)
+        makeStager().remove(forged)
 
         XCTAssertTrue(
             FileManager.default.fileExists(atPath: outsideDirectory.path),
@@ -40,8 +36,8 @@ final class AppleScriptStagingTests: XCTestCase {
     }
 
     func testSweepRemovesDirectoriesOlderThanCutoff() throws {
-        let root = try requireStagingRoot()
-        let testDir = root.appendingPathComponent(
+        let stager = makeStager()
+        let testDir = stager.root.appendingPathComponent(
             "xctest-\(UUID().uuidString)",
             isDirectory: true
         )
@@ -53,7 +49,7 @@ final class AppleScriptStagingTests: XCTestCase {
             ofItemAtPath: testDir.path
         )
 
-        AppleScriptRunner.cleanupOldStagedFilesIfPossible()
+        stager.sweepExpired()
 
         XCTAssertFalse(
             FileManager.default.fileExists(atPath: testDir.path),
@@ -61,24 +57,10 @@ final class AppleScriptStagingTests: XCTestCase {
         )
     }
 
-    private func requireStagingRoot() throws -> URL {
-        let root = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Pictures", isDirectory: true)
-            .appendingPathComponent("imessage-max-staging", isDirectory: true)
-        do {
-            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-            let probe = root.appendingPathComponent(
-                "xctest-probe-\(UUID().uuidString)",
-                isDirectory: true
-            )
-            try FileManager.default.createDirectory(at: probe, withIntermediateDirectories: true)
-            try FileManager.default.removeItem(at: probe)
-            return root
-        } catch {
-            if ProcessInfo.processInfo.environment["CI"] != nil {
-                throw XCTSkip("CI/sandbox cannot write ~/Pictures")
-            }
-            throw error
-        }
+    private func makeStager() -> OutgoingFileStager {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("xctest-imessage-max-staging-\(UUID().uuidString)", isDirectory: true)
+        createdPaths.append(root)
+        return OutgoingFileStager(root: root)
     }
 }

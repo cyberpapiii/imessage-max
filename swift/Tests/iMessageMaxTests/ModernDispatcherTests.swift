@@ -183,7 +183,7 @@ final class ModernDispatcherTests: XCTestCase {
 
     func testToolErrorBecomesIsErrorResultNotProtocolError() async throws {
         registerFakeTool(named: "modern_fail") { _ in
-            throw ToolError(content: [.plainText("tool exploded")])
+            throw ToolFailure("tool_exploded", "tool exploded")
         }
 
         let outcome = await ModernDispatcher.handle(

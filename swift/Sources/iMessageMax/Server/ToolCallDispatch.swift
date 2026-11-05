@@ -80,8 +80,6 @@ enum ToolCallDispatch {
                 }
             }
             return (.completed(content: content, isError: false), "ok")
-        } catch let error as ToolError {
-            return (.completed(content: error.content, isError: true), Task.isCancelled ? "cancelled" : "tool_error")
         } catch {
             let outcome =
                 Task.isCancelled || Self.isCancellation(error) ? "cancelled"

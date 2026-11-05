@@ -29,26 +29,17 @@ final class StubScriptRunner: ScriptRunning, @unchecked Sendable {
         queuedResults.isEmpty ? nextResult : queuedResults.removeFirst()
     }
 
-    func sendTextToParticipant(handle: String, message: String) async -> Result<Void, SendFailure> {
-        invocations.append(.textToParticipant(handle: handle, message: message))
-        onSend?()
-        return takeResult()
-    }
-
-    func sendFileToParticipant(handle: String, filePath: String) async -> Result<Void, SendFailure> {
-        invocations.append(.fileToParticipant(handle: handle, filePath: filePath))
-        onSend?()
-        return takeResult()
-    }
-
-    func sendTextToChat(guid: String, message: String) async -> Result<Void, SendFailure> {
-        invocations.append(.textToChat(guid: guid, message: message))
-        onSend?()
-        return takeResult()
-    }
-
-    func sendFileToChat(guid: String, filePath: String) async -> Result<Void, SendFailure> {
-        invocations.append(.fileToChat(guid: guid, filePath: filePath))
+    func send(_ payload: SendPayload, to target: SendTarget) async -> Result<Void, SendFailure> {
+        switch (target, payload) {
+        case (.participant(let handle, _), .text(let message)):
+            invocations.append(.textToParticipant(handle: handle, message: message))
+        case (.participant(let handle, _), .file(let path)):
+            invocations.append(.fileToParticipant(handle: handle, filePath: path))
+        case (.chat(let guid, _), .text(let message)):
+            invocations.append(.textToChat(guid: guid, message: message))
+        case (.chat(let guid, _), .file(let path)):
+            invocations.append(.fileToChat(guid: guid, filePath: path))
+        }
         onSend?()
         return takeResult()
     }
@@ -161,8 +152,8 @@ final class SendToolExecuteTests: XCTestCase {
                 "to": .string("+15550000001"),
                 "text": .string("Hello"),
             ])
-            XCTFail("Expected ToolError to be thrown for failed send")
-        } catch let error as ToolError {
+            XCTFail("Expected ToolFailure to be thrown for failed send")
+        } catch let error as ToolFailure {
             let json = try decodeJSONDictionary(from: error.content)
             XCTAssertEqual(json["status"] as? String, "failed", "Status should be 'failed' when script errors")
             let errorMsg = json["error"] as? String
@@ -183,7 +174,7 @@ final class SendToolExecuteTests: XCTestCase {
         let fixture = try makeSendFixture()  // DM chat 1 (Alice) + group chat 2 (Alice+Bob)
 
         let resolver = SendResolver(db: fixture.database(), resolver: makeSeededResolver())
-        let result = await resolver.resolve(chatId: nil, to: "+15550000001")
+        let result = await resolver.resolve(.recipient("+15550000001"))
 
         switch result {
         case .failure(let message):
@@ -242,7 +233,7 @@ final class SendToolExecuteTests: XCTestCase {
     // Same setup as testStubSendWithMatchingRowConfirms, but the matching row lands
     // in the GROUP (chat 2) while the send targets Alice's DM (chat 1). The verifier
     // finds the row through Alice's handle, sees it is not in the intended chat, and
-    // the tool must surface "mismatch" as a ToolError so an agent never treats it as
+    // the tool must surface "mismatch" as a ToolFailure so an agent never treats it as
     // confirmed. Pins the response envelope that plans 045 and 049 will touch.
     func testRowInDifferentChatProducesMismatchStatus() async throws {
         let fixture = try makeSendFixture()  // DM chat 1 (Alice) + group chat 2 (Alice+Bob)
@@ -268,8 +259,8 @@ final class SendToolExecuteTests: XCTestCase {
                 "to": .string("+15550000001"),
                 "text": .string("Hello Alice"),
             ])
-            XCTFail("Expected ToolError for a routing mismatch")
-        } catch let error as ToolError {
+            XCTFail("Expected ToolFailure for a routing mismatch")
+        } catch let error as ToolFailure {
             let json = try decodeJSONDictionary(from: error.content)
             XCTAssertEqual(json["status"] as? String, "mismatch",
                 "A matching row in a chat other than the intended one is a routing mismatch")
@@ -355,7 +346,7 @@ final class SendToolExecuteTests: XCTestCase {
 
     // Pre-insert a row with error=22 (measured failed-send pattern) → NOT confirmed.
     // The row is a verified delivery failure, so the tool reports "failed_delivery"
-    // and surfaces it as a ToolError. Uses the full multi-chat fixture.
+    // and surfaces it as a ToolFailure. Uses the full multi-chat fixture.
     func testFailedRowReturnsFailedDeliveryStatus() async throws {
         let fixture = try makeSendFixture()  // DM chat 1 (Alice) + group chat 2 (Alice+Bob)
         let stub = StubScriptRunner()
@@ -380,8 +371,8 @@ final class SendToolExecuteTests: XCTestCase {
                 "to": .string("+15550000001"),
                 "text": .string("Hello Alice"),
             ])
-            XCTFail("Expected ToolError for a verified delivery failure")
-        } catch let error as ToolError {
+            XCTFail("Expected ToolFailure for a verified delivery failure")
+        } catch let error as ToolFailure {
             let json = try decodeJSONDictionary(from: error.content)
             XCTAssertEqual(json["status"] as? String, "failed_delivery",
                 "A row with error=22 is a verified delivery failure, not 'uncertain' (§3 finding 3)")
@@ -409,8 +400,8 @@ final class SendToolExecuteTests: XCTestCase {
                 "to": .string("+15559999999"),  // not in the fixture DB
                 "text": .string("Hi"),
             ])
-            XCTFail("Expected ToolError for unresolvable recipient")
-        } catch let error as ToolError {
+            XCTFail("Expected ToolFailure for unresolvable recipient")
+        } catch let error as ToolFailure {
             let json = try decodeJSONDictionary(from: error.content)
             XCTAssertEqual(
                 json["status"] as? String,
@@ -494,6 +485,53 @@ final class SendToolExecuteTests: XCTestCase {
 
     // The confirm flag is inert: explicit true and explicit false produce the
     // identical "confirmed" outcome.
+    // Before payloads were validated up front, the file went out and the text
+    // then failed its length check, which reported partial_failure.
+    func testOverlongTextAfterFileFailsBeforeAnythingIsSent() async throws {
+        let fixture = try makeSendFixture()
+        let stub = StubScriptRunner()
+        let tool = SendTool(db: fixture.database(), resolver: makeSeededResolver(), runner: stub)
+
+        do {
+            _ = try await tool.execute(args: [
+                "to": .string("+15550000001"),
+                "file_paths": .array([.string("/tmp/a.jpg")]),
+                "text": .string(String(repeating: "a", count: 20_001)),
+            ])
+            XCTFail("Expected ToolFailure for an overlong message")
+        } catch let error as ToolFailure {
+            let json = try decodeJSONDictionary(from: error.content)
+            XCTAssertEqual(json["status"] as? String, "failed")
+            XCTAssertEqual(json["error"] as? String, "Message too long (max 20,000 chars)")
+            XCTAssertEqual(json["disposition"] as? String, "not_started")
+            XCTAssertEqual(json["retry_safe"] as? Bool, true)
+        }
+        XCTAssertTrue(stub.invocations.isEmpty, "Nothing may be dispatched when any payload is invalid")
+    }
+
+    func testOverlongRecipientHandleFailsBeforeAnythingIsSent() async throws {
+        let fixture = try makeSendFixture()
+        let longEmail = String(repeating: "a", count: 95) + "@x.com"
+        try fixture.insertHandle(rowId: 3, handle: longEmail)
+        let stub = StubScriptRunner()
+        let tool = SendTool(db: fixture.database(), resolver: makeSeededResolver(), runner: stub)
+
+        do {
+            _ = try await tool.execute(args: [
+                "to": .string(longEmail),
+                "file_paths": .array([.string("/tmp/a.jpg")]),
+                "text": .string("hi"),
+            ])
+            XCTFail("Expected ToolFailure for an overlong recipient")
+        } catch let error as ToolFailure {
+            let json = try decodeJSONDictionary(from: error.content)
+            XCTAssertEqual(json["status"] as? String, "failed")
+            XCTAssertEqual(json["error"] as? String, "Recipient too long")
+            XCTAssertEqual(json["disposition"] as? String, "not_started")
+        }
+        XCTAssertTrue(stub.invocations.isEmpty)
+    }
+
     func testConfirmFlagIsInert() async throws {
         for (confirmValue, rowId, guid) in [(true, 120, "msg-guid-inert-true"), (false, 121, "msg-guid-inert-false")] {
             let fixture = try makeSendFixture()
@@ -556,8 +594,8 @@ final class SendToolExecuteTests: XCTestCase {
                 "text": .string("Hello Alice"),
                 "file_paths": .array([.string("/tmp/x.jpg")]),
             ])
-            XCTFail("Expected ToolError for a partial send failure")
-        } catch let error as ToolError {
+            XCTFail("Expected ToolFailure for a partial send failure")
+        } catch let error as ToolFailure {
             let json = try decodeJSONDictionary(from: error.content)
             XCTAssertEqual(json["status"] as? String, "partial_failure",
                 "A dispatched payload followed by a hard failure must not report a blanket 'failed'")
@@ -596,8 +634,8 @@ final class SendToolExecuteTests: XCTestCase {
                 "text": .string("Hello Alice"),
                 "file_paths": .array([.string("/tmp/x.jpg")]),
             ])
-            XCTFail("Expected ToolError when the first payload fails")
-        } catch let error as ToolError {
+            XCTFail("Expected ToolFailure when the first payload fails")
+        } catch let error as ToolFailure {
             let json = try decodeJSONDictionary(from: error.content)
             XCTAssertEqual(json["status"] as? String, "failed",
                 "Nothing was dispatched, so this stays a plain 'failed', not 'partial_failure'")
@@ -690,7 +728,7 @@ final class SendToolExecuteTests: XCTestCase {
                 "text": .string("Hello"),
             ])
             XCTFail("expected failed")
-        } catch let error as ToolError {
+        } catch let error as ToolFailure {
             let json = try decodeJSONDictionary(from: error.content)
             XCTAssertEqual(json["status"] as? String, "failed")
             XCTAssertEqual(json["disposition"] as? String, "not_started")
@@ -709,7 +747,7 @@ final class SendToolExecuteTests: XCTestCase {
                 "text": .string("Hello"),
             ])
             XCTFail("expected failed")
-        } catch let error as ToolError {
+        } catch let error as ToolFailure {
             let json = try decodeJSONDictionary(from: error.content)
             XCTAssertEqual(json["status"] as? String, "failed")
             XCTAssertEqual(json["disposition"] as? String, "may_have_completed")
@@ -737,7 +775,7 @@ final class SendToolExecuteTests: XCTestCase {
                 "file_paths": .array([.string("/tmp/x.jpg")]),
             ])
             XCTFail("expected partial_failure")
-        } catch let error as ToolError {
+        } catch let error as ToolFailure {
             let json = try decodeJSONDictionary(from: error.content)
             XCTAssertEqual(json["status"] as? String, "partial_failure")
             XCTAssertEqual(json["disposition"] as? String, "not_started")
@@ -766,7 +804,7 @@ final class SendToolExecuteTests: XCTestCase {
                 "text": .string("Hello Alice"),
             ])
             XCTFail("expected failed_delivery")
-        } catch let error as ToolError {
+        } catch let error as ToolFailure {
             let json = try decodeJSONDictionary(from: error.content)
             XCTAssertEqual(json["status"] as? String, "failed_delivery")
             XCTAssertEqual(json["disposition"] as? String, "completed")
@@ -783,7 +821,7 @@ final class SendToolExecuteTests: XCTestCase {
                 "text": .string("Hello"),
             ])
             XCTFail("expected failed")
-        } catch let error as ToolError {
+        } catch let error as ToolFailure {
             let json = try decodeJSONDictionary(from: error.content)
             XCTAssertEqual(json["status"] as? String, "failed")
             XCTAssertEqual(json["disposition"] as? String, "not_started")
@@ -818,7 +856,7 @@ private func decodeJSONDictionary(from contents: [Tool.Content]) throws -> [Stri
     return try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
 }
 
-private func decodeJSONDictionary(from error: ToolError) throws -> [String: Any] {
+private func decodeJSONDictionary(from error: ToolFailure) throws -> [String: Any] {
     return try decodeJSONDictionary(from: error.content)
 }
 

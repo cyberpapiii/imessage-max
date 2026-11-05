@@ -89,15 +89,6 @@ enum OutputSchema {
     ])
 }
 
-// MARK: - Tool Error
-
-/// Error type that tools throw to signal failure with content.
-/// The CallTool handler catches this and sets isError: true on the result,
-/// letting MCP clients programmatically distinguish errors from success.
-struct ToolError: Error {
-    let content: [Tool.Content]
-}
-
 extension Tool.Content {
     static func plainText(_ text: String) -> Self {
         .text(text: text, annotations: nil, _meta: nil)
