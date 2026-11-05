@@ -254,7 +254,7 @@ actor HTTPTransport {
                 return errorResponse(.badRequest, "Missing Mcp-Session-Id header")
             }
             // 404 tells the client to re-initialize (spec).
-            guard await sessionManager.validate(sessionId: requestSessionId) != nil else {
+            guard await sessionManager.validate(sessionId: requestSessionId) else {
                 return errorResponse(.notFound, "Invalid or expired session. Please re-initialize.")
             }
             sessionId = requestSessionId
@@ -454,7 +454,7 @@ actor HTTPTransport {
         guard let sessionId = request.headers[.mcpSessionId] else {
             return errorResponse(.badRequest, "Missing Mcp-Session-Id header")
         }
-        guard await sessionManager.validate(sessionId: sessionId) != nil else {
+        guard await sessionManager.validate(sessionId: sessionId) else {
             return errorResponse(.notFound, "Invalid or expired session. Please re-initialize.")
         }
 
@@ -498,7 +498,7 @@ actor HTTPTransport {
         guard let sessionId = request.headers[.mcpSessionId] else {
             return errorResponse(.badRequest, "Missing Mcp-Session-Id header")
         }
-        guard await sessionManager.validate(sessionId: sessionId) != nil else {
+        guard await sessionManager.validate(sessionId: sessionId) else {
             return errorResponse(.notFound, "Invalid or expired session")
         }
 
