@@ -20,12 +20,6 @@ final class Database: @unchecked Sendable {
         self.schemaCache = Mutex(nil)
     }
 
-    /// Test-only: skip the probe and use `schema` as the answer.
-    init(path: String, schemaOverride: SchemaCapabilities) {
-        self.path = path
-        self.schemaCache = Mutex(schemaOverride)
-    }
-
     /// The probed schema, cached after the first successful open. A failed
     /// open throws and caches nothing, so the next call probes again.
     func schema() throws -> SchemaCapabilities {
