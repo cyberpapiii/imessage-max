@@ -14,17 +14,21 @@ enum SenderFilter: Equatable {
         if fromPerson.lowercased() == "me" {
             return .me
         }
-        if let normalized = PhoneUtils.normalizeToE164(fromPerson) {
-            return .handles([normalized])
+        let handles = await exactHandles(for: fromPerson, resolver: resolver)
+        return handles.isEmpty ? .handleContains(fromPerson) : .handles(handles)
+    }
+
+    /// The `handle.id` values `person` names: a phone number normalized to
+    /// E.164, an email lowercased, or every handle of every contact whose
+    /// name matches. Empty when it names nobody.
+    static func exactHandles(for person: String, resolver: ContactResolver) async -> [String] {
+        if let normalized = PhoneUtils.normalizeToE164(person) {
+            return [normalized]
         }
-        if PhoneUtils.isEmail(fromPerson) {
-            return .handles([fromPerson.lowercased()])
+        if PhoneUtils.isEmail(person) {
+            return [person.lowercased()]
         }
-        let matches = Set(await resolver.searchByName(fromPerson).map(\.handle))
-        if !matches.isEmpty {
-            return .handles(matches.sorted())
-        }
-        return .handleContains(fromPerson)
+        return Set(await resolver.searchByName(person).map(\.handle)).sorted()
     }
 
     /// A predicate over `m` and the sender join `h`.

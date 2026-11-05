@@ -187,4 +187,71 @@ final class ToolsReviewRegressionTests: XCTestCase {
         let chats = try decodeJSONArray(found["chats"])
         XCTAssertEqual(chats.compactMap { $0["id"] as? String }, ["chat1"])
     }
+
+    // MARK: - One participant resolver
+
+    /// Chats 1-12: DMs with Alice, newest last. Chat 20: Alice and Bob,
+    /// older than all of them. Chat 30: a DM with an email handle.
+    private func participantFixture() throws -> ToolTestDatabase {
+        let db = try ToolTestDatabase(name: "participants")
+        try db.insertHandle(rowId: 1, handle: "+15550000001")
+        try db.insertHandle(rowId: 2, handle: "+15550000002")
+        try db.insertHandle(rowId: 3, handle: "pat@example.com")
+        let base = now() - 100 * minute
+        var id = 0
+        func say(_ chat: Int, _ at: Int64, handle: Int) throws {
+            id += 1
+            try db.insertMessage(rowId: id, guid: "P\(id)", text: "hello \(id)", date: base + at * minute, isFromMe: false, handleId: handle)
+            try db.joinChatMessage(chatId: chat, messageId: id)
+        }
+        try db.insertChat(rowId: 20, guid: "iMessage;+;alice-bob")
+        try db.joinChatHandle(chatId: 20, handleId: 1)
+        try db.joinChatHandle(chatId: 20, handleId: 2)
+        try say(20, 0, handle: 2)
+        for chat in 1...12 {
+            try db.insertChat(rowId: chat, guid: "iMessage;-;alice\(chat)")
+            try db.joinChatHandle(chatId: chat, handleId: 1)
+            try say(chat, Int64(chat), handle: 1)
+        }
+        try db.insertChat(rowId: 30, guid: "iMessage;-;pat@example.com")
+        try db.joinChatHandle(chatId: 30, handleId: 3)
+        try say(30, 50, handle: 3)
+        return db
+    }
+
+    private let aliceAndBob = ["+15550000001": "Alice Smith", "+15550000002": "Bob Brown"]
+
+    func testGetMessagesFindsTheOnlyChatWithEveryParticipantPastTenNewerCandidates() async throws {
+        let db = try participantFixture()
+        let page = try await call("get_messages", ["participants": ["Alice", "Bob"]], db: db, contacts: aliceAndBob)
+        XCTAssertEqual((page["chat"] as? [String: Any])?["id"] as? String, "chat20")
+    }
+
+    func testAnUnresolvedParticipantIsNeverDropped() async throws {
+        let db = try participantFixture()
+        let catalog = ToolCatalog(database: db.database(), resolver: ContactResolver(seedCache: aliceAndBob))
+        let getMessages = try XCTUnwrap(catalog.handler(named: "get_messages"))
+        let body = try await toolFailureBody { try await getMessages(["participants": ["Alice", "Bob", "Nobody Known"]]) }
+        XCTAssertEqual(body["error"] as? String, "invalid_participants")
+        XCTAssertTrue((body["message"] as? String ?? "").contains("Nobody Known"))
+
+        let found = try await call("find_chat", ["participants": ["Alice", "Bob", "Nobody Known"]], db: db, contacts: aliceAndBob)
+        XCTAssertEqual(try decodeJSONArray(found["chats"]).count, 0)
+    }
+
+    func testParticipantsAcceptAnEmail() async throws {
+        let db = try participantFixture()
+        let page = try await call("get_messages", ["participants": ["Pat@Example.com"]], db: db)
+        XCTAssertEqual((page["chat"] as? [String: Any])?["id"] as? String, "chat30")
+        let found = try await call("find_chat", ["participants": ["pat@example.com"]], db: db)
+        XCTAssertEqual(try decodeJSONArray(found["chats"]).compactMap { $0["id"] as? String }, ["chat30"])
+    }
+
+    func testFindChatRanksTheExactParticipantSetFirst() async throws {
+        let db = try participantFixture()
+        let found = try await call("find_chat", ["participants": ["Bob"]], db: db, contacts: aliceAndBob)
+        XCTAssertEqual(try decodeJSONArray(found["chats"]).compactMap { $0["id"] as? String }, ["chat20"])
+        let alice = try await call("find_chat", ["participants": ["Alice"], "limit": 3], db: db, contacts: aliceAndBob)
+        XCTAssertEqual(try decodeJSONArray(alice["chats"]).compactMap { $0["id"] as? String }, ["chat12", "chat11", "chat10"])
+    }
 }

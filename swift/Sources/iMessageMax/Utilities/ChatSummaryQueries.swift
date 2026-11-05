@@ -86,36 +86,6 @@ enum ChatSummaryQueries {
         try await participantsByChat(db: db, chatIds: [chatId], resolver: resolver)[chatId] ?? []
     }
 
-    /// Participant counts keyed by chat ID, by the same rule as
-    /// `SQLFragments.participantCount`; callers add 1 for "me" themselves.
-    static func participantCountsByChat(
-        db: Database,
-        chatIds: [Int64]
-    ) throws -> [Int64: Int] {
-        guard !chatIds.isEmpty else { return [:] }
-
-        let placeholders = SQLFragments.placeholders(chatIds.count)
-        let sql = """
-            SELECT chj.chat_id, COUNT(DISTINCT h.id)
-            FROM chat_handle_join chj
-            JOIN handle h ON h.ROWID = chj.handle_id
-            WHERE chj.chat_id IN (\(placeholders))
-            GROUP BY chj.chat_id
-            """
-
-        var result: [Int64: Int] = [:]
-        for chatId in chatIds {
-            result[chatId] = 0
-        }
-        let rows = try db.query(sql, params: chatIds.map { $0 as Any }) { row in
-            (chatId: row.int(0), count: Int(row.int(1)))
-        }
-        for row in rows {
-            result[row.chatId] = row.count
-        }
-        return result
-    }
-
     /// Most-recent inbound sender handles per chat, newest first, at most
     /// `perChatLimit` rows per chat. Reactions and outbound rows excluded.
     static func recentSendersByChat(
@@ -155,32 +125,6 @@ enum ChatSummaryQueries {
         }
         for row in rows {
             result[row.chatId, default: []].append(row.handle)
-        }
-        return result
-    }
-
-    /// Newest `message.date` keyed by chat ID, via `chat_message_join` to `message`.
-    static func lastMessageDatesByChat(
-        db: Database,
-        chatIds: [Int64]
-    ) throws -> [Int64: Int64] {
-        guard !chatIds.isEmpty else { return [:] }
-
-        let placeholders = SQLFragments.placeholders(chatIds.count)
-        let sql = """
-            SELECT cmj.chat_id, MAX(m.date)
-            FROM chat_message_join cmj
-            JOIN message m ON m.ROWID = cmj.message_id
-            WHERE cmj.chat_id IN (\(placeholders))
-            GROUP BY cmj.chat_id
-            """
-
-        var result: [Int64: Int64] = [:]
-        let rows = try db.query(sql, params: chatIds.map { $0 as Any }) { row in
-            (chatId: row.int(0), date: row.optionalInt(1) ?? 0)
-        }
-        for row in rows {
-            result[row.chatId] = row.date
         }
         return result
     }

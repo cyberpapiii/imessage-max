@@ -2,100 +2,40 @@ import Foundation
 
 extension GetMessagesTool {
     func resolveParticipantsToChat(participants: [String]) async throws -> String {
-        var handleGroups: [Set<String>] = []
-
-        for p in participants {
-            var handlesForParticipant: Set<String> = []
-            if p.hasPrefix("+") {
-                handlesForParticipant.insert(p)
-            } else if let normalized = PhoneUtils.normalizeToE164(p) {
-                handlesForParticipant.insert(normalized)
-            }
-
-            let matches = await resolver.searchByName(p)
-            for (handle, _) in matches {
-                handlesForParticipant.insert(handle)
-            }
-
-            if !handlesForParticipant.isEmpty {
-                handleGroups.append(handlesForParticipant)
-            }
+        let match = await ParticipantChats.resolve(participants, resolver: resolver)
+        guard match.unresolved.isEmpty else {
+            throw ToolFailure("invalid_participants", "Could not resolve any handles for participants: \(match.unresolved)")
         }
 
-        let allHandles = handleGroups.reduce(into: Set<String>()) { partialResult, handles in
-            partialResult.formUnion(handles)
-        }
-
-        guard !allHandles.isEmpty else {
-            throw ToolFailure("invalid_participants", "Could not resolve any handles for participants: \(participants)")
-        }
-
-        let placeholders = SQLFragments.placeholders(allHandles.count)
-        let sql = """
-            SELECT c.ROWID, c.display_name,
-                   \(SQLFragments.participantCount()) as participant_count
-            FROM chat c
-            JOIN chat_handle_join chj ON c.ROWID = chj.chat_id
-            JOIN handle h ON chj.handle_id = h.ROWID
-            WHERE h.id IN (\(placeholders))
-            GROUP BY c.ROWID
-            ORDER BY (SELECT MAX(m.date) FROM message m JOIN chat_message_join cmj ON m.ROWID = cmj.message_id WHERE cmj.chat_id = c.ROWID) DESC
-            LIMIT 10
-            """
-
-        let rows = try db.query(sql, params: Array(allHandles)) { row in
-            (
-                id: Int(row.int(0)),
-                displayName: row.string(1),
-                participantCount: Int(row.int(2))
-            )
+        let chats = try match.chats(db: db, order: .recent, limit: 5)
+        guard chats.count != 1 else { return ChatIdentifier.format(chats[0].id) }
+        guard !chats.isEmpty else {
+            throw ToolFailure("chat_not_found", "No chat found with participants: \(participants)")
         }
 
         let participantsByChat = try await ChatSummaryQueries.participantsByChat(
             db: db,
-            chatIds: rows.map { Int64($0.id) },
+            chatIds: chats.map(\.id),
             resolver: resolver
         )
-        let exactMatches = rows.filter { row in
-            let chatHandles = Set((participantsByChat[Int64(row.id)] ?? []).map(\.handle))
-            return handleGroups.allSatisfy { !chatHandles.intersection($0).isEmpty }
-        }
-
-        func candidate(_ row: (id: Int, displayName: String?, participantCount: Int)) -> GetMessagesErrorResponse.Candidate {
-            let identity = ChatIdentity.from(
-                chatId: Int64(row.id),
-                guid: nil,
-                explicitName: row.displayName,
-                rows: participantsByChat[Int64(row.id)] ?? []
-            )
-            return GetMessagesErrorResponse.Candidate(
-                chatId: identity.mcpId,
-                name: identity.displayName,
-                participantCount: row.participantCount
-            )
-        }
-
-        if exactMatches.count == 1 {
-            return ChatIdentifier.format(exactMatches[0].id)
-        } else if !exactMatches.isEmpty {
-            throw ToolFailure(code: "ambiguous_participants", body: GetMessagesErrorResponse(
-                error: "ambiguous_participants",
-                message: "Multiple chats found with participants: \(participants)",
-                candidates: exactMatches.prefix(5).map(candidate),
-                suggestion: "Please specify chat_id to target the exact conversation."
-            ))
-        } else if rows.count == 1 {
-            return ChatIdentifier.format(rows[0].id)
-        } else if !rows.isEmpty {
-            throw ToolFailure(code: "ambiguous_participants", body: GetMessagesErrorResponse(
-                error: "ambiguous_participants",
-                message: "Multiple chats found with participants: \(participants)",
-                candidates: rows.prefix(5).map(candidate),
-                suggestion: "Did you mean the \(rows[0].participantCount)-person chat or a different one?"
-            ))
-        } else {
-            throw ToolFailure("chat_not_found", "No chat found with participants: \(participants)")
-        }
+        throw ToolFailure(code: "ambiguous_participants", body: GetMessagesErrorResponse(
+            error: "ambiguous_participants",
+            message: "Multiple chats found with participants: \(participants)",
+            candidates: chats.map { chat in
+                let identity = ChatIdentity.from(
+                    chatId: chat.id,
+                    guid: nil,
+                    explicitName: chat.displayName,
+                    rows: participantsByChat[chat.id] ?? []
+                )
+                return GetMessagesErrorResponse.Candidate(
+                    chatId: identity.mcpId,
+                    name: identity.displayName,
+                    participantCount: chat.participantCount
+                )
+            },
+            suggestion: "Please specify chat_id to target the exact conversation."
+        ))
     }
 
     func parseChatId(_ chatId: String?) -> Int? {

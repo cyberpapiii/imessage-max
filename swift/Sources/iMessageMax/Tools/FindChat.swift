@@ -127,29 +127,23 @@ enum FindChatTool {
         var filteredHidden: Int? = params.includeFiltered ? nil : 0
 
         if let participants = params.participants, !participants.isEmpty {
-            let handleGroups = await buildHandleGroups(participants: participants, resolver: resolver)
-            if !handleGroups.isEmpty {
-            let chats = try await findChatsByHandleGroups(
-                database: database,
-                handleGroups: handleGroups,
+            // A participant who resolves to nobody matches no chat.
+            let match = await ParticipantChats.resolve(participants, resolver: resolver)
+            let chats = try match.chats(
+                db: database,
+                chatPredicate: params.includeFiltered ? nil : SQLFragments.shownChat(),
                 isGroup: params.isGroup,
-                includeFiltered: params.includeFiltered,
-                limit: params.limit,
-                resolver: resolver
+                order: .exactSizeFirst,
+                limit: params.limit
             )
             results.append(contentsOf: try await buildChatResults(
                 database: database,
-                chats: chats,
+                chats: chats.map { ChatRow(id: $0.id, guid: $0.guid, displayName: $0.displayName) },
                 resolver: resolver,
                 matchType: "participants"
             ))
             if !params.includeFiltered {
-                filteredHidden = try countFilteredHiddenByHandleGroups(
-                    database: database,
-                    handleGroups: handleGroups,
-                    isGroup: params.isGroup
-                )
-            }
+                filteredHidden = try match.count(db: database, chatPredicate: SQLFragments.hiddenChat(), isGroup: params.isGroup)
             }
         }
 
@@ -227,42 +221,6 @@ enum FindChatTool {
 
     // MARK: - Private Helpers
 
-
-    private static func buildHandleGroups(
-        participants: [String],
-        resolver: ContactResolver
-    ) async -> [[String]] {
-        var handleGroups: [[String]] = []
-
-        for participant in participants {
-            var groupHandles: [String] = []
-
-            if participant.hasPrefix("+") {
-                groupHandles.append(participant)
-            } else {
-                if let normalized = PhoneUtils.normalizeToE164(participant) {
-                    groupHandles.append(normalized)
-                }
-
-                let matches = await resolver.searchByName(participant)
-                for (handle, _) in matches {
-                    if !groupHandles.contains(handle) {
-                        groupHandles.append(handle)
-                    }
-                }
-            }
-
-            if !groupHandles.isEmpty {
-                handleGroups.append(groupHandles)
-            }
-        }
-
-        return handleGroups
-    }
-
-    // The four queries below stay on raw SQL on purpose: they splice
-    // `IN (?, ?, ...)` placeholder lists whose length is data-dependent,
-    // which QueryBuilder does not model. See plans/071.
     /// SQL fragment filtering chats by handle count before LIMIT (groups > 1, DMs <= 1).
     private static func groupFilterSQL(isGroup: Bool?) -> String {
         guard let isGroup else { return "" }
@@ -275,108 +233,6 @@ enum FindChatTool {
 
     private static func filteredHiddenSQL() -> String {
         " AND \(SQLFragments.hiddenChat())"
-    }
-
-    private static func findChatsByHandleGroups(
-        database: Database,
-        handleGroups: [[String]],
-        isGroup: Bool?,
-        includeFiltered: Bool,
-        limit: Int,
-        resolver: ContactResolver
-    ) async throws -> [ChatRow] {
-        guard !handleGroups.isEmpty else { return [] }
-
-        // Flatten all handles for initial query
-        let allHandles = handleGroups.flatMap { $0 }
-        let placeholders = SQLFragments.placeholders(allHandles.count)
-        let groupSQL = groupFilterSQL(isGroup: isGroup)
-        let filterSQL = filteredSQL(includeFiltered: includeFiltered)
-
-        // Get candidate chats
-        let sql = """
-            SELECT DISTINCT c.ROWID as id, c.guid, c.display_name
-            FROM chat c
-            JOIN chat_handle_join chj ON c.ROWID = chj.chat_id
-            JOIN handle h ON chj.handle_id = h.ROWID
-            WHERE h.id IN (\(placeholders))
-            \(groupSQL)
-            \(filterSQL)
-            ORDER BY c.ROWID DESC
-            LIMIT 500
-            """
-
-        let candidates = try database.query(sql, params: allHandles) { row in
-            ChatRow(
-                id: row.int(0),
-                guid: row.string(1),
-                displayName: row.string(2)
-            )
-        }
-
-        let sorted: [ChatRow]
-        // For single group, filter to those with matching handles
-        if handleGroups.count == 1 {
-            sorted = try enrichAndSortChats(database: database, chats: candidates, targetCount: 2)
-        } else {
-            // For multiple groups, filter to chats that have at least one handle from each group
-            let handlesByChat = try await ChatSummaryQueries.participantsByChat(
-                db: database,
-                chatIds: candidates.map(\.id),
-                resolver: resolver
-            )
-            var matchingChats: [ChatRow] = []
-
-            for chat in candidates {
-                let chatHandles = Set((handlesByChat[chat.id] ?? []).map(\.handle))
-
-                var hasAllGroups = true
-                for group in handleGroups {
-                    if !group.contains(where: { chatHandles.contains($0) }) {
-                        hasAllGroups = false
-                        break
-                    }
-                }
-
-                if hasAllGroups {
-                    matchingChats.append(chat)
-                }
-            }
-
-            let targetCount = handleGroups.count + 1  // participants + me
-            sorted = try enrichAndSortChats(database: database, chats: matchingChats, targetCount: targetCount)
-        }
-
-        return Array(sorted.prefix(limit))
-    }
-
-    private static func enrichAndSortChats(
-        database: Database,
-        chats: [ChatRow],
-        targetCount: Int
-    ) throws -> [ChatRow] {
-        let chatIds = chats.map(\.id)
-        let countsByChat = try ChatSummaryQueries.participantCountsByChat(db: database, chatIds: chatIds)
-        let datesByChat = try ChatSummaryQueries.lastMessageDatesByChat(db: database, chatIds: chatIds)
-
-        var enriched: [(chat: ChatRow, participantCount: Int, lastMessageDate: Int64)] = []
-        for chat in chats {
-            let participantCount = (countsByChat[chat.id] ?? 0) + 1  // +1 for "me"
-            let lastDate = datesByChat[chat.id] ?? 0
-            enriched.append((chat, participantCount, lastDate))
-        }
-
-        // Sort: exact participant match first, then by recency
-        enriched.sort { a, b in
-            let aExact = a.participantCount == targetCount ? 0 : 1
-            let bExact = b.participantCount == targetCount ? 0 : 1
-            if aExact != bExact {
-                return aExact < bExact
-            }
-            return a.lastMessageDate > b.lastMessageDate
-        }
-
-        return enriched.map { $0.chat }
     }
 
     private static func findChatsByName(
@@ -518,34 +374,6 @@ enum FindChatTool {
             }
         }
         return chats
-    }
-
-    private static func countFilteredHiddenByHandleGroups(
-        database: Database,
-        handleGroups: [[String]],
-        isGroup: Bool?
-    ) throws -> Int {
-        let allHandles = handleGroups.flatMap { $0 }
-        guard !allHandles.isEmpty else { return 0 }
-        let placeholders = SQLFragments.placeholders(allHandles.count)
-        let groupSQL = groupFilterSQL(isGroup: isGroup)
-        let sql = """
-            SELECT COUNT(*) FROM (
-                SELECT DISTINCT c.ROWID
-                FROM chat c
-                JOIN chat_handle_join chj ON c.ROWID = chj.chat_id
-                JOIN handle h ON chj.handle_id = h.ROWID
-                WHERE h.id IN (\(placeholders))
-                \(groupSQL)
-                \(filteredHiddenSQL())
-                ORDER BY c.ROWID DESC
-                LIMIT 500
-            )
-            """
-        let rows: [Int] = try database.query(sql, params: allHandles) { row in
-            Int(row.int(0))
-        }
-        return rows.first ?? 0
     }
 
     private static func countFilteredHiddenByName(
