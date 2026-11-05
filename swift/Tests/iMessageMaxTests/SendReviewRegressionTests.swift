@@ -127,4 +127,40 @@ final class SendReviewRegressionTests: XCTestCase {
         }
         XCTAssertEqual(resolved.target, .participant(handle: "12345", chatId: 9))
     }
+
+    // MARK: - 3. Chat name
+
+    /// `to` and `chat_id` name the same unnamed 1:1 the same way, as every
+    /// other tool does. `to` used to answer "chat1".
+    func testChatNameMatchesAcrossEntryPoints() async throws {
+        let fixture = try makeFixture()
+        let resolver = SendResolver(db: fixture.database(), resolver: makeSeededResolver())
+
+        guard case .success(let byRecipient) = await resolver.resolve(.recipient("+15550000001")),
+              case .success(let byChatId) = await resolver.resolve(.chatId("chat1")) else {
+            return XCTFail("both entry points should resolve")
+        }
+        let expected = try await ChatPage.identities(
+            [ChatPage.Chat(id: 1, guid: "iMessage;-;alice-review-guid", explicitName: nil)],
+            db: fixture.database(), resolver: makeSeededResolver()
+        )[1]?.displayName
+        XCTAssertEqual(byRecipient.chat?.name, "Alice Smith")
+        XCTAssertEqual(byRecipient.chat?.name, byChatId.chat?.name)
+        XCTAssertEqual(byRecipient.chat?.name, expected)
+        XCTAssertEqual(byRecipient.chat?.id, "chat1")
+    }
+
+    /// A named chat keeps its explicit name on both paths.
+    func testNamedChatKeepsItsNameViaRecipient() async throws {
+        let fixture = try ToolTestDatabase(name: "send-review-named")
+        try fixture.insertHandle(rowId: 1, handle: "+15550000001")
+        try fixture.insertChat(rowId: 1, guid: "iMessage;-;named", displayName: "  Alice Work  ")
+        try fixture.joinChatHandle(chatId: 1, handleId: 1)
+        let resolver = SendResolver(db: fixture.database(), resolver: makeSeededResolver())
+
+        guard case .success(let resolved) = await resolver.resolve(.recipient("+15550000001")) else {
+            return XCTFail("should resolve")
+        }
+        XCTAssertEqual(resolved.chat?.name, "Alice Work")
+    }
 }
