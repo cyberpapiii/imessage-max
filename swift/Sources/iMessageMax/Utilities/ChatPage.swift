@@ -12,11 +12,17 @@ enum ChatPage {
         var newestDate: Int64? = nil
     }
 
+    /// Which message a chat's `last_message` shows and how. The defaults
+    /// are list_chats'; other tools override what their style differs in.
     struct LastMessageOptions {
+        /// Only messages at or after this Apple-epoch time; nil for all.
         var sinceApple: Int64? = nil
         var previewMaxLength = 50
+        /// Sender of a received message with no handle.
         var unknownSenderLabel = "unknown"
+        /// `ago` when the date can't be formatted; nil leaves it out.
         var agoFallback: String? = "unknown"
+        /// Only unread received messages, as get_unread shows.
         var onlyUnreadInbound = false
     }
 
@@ -67,11 +73,7 @@ enum ChatPage {
                 db: db,
                 chatIds: chatIds,
                 resolver: resolver,
-                sinceApple: options.sinceApple,
-                previewMaxLength: options.previewMaxLength,
-                unknownSenderLabel: options.unknownSenderLabel,
-                agoFallback: options.agoFallback,
-                onlyUnreadInbound: options.onlyUnreadInbound,
+                options: options,
                 newestDates: newestDates
             )
         }

@@ -7,7 +7,6 @@ enum ChatSummaryQueries {
     struct Participant {
         let handle: String
         let name: String?
-        let service: String?
     }
 
     struct LastMessage {
@@ -31,7 +30,7 @@ enum ChatSummaryQueries {
 
         let placeholders = SQLFragments.placeholders(chatIds.count)
         let sql = """
-            SELECT DISTINCT chj.chat_id, h.id as handle, h.service
+            SELECT DISTINCT chj.chat_id, h.id as handle
             FROM chat_handle_join chj
             JOIN handle h ON chj.handle_id = h.ROWID
             WHERE chj.chat_id IN (\(placeholders))
@@ -40,7 +39,7 @@ enum ChatSummaryQueries {
         let params: [Any] = chatIds.map { $0 as Any }
 
         let rows = try db.query(sql, params: params) { row in
-            (chatId: row.int(0), handle: row.string(1) ?? "", service: row.string(2))
+            (chatId: row.int(0), handle: row.string(1) ?? "")
         }
 
         // Collect unique handles and resolve all at once.
@@ -55,23 +54,13 @@ enum ChatSummaryQueries {
         // Group by chat id. chat_handle_join has no unique constraint, and the
         // same handle can be joined to one chat more than once (iCloud sync
         // merges, SMS and iMessage handles that normalize to the same string).
-        // DISTINCT above collapses exact duplicate rows; this collapses the
-        // rest by handle, keeping the first row seen so order stays stable.
+        // DISTINCT above collapses those to one row per handle.
         var result: [Int64: [Participant]] = [:]
-        var seenHandlesByChat: [Int64: Set<String>] = [:]
         for chatId in chatIds {
             result[chatId] = []
         }
         for row in rows {
-            guard seenHandlesByChat[row.chatId, default: []].insert(row.handle).inserted else {
-                continue
-            }
-            let participant = Participant(
-                handle: row.handle,
-                name: resolvedNames[row.handle],
-                service: row.service
-            )
-            result[row.chatId, default: []].append(participant)
+            result[row.chatId, default: []].append(Participant(handle: row.handle, name: resolvedNames[row.handle]))
         }
 
         return result
@@ -131,49 +120,23 @@ enum ChatSummaryQueries {
 
     // MARK: - Last messages
 
-    /// Returns the newest non-reaction message per chat, keyed by chat ID.
+    /// The newest non-reaction message per chat that `options` admits,
+    /// keyed by chat ID; a chat with none is absent. One query for all
+    /// chats, then one for the attachment kinds of text-less previews.
     ///
-    /// One query for all chats. Formatting defaults are `ListChats`'
-    /// (maxLength 50, "unknown" sender fallback, `ago ?? "unknown"`).
-    /// GetActiveConversations passes its own (maxLength 80, "Unknown",
-    /// nullable `ago`). `awaitingReply = !isFromMe`.
-    ///
-    /// - Parameters:
-    ///   - sinceApple: When non-nil, adds `AND m.date >= ?` so only messages
-    ///     at or after this Apple-epoch nanosecond timestamp are considered.
-    ///     Pass `nil` to search the full history.
-    ///   - previewMaxLength: Max length for the message text preview.
-    ///   - unknownSenderLabel: Sender label when the message is not from me
-    ///     and has no sender handle.
-    ///   - agoFallback: Value for `ago` when the date cannot be formatted;
-    ///     pass `nil` to keep `ago` nullable.
-    ///   - onlyUnreadInbound: When true, only unread inbound messages
-    ///     (`is_read = 0 AND is_from_me = 0`) are considered, matching
-    ///     `get_unread`'s latest-unread selection. Default false preserves
-    ///     the newest-message behavior for all existing callers.
-    ///   - newestDates: Each chat's newest qualifying message date, when the
-    ///     caller already computed it under the same filters passed here.
-    ///     Turns the per-chat search into a seek. Ignored unless every chat in
-    ///     `chatIds` has one.
+    /// - Parameter newestDates: Each chat's newest admitted message date,
+    ///   when the caller's own query already found it under the same
+    ///   filters. The lookup then seeks to that date instead of searching
+    ///   the chat's history. Used only when every chat in `chatIds` has one.
     static func lastMessagesByChat(
         db: Database,
         chatIds: [Int64],
         resolver: ContactResolver,
-        sinceApple: Int64? = nil,
-        previewMaxLength: Int = 50,
-        unknownSenderLabel: String = "unknown",
-        agoFallback: String? = "unknown",
-        onlyUnreadInbound: Bool = false,
+        options: ChatPage.LastMessageOptions = .init(),
         newestDates: [Int64: Int64]? = nil
     ) async throws -> [Int64: LastMessage] {
         guard !chatIds.isEmpty else { return [:] }
 
-        // A caller that already knows each chat's newest qualifying date can
-        // hand it over, and the lookup becomes a seek into message(date)
-        // instead of a walk over everything the chat has ever held. Used only
-        // when every requested chat has a date, so a single statement covers
-        // the batch. The date must be the newest under the same filters this
-        // call applies, unread ones included.
         let pinnedDates: [Int64]? = {
             guard let newestDates else { return nil }
             let pins = chatIds.compactMap { newestDates[$0] }
@@ -181,175 +144,83 @@ enum ChatSummaryQueries {
         }()
 
         var params: [Any] = []
-        let idRows: String
+        var pick = ""
         if let pinnedDates {
-            idRows = chatIds.map { _ in "(?,?)" }.joined(separator: ",")
             for (chatId, date) in zip(chatIds, pinnedDates) {
                 params.append(chatId)
                 params.append(date)
             }
+            // A pinned date already satisfies the caller's `since`.
+            pick = "\n      AND m2.date = i.newest_date"
         } else {
-            idRows = chatIds.map { _ in "(?)" }.joined(separator: ",")
             params.append(contentsOf: chatIds.map { $0 as Any })
+            if let since = options.sinceApple {
+                pick = "\n      AND m2.date >= ?"
+                params.append(since)
+            }
+        }
+        if options.onlyUnreadInbound {
+            pick += "\n      AND \(SQLFragments.unreadInbound("m2"))"
         }
 
-        var sinceClause = ""
-        if let since = sinceApple, pinnedDates == nil {
-            // A pinned date is already at or after any `since` the caller
-            // applied when it computed the date, so repeating the bound would
-            // only cost another term.
-            sinceClause = "\n                  AND m2.date >= ?"
-            params.append(since)
-        }
-
-        let unreadClause = onlyUnreadInbound
-            ? "\n                  AND \(SQLFragments.unreadInbound("m2"))"
-            : ""
-
-        // One correlated LIMIT 1 per requested chat, not a ROW_NUMBER() rank over
-        // every message in every requested chat. Ordering on m2.date (not the cached
-        // chat_message_join.message_date) keeps message.date as the single
-        // source of truth for recency.
-        // Both forms pick the same row: newest date first, highest ROWID to
-        // break a tie. The pinned form states the date instead of sorting to
-        // find it, which lets the message(date) index do the work; ordering
-        // still runs on message.date rather than the cached copy in
-        // chat_message_join, so message.date stays the source of truth.
-        let sql: String
-        if pinnedDates != nil {
-            sql = """
-                WITH ids(chat_id, newest_date) AS (VALUES \(idRows))
-                SELECT i.chat_id, m.text, m.attributedBody, m.is_from_me,
-                       h.id as sender_handle, m.date, m.ROWID as message_id,
-                       m.item_type, m.group_action_type, m.group_title, oh.id as other_handle_id
-                FROM ids i
-                JOIN message m ON m.ROWID = (
-                    SELECT cmj.message_id
-                    FROM chat_message_join cmj
-                    JOIN message m2 ON m2.ROWID = cmj.message_id
-                    WHERE cmj.chat_id = i.chat_id
-                      AND \(SQLFragments.notReaction("m2"))
-                      AND m2.date = i.newest_date\(unreadClause)
-                    ORDER BY m2.ROWID DESC
-                    LIMIT 1
-                )
-                LEFT JOIN handle h ON m.handle_id = h.ROWID
-                LEFT JOIN handle oh ON m.other_handle = oh.ROWID
-                """
-        } else {
-            sql = """
-                WITH ids(chat_id) AS (VALUES \(idRows))
-                SELECT i.chat_id, m.text, m.attributedBody, m.is_from_me,
-                       h.id as sender_handle, m.date, m.ROWID as message_id,
-                       m.item_type, m.group_action_type, m.group_title, oh.id as other_handle_id
-                FROM ids i
-                JOIN message m ON m.ROWID = (
-                    SELECT cmj.message_id
-                    FROM chat_message_join cmj
-                    JOIN message m2 ON m2.ROWID = cmj.message_id
-                    WHERE cmj.chat_id = i.chat_id
-                      AND \(SQLFragments.notReaction("m2"))\(sinceClause)\(unreadClause)
-                    ORDER BY m2.date DESC, m2.ROWID DESC
-                    LIMIT 1
-                )
-                LEFT JOIN handle h ON m.handle_id = h.ROWID
-                LEFT JOIN handle oh ON m.other_handle = oh.ROWID
-                """
-        }
-
-        struct RawRow {
-            let chatId: Int64
-            let text: String?
-            let attributedBody: Data?
-            let isFromMe: Bool
-            let senderHandle: String?
-            let date: Int64?
-            let messageId: Int64
-            let itemType: Int
-            let groupActionType: Int
-            let groupTitle: String?
-            let otherHandle: String?
-        }
+        // One correlated LIMIT 1 per chat, ordered on message.date rather
+        // than the copy in chat_message_join, newest ROWID breaking ties.
+        let width = pinnedDates == nil ? 1 : 2
+        let row = "(" + SQLFragments.placeholders(width) + ")"
+        let sql = """
+            WITH ids(\(pinnedDates == nil ? "chat_id" : "chat_id, newest_date")) AS (
+              VALUES \(Array(repeating: row, count: chatIds.count).joined(separator: ","))
+            )
+            SELECT \(MessageRecord.selectList(try db.schema())), i.chat_id
+            FROM ids i
+            JOIN message m ON m.ROWID = (
+              SELECT cmj.message_id
+              FROM chat_message_join cmj
+              JOIN message m2 ON m2.ROWID = cmj.message_id
+              WHERE cmj.chat_id = i.chat_id
+                AND \(SQLFragments.notReaction("m2"))\(pick)
+              ORDER BY m2.date DESC, m2.ROWID DESC
+              LIMIT 1
+            )
+            \(MessageRecord.handleJoinsSQL)
+            """
 
         let rows = try db.query(sql, params: params) { row in
-            RawRow(
-                chatId: row.int(0),
-                text: row.string(1),
-                attributedBody: row.blob(2),
-                isFromMe: row.int(3) == 1,
-                senderHandle: row.string(4),
-                date: row.optionalInt(5),
-                messageId: row.int(6),
-                itemType: Int(row.int(7)),
-                groupActionType: Int(row.int(8)),
-                groupTitle: row.string(9),
-                otherHandle: row.string(10)
-            )
+            (chatId: row.int(MessageRecord.columnCount), message: MessageRecord(row))
         }
-
-        // Collect unique sender and other-handle ids for batched name resolution.
-        var uniqueHandles = Set(rows.compactMap(\.senderHandle))
-        uniqueHandles.formUnion(rows.compactMap(\.otherHandle))
-        var resolvedNames: [String: String] = [:]
-        for handle in uniqueHandles {
-            resolvedNames[handle] = await IdentityDisplayFormatter.displayName(
-                handle: handle, resolver: resolver
-            )
-        }
+        let messages = rows.map(\.message)
 
         let typesByMessage = try MessagePreviewResolver.attachmentTypesByMessage(
             db: db,
-            messageIds: rows.map(\.messageId)
+            messageIds: messages.map(\.id)
+        )
+        let renderer = MessageRenderer(
+            annotations: .none,
+            labels: await SenderLabels.displayNames(
+                me: "Me", unknown: options.unknownSenderLabel, for: messages, resolver: resolver
+            ),
+            eventNames: await MessageRenderer.eventNames(for: messages, resolver: resolver)
         )
 
         var result: [Int64: LastMessage] = [:]
-        for row in rows {
-            // Sender logic shared by both list tools; only the unknown label differs.
-            let sender: String
-            if row.isFromMe {
-                sender = "Me"
-            } else if let handle = row.senderHandle {
-                sender = resolvedNames[handle] ?? IdentityDisplayFormatter.displayName(
-                    handle: handle, contactName: nil
-                )
-            } else {
-                sender = unknownSenderLabel
-            }
-
-            let date = AppleTime.toDate(row.date)
-            let ago = TimeUtils.formatCompactRelative(date) ?? agoFallback
-
-            let event = GroupEvent.classify(
-                itemType: row.itemType,
-                groupActionType: row.groupActionType,
-                groupTitle: row.groupTitle,
-                otherHandleName: row.otherHandle.flatMap { resolvedNames[$0] }
+        for (chatId, message) in rows {
+            let rendered = renderer.render(message)
+            let text = rendered.event?.previewText ?? MessagePreviewResolver.messageSummary(
+                text: message.text,
+                attributedBody: nil,
+                maxLength: options.previewMaxLength,
+                attachmentTypes: typesByMessage[message.id] ?? []
             )
-            let previewText: String
-            if let event {
-                previewText = event.previewText
-            } else {
-                previewText = MessagePreviewResolver.messageSummary(
-                    text: row.text,
-                    attributedBody: row.attributedBody,
-                    maxLength: previewMaxLength,
-                    attachmentTypes: typesByMessage[row.messageId] ?? []
-                )
-            }
-
-            let summary = LastMessageSummary(
-                from: sender,
-                text: previewText,
-                ago: ago,
-                ts: TimeUtils.formatISO(date)
-            )
-
-            result[row.chatId] = LastMessage(
-                info: summary,
-                awaitingReply: !row.isFromMe
+            result[chatId] = LastMessage(
+                info: LastMessageSummary(
+                    from: rendered.from,
+                    text: text,
+                    ago: rendered.ago ?? options.agoFallback,
+                    ts: rendered.ts
+                ),
+                awaitingReply: !message.isFromMe
             )
         }
-
         return result
     }
 }
