@@ -30,7 +30,7 @@ make -C swift install
 # Build, sign, and run from dist/; also available through Codex's Run action.
 ./script/build_and_run.sh
 
-# Run the companion's service-boundary tests.
+# Run the companion's service-boundary and panel-state tests.
 swift test --package-path macos
 ```
 
@@ -50,11 +50,11 @@ The setup endpoint is outside MCP's thirteen tools. It rejects browser origins, 
 
 ## Implementation
 
-`Sources/MaxCore` contains immutable diagnostic snapshots, strict loopback configuration parsing, the modern MCP client, bounded actor-owned process execution, and launchd control. `Sources/iMessageMaxMenu` contains MainActor observable UI state and SwiftUI views. A narrow AppKit boundary owns the status item and popover so the same panel can open on first launch and app reopen. Background checks run at most once per minute, stop during sleep, and coalesce with interactive checks. The face is drawn only while the panel is open: it blinks every few seconds, pauses between blinks, and animates continuously only while an action is in progress.
+`Sources/MaxCore` contains immutable diagnostic snapshots and the server's capability keys, strict loopback configuration parsing, the modern MCP client, bounded actor-owned process execution, and launchd control behind the `ServiceControlling` protocol. `Sources/iMessageMaxMenu` contains MainActor observable UI state and SwiftUI views; `PanelState.swift` derives the home page's headline, primary button, and face from one reading of the service, so a copy change lands in one place. A narrow AppKit boundary owns the status item and popover so the same panel can open on first launch and app reopen. Background checks run at most once per minute, stop during sleep, and coalesce with interactive checks. The face is drawn only while the panel is open, and animates only when its mood changes, on a click or good news, and continuously while an action is in progress.
 
 ## Design checks
 
-The panel face, app icon, and cached menu bar artwork share `Sources/MaxBrand`: `MessageMark.swift` holds the bubble outlines (the round one the panel and menu bar wear, and the original one inside the app icon) and `MaxFace.swift` holds the poses, each one row of numbers on the same grid. The build script prepends those sources to the app-icon renderer, preventing drift between drawings, and compiles it with optimisation because it shades the icon's satin-silver bubble pixel by pixel. The companion uses its own round-stroke glyph family, switch, and buttons, and follows native appearance, contrast, and motion preferences.
+The panel face, app icon, and cached menu bar artwork share `Sources/MaxBrand`: `MessageMark.swift` holds the bubble outlines (the round one the panel and menu bar wear, and the original one inside the app icon) and `MaxFace.swift` holds the poses, each one row of numbers on the same grid, and `CompanionMood`, which picks each mood's pose for the panel and the menu bar. The build script prepends those sources to the app-icon renderer, preventing drift between drawings, and compiles it with optimisation because it shades the icon's satin-silver bubble pixel by pixel. The companion uses its own round-stroke glyph family, switch, and buttons, and follows native appearance, contrast, and motion preferences.
 
 Design checks run from a debug build without touching the installed companion or the service:
 
@@ -63,4 +63,4 @@ swift build --package-path macos
 macos/.build/debug/iMessageMaxMenu --design-window --design-state setup-contacts --design-dark
 ```
 
-`--design-state` loads a fixture (`fresh`, `stopped`, `setup-messages`, `setup-contacts`, `setup-sending`, `problem`, `working`, `checking`, `ready`) and never contacts the service. `--design-window` shows the panel in a floating window. `--design-open <connection|details|preferences>` opens a page, `--design-act <start|stop|allow|copy>` plays an action, and `--design-light`, `--design-dark`, `--design-reduce-motion`, and `--design-slow-motion` override appearance and motion for that process only. `--design-artwork <file.png>` writes every menu bar mood to a contact sheet and exits. The decisions and verification limits are recorded in `docs/design/2026-10-12-companion-overhaul.md`; the earlier pass is in `docs/design/2026-10-12-benji-polish.md`.
+`--design-state` loads a fixture (`fresh`, `stopped`, `setup-messages`, `setup-contacts`, `setup-sending`, `problem`, `working`, `checking`, `ready`) and never contacts the service: the panel runs against a canned `ServiceControlling` from `Sources/iMessageMaxMenu/DesignHarness.swift`, which holds every design flag. `--design-window` shows the panel in a floating window. `--design-open <connection|details|preferences>` opens a page, `--design-act <start|stop|allow|copy>` plays an action, and `--design-light`, `--design-dark`, `--design-reduce-motion`, and `--design-slow-motion` override appearance and motion for that process only. `--design-artwork <file.png>` writes every menu bar mood to a contact sheet and exits. The decisions and verification limits are recorded in `docs/design/2026-10-12-companion-overhaul.md`; the earlier pass is in `docs/design/2026-10-12-benji-polish.md`.

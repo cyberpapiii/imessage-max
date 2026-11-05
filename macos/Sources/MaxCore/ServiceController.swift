@@ -23,7 +23,15 @@ public struct ServiceInspection: Sendable {
 
 public enum ServiceAction: Sendable { case start, stop, restart }
 
-public actor ServiceController {
+/// What the companion asks of the service. `ServiceController` is the real
+/// one; design fixtures supply a canned one that never touches launchd.
+public protocol ServiceControlling: Sendable {
+  func inspect() async throws -> ServiceInspection
+  func perform(_ action: ServiceAction) async throws
+  func requestPermission(_ permission: PermissionKind) async throws -> SetupPermissionReply
+}
+
+public actor ServiceController: ServiceControlling {
   private let home: URL
   private let bundledHelper: URL
   private let template: URL
@@ -112,10 +120,7 @@ public actor ServiceController {
     guard let pid = inspection.processID else {
       throw CoreError.commandFailed("Start iMessage Max before finishing setup.")
     }
-    if permission == .automation
-      && inspection.diagnosis?.capabilities["perm_automation"]?.state == "supported"
-      || permission == .contacts && inspection.diagnosis?.namesReady == true
-    {
+    if inspection.diagnosis?.grants(permission) == true {
       return SetupPermissionReply(
         permission: permission, authorized: true, status: "authorized", processID: pid)
     }

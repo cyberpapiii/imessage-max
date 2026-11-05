@@ -92,17 +92,25 @@ public struct ServiceClient: Sendable {
     }
     let diagnosis = try JSONDecoder().decode(Diagnosis.self, from: payload)
     guard diagnosis.processID > 0, !diagnosis.version.isEmpty,
-      diagnosis.capabilities["perm_automation"] != nil
+      diagnosis[.automation] != nil
     else { throw CoreError.invalidResponse }
     return diagnosis
   }
 }
 
+/// The reply from the server's native-only `POST /setup/permissions`.
 public struct SetupPermissionReply: Codable, Sendable {
   public let permission: PermissionKind
   public let authorized: Bool
   public let status: String
   public let processID: Int32
+
+  public init(permission: PermissionKind, authorized: Bool, status: String, processID: Int32) {
+    self.permission = permission
+    self.authorized = authorized
+    self.status = status
+    self.processID = processID
+  }
 
   enum CodingKeys: String, CodingKey {
     case permission, authorized, status

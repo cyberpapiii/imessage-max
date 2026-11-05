@@ -72,7 +72,7 @@ struct SetupStep: View {
               : "Allow iMessage Max to work with Messages. Your assistant sends only when you ask. Setup sends no message."
           )
           buttons {
-            if diagnosis.capabilities["perm_automation"]?.state == "permission-gated" {
+            if diagnosis[.automation]?.isPermissionGated == true {
               Button("Open Automation Settings") { model.openSettings("Privacy_Automation") }
                 .buttonStyle(MaxButtonStyle(primary: true))
             } else {
@@ -192,9 +192,7 @@ struct ConnectionView: View {
 struct DetailsView: View {
   let model: AppModel
   var body: some View {
-    let inbox =
-      model.diagnosis?.capabilities["live_inbox"]?.state == "supported"
-      ? "Available" : "Not available"
+    let inbox = model.diagnosis?[.liveInbox]?.isSupported == true ? "Available" : "Not available"
     VStack(alignment: .leading, spacing: Space.regular) {
       Card {
         VStack(spacing: Space.tight) {
