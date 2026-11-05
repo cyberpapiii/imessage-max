@@ -241,7 +241,12 @@ actor GetMessagesTool {
         }
 
         let chatInfo = try getChatInfo(chatId: numericChatId)
-        let (people, handleToKey) = try await buildPeopleMap(chatId: numericChatId)
+        let chatParticipants = try await ChatSummaryQueries.participants(db: db, chatId: Int64(numericChatId), resolver: resolver)
+        var people = PeopleMap(rules: .participants)
+        people.addMe()
+        for (position, participant) in chatParticipants.enumerated() {
+            people.add(handle: participant.handle, name: participant.name, position: position)
+        }
 
         let sinceApple = since.flatMap { AppleTime.parse($0) }
         let beforeApple = before.flatMap { AppleTime.parse($0) }
@@ -283,13 +288,7 @@ actor GetMessagesTool {
         let processor = ImageProcessor()
         let renderer = MessageRenderer(
             annotations: annotations,
-            labels: SenderLabels(
-                me: "me",
-                noHandle: "unknown",
-                names: handleToKey,
-                missingSender: .handle,
-                missingReactor: .label("unknown")
-            ),
+            labels: people.labels(noHandle: "unknown"),
             eventNames: await MessageRenderer.eventNames(for: messageRows, resolver: resolver),
             linkCap: maxLinks
         )
@@ -364,7 +363,7 @@ actor GetMessagesTool {
             chatId: Int64(numericChatId),
             guid: nil,
             explicitName: chatInfo,
-            rows: try await ChatSummaryQueries.participants(db: db, chatId: Int64(numericChatId), resolver: resolver)
+            rows: chatParticipants
         )
 
         let mediaTruncated = mediaTotal > maxMedia
@@ -372,7 +371,9 @@ actor GetMessagesTool {
 
         return GetMessagesResponse(
             chat: ChatReference(id: identity.mcpId, name: identity.displayName),
-            people: people,
+            people: Dictionary(uniqueKeysWithValues: people.people.map { person in
+                (person.key, person.name ?? person.handle.map(PhoneUtils.formatDisplay) ?? "")
+            }),
             messages: finalMessages,
             sessions: finalSessions,
             more: nextCursor != nil,

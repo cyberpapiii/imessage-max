@@ -22,6 +22,9 @@ struct GetContextResponse: Codable {
 }
 
 enum GetContext {
+    /// Stands in for a received message's NULL sender handle in `people`.
+    private static let noHandle = "unknown"
+
     // MARK: - Tool Registration
 
     static func definition(db: Database, resolver: ContactResolver) -> ToolDefinition {
@@ -198,90 +201,46 @@ enum GetContext {
         let beforeRows = window.before
         let afterRows = window.after
 
-        var people: [String: GetContextResponse.PersonInfo] = [:]
-        var handleToKey: [String: String] = [:]
-        var personCounter = 1
+        let shown = [targetResult.message] + beforeRows + afterRows
+        let annotations = try MessageAnnotations.load(for: shown, include: [.reactions, .replies], db: database)
 
-        func generateUniqueKey(baseName: String, existing: [String: GetContextResponse.PersonInfo]) -> String {
-            if existing[baseName] == nil { return baseName }
-            var suffix = 2
-            while existing["\(baseName)\(suffix)"] != nil {
-                suffix += 1
-            }
-            return "\(baseName)\(suffix)"
+        // Keys go to reactors first, then senders, each in window order.
+        var people = PeopleMap(rules: .seen)
+        func see(_ handle: String?) async {
+            guard let handle else { return people.addMe() }
+            people.add(handle: handle, name: await resolver.resolve(handle))
         }
-
-        func getPersonKey(isFromMe: Bool, handle: String?) async -> String {
-            if isFromMe {
-                if people["me"] == nil {
-                    people["me"] = GetContextResponse.PersonInfo(name: "Me", handle: nil, isMe: true)
-                }
-                return "me"
-            } else {
-                let h = handle ?? "unknown"
-                if let existingKey = handleToKey[h] {
-                    return existingKey
-                }
-
-                let name = await resolver.resolve(h)
-
-                let key: String
-                if let resolvedName = name {
-                    let firstName = resolvedName.split(separator: " ").first.map(String.init) ?? resolvedName
-                    key = generateUniqueKey(baseName: firstName.lowercased(), existing: people)
-                } else {
-                    key = "p\(personCounter)"
-                    personCounter += 1
-                }
-                handleToKey[h] = key
-
-                people[key] = GetContextResponse.PersonInfo(
-                    name: name ?? h,
-                    handle: h,
-                    isMe: nil
-                )
-                return key
+        for message in shown {
+            for reaction in annotations.reactions[message.guid] ?? [] {
+                await see(reaction.fromHandle)
             }
         }
-
-        let annotations = try MessageAnnotations.load(
-            for: [targetResult.message] + beforeRows + afterRows,
-            include: [.reactions, .replies],
-            db: database
-        )
-        for recs in annotations.reactions.values {
-            for reaction in recs {
-                _ = await getPersonKey(isFromMe: reaction.fromHandle == nil, handle: reaction.fromHandle)
-            }
-        }
-
-        for row in [targetResult.message] + beforeRows + afterRows {
-            _ = await getPersonKey(isFromMe: row.isFromMe, handle: row.senderHandle)
+        for message in shown {
+            await see(message.isFromMe ? nil : message.senderHandle ?? noHandle)
         }
         let renderer = MessageRenderer(
             annotations: annotations,
-            labels: SenderLabels(
-                me: "me",
-                noHandle: handleToKey["unknown"] ?? "unknown",
-                names: handleToKey,
-                missingSender: .handle,
-                missingReactor: .label("unknown")
-            )
+            labels: people.labels(noHandle: people.keyByHandle[noHandle] ?? noHandle)
         )
         func context(_ rows: [MessageRecord]) -> [ContextMessage] {
             rows.map { ContextMessage(renderer.render($0), showAgo: true) }
         }
 
-        let chatName = try await displayNameForChat(
-            chatId: targetChatId,
-            explicitName: targetResult.chatName,
-            database: database,
+        let chatName = try await ChatPage.identities(
+            [ChatPage.Chat(id: targetChatId, explicitName: targetResult.chatName)],
+            db: database,
             resolver: resolver
-        )
+        )[targetChatId]?.displayName ?? DisplayNameGenerator.fromNames([])
 
         let response = GetContextResponse(
             chat: ChatReference(id: ChatIdentifier.format(targetChatId), name: chatName),
-            people: people,
+            people: Dictionary(uniqueKeysWithValues: people.people.map { person in
+                (person.key, GetContextResponse.PersonInfo(
+                    name: person.name ?? person.handle ?? "Me",
+                    handle: person.handle,
+                    isMe: person.isMe ? true : nil
+                ))
+            }),
             message: ContextMessage(renderer.render(targetResult.message), showAgo: true),
             before: context(beforeRows),
             after: context(afterRows)
@@ -289,26 +248,4 @@ enum GetContext {
 
         return response
     }
-
-    // MARK: - Private Helpers
-
-    private static func displayNameForChat(
-        chatId: Int64,
-        explicitName: String?,
-        database: Database,
-        resolver: ContactResolver
-    ) async throws -> String {
-        let rows = try await ChatSummaryQueries.participants(
-            db: database,
-            chatId: chatId,
-            resolver: resolver
-        )
-        return ChatIdentity.from(
-            chatId: chatId,
-            guid: nil,
-            explicitName: explicitName,
-            rows: rows
-        ).displayName
-    }
-
 }

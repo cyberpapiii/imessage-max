@@ -118,39 +118,6 @@ extension GetMessagesTool {
         return info
     }
 
-    func buildPeopleMap(chatId: Int) async throws -> (people: [String: String], handleToKey: [String: String]) {
-        let handles = try await ChatSummaryQueries.participants(
-            db: db,
-            chatId: Int64(chatId),
-            resolver: resolver
-        )
-
-        var people: [String: String] = ["me": "Me"]
-        var handleToKey: [String: String] = [:]
-        var unknownCount = 0
-
-        for (i, h) in handles.enumerated() {
-            let handle = h.handle
-            let name = h.name
-
-            if let name = name {
-                var key = name.components(separatedBy: " ").first?.lowercased() ?? "person\(i)"
-                if people[key] != nil {
-                    key = "\(key)\(i)"
-                }
-                people[key] = name
-                handleToKey[handle] = key
-            } else {
-                unknownCount += 1
-                let key = "unknown\(unknownCount)"
-                people[key] = PhoneUtils.formatDisplay(handle)
-                handleToKey[handle] = key
-            }
-        }
-
-        return (people, handleToKey)
-    }
-
     func resolveFromPerson(
         fromPerson: String?,
         unanswered: Bool
