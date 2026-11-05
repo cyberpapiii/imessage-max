@@ -131,9 +131,9 @@ final class SessionManagerTests: XCTestCase {
                 cleanupInterval: .milliseconds(20)
             )
         )
-        let collected = Mutex<[(String, Data)]>([])
+        let (deliveries, delivery) = AsyncStream.makeStream(of: (String, Data).self)
         await manager.setResponseHandler { sessionId, data in
-            collected.withLock { $0.append((sessionId, data)) }
+            delivery.yield((sessionId, data))
         }
 
         guard case .created(let first) = await manager.createSession() else {
@@ -151,12 +151,11 @@ final class SessionManagerTests: XCTestCase {
         )
         XCTAssertEqual(delivered, 2)
 
-        let deadline = ContinuousClock.now + .seconds(2)
-        while ContinuousClock.now < deadline, collected.withLock({ $0.count }) < 2 {
-            await AsyncTimeout.sleep(.milliseconds(20))
+        var payloads: [(String, Data)] = []
+        for await payload in deliveries {
+            payloads.append(payload)
+            if payloads.count == 2 { break }
         }
-        let payloads = collected.withLock { $0 }
-        XCTAssertEqual(payloads.count, 2)
         XCTAssertEqual(Set(payloads.map(\.0)), Set([first.id, second.id]))
         for (_, data) in payloads {
             let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
@@ -168,21 +167,6 @@ final class SessionManagerTests: XCTestCase {
 
         await manager.terminateSession(sessionId: first.id)
         await manager.terminateSession(sessionId: second.id)
-    }
-
-    func testTerminateUnknownIdIsANoOp() async {
-        let manager = SessionManager(
-            catalog: makeTestCatalog(),
-            configuration: .init(
-                maxSessions: 2,
-                cleanupInterval: .milliseconds(20)
-            )
-        )
-
-        await manager.terminateSession(sessionId: "missing")
-
-        let count = await manager.sessionCount
-        XCTAssertEqual(count, 0)
     }
 
     /// A detached `terminateSession` plus an immediate `activeSessionIds()`

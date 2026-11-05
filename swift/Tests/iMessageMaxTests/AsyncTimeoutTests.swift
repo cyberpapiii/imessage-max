@@ -21,8 +21,9 @@ final class AsyncTimeoutTests: XCTestCase {
     /// Cancellation after arming returns promptly (well before the 30 s timer).
     func testSleepReturnsPromptlyWhenCancelledAfterEntry() async {
         let start = ContinuousClock.now
-        let task = Task { await AsyncTimeout.sleep(.seconds(30)) }
-        try? await Task.sleep(for: .milliseconds(50))
+        let gate = AsyncTimeout.ResumeGate()
+        let task = Task { await AsyncTimeout.sleep(.seconds(30), gate: gate) }
+        await waitForTimer(gate)
         task.cancel()
         await task.value
         XCTAssertLessThan(ContinuousClock.now - start, .seconds(2))
@@ -77,12 +78,20 @@ final class AsyncTimeoutTests: XCTestCase {
             let gate = AsyncTimeout.ResumeGate()
             box.value = gate
             task = Task { await AsyncTimeout.sleep(.seconds(300), gate: gate) }
+            await waitForTimer(gate)
         }
-        try? await Task.sleep(for: .milliseconds(50))
         task.cancel()
         await task.value
         await waitForRelease(box)
         XCTAssertNil(box.value, "cancelled sleep kept its ResumeGate until the deadline")
+    }
+
+    /// Returns once the sleep holding `gate` has armed its timer, so a
+    /// cancel that follows is a cancel after entry.
+    private func waitForTimer(_ gate: AsyncTimeout.ResumeGate) async {
+        while !gate.startedTimer {
+            await Task.yield()
+        }
     }
 
     private final class WeakBox: @unchecked Sendable {

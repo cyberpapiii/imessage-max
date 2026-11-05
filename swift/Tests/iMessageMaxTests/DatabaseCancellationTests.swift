@@ -47,40 +47,7 @@ final class DatabaseCancellationTests: XCTestCase {
 
     /// Cancelling one tool call must not abort another client's query. At
     /// 33e20cb the cancel handler interrupted every open connection in the
-    /// process, so the bystander below failed with `DatabaseError.cancelled`.
-    func testInterruptOnlyReachesTheCancelledCall() async throws {
-        let fixture = try ToolTestDatabase(name: "db-cancel-scope")
-        try fixture.insertChat(rowId: 1, guid: "scope-chat")
-        let db = fixture.database()
-        let slowCount = """
-            WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c WHERE x < 3000000)
-            SELECT count(*) FROM c
-            """
-
-        let cancelled = Database.CallScope()
-        let bystander = Database.CallScope()
-        let victim = Task {
-            try Database.$currentCall.withValue(cancelled) {
-                try db.query(slowCount) { $0.int(0) }
-            }
-        }
-        let survivor = Task {
-            try Database.$currentCall.withValue(bystander) {
-                try db.query(slowCount) { $0.int(0) }
-            }
-        }
-        await AsyncTimeout.sleep(.milliseconds(15))
-        Database.interruptActiveQueries(in: cancelled)
-
-        do {
-            _ = try await victim.value
-            XCTFail("the interrupted call should not finish")
-        } catch DatabaseError.cancelled {}
-        let counted = try await survivor.value
-        XCTAssertEqual(counted, [3_000_000])
-    }
-
-    /// The same guarantee through the real dispatch path both lanes use.
+    /// process, so the bystander failed with `DatabaseError.cancelled`.
     func testCancellingOneToolCallLeavesAConcurrentCallRunning() async throws {
         let fixture = try ToolTestDatabase(name: "db-cancel-dispatch")
         try fixture.insertChat(rowId: 1, guid: "dispatch-chat")

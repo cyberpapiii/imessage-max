@@ -7,9 +7,8 @@ import NIOEmbedded
 @testable import iMessageMax
 
 /// Characterization tests for the host-parsing branches of
-/// `OriginValidationMiddleware`, the DNS-rebinding defense. The existing
-/// integration test only exercises authorities "localhost" and "example.com";
-/// these pin the port-stripping and IPv6 branches.
+/// `OriginValidationMiddleware`, the DNS-rebinding defense: the Origin check,
+/// port stripping, and the IPv6 branches.
 final class OriginHostParsingTests: XCTestCase {
 
     private func makeContext() -> BasicRequestContext {
@@ -85,6 +84,13 @@ final class OriginHostParsingTests: XCTestCase {
     func testNonNumericPortSuffixIsNotStripped() async throws {
         let status = try await status(forAuthority: "localhost:notaport")
         XCTAssertEqual(status, .forbidden, "a non-numeric suffix keeps the whole authority, which is not an allowed host")
+    }
+
+    func testForeignOriginIsRejectedAndLocalOriginAccepted() async throws {
+        let foreign = try await status(forAuthority: "localhost", origin: "https://malicious.example")
+        XCTAssertEqual(foreign, .forbidden)
+        let local = try await status(forAuthority: "localhost", origin: "http://localhost:3000")
+        XCTAssertEqual(local, .ok)
     }
 
     func testMissingOriginIsAllowedByDefault() async throws {

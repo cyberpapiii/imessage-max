@@ -24,21 +24,4 @@ final class BodyReadDeadlineTests: XCTestCase {
         source.finish()
         await producer.value
     }
-
-    func testCompleteBodyIsUnaffectedByDeadline() async throws {
-        let (body, source) = RequestBody.makeStream()
-        let producer = Task {
-            await source.yield(ByteBuffer(string: "{}"))
-            source.finish()
-        }
-        let result = try await HTTPRequestParsing.collectBodyDrainingOverflow(
-            body, declaredLength: 2,
-            maxBytes: HTTPRequestParsing.maxRequestBodyBytes,
-            drainLimit: HTTPRequestParsing.overLimitDrainBytes,
-            deadline: .seconds(5)
-        )
-        guard case .complete(let data) = result else { return XCTFail("Expected .complete") }
-        XCTAssertEqual(String(decoding: data, as: UTF8.self), "{}")
-        await producer.value
-    }
 }

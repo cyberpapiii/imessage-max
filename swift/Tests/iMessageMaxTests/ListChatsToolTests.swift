@@ -2,7 +2,7 @@ import XCTest
 @testable import iMessageMax
 
 final class ListChatsToolTests: XCTestCase {
-    func testCursorPageSkipsTotalsQuery() async throws {
+    func testCursorPageOmitsTotals() async throws {
         let fixture = try ToolTestDatabase(name: "list-chats-totals")
         try fixture.insertHandle(rowId: 1, handle: "+15550000001")
         for chatId in 1...3 {
@@ -30,20 +30,15 @@ final class ListChatsToolTests: XCTestCase {
             return result
         }
 
-        Database.queryCountForTesting = 0
         let first = try await run(cursor: nil)
-        let firstCount = try XCTUnwrap(Database.queryCountForTesting)
         XCTAssertNotNil(first.totalChats)
         XCTAssertNotNil(first.cursor)
 
-        Database.queryCountForTesting = 0
-        defer { Database.queryCountForTesting = nil }
         let second = try await run(cursor: first.cursor)
-        let secondCount = try XCTUnwrap(Database.queryCountForTesting)
+        XCTAssertEqual(second.chats.count, 1)
         XCTAssertNil(second.totalChats)
         XCTAssertNil(second.totalGroups)
         XCTAssertNil(second.totalDms)
-        XCTAssertLessThanOrEqual(secondCount, firstCount - 1, "cursor page \(secondCount) first page \(firstCount)")
     }
 
     func testMoreIsFalseWhenNoCursorCanBeIssued() async throws {

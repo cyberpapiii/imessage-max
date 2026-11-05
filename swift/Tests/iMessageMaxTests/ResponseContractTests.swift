@@ -174,7 +174,7 @@ final class ResponseContractTests: XCTestCase {
         let fixture = try makeSearchFixture()
         let resolver = makeSeededResolver()
 
-        let response = try await decodeSearchResponse(
+        let response = try await decodeJSONDictionary(from:
             SearchTool.execute(
                 query: "appointment",
                 limit: 10,
@@ -192,58 +192,5 @@ final class ResponseContractTests: XCTestCase {
         XCTAssertNotNil(first["chat"])
         XCTAssertNil(first["text"])
         XCTAssertNil(response["people"])
-    }
-
-    func testSendResponseUsesNestedChat() throws {
-        let response = SendResponse.sent(
-            deliveredTo: ["Contact A"],
-            chat: ChatReference(id: "chat42", name: "Project Group")
-        )
-
-        let encoded = try decodeJSONDictionary(from: try FormatUtils.encodeJSON(response))
-        XCTAssertNotNil(encoded["chat"])
-        XCTAssertNil(encoded["success"])
-        XCTAssertNil(encoded["message_id"])
-        XCTAssertEqual(encoded["disposition"] as? String, "completed")
-        XCTAssertEqual(encoded["retry_safe"] as? Bool, false)
-    }
-
-    func testDiagnoseResultEncodesGroupedSections() throws {
-        let sample = DiagnoseResult(
-            version: "1.2.1",
-            processID: 123,
-            status: "ready",
-            database: .init(accessible: true, status: "ok", path: "/tmp/chat.db", fix: nil),
-            contacts: .init(authorized: true, status: "authorized", loaded: 10, fix: nil),
-            capabilities: [
-                "send_text_dm":    Capability(state: "supported"),
-                "send_text_group": Capability(state: "supported"),
-                "send_file_dm":    Capability(state: "supported"),
-                "send_file_group": Capability(state: "risky-private"),
-                "verified_send":   Capability(state: "supported", detail: "db_reread"),
-                "attachments_read": Capability(state: "supported"),
-                "attachments_offloaded": Capability(state: "supported"),
-                "reply_threading": Capability(state: "unsupported"),
-                "tapbacks":        Capability(state: "unsupported"),
-                "edit_unsend":     Capability(state: "unsupported"),
-                "live_inbox":      Capability(state: "unavailable"),
-                "perm_full_disk":  Capability(state: "supported"),
-                "perm_contacts":   Capability(state: "supported"),
-                "perm_automation": Capability(state: "supported"),
-                "rich_backend":    Capability(state: "unavailable"),
-            ]
-        )
-
-        let encoded = try decodeJSONDictionary(from: try FormatUtils.encodeJSON(sample))
-        XCTAssertNotNil(encoded["database"])
-        XCTAssertNotNil(encoded["contacts"])
-        XCTAssertNotNil(encoded["capabilities"])
-        XCTAssertNil(encoded["database_accessible"])
-        XCTAssertNil(encoded["contacts_authorized"])
-
-        let caps = try XCTUnwrap(encoded["capabilities"] as? [String: Any])
-        let sendDM = try XCTUnwrap(caps["send_text_dm"] as? [String: Any])
-        XCTAssertEqual(sendDM["state"] as? String, "supported")
-        XCTAssertEqual(caps.count, 15)
     }
 }

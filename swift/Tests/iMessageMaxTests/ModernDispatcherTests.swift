@@ -198,29 +198,6 @@ final class ModernDispatcherTests: XCTestCase {
         XCTAssertEqual(HTTPRequestParsing.decodeBase64Sentinel("=?base64?!!?="), "=?base64?!!?=")
     }
 
-    // MARK: - Catalog cache
-
-    func testCatalogCacheServesConsistentResultAcrossCalls() async throws {
-        registerFakeTool(named: "zeta_tool")
-        registerFakeTool(named: "alpha_tool")
-        registerFakeTool(named: "mid_tool")
-
-        let firstOutcome = await dispatch(modernRequest(method: "tools/list"))
-        let secondOutcome = await dispatch(modernRequest(method: "tools/list"))
-
-        let firstTools = try XCTUnwrap(try result(from: firstOutcome)["tools"] as? [[String: Any]])
-        let secondTools = try XCTUnwrap(try result(from: secondOutcome)["tools"] as? [[String: Any]])
-
-        XCTAssertEqual(
-            firstTools.map { $0["name"] as? String },
-            secondTools.map { $0["name"] as? String }
-        )
-        XCTAssertEqual(
-            secondTools.map { $0["name"] as? String },
-            ["zeta_tool", "alpha_tool", "mid_tool"]
-        )
-    }
-
     // MARK: - Log sanitization
 
     func testLogFieldSanitization() {

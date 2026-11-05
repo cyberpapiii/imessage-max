@@ -6,6 +6,7 @@ import MCP
 import CoreGraphics
 import ImageIO
 import UniformTypeIdentifiers
+import NIOCore
 @testable import iMessageMax
 
 final class ToolTestDatabase {
@@ -344,4 +345,62 @@ func typedstreamBlob(marker: String = "NSString", lengthField: [UInt8]? = nil, p
     bytes += lengthField ?? [UInt8(payload.count)]
     bytes += payload
     return Data(bytes)
+}
+
+/// Calls a tool through the catalog the server serves and returns the JSON
+/// body a client reads, whether the tool answered or failed.
+func callTool(
+    _ name: String,
+    _ arguments: [String: Value] = [:],
+    database: Database,
+    resolver: ContactResolver = makeSeededResolver(),
+    file: StaticString = #filePath, line: UInt = #line
+) async throws -> [String: Any] {
+    let catalog = ToolCatalog(database: database, resolver: resolver)
+    let handler = try XCTUnwrap(catalog.handler(named: name), "\(name) is not registered", file: file, line: line)
+    do {
+        return try decodeJSONDictionary(from: try await handler(arguments), file: file, line: line)
+    } catch let failure as ToolFailure {
+        return try decodeJSONDictionary(from: failure.content, file: file, line: line)
+    }
+}
+
+/// How many SQL queries `body` ran. Compare runs of different sizes rather
+/// than pinning a number: the query plan is the tool's business, a count
+/// that grows with the rows is the regression.
+func countQueries(_ body: () async throws -> Void) async rethrows -> Int {
+    Database.queryCountForTesting = 0
+    defer { Database.queryCountForTesting = nil }
+    try await body()
+    return Database.queryCountForTesting ?? 0
+}
+
+// MARK: - HTTP bodies
+
+func decodeJSONString(from buffer: ByteBuffer) throws -> String {
+    var body = buffer
+    return try XCTUnwrap(body.readString(length: body.readableBytes))
+}
+
+func decodeJSON(from buffer: ByteBuffer) throws -> [String: Any] {
+    try decodeJSONDictionary(from: decodeJSONString(from: buffer))
+}
+
+// MARK: - Repository files
+
+/// The repository root: the nearest ancestor of this file holding icon.png.
+func findRepoRoot(from fileURL: URL = URL(fileURLWithPath: #filePath)) throws -> URL {
+    var directory = fileURL.deletingLastPathComponent()
+    while directory.path != "/" {
+        if FileManager.default.fileExists(atPath: directory.appendingPathComponent("icon.png").path) {
+            return directory
+        }
+        directory.deleteLastPathComponent()
+    }
+    throw CocoaError(.fileNoSuchFile)
+}
+
+func jsonObject(at url: URL) throws -> [String: Any] {
+    let data = try Data(contentsOf: url)
+    return try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
 }

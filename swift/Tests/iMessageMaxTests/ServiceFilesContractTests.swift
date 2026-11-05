@@ -7,7 +7,7 @@ import IMessageMaxContract
 /// contract, so they repeat its values. These tests fail when they drift. The
 /// rest pins producers outside this refactor's reach to the contract's words.
 final class ServiceFilesContractTests: XCTestCase {
-    private var root: URL { get throws { try repoRoot() } }
+    private var root: URL { get throws { try findRepoRoot() } }
 
     func testLaunchdTemplateMatchesContract() throws {
         let url = try root.appendingPathComponent("swift/launchd/\(ServiceDefaults.launchdLabel).plist")
@@ -78,15 +78,4 @@ final class ServiceFilesContractTests: XCTestCase {
         XCTAssertEqual(
             Database.checkAccess(path: "/nonexistent/chat.db").status, DatabaseStatus.databaseNotFound)
     }
-}
-
-private func repoRoot() throws -> URL {
-    var directory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-    while directory.path != "/" {
-        if FileManager.default.fileExists(atPath: directory.appendingPathComponent("contract/Package.swift").path) {
-            return directory
-        }
-        directory.deleteLastPathComponent()
-    }
-    throw CocoaError(.fileNoSuchFile)
 }

@@ -4,24 +4,32 @@ import MCP
 
 final class PendingRequestRegistryTests: XCTestCase {
 
-    func testStoreThenRemoveReturnsContinuationAndCancelsTimer() async throws {
-        let registry = PendingRequestRegistry(timeout: .seconds(30))
-        let expected = Data("ok".utf8)
-
-        let waiter = Task {
+    /// Starts a request waiting in `registry` and returns once it is stored.
+    private func startRequest(
+        _ registry: PendingRequestRegistry,
+        sessionId: String,
+        id: String
+    ) async -> Task<Data, Error> {
+        let before = await registry.count
+        let task = Task {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, Error>) in
                 Task {
-                    let stored = await registry.store(
-                        sessionId: "s1",
-                        id: "1",
-                        continuation: continuation
-                    )
+                    let stored = await registry.store(sessionId: sessionId, id: id, continuation: continuation)
                     XCTAssertTrue(stored)
                 }
             }
         }
+        while await registry.count == before {
+            await Task.yield()
+        }
+        return task
+    }
 
-        await AsyncTimeout.sleep(.milliseconds(20))
+    func testStoreThenRemoveReturnsContinuationAndCancelsTimer() async throws {
+        let registry = PendingRequestRegistry(timeout: .seconds(30))
+        let expected = Data("ok".utf8)
+
+        let waiter = await startRequest(registry, sessionId: "s1", id: "1")
         let pending = await registry.remove(sessionId: "s1", id: "1")
         XCTAssertNotNil(pending)
         pending?.resume(returning: expected)
@@ -35,20 +43,7 @@ final class PendingRequestRegistryTests: XCTestCase {
     func testDuplicateIdIsRejected() async throws {
         let registry = PendingRequestRegistry(timeout: .seconds(30))
 
-        let first = Task {
-            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, Error>) in
-                Task {
-                    let stored = await registry.store(
-                        sessionId: "s1",
-                        id: "1",
-                        continuation: continuation
-                    )
-                    XCTAssertTrue(stored)
-                }
-            }
-        }
-
-        await AsyncTimeout.sleep(.milliseconds(20))
+        let first = await startRequest(registry, sessionId: "s1", id: "1")
 
         let second = Task {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, Error>) in
@@ -109,22 +104,9 @@ final class PendingRequestRegistryTests: XCTestCase {
     func testCleanupForSessionOnlyTouchesThatSession() async throws {
         let registry = PendingRequestRegistry(timeout: .seconds(30))
 
-        let s1 = Task {
-            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, Error>) in
-                Task {
-                    _ = await registry.store(sessionId: "s1", id: "1", continuation: continuation)
-                }
-            }
-        }
-        let s2 = Task {
-            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, Error>) in
-                Task {
-                    _ = await registry.store(sessionId: "s2", id: "1", continuation: continuation)
-                }
-            }
-        }
+        let s1 = await startRequest(registry, sessionId: "s1", id: "1")
+        let s2 = await startRequest(registry, sessionId: "s2", id: "1")
 
-        await AsyncTimeout.sleep(.milliseconds(20))
         await registry.cleanup(for: "s1")
 
         do {
@@ -148,22 +130,9 @@ final class PendingRequestRegistryTests: XCTestCase {
     func testRemoveAllResumesEverythingWithConnectionClosed() async throws {
         let registry = PendingRequestRegistry(timeout: .seconds(30))
 
-        let a = Task {
-            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, Error>) in
-                Task {
-                    _ = await registry.store(sessionId: "s1", id: "1", continuation: continuation)
-                }
-            }
-        }
-        let b = Task {
-            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, Error>) in
-                Task {
-                    _ = await registry.store(sessionId: "s2", id: "2", continuation: continuation)
-                }
-            }
-        }
+        let a = await startRequest(registry, sessionId: "s1", id: "1")
+        let b = await startRequest(registry, sessionId: "s2", id: "2")
 
-        await AsyncTimeout.sleep(.milliseconds(20))
         await registry.removeAll()
 
         for task in [a, b] {

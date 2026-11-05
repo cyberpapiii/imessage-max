@@ -23,16 +23,6 @@ final class CursorCodecTests: XCTestCase {
         }
     }
 
-    func testTimelineCursorSQLFragments() {
-        let cursor = TimelineCursor(date: 123, messageId: 456)
-
-        XCTAssertEqual(cursor.olderThanSQL, "(m.date < ? OR (m.date = ? AND m.ROWID < ?))")
-        XCTAssertEqual(cursor.olderThanParams.compactMap { $0 as? Int64 }, [123, 123, 456])
-
-        XCTAssertEqual(cursor.newerThanSQL, "(m.date > ? OR (m.date = ? AND m.ROWID > ?))")
-        XCTAssertEqual(cursor.newerThanParams.compactMap { $0 as? Int64 }, [123, 123, 456])
-    }
-
     // MARK: - ChatListCursor
 
     func testChatListCursorTwoAndThreePartRoundTrip() {

@@ -1,5 +1,4 @@
 import XCTest
-import SQLite3
 import CoreGraphics
 import ImageIO
 import UniformTypeIdentifiers
@@ -9,7 +8,7 @@ final class GetAttachmentToolTests: XCTestCase {
     func testThumbVariantHonorsMaxDimensionAndDoesNotUpscale() throws {
         let processor = ImageProcessor()
 
-        let largeURL = try makeTestImage(width: 2000, height: 1000, filename: "thumb-large-\(UUID().uuidString).jpg")
+        let largeURL = try makeFixtureImage(name: "thumb-large.jpg", width: 2000, height: 1000)
         defer { try? FileManager.default.removeItem(at: largeURL) }
         let largeResult = try XCTUnwrap(processor.process(at: largeURL.path, variant: .thumb))
         XCTAssertLessThanOrEqual(largeResult.width, 400)
@@ -17,14 +16,14 @@ final class GetAttachmentToolTests: XCTestCase {
         XCTAssertEqual(largeResult.width, 400)
         XCTAssertEqual(largeResult.height, 200)
 
-        let smallURL = try makeTestImage(width: 100, height: 50, filename: "thumb-small-\(UUID().uuidString).jpg")
+        let smallURL = try makeFixtureImage(name: "thumb-small.jpg", width: 100, height: 50)
         defer { try? FileManager.default.removeItem(at: smallURL) }
         let smallResult = try XCTUnwrap(processor.process(at: smallURL.path, variant: .thumb))
         XCTAssertEqual(smallResult.width, 100, "Images smaller than maxDimension must not be upscaled")
         XCTAssertEqual(smallResult.height, 50, "Images smaller than maxDimension must not be upscaled")
     }
 
-    func testFullVariantOversizeFallsBackToVisionSize() throws {
+    func testDeclaredOversizeTripsTheFullVariantPixelCap() throws {
         // Header-only oversize. process(.full) on a file that *declares*
         // 50MP still hung macos-26 CI: ImageIO's vision thumbnail path
         // allocates from SOF, not from the real 200x100 payload. The
@@ -39,7 +38,7 @@ final class GetAttachmentToolTests: XCTestCase {
             pixelHeight: 100,
             declaredWidth: declaredWidth,
             declaredHeight: declaredHeight,
-            filename: "full-oversize-\(UUID().uuidString).jpg"
+            name: "full-oversize.jpg"
         )
         defer { try? FileManager.default.removeItem(at: oversizedURL) }
 
@@ -50,7 +49,7 @@ final class GetAttachmentToolTests: XCTestCase {
     }
 
     func testProcessedOutputIsJPEG() throws {
-        let imageURL = try makeTestImage(width: 800, height: 600, filename: "jpeg-format-\(UUID().uuidString).jpg")
+        let imageURL = try makeFixtureImage(name: "jpeg-format.jpg", width: 800, height: 600)
         defer { try? FileManager.default.removeItem(at: imageURL) }
 
         let processor = ImageProcessor()
@@ -61,15 +60,13 @@ final class GetAttachmentToolTests: XCTestCase {
     }
 
     func testExecuteReturnsResizedImageForVisionVariant() async throws {
-        let imageURL = try makeTestImage(width: 2000, height: 1000, filename: "attachment-large.jpg")
+        let imageURL = try makeFixtureImage(name: "attachment-large.jpg", width: 2000, height: 1000)
         defer { try? FileManager.default.removeItem(at: imageURL) }
 
-        let dbPath = try makeAttachmentTestDatabase(rows: [
-            (1, imageURL.path, "image/jpeg", "public.jpeg", 0, "attachment-large.jpg")
-        ])
-        defer { try? FileManager.default.removeItem(atPath: dbPath) }
+        let fixture = try ToolTestDatabase(name: "get-attachment-vision")
+        try fixture.insertAttachment(rowId: 1, filename: imageURL.path, mimeType: "image/jpeg", uti: "public.jpeg", transferName: "attachment-large.jpg")
 
-        let tool = GetAttachment(db: Database(path: dbPath), resolver: ContactResolver(seedCache: [:]))
+        let tool = GetAttachment(db: fixture.database(), resolver: ContactResolver(seedCache: [:]))
         let image = try await tool.execute(attachmentId: "att1", variant: "vision", allowedRoots: [FileManager.default.temporaryDirectory.path])
 
         XCTAssertEqual(image.mimeType, "image/jpeg")
@@ -77,20 +74,22 @@ final class GetAttachmentToolTests: XCTestCase {
         XCTAssertEqual(image.metadata.type, "image")
         XCTAssertEqual(image.metadata.name, "attachment-large.jpg")
         XCTAssertTrue(image.metadata.available)
-        XCTAssertFalse(image.imageData.isEmpty)
+        let jpeg = try XCTUnwrap(Data(base64Encoded: image.imageData))
+        let source = try XCTUnwrap(CGImageSourceCreateWithData(jpeg as CFData, nil))
+        let properties = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any])
+        XCTAssertEqual(properties[kCGImagePropertyPixelWidth] as? Int, 1568, "vision caps the long side at 1568")
+        XCTAssertEqual(properties[kCGImagePropertyPixelHeight] as? Int, 784)
     }
 
     func testExecuteReturnsUnsupportedTypeForVideoAttachment() async throws {
-        let videoURL = FileManager.default.temporaryDirectory.appendingPathComponent("attachment-video.mp4")
+        let videoURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString)-attachment-video.mp4")
         try Data("video".utf8).write(to: videoURL)
         defer { try? FileManager.default.removeItem(at: videoURL) }
 
-        let dbPath = try makeAttachmentTestDatabase(rows: [
-            (2, videoURL.path, "video/mp4", "public.mpeg-4", 5, "attachment-video.mp4")
-        ])
-        defer { try? FileManager.default.removeItem(atPath: dbPath) }
+        let fixture = try ToolTestDatabase(name: "get-attachment-video")
+        try fixture.insertAttachment(rowId: 2, filename: videoURL.path, mimeType: "video/mp4", uti: "public.mpeg-4", totalBytes: 5, transferName: "attachment-video.mp4")
 
-        let tool = GetAttachment(db: Database(path: dbPath), resolver: ContactResolver(seedCache: [:]))
+        let tool = GetAttachment(db: fixture.database(), resolver: ContactResolver(seedCache: [:]))
         let body = try await toolFailureBody {
             try await tool.execute(attachmentId: "2", variant: "full", allowedRoots: [FileManager.default.temporaryDirectory.path])
         }
@@ -102,11 +101,7 @@ final class GetAttachmentToolTests: XCTestCase {
     }
 
     func testUnnamedDMChatNameUsesResolvedParticipant() async throws {
-        let imageURL = try makeTestImage(
-            width: 200,
-            height: 100,
-            filename: "unnamed-dm-\(UUID().uuidString).jpg"
-        )
+        let imageURL = try makeFixtureImage(name: "unnamed-dm.jpg", width: 200, height: 100)
         defer { try? FileManager.default.removeItem(at: imageURL) }
 
         let fixture = try ToolTestDatabase(name: "get-attachment-unnamed-dm")
@@ -151,100 +146,20 @@ final class GetAttachmentToolTests: XCTestCase {
 
     func testExecuteReturnsOffloadedErrorWhenImageFileIsMissing() async throws {
         let missingPath = FileManager.default.temporaryDirectory
-            .appendingPathComponent("definitely-missing-attachment.jpg").path
+            .appendingPathComponent("\(UUID().uuidString)-missing-attachment.jpg").path
 
-        let dbPath = try makeAttachmentTestDatabase(rows: [
-            (3, missingPath, "image/jpeg", "public.jpeg", 12, "missing.jpg")
-        ])
-        defer { try? FileManager.default.removeItem(atPath: dbPath) }
+        let fixture = try ToolTestDatabase(name: "get-attachment-missing")
+        try fixture.insertAttachment(rowId: 3, filename: missingPath, mimeType: "image/jpeg", uti: "public.jpeg", totalBytes: 12, transferName: "missing.jpg")
 
-        let tool = GetAttachment(db: Database(path: dbPath), resolver: ContactResolver(seedCache: [:]))
+        let tool = GetAttachment(db: fixture.database(), resolver: ContactResolver(seedCache: [:]))
         let body = try await toolFailureBody {
             try await tool.execute(attachmentId: "att3", variant: "thumb", allowedRoots: [FileManager.default.temporaryDirectory.path])
         }
 
         XCTAssertEqual(body["error"] as? String, "attachment_offloaded")
         let message = body["message"] as? String ?? ""
-        XCTAssertTrue(message.contains("offloaded") || message.contains("iCloud"))
+        XCTAssertTrue(message.contains("iCloud"), message)
     }
-}
-
-private func makeAttachmentTestDatabase(
-    rows: [(id: Int, filename: String, mimeType: String?, uti: String?, totalBytes: Int64, transferName: String?)]
-) throws -> String {
-    let dbURL = FileManager.default.temporaryDirectory
-        .appendingPathComponent("imessage-max-attachment-\(UUID().uuidString).sqlite")
-
-    var db: OpaquePointer?
-    guard sqlite3_open(dbURL.path, &db) == SQLITE_OK, let db else {
-        XCTFail("Failed to open attachment sqlite database")
-        return dbURL.path
-    }
-    defer { sqlite3_close(db) }
-
-    let createStatement = """
-        CREATE TABLE attachment (
-            ROWID INTEGER PRIMARY KEY,
-            filename TEXT,
-            mime_type TEXT,
-            uti TEXT,
-            total_bytes INTEGER,
-            transfer_name TEXT
-        );
-        """
-    guard sqlite3_exec(db, createStatement, nil, nil, nil) == SQLITE_OK else {
-        XCTFail("Failed to create attachment table")
-        return dbURL.path
-    }
-
-    for row in rows {
-        let transferNameSQL = row.transferName.map { "'\($0.replacingOccurrences(of: "'", with: "''"))'" } ?? "NULL"
-        let mimeSQL = row.mimeType.map { "'\($0)'" } ?? "NULL"
-        let utiSQL = row.uti.map { "'\($0)'" } ?? "NULL"
-        let insert = """
-            INSERT INTO attachment (ROWID, filename, mime_type, uti, total_bytes, transfer_name)
-            VALUES (\(row.id), '\(row.filename.replacingOccurrences(of: "'", with: "''"))', \(mimeSQL), \(utiSQL), \(row.totalBytes), \(transferNameSQL));
-            """
-        guard sqlite3_exec(db, insert, nil, nil, nil) == SQLITE_OK else {
-            let message = String(cString: sqlite3_errmsg(db))
-            XCTFail("Failed to insert attachment row: \(message)")
-            break
-        }
-    }
-
-    return dbURL.path
-}
-
-private func makeTestImage(width: Int, height: Int, filename: String) throws -> URL {
-    let url = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
-    let colorSpace = CGColorSpaceCreateDeviceRGB()
-    let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue
-    guard let context = CGContext(
-        data: nil,
-        width: width,
-        height: height,
-        bitsPerComponent: 8,
-        bytesPerRow: width * 4,
-        space: colorSpace,
-        bitmapInfo: bitmapInfo
-    ) else {
-        throw NSError(domain: "TestImage", code: 1)
-    }
-
-    context.setFillColor(CGColor(red: 0.95, green: 0.2, blue: 0.2, alpha: 1))
-    context.fill(CGRect(x: 0, y: 0, width: width, height: height))
-
-    guard let image = context.makeImage(),
-          let destination = CGImageDestinationCreateWithURL(url as CFURL, UTType.jpeg.identifier as CFString, 1, nil) else {
-        throw NSError(domain: "TestImage", code: 2)
-    }
-
-    CGImageDestinationAddImage(destination, image, nil)
-    guard CGImageDestinationFinalize(destination) else {
-        throw NSError(domain: "TestImage", code: 3)
-    }
-
-    return url
 }
 
 /// Tiny JPEG whose SOF width/height are patched so ImageIO reports an
@@ -254,9 +169,9 @@ private func makeJPEGDeclaringDimensions(
     pixelHeight: Int,
     declaredWidth: Int,
     declaredHeight: Int,
-    filename: String
+    name: String
 ) throws -> URL {
-    let url = try makeTestImage(width: pixelWidth, height: pixelHeight, filename: filename)
+    let url = try makeFixtureImage(name: name, width: pixelWidth, height: pixelHeight)
     let data = try Data(contentsOf: url)
     let bytes = [UInt8](data)
     var i = 0

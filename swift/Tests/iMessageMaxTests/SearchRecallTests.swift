@@ -6,7 +6,7 @@ final class SearchRecallTests: XCTestCase {
         let fixture = try makeRecallFixture()
         let resolver = makeSeededResolver()
 
-        let response = try await decodeSearchResponse(
+        let response = try await decodeJSONDictionary(from:
             SearchTool.execute(
                 query: "zebra",
                 db: fixture.database(),
@@ -23,7 +23,7 @@ final class SearchRecallTests: XCTestCase {
         let fixture = try makeAttributedBodyRecallFixture()
         let resolver = makeSeededResolver()
 
-        let response = try await decodeSearchResponse(
+        let response = try await decodeJSONDictionary(from:
             SearchTool.execute(
                 query: "zebra",
                 db: fixture.database(),

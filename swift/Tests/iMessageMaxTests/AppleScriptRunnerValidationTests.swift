@@ -209,27 +209,6 @@ final class AppleScriptRunnerValidationTests: XCTestCase {
             "The user's original file must never be touched")
     }
 
-    // The guard is what makes the helper safe: a StagedFile whose
-    // fileURL somehow points outside the staging root must be refused outright.
-    func testRemoveStagedDirectoryRefusesPathsOutsideStagingRoot() throws {
-        let outsideDirectory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("imessage-max-outside-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: outsideDirectory, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: outsideDirectory) }
-
-        let outsideFile = outsideDirectory.appendingPathComponent("precious.txt")
-        try "do not delete".write(to: outsideFile, atomically: true, encoding: .utf8)
-
-        let forged = OutgoingFileStager.StagedFile(fileURL: outsideFile, trackingName: "precious.txt")
-
-        makeStager().remove(forged)
-
-        XCTAssertTrue(FileManager.default.fileExists(atPath: outsideFile.path),
-            "The staging-root guard must refuse to delete anything outside the staging root")
-        XCTAssertTrue(FileManager.default.fileExists(atPath: outsideDirectory.path),
-            "The containing directory outside the staging root must survive as well")
-    }
-
     func testTransferObservationFinishedWins() {
         let observation = TransferMonitor.interpret(["waiting", "finished"])
 

@@ -274,9 +274,13 @@ final class HTTPTransportIntegrationTests: XCTestCase {
             configuration: .init(
                 requestTimeout: .seconds(2),
                 cleanupInterval: .milliseconds(20),
-                // Sessions are created in order: the first answers as
-                // session-a after 20 ms, the second as session-b after 40 ms.
-                makeServer: serversWithSlowMethod([("session-a", .milliseconds(20)), ("session-b", .milliseconds(40))])
+                // Sessions are created in order and answer as session-a and
+                // session-b. Neither answers until both requests are in
+                // flight, so the two same-id requests always overlap.
+                makeServer: serversWithSlowMethod(
+                    [("session-a", .zero), ("session-b", .zero)],
+                    rendezvous: Rendezvous(parties: 2)
+                )
             )
         )
         let app = await transport.application()
@@ -391,18 +395,13 @@ final class HTTPTransportIntegrationTests: XCTestCase {
                 {"jsonrpc":"2.0","id":1e300,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"tests","version":"1.0"}}}
                 """
 
-            let hugeResponse = try await client.executeRequest(
+            // Getting any response at all is the regression test: the
+            // process used to abort before answering.
+            _ = try await client.executeRequest(
                 uri: "/",
                 method: HTTPRequest.Method.post,
                 headers: jsonHeaders(),
                 body: byteBuffer(for: hugeIdPayload)
-            )
-
-            // Reaching this line at all is the regression test: any HTTP
-            // status beats aborting the process.
-            XCTAssertTrue(
-                (100...599).contains(Int(hugeResponse.head.status.code)),
-                "Expected a real HTTP status, got \(hugeResponse.head.status)"
             )
 
             // And the server is still serving afterwards.
@@ -457,72 +456,6 @@ final class HTTPTransportIntegrationTests: XCTestCase {
                 "Expected the raw header echoed back safely, got \(message)"
             )
         }
-    }
-
-    func testOriginMiddlewareRejectsBadOriginAndHost() async throws {
-        let middleware = OriginValidationMiddleware<BasicRequestContext>()
-        let context = BasicRequestContext(
-            source: ApplicationRequestContextSource(
-                channel: EmbeddedChannel(),
-                logger: Logger(label: #function)
-            )
-        )
-
-        let blockedOriginRequest = Request(
-            head: .init(
-                method: .post,
-                scheme: "http",
-                authority: "localhost",
-                path: "/",
-                headerFields: [HTTPField.Name("Origin")!: "https://malicious.example"]
-            ),
-            body: .init(buffer: ByteBuffer())
-        )
-        let blockedOriginResponse = try await middleware.handle(
-            blockedOriginRequest,
-            context: context
-        ) { _, _ in
-            XCTFail("Blocked origin should not reach next middleware")
-            return Response(status: .ok)
-        }
-        XCTAssertEqual(blockedOriginResponse.head.status, HTTPResponse.Status.forbidden)
-
-        let blockedHostRequest = Request(
-            head: .init(
-                method: .post,
-                scheme: "http",
-                authority: "example.com",
-                path: "/",
-                headerFields: [:]
-            ),
-            body: .init(buffer: ByteBuffer())
-        )
-        let blockedHostResponse = try await middleware.handle(
-            blockedHostRequest,
-            context: context
-        ) { _, _ in
-            XCTFail("Blocked host should not reach next middleware")
-            return Response(status: .ok)
-        }
-        XCTAssertEqual(blockedHostResponse.head.status, HTTPResponse.Status.forbidden)
-
-        let allowedRequest = Request(
-            head: .init(
-                method: .post,
-                scheme: "http",
-                authority: "localhost",
-                path: "/",
-                headerFields: [HTTPField.Name("Origin")!: "http://localhost:3000"]
-            ),
-            body: .init(buffer: ByteBuffer())
-        )
-        let allowedResponse = try await middleware.handle(
-            allowedRequest,
-            context: context
-        ) { _, _ in
-            Response(status: .ok)
-        }
-        XCTAssertEqual(allowedResponse.head.status, HTTPResponse.Status.ok)
     }
 
     func testSSEGetRejectsMissingEventStreamAccept() async throws {
@@ -726,9 +659,10 @@ private struct TestSlowMethod: MCP.Method {
 }
 
 /// A Server factory whose nth Server also answers `TestSlowMethod` with the
-/// nth (source, delay).
+/// nth (source, delay), after every party has reached `rendezvous` if given.
 private func serversWithSlowMethod(
-    _ answers: [(source: String, delay: Duration)]
+    _ answers: [(source: String, delay: Duration)],
+    rendezvous: Rendezvous? = nil
 ) -> @Sendable (ToolCatalog) async -> Server {
     let created = Mutex(0)
     return { catalog in
@@ -739,10 +673,28 @@ private func serversWithSlowMethod(
         }
         let (source, delay) = answers[index]
         await server.withMethodHandler(TestSlowMethod.self) { _ in
+            await rendezvous?.arrive()
             try await Task.sleep(for: delay)
             return .init(source: source)
         }
         return server
+    }
+}
+
+/// Suspends each caller until `parties` callers have arrived.
+private actor Rendezvous {
+    private let parties: Int
+    private var waiting: [CheckedContinuation<Void, Never>] = []
+
+    init(parties: Int) { self.parties = parties }
+
+    func arrive() async {
+        if waiting.count + 1 == parties {
+            waiting.forEach { $0.resume() }
+            waiting.removeAll()
+            return
+        }
+        await withCheckedContinuation { waiting.append($0) }
     }
 }
 
@@ -780,17 +732,6 @@ private func jsonHeaders(sessionId: String? = nil, protocolVersion: String? = ni
 
 private func byteBuffer(for string: String) -> ByteBuffer {
     ByteBuffer(string: string)
-}
-
-private func decodeJSONString(from buffer: ByteBuffer) throws -> String {
-    var body = buffer
-    return try XCTUnwrap(body.readString(length: body.readableBytes))
-}
-
-private func decodeJSON(from buffer: ByteBuffer) throws -> [String: Any] {
-    let body = try decodeJSONString(from: buffer)
-    let data = Data(body.utf8)
-    return try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
 }
 
 private func assertIconMetadata(

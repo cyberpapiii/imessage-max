@@ -312,7 +312,9 @@ final class DualEraStdioTests: XCTestCase {
     func testWriteFailureIsSwallowedButLogged() async throws {
         let base = FakeBaseTransport()
         let dual = DualEraStdio(base: base, catalog: catalog)
-        try await dual.start()
+        let log = Log.Capture()
+        // The writer task inherits the capture from start().
+        try await Log.$capture.withValue(log) { try await dual.start() }
 
         await base.failNextSend()
 
@@ -325,10 +327,7 @@ final class DualEraStdioTests: XCTestCase {
         // Wait for the (failing) write attempt before feeding the next
         // message, so the flag is deterministically consumed by the first
         // request rather than racing with the second on the actor.
-        for _ in 0..<200 {
-            if await base.sendAttemptCount() >= 1 { break }
-            try await Task.sleep(for: .milliseconds(10))
-        }
+        await base.waitForAttempts(1)
         let attempts = await base.sendAttemptCount()
         XCTAssertEqual(attempts, 1, "the first response must have attempted a write")
         let sentSoFar = await base.sentCount()
@@ -348,6 +347,10 @@ final class DualEraStdioTests: XCTestCase {
             JSONSerialization.jsonObject(with: responseData) as? [String: Any]
         )
         XCTAssertEqual(response["id"] as? Int, 2)
+        XCTAssertTrue(
+            log.lines.contains { $0.hasPrefix("stdio write failed; response dropped:") && $0.contains("simulated write failure") },
+            "\(log.lines)"
+        )
 
         await dual.stop()
     }
@@ -365,9 +368,7 @@ final class DualEraStdioTests: XCTestCase {
             #"{"jsonrpc":"2.0","id":3,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}"#.utf8
         ))
         _ = try await (first, second)
-        for _ in 0..<200 where await base.sentCount() < 3 {
-            try await Task.sleep(for: .milliseconds(10))
-        }
+        await base.waitForSent(3)
         await dual.stop()
 
         let events = await base.writeEvents()
@@ -402,6 +403,7 @@ private actor FakeBaseTransport: Transport {
     private let suspendsMidWrite: Bool
     private var shouldFailNextSend = false
     private var sendAttempts = 0
+    private var waiters: [(ready: @Sendable (Int, Int) -> Bool, continuation: CheckedContinuation<Void, Never>)] = []
     private let stream: AsyncThrowingStream<Data, Error>
     private let continuation: AsyncThrowingStream<Data, Error>.Continuation
 
@@ -424,6 +426,7 @@ private actor FakeBaseTransport: Transport {
 
     func send(_ data: Data) async throws {
         sendAttempts += 1
+        defer { wakeWaiters() }
         if shouldFailNextSend {
             shouldFailNextSend = false
             throw NSError(
@@ -461,24 +464,37 @@ private actor FakeBaseTransport: Transport {
         shouldFailNextSend = true
     }
 
-    /// Total `send(_:)` calls, whether they succeeded or failed. Lets tests
-    /// deterministically wait for a failing write to happen before feeding
-    /// the next message.
+    /// Total `send(_:)` calls, whether they succeeded or failed.
     func sendAttemptCount() -> Int {
         sendAttempts
     }
 
-    /// Polls until the adapter has written at least one message (the pump
-    /// task answers asynchronously) or fails after ~2 seconds.
+    /// Returns once `send(_:)` has been called `count` times, failed or not,
+    /// so a test can let a failing write happen before feeding the next message.
+    func waitForAttempts(_ count: Int) async {
+        await wait { attempts, _ in attempts >= count }
+    }
+
+    /// Returns once `count` messages have been written (the pump answers
+    /// asynchronously).
+    func waitForSent(_ count: Int) async {
+        await wait { _, sent in sent >= count }
+    }
+
     func waitForFirstSend() async throws -> Data {
-        for _ in 0..<200 {
-            if let first = sent.first { return first }
-            try await Task.sleep(for: .milliseconds(10))
-        }
-        throw NSError(
-            domain: "DualEraStdioTests",
-            code: 1,
-            userInfo: [NSLocalizedDescriptionKey: "Timed out waiting for transport send"]
-        )
+        await waitForSent(1)
+        return sent[0]
+    }
+
+    private func wait(until ready: @escaping @Sendable (Int, Int) -> Bool) async {
+        if ready(sendAttempts, sent.count) { return }
+        await withCheckedContinuation { waiters.append((ready, $0)) }
+    }
+
+    private func wakeWaiters() {
+        let (attempts, sentCount) = (sendAttempts, sent.count)
+        let due = waiters.filter { $0.ready(attempts, sentCount) }
+        waiters.removeAll { $0.ready(attempts, sentCount) }
+        due.forEach { $0.continuation.resume() }
     }
 }

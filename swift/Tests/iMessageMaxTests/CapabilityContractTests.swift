@@ -159,6 +159,9 @@ final class CapabilityContractTests: XCTestCase {
         XCTAssertNotNil(decoded["version"])
         XCTAssertNotNil(decoded["process_id"])
         XCTAssertNotNil(decoded["status"])
+        // Grouped sections replaced these flat keys.
+        XCTAssertNil(decoded["database_accessible"])
+        XCTAssertNil(decoded["contacts_authorized"])
 
         // verified_send detail key name (§3.2)
         let verifiedSend = try XCTUnwrap(caps["verified_send"] as? [String: Any])

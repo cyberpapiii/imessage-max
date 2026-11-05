@@ -71,14 +71,10 @@ final class AttachmentPathContainmentTests: XCTestCase {
         let outside = base.appendingPathComponent("outside.txt")
         let symlink = root.appendingPathComponent("link.txt")
 
-        do {
-            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-            try Data("outside".utf8).write(to: outside)
-            try FileManager.default.createSymbolicLink(at: symlink, withDestinationURL: outside)
-        } catch {
-            throw XCTSkip("Could not create symlink (sandboxing may prevent it): \(error)")
-        }
         defer { try? FileManager.default.removeItem(at: base) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try Data("outside".utf8).write(to: outside)
+        try FileManager.default.createSymbolicLink(at: symlink, withDestinationURL: outside)
 
         let result = AttachmentPathPolicy.validatedPath(symlink.path, allowedRoots: [root.path])
         XCTAssertNil(result, "Symlink inside root pointing outside should be rejected after resolution")

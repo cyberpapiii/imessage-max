@@ -198,20 +198,31 @@ final class GetMessagesSinceToolTests: XCTestCase {
         }
     }
 
-    func testLimitIsClamped() {
-        XCTAssertEqual(GetMessagesSinceTool.limit.read(["limit": 0]), 1)
-        XCTAssertEqual(GetMessagesSinceTool.limit.read(["limit": 9999]), 500)
-        XCTAssertEqual(GetMessagesSinceTool.limit.read(nil), 100)
-    }
-
-    func testQueryCountIsBounded() async throws {
+    func testLimitIsClamped() async throws {
         let fixture = try makeSinceFixture()
         let tool = GetMessagesSinceTool(db: fixture.database(), resolver: makeSeededResolver())
-        Database.queryCountForTesting = 0
-        defer { Database.queryCountForTesting = nil }
-        _ = try await tool.execute(args: ["since_rowid": .int(99), "limit": .int(5)])
-        let count = try XCTUnwrap(Database.queryCountForTesting)
-        // MAX(ROWID) + scan + reactions + reply counts + attachments + participants.
-        XCTAssertEqual(count, 6, "unexpected query count \(count)")
+        func ids(limit: Int) async throws -> [String?] {
+            let json = try decodeJSONDictionary(from: try await tool.execute(args: ["since_rowid": .int(99), "limit": .int(limit)]))
+            return try decodeJSONArray(json["messages"]).map { $0["id"] as? String }
+        }
+        let floor = try await ids(limit: 0)
+        XCTAssertEqual(floor, ["msg_100"], "limit 0 clamps up to 1")
+        let ceiling = try await ids(limit: 9999)
+        XCTAssertEqual(ceiling, ["msg_100", "msg_101", "msg_103", "msg_106", "msg_107"])
+    }
+
+    /// Reactions, reply counts, attachments and participants are fetched per
+    /// page, not per message.
+    func testQueryCountDoesNotGrowWithPageSize() async throws {
+        let fixture = try makeSinceFixture()
+        let tool = GetMessagesSinceTool(db: fixture.database(), resolver: makeSeededResolver())
+        let one = try await countQueries {
+            _ = try await tool.execute(args: ["since_rowid": .int(99), "limit": .int(1)])
+        }
+        let five = try await countQueries {
+            _ = try await tool.execute(args: ["since_rowid": .int(99), "limit": .int(5)])
+        }
+        XCTAssertGreaterThan(one, 0)
+        XCTAssertEqual(five, one, "a page of 5 ran \(five) queries, a page of 1 ran \(one)")
     }
 }

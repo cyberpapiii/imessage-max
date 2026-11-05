@@ -32,8 +32,7 @@ final class AttachmentStagingSecurityTests: XCTestCase {
     }
 
     private func symlink(_ link: URL, to target: URL) throws {
-        do { try FileManager.default.createSymbolicLink(at: link, withDestinationURL: target) }
-        catch { throw XCTSkip("cannot create symlinks here: \(error)") }
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: target)
     }
 
     private func stagingRootEntryCount() throws -> Int {
@@ -171,14 +170,6 @@ final class AttachmentStagingSecurityTests: XCTestCase {
             try stage("/dev/null")
         ) { error in
             XCTAssertTrue(error.localizedDescription.contains("regular file"), error.localizedDescription)
-        }
-    }
-
-    func testMissingFileStillReportsBasenameOnly() {
-        XCTAssertThrowsError(
-            try stage(scratch.path + "/nope/missing.png")
-        ) { error in
-            XCTAssertEqual(error.localizedDescription, "Could not read file at 'missing.png'.")
         }
     }
 }

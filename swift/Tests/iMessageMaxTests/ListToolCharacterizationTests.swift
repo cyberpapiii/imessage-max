@@ -87,37 +87,6 @@ final class ListToolCharacterizationTests: XCTestCase {
 
     // MARK: - list_chats tests
 
-    func testListChatsResolvesParticipantNamesFromContacts() async throws {
-        let fixture = try makeListCharacterizationFixture()
-        let resolver = makeSeededResolver()
-
-        let result = try await ListChatsTool.execute(
-            limit: 10,
-            since: nil,
-            isGroup: nil,
-            minParticipants: nil,
-            maxParticipants: nil,
-            sort: "recent",
-            db: fixture.database(),
-            resolver: resolver
-        )
-
-        let response = result
-        let groupChat = try XCTUnwrap(
-            response.chats.first(where: { $0.id == "chat2" }),
-            "Expected chat2 (Trip Crew) in results"
-        )
-        let preview = groupChat.participantsPreview
-        XCTAssertTrue(
-            preview.contains("Alice Smith"),
-            "Expected 'Alice Smith' in participants_preview, got \(preview)"
-        )
-        XCTAssertFalse(
-            preview.contains("+15550000001"),
-            "Raw handle should not appear when contact name is available"
-        )
-    }
-
     func testListChatsLastMessagePicksNewestNonReaction() async throws {
         let fixture = try makeListCharacterizationFixture()
         let resolver = makeSeededResolver()
@@ -446,14 +415,16 @@ final class ListToolCharacterizationTests: XCTestCase {
 
     /// One page of named large chats must stay a constant query count,
     /// not one recent-sender lookup per row.
-    func testListChatsQueryCountIsConstantInRowCount() async throws {
+    func testListChatsQueryCountDoesNotGrowWithPageSize() async throws {
         let fixture = try ToolTestDatabase(name: "list-chats-query-count")
         for rowId in 1...6 {
             try fixture.insertHandle(rowId: rowId, handle: "+1555000000\(rowId)")
         }
         let base: Int64 = 700_000_000_000_000_000
         let sec: Int64 = 1_000_000_000
-        for chatId in 1...12 {
+        // More chats than either page, so both pages fill from the first
+        // candidate scan and differ only in rows.
+        for chatId in 1...24 {
             try fixture.insertChat(rowId: chatId, guid: "chat-\(chatId)-guid", displayName: "Group \(chatId)")
             for handleId in 1...6 {
                 try fixture.joinChatHandle(chatId: chatId, handleId: handleId)
@@ -472,28 +443,20 @@ final class ListToolCharacterizationTests: XCTestCase {
             }
         }
 
-        Database.queryCountForTesting = 0
-        defer { Database.queryCountForTesting = nil }
-
-        let result = try await ListChatsTool.execute(
-            limit: 12,
-            since: nil,
-            isGroup: nil,
-            minParticipants: nil,
-            maxParticipants: nil,
-            sort: "recent",
-            db: fixture.database(),
-            resolver: makeSeededResolver()
-        )
-        let response = result
-        XCTAssertEqual(response.chats.count, 12)
-        let queryCount = try XCTUnwrap(Database.queryCountForTesting)
-        // 10 queries for one page of 12 named 6-handle chats:
-        // 4 page-candidate widths (2000 / 20_000 / 200_000 / unbounded;
-        // exact-limit pages do not trip `count > limit`, so the ladder
-        // runs out), participantsByChat, lastMessagesByChat,
-        // attachmentTypesByMessage, recentSendersByChat, getTotals,
-        // plus 074's filtered_hidden count.
-        XCTAssertLessThanOrEqual(queryCount, 10, "list_chats ran \(queryCount) queries")
+        func queries(limit: Int) async throws -> Int {
+            try await countQueries {
+                let response = try await ListChatsTool.execute(
+                    limit: limit,
+                    sort: "recent",
+                    db: fixture.database(),
+                    resolver: makeSeededResolver()
+                )
+                XCTAssertEqual(response.chats.count, limit)
+            }
+        }
+        let three = try await queries(limit: 3)
+        let twelve = try await queries(limit: 12)
+        XCTAssertGreaterThan(three, 0)
+        XCTAssertEqual(twelve, three, "a page of 12 ran \(twelve) queries, a page of 3 ran \(three)")
     }
 }

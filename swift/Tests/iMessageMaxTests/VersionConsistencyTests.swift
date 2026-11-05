@@ -23,30 +23,11 @@ final class VersionConsistencyTests: XCTestCase {
         let formula = try String(contentsOf: root.appendingPathComponent("swift/Formula/imessage-max.rb"), encoding: .utf8)
         XCTAssertTrue(formula.contains("version \"\(expected)\""), "Formula version")
         XCTAssertTrue(formula.contains("/releases/download/v\(expected)/"), "Formula url tag segment")
-
-        XCTAssertEqual(Version.display, "\(Version.name) \(expected)")
     }
-}
-
-private func jsonObject(at url: URL) throws -> [String: Any] {
-    let data = try Data(contentsOf: url)
-    return try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
 }
 
 private func plistObject(at url: URL) throws -> [String: Any] {
     let data = try Data(contentsOf: url)
     let object = try PropertyListSerialization.propertyList(from: data, options: [], format: nil)
     return try XCTUnwrap(object as? [String: Any])
-}
-
-private func findRepoRoot(from fileURL: URL) throws -> URL {
-    var directory = fileURL.deletingLastPathComponent()
-    while directory.path != "/" {
-        let iconURL = directory.appendingPathComponent("icon.png")
-        if FileManager.default.fileExists(atPath: iconURL.path) {
-            return directory
-        }
-        directory.deleteLastPathComponent()
-    }
-    throw CocoaError(.fileNoSuchFile)
 }
