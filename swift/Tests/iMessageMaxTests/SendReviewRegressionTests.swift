@@ -164,6 +164,15 @@ final class SendReviewRegressionTests: XCTestCase {
         XCTAssertEqual(resolved.chat?.name, "Alice Work")
     }
 
+    // MARK: - 9. Uncertain follow-up wording (dead fallback removed)
+
+    func testUncertainFollowUpNamesTheChatIdOrTheIntendedChat() {
+        let withChat = SendResponse.uncertain(deliveredTo: ["A"], chat: ChatReference(id: "chat7", name: "Alice"))
+        XCTAssertTrue(withChat.message?.hasSuffix("Use get_messages on chat7 to confirm.") == true)
+        let withoutChat = SendResponse.uncertain(deliveredTo: ["A"], chat: nil)
+        XCTAssertTrue(withoutChat.message?.hasSuffix("Use get_messages on the intended chat to confirm.") == true)
+    }
+
     // MARK: - 4. Staged copy cleanup
 
     private struct StatusQueryFailure: Error {}

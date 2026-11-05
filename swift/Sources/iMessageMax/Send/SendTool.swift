@@ -6,7 +6,7 @@ actor SendTool {
     private let resolver: ContactResolver
     private let runner: any ScriptRunning
     private let verifier: SendVerifier
-    private lazy var sendResolver = SendResolver(db: db, resolver: resolver)
+    private let sendResolver: SendResolver
 
     init(
         db: Database = Database(),
@@ -18,6 +18,7 @@ actor SendTool {
         self.resolver = resolver
         self.runner = runner
         self.verifier = verifier ?? SendVerifier(db: db)
+        self.sendResolver = SendResolver(db: db, resolver: resolver)
     }
 
     static func definition(db: Database, resolver: ContactResolver) -> ToolDefinition {

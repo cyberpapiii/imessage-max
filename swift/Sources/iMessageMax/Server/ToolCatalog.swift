@@ -41,7 +41,9 @@ final class ToolCatalog: @unchecked Sendable {
 
     init(_ definitions: [ToolDefinition]) {
         tools = definitions.map(\.tool)
-        handlers = Dictionary(definitions.map { ($0.tool.name, $0.handler) }) { _, last in last }
+        handlers = Dictionary(definitions.map { ($0.tool.name, $0.handler) }) { _, _ in
+            preconditionFailure("ToolCatalog: two tools share a name; tools/list would advertise both and only one would run")
+        }
         if let json = JSONRPC.jsonValue(encoding: tools) as? [[String: Any]] {
             toolsJSON = json
         } else {

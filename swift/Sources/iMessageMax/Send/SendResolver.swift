@@ -18,7 +18,8 @@ enum SendResolution {
     case ambiguous([RecipientCandidate])
 }
 
-actor SendResolver {
+/// Stateless: every lookup goes to chat.db or the ContactResolver actor.
+struct SendResolver: Sendable {
     private let db: Database
     private let resolver: ContactResolver
 
