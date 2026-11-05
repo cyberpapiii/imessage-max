@@ -10,6 +10,12 @@ struct TimelineCursor: Equatable {
         return "\(date):\(messageId)"
     }
 
+    /// The cursor for the page after `last`; nil when the page was not full.
+    static func next(after last: MessageRecord?, pageFull: Bool) -> String? {
+        guard pageFull, let last else { return nil }
+        return encode(date: last.date, messageId: last.id)
+    }
+
     static func decode(_ raw: String) -> TimelineCursor? {
         let parts = raw.split(separator: ":")
         guard parts.count == 2,

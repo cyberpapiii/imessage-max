@@ -174,7 +174,7 @@ struct GetAttachment {
                     available: true
                 ),
                 imageData: base64Data,
-                mimeType: "image/jpeg"
+                mimeType: "image/\(result.format)"
             )
 
         case .video:
@@ -209,29 +209,14 @@ struct GetAttachment {
         }
 
         guard let row = rows.first else { return nil }
-        let displayName = row.1?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let name: String
-        if let displayName, !displayName.isEmpty {
-            name = displayName
-        } else {
-            let participants = try await ChatSummaryQueries.participants(
-                db: db,
-                chatId: row.0,
-                resolver: resolver
-            )
-            let identity = ChatIdentity(
-                mcpId: ChatIdentifier.format(row.0),
-                guid: nil,
-                explicitName: nil,
-                participants: participants.map {
-                    ChatIdentity.makeParticipant(handle: $0.handle, contactName: $0.name)
-                }
-            )
-            name = identity.displayName
-        }
+        let identity = try await ChatPage.identities(
+            [ChatPage.Chat(id: row.0, explicitName: row.1)],
+            db: db,
+            resolver: resolver
+        )[row.0]
         return ChatReference(
             id: ChatIdentifier.format(row.0),
-            name: name
+            name: identity?.displayName ?? DisplayNameGenerator.fromNames([])
         )
     }
 

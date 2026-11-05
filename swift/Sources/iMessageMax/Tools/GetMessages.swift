@@ -361,7 +361,7 @@ actor GetMessagesTool {
         )
 
         let mediaTruncated = mediaTotal > maxMedia
-        let nextCursor = Self.nextCursor(from: messageRows, limit: limit)
+        let nextCursor = TimelineCursor.next(after: messageRows.last, pageFull: messageRows.count >= limit)
 
         return GetMessagesResponse(
             chat: ChatReference(id: identity.mcpId, name: identity.displayName),

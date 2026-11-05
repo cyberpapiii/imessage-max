@@ -265,12 +265,7 @@ final class ListAttachments {
             )
         }
 
-        let nextCursor: String?
-        if hasMore, let last = pageRows.last {
-            nextCursor = TimelineCursor.encode(date: last.message.date, messageId: last.message.id)
-        } else {
-            nextCursor = nil
-        }
+        let nextCursor = TimelineCursor.next(after: pageRows.last?.message, pageFull: hasMore)
 
         return (results, nextCursor != nil, nextCursor)
     }

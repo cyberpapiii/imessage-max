@@ -237,8 +237,4 @@ extension GetMessagesTool {
         return (updatedMessages, sessions)
     }
 
-    static func nextCursor(from rows: [MessageRecord], limit: Int) -> String? {
-        guard rows.count >= limit, let last = rows.last else { return nil }
-        return TimelineCursor.encode(date: last.date, messageId: last.id)
-    }
 }

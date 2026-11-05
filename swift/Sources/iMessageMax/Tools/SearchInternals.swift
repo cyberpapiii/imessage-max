@@ -319,7 +319,7 @@ extension SearchTool {
             results.append(result)
         }
 
-        let nextCursor = Self.nextCursor(from: rows, limit: limit)
+        let nextCursor = TimelineCursor.next(after: rows.last?.message, pageFull: rows.count >= limit)
         let response = SearchFlatResponse(
             results: results,
             total: results.count,
@@ -419,7 +419,7 @@ extension SearchTool {
             ($0.matchCount, $0.lastMatch ?? "", $0.id) > ($1.matchCount, $1.lastMatch ?? "", $1.id)
         }
 
-        let nextCursor = Self.nextCursor(from: rows, limit: limit)
+        let nextCursor = TimelineCursor.next(after: rows.last?.message, pageFull: rows.count >= limit)
         let response = SearchGroupedResponse(
             chats: chats,
             total: chats.reduce(0) { $0 + $1.matchCount },
@@ -547,8 +547,4 @@ extension SearchTool {
         return prevRow[n]
     }
 
-    static func nextCursor(from rows: [SearchRow], limit: Int) -> String? {
-        guard rows.count >= limit, let last = rows.last else { return nil }
-        return TimelineCursor.encode(date: last.message.date, messageId: last.message.id)
-    }
 }
