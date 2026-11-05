@@ -6,6 +6,8 @@ on:
     paths:
       - 'swift/**'
       - 'scripts/**'
+      - 'script/**'
+      - 'macos/**'
       - 'mcpb/**'
       - '.codex-plugin/**'
       - '.mcp.json'
@@ -16,15 +18,21 @@ on:
     paths:
       - 'swift/**'
       - 'scripts/**'
+      - 'script/**'
+      - 'macos/**'
       - 'mcpb/**'
       - '.codex-plugin/**'
       - '.mcp.json'
       - 'assets/**'
       - '.github/workflows/build.yml'
   workflow_dispatch:
+  # release.yml runs these same checks before it builds a release.
+  workflow_call:
 
 concurrency:
-  group: build-${{ github.ref }}
+  # github.workflow is the caller's name under workflow_call, so a release
+  # run never cancels (or is cancelled by) a push build on the same ref.
+  group: build-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -69,4 +77,26 @@ jobs:
         # test. ContactResolver.initialize now skips loading when CI=true
         # (GitHub sets it). Serial stays until a workflow_dispatch run of
         # `--parallel` with the guard in place is green; see plan 066.
+        run: swift test --skip-build
+
+  companion:
+    runs-on: macos-26
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: macos
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: Build (including tests)
+        run: swift build --build-tests
+
+      - name: Run tests
         run: swift test --skip-build

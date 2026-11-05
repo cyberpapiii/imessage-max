@@ -20,7 +20,7 @@ SERVER_BINARY="$ROOT_DIR/swift/.build/release/imessage-max"
 # Always package current source, including explicit permission commands. Signing
 # retains the canonical server path; this build does not restart the service.
 make -C "$ROOT_DIR/swift" sign
-VERSION="$(sed -nE 's/^ *static let current = "([^"]+)"/\1/p' "$ROOT_DIR/swift/Sources/iMessageMax/Server/Version.swift")"
+VERSION="$("$ROOT_DIR/scripts/check-version.sh" --print)"
 SIGN_HASH="$(security find-identity -v -p codesigning | awk '/"iMessage Max Dev"/ { print $2; exit }')"
 if [ -z "$SIGN_HASH" ]; then
   echo "Persistent signing identity missing. Run: cd swift && make setup-signing" >&2

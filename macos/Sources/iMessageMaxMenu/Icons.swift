@@ -4,7 +4,7 @@ import SwiftUI
 
 /// One 16-unit grid, one round pen, and up to three layers per glyph: a faint
 /// fill, the strokes, and solid dots.
-enum Glyph: CaseIterable {
+enum Glyph {
   case messages, contacts, sending, connection, details, preferences
   case refresh, lock, document, warning, check
 
@@ -207,7 +207,7 @@ private struct MorphStroke: Shape {
 struct ActionGlyph: View {
   let mark: ActionMark
   var size: CGFloat = 16
-  @MotionReduced private var reduceMotion
+  @PanelMotion private var motion
 
   var body: some View {
     ZStack {
@@ -220,11 +220,8 @@ struct ActionGlyph: View {
       }
     }
     .frame(width: size, height: size).accessibilityHidden(true)
-    .animation(
-      reduceMotion ? nil : .smooth(duration: 0.16 * Design.motionScale), value: mark.lines[0].0
-    )
-    .animation(
-      reduceMotion ? nil : .smooth(duration: 0.16 * Design.motionScale), value: mark.lines[2].1)
+    .animation(motion[.morph], value: mark.lines[0].0)
+    .animation(motion[.morph], value: mark.lines[2].1)
   }
 }
 
@@ -289,8 +286,7 @@ private struct RearPage: Shape {
 }
 
 /// The panel's face, drawn once per mood as a template bitmap. Moods differ by
-/// silhouette, so they read without colour: solid, solid with a badge, or an
-/// outline.
+/// silhouette (see `CompanionMood.menuBarPose`), so they read without colour.
 @MainActor
 enum MenuBarArtwork {
   private static var cache: [CompanionMood: NSImage] = [:]
@@ -319,33 +315,20 @@ enum MenuBarArtwork {
     return image
   }
 
-  static func draw(_ mood: CompanionMood, in context: CGContext) {
-    var pose = mood.pose
-    // Upright and with heavier marks: 20 points leaves no room for nuance.
-    pose[.lean] = 0
-    pose[.lift] = 0
-    if mood == .working || mood == .trouble {
-      for part in [MaxPose.Part.leftWidth, .rightWidth, .middle] { pose[part] *= 1.25 }
-      for part in [MaxPose.Part.leftHeight, .rightHeight] { pose[part] *= 1.2 }
-    } else if mood == .resting {
-      pose[.leftHeight] = 1.6
-    }
-    if mood == .trouble { pose[.badge] = 1 }
+  private static func draw(_ mood: CompanionMood, in context: CGContext) {
+    let pose = mood.menuBarPose
     let rect = CGRect(x: 0, y: 0, width: points, height: points)
     let marks = MaxFace.eyes(pose, in: rect)
     context.setFillColor(NSColor.black.cgColor)
-    if mood == .working || mood == .resting {
+    if mood.menuBarOutlined {
       context.addPath(
-        rounded(MaxFace.silhouette(pose, in: rect.insetBy(dx: 0.75, dy: 0.75)), width: 1.5))
+        MessageMark.rounded(
+          MaxFace.silhouette(pose, in: rect.insetBy(dx: 0.75, dy: 0.75)), width: 1.5))
       context.addPath(marks)
     } else {
       context.addPath(MaxFace.silhouette(pose, in: rect).subtracting(marks))
     }
     if let badge = MaxFace.badge(pose, in: rect) { context.addPath(badge) }
     context.fillPath()
-  }
-
-  private static func rounded(_ path: CGPath, width: CGFloat) -> CGPath {
-    path.copy(strokingWithWidth: width, lineCap: .round, lineJoin: .round, miterLimit: 1)
   }
 }

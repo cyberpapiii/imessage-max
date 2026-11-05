@@ -5,13 +5,12 @@ import SwiftUI
 enum Design {
   static let width: CGFloat = 340
   static let inset: CGFloat = 16
-  static let reduceMotionOverride = CommandLine.arguments.contains("--design-reduce-motion")
-  static let motionScale = CommandLine.arguments.contains("--design-slow-motion") ? 4.0 : 1.0
+  /// The tallest the panel grows; shorter screens cap it lower.
+  static let maximumPanelHeight: CGFloat = 720
 
   // One action colour. Status roles are separate and never used for buttons.
   static let blue = Color(
     red: MessageMark.blue.red, green: MessageMark.blue.green, blue: MessageMark.blue.blue)
-  static let selectionInk = adaptive(light: 0x216DE8, dark: 0x70ADFA)
   static let ready = adaptive(light: 0x237446, dark: 0x79CF9E)
   static let attention = adaptive(light: 0x985410, dark: 0xF0BA76)
   static let running = adaptive(light: 0x2F9E5B, dark: 0x3DB56E)
@@ -40,13 +39,11 @@ enum Space {
   static let tight: CGFloat = 6
   static let snug: CGFloat = 10
   static let regular: CGFloat = 14
-  static let roomy: CGFloat = 20
 }
 
 enum Radius {
   static let card: CGFloat = 10
   static let control: CGFloat = 7
-  static let chip: CGFloat = 5
 }
 
 /// Four type roles. Nothing in the panel is smaller than 12 points.
@@ -58,37 +55,49 @@ extension Font {
   static let maxCode = Font.system(size: 12, design: .monospaced)
 }
 
-/// Frequency sets speed: presses and hovers are quickest, a page change is
-/// the slowest thing the panel does.
-enum Move {
-  static let hover = Animation.easeOut(duration: 0.10 * Design.motionScale)
-  static let press = Animation.snappy(duration: 0.15 * Design.motionScale)
-  static let toggle = Animation.snappy(duration: 0.20 * Design.motionScale)
-  static let swap = Animation.snappy(duration: 0.25 * Design.motionScale)
-  static let step = Animation.snappy(duration: 0.32 * Design.motionScale)
-  static let glide = Animation.smooth(duration: 0.25 * Design.motionScale)
+/// Per-process motion overrides, injected at the panel's root. Design checks
+/// use them to slow everything down or force Reduce Motion without touching
+/// the Mac's own setting.
+struct MotionSettings: Equatable {
+  var scale = 1.0
+  var reduce = false
 }
 
-/// Reduce Motion from the system, or forced by a design-check argument.
-@propertyWrapper
-struct MotionReduced: DynamicProperty {
-  @Environment(\.accessibilityReduceMotion) private var system
-  var wrappedValue: Bool { system || Design.reduceMotionOverride }
+extension EnvironmentValues {
+  @Entry var motionSettings = MotionSettings()
 }
 
-enum CompanionMood: Hashable, CaseIterable {
-  case ready, needsYou, working, resting, trouble
+/// The panel's animations at the injected speed. Frequency sets speed:
+/// presses and hovers are quickest, a page change is the slowest thing the
+/// panel does.
+struct Motion {
+  enum Kind { case hover, press, toggle, swap, step, glide, morph }
 
-  var pose: MaxPose {
-    switch self {
-    case .ready: .rest
-    case .needsYou: .needsYou
-    case .working: .working
-    case .resting: .asleep
-    case .trouble: .trouble
+  let reduced: Bool
+  let scale: Double
+
+  /// The animation for `kind`, or nil when motion is reduced.
+  subscript(kind: Kind) -> Animation? {
+    guard !reduced else { return nil }
+    return switch kind {
+    case .hover: .easeOut(duration: 0.10 * scale)
+    case .press: .snappy(duration: 0.15 * scale)
+    case .toggle: .snappy(duration: 0.20 * scale)
+    case .swap: .snappy(duration: 0.25 * scale)
+    case .step: .snappy(duration: 0.32 * scale)
+    case .glide: .smooth(duration: 0.25 * scale)
+    case .morph: .smooth(duration: 0.16 * scale)
     }
   }
-  var idles: Bool { self == .ready || self == .needsYou }
+}
+
+/// Reduce Motion from the system or the injected settings, with the
+/// injected speed.
+@propertyWrapper
+struct PanelMotion: DynamicProperty {
+  @Environment(\.accessibilityReduceMotion) private var system
+  @Environment(\.motionSettings) private var settings
+  var wrappedValue: Motion { Motion(reduced: system || settings.reduce, scale: settings.scale) }
 }
 
 // MARK: - Face
@@ -110,40 +119,33 @@ final class FaceEngine {
   @ObservationIgnored private var dots: Date?
   @ObservationIgnored private var sheen: Date?
   @ObservationIgnored private var pending: [DispatchWorkItem] = []
-  @ObservationIgnored private var blink: DispatchWorkItem?
+  /// Slows every timing; design checks set it above 1.
+  @ObservationIgnored var scale = 1.0
 
-  private static let sparkTime = 0.6 * Design.motionScale
-  private static let sheenTime = 0.9 * Design.motionScale
+  private var sparkTime: Double { 0.6 * scale }
+  private var sheenTime: Double { 0.9 * scale }
 
   func show(_ mood: CompanionMood, animated: Bool) {
     cancel()
-    let changed = mood != self.mood
     self.mood = mood
     dots = mood == .working && animated ? .now : nil
     guard animated else {
       place(mood.pose)
       return
     }
-    if changed {
-      // Every change of face passes through a blink.
-      goal[.blink] = 1
-      after(0.13) { [weak self] in self?.goal = mood.pose }
-    } else {
-      goal = mood.pose
-    }
+    goal = mood.pose
     wake()
-    scheduleBlink()
   }
 
   func cheer(animated: Bool) {
     cancel()
     let mood = mood
     guard animated else {
-      place(.happy)
+      place(.rest)
       after(1.6) { [weak self] in self?.place(mood.pose) }
       return
     }
-    goal = .happy
+    goal = .rest
     kick(1.3)
     sparks = .now
     sheen = .now
@@ -151,12 +153,11 @@ final class FaceEngine {
     after(1.6) { [weak self] in
       self?.goal = mood.pose
       self?.wake()
-      self?.scheduleBlink()
     }
   }
 
   func poke(animated: Bool) {
-    guard animated, mood.idles, pending.isEmpty else { return }
+    guard animated, mood == .ready || mood == .needsYou, pending.isEmpty else { return }
     goal = .wink
     kick(0.45)
     sheen = .now
@@ -182,7 +183,7 @@ final class FaceEngine {
       last = date
       var moving = false
       for _ in 0..<2 {
-        let dt = CGFloat(elapsed / 2 / Design.motionScale)
+        let dt = CGFloat(elapsed / 2 / scale)
         for part in MaxPose.Part.allCases {
           let (stiffness, damping) = Self.spring(part)
           let index = part.rawValue
@@ -192,8 +193,8 @@ final class FaceEngine {
           if abs(speed[index]) > 0.02 || abs(gap) > 0.005 { moving = true }
         }
       }
-      if let start = sparks, date.timeIntervalSince(start) > Self.sparkTime { sparks = nil }
-      if let start = sheen, date.timeIntervalSince(start) > Self.sheenTime { sheen = nil }
+      if let start = sparks, date.timeIntervalSince(start) > sparkTime { sparks = nil }
+      if let start = sheen, date.timeIntervalSince(start) > sheenTime { sheen = nil }
       settled = !moving && sparks == nil && dots == nil && sheen == nil
       if settled {
         pose = goal
@@ -203,7 +204,7 @@ final class FaceEngine {
     var drawn = pose
     if let dots {
       // The three dots hop in turn, 0.4 s each, like a typing indicator.
-      let time = date.timeIntervalSince(dots) / Design.motionScale
+      let time = date.timeIntervalSince(dots) / scale
       func hop(_ place: Double) -> CGFloat {
         let local = (time - 0.4 * place).truncatingRemainder(dividingBy: 1.2)
         return local >= 0 && local < 0.4 ? -1.5 * sin(.pi * local / 0.4) : 0
@@ -214,8 +215,8 @@ final class FaceEngine {
       drawn[.middleLift] += middle - (left + right) / 2
     }
     return (
-      drawn, sparks.map { CGFloat(date.timeIntervalSince($0) / Self.sparkTime) },
-      sheen.map { CGFloat(date.timeIntervalSince($0) / Self.sheenTime) }
+      drawn, sparks.map { CGFloat(date.timeIntervalSince($0) / sparkTime) },
+      sheen.map { CGFloat(date.timeIntervalSince($0) / sheenTime) }
     )
   }
 
@@ -258,24 +259,6 @@ final class FaceEngine {
     if !running { running = true }
   }
 
-  private func scheduleBlink() {
-    blink?.cancel()
-    guard mood.idles else { return }
-    let item = DispatchWorkItem { [weak self] in
-      guard let self, pending.isEmpty else { return }
-      goal[.blink] = 1
-      wake()
-      after(0.13) { [weak self] in
-        guard let self else { return }
-        goal = mood.pose
-        wake()
-        scheduleBlink()
-      }
-    }
-    blink = item
-    DispatchQueue.main.asyncAfter(deadline: .now() + .random(in: 2.5...6), execute: item)
-  }
-
   private func after(_ seconds: Double, _ work: @escaping @MainActor () -> Void) {
     var item: DispatchWorkItem?
     item = DispatchWorkItem { [weak self] in
@@ -286,14 +269,12 @@ final class FaceEngine {
     }
     pending.append(item!)
     DispatchQueue.main.asyncAfter(
-      deadline: .now() + seconds * Design.motionScale, execute: item!)
+      deadline: .now() + seconds * scale, execute: item!)
   }
 
   private func cancel() {
     pending.forEach { $0.cancel() }
     pending.removeAll()
-    blink?.cancel()
-    blink = nil
   }
 }
 
@@ -307,7 +288,7 @@ struct MaxFaceView: View {
   /// False while the panel is closed, so nothing animates out of sight.
   var awake = true
   @State private var engine = FaceEngine()
-  @MotionReduced private var reduceMotion
+  @PanelMotion private var motion
 
   var body: some View {
     let margin = size * 0.3
@@ -364,7 +345,6 @@ struct MaxFaceView: View {
                 startPoint: point(place - 0.2), endPoint: point(place + 0.2)))
           }
         }
-        context.fill(Path(MaxFace.sparkle(frame.pose, in: rect)), with: .color(.white))
         context.fill(Path(MaxFace.eyes(frame.pose, in: rect)), with: .color(.white))
         if let badge = MaxFace.badge(frame.pose, in: rect) {
           context.fill(Path(badge), with: .color(Design.badge))
@@ -394,12 +374,15 @@ struct MaxFaceView: View {
     .padding(-margin)
     .frame(width: size, height: size)
     .contentShape(Rectangle())
-    .onTapGesture { engine.poke(animated: awake && !reduceMotion) }
-    .onAppear { engine.show(mood, animated: false) }
-    .onChange(of: mood) { engine.show(mood, animated: awake && !reduceMotion) }
-    .onChange(of: celebration) { if awake { engine.cheer(animated: !reduceMotion) } }
+    .onTapGesture { engine.poke(animated: awake && !motion.reduced) }
+    .onAppear {
+      engine.scale = motion.scale
+      engine.show(mood, animated: false)
+    }
+    .onChange(of: mood) { engine.show(mood, animated: awake && !motion.reduced) }
+    .onChange(of: celebration) { if awake { engine.cheer(animated: !motion.reduced) } }
     .onChange(of: awake) {
-      if awake { engine.show(mood, animated: !reduceMotion) } else { engine.sleep() }
+      if awake { engine.show(mood, animated: !motion.reduced) } else { engine.sleep() }
     }
     .accessibilityHidden(true)
   }
@@ -410,7 +393,7 @@ struct MaxFaceView: View {
 /// A drawn switch: the knob slides, the track changes role colour.
 struct MaxSwitchStyle: ToggleStyle {
   @Environment(\.isEnabled) private var enabled
-  @MotionReduced private var reduceMotion
+  @PanelMotion private var motion
 
   func makeBody(configuration: Configuration) -> some View {
     Button {
@@ -428,7 +411,7 @@ struct MaxSwitchStyle: ToggleStyle {
     }
     .buttonStyle(.plain)
     .opacity(enabled ? 1 : 0.5)
-    .animation(reduceMotion ? nil : Move.toggle, value: configuration.isOn)
+    .animation(motion[.toggle], value: configuration.isOn)
     .accessibilityRepresentation {
       Toggle(isOn: configuration.$isOn) { configuration.label }
     }
@@ -439,7 +422,7 @@ struct MaxButtonStyle: ButtonStyle {
   var primary = false
   @Environment(\.isEnabled) private var enabled
   @Environment(\.colorSchemeContrast) private var contrast
-  @MotionReduced private var reduceMotion
+  @PanelMotion private var motion
   @State private var hovering = false
 
   func makeBody(configuration: Configuration) -> some View {
@@ -465,10 +448,10 @@ struct MaxButtonStyle: ButtonStyle {
       }
       .contentShape(shape)
       .opacity(enabled ? 1 : 0.45)
-      .scaleEffect(configuration.isPressed && !reduceMotion ? 0.98 : 1)
+      .scaleEffect(configuration.isPressed && !motion.reduced ? 0.98 : 1)
       .onHover { hovering = $0 }
-      .animation(reduceMotion ? nil : Move.hover, value: hovering)
-      .animation(reduceMotion ? nil : Move.press, value: configuration.isPressed)
+      .animation(motion[.hover], value: hovering)
+      .animation(motion[.press], value: configuration.isPressed)
   }
 }
 
@@ -496,7 +479,7 @@ struct StatusLine: View {
   let detail: String
   let good: Bool
   let attention: Bool
-  @MotionReduced private var reduceMotion
+  @PanelMotion private var motion
 
   private var ink: Color { good ? Design.ready : (attention ? Design.attention : Design.muted) }
   var body: some View {
@@ -509,7 +492,7 @@ struct StatusLine: View {
         .foregroundStyle(ink)
     }
     .frame(minHeight: 24)
-    .animation(reduceMotion ? nil : Move.swap, value: detail)
+    .animation(motion[.swap], value: detail)
     .accessibilityElement(children: .ignore)
     .accessibilityLabel("\(title): \(detail)")
   }
@@ -521,7 +504,7 @@ struct NavRow: View {
   let glyph: Glyph
   let action: () -> Void
   @State private var hovering = false
-  @MotionReduced private var reduceMotion
+  @PanelMotion private var motion
 
   var body: some View {
     Button(action: action) {
@@ -539,7 +522,7 @@ struct NavRow: View {
     }
     .buttonStyle(.plain)
     .onHover { hovering = $0 }
-    .animation(reduceMotion ? nil : Move.hover, value: hovering)
+    .animation(motion[.hover], value: hovering)
     .accessibilityHint("Show \(title.lowercased())")
   }
 }
@@ -549,7 +532,7 @@ struct IconButton: View {
   let label: String
   let action: () -> Void
   @State private var hovering = false
-  @MotionReduced private var reduceMotion
+  @PanelMotion private var motion
 
   var body: some View {
     Button(action: action) {
@@ -560,7 +543,7 @@ struct IconButton: View {
     }
     .buttonStyle(.plain)
     .onHover { hovering = $0 }
-    .animation(reduceMotion ? nil : Move.hover, value: hovering)
+    .animation(motion[.hover], value: hovering)
     .help(label).accessibilityLabel(label)
   }
 }
@@ -569,7 +552,7 @@ struct CopyButton: View {
   let title: String
   let action: () -> Void
   @State private var copied = false
-  @MotionReduced private var reduceMotion
+  @PanelMotion private var motion
 
   var body: some View {
     Button {
@@ -582,7 +565,7 @@ struct CopyButton: View {
       }
     }
     .buttonStyle(MaxButtonStyle())
-    .animation(reduceMotion ? nil : Move.swap, value: copied)
+    .animation(motion[.swap], value: copied)
     .accessibilityLabel(copied ? "\(title), copied" : title)
   }
 }

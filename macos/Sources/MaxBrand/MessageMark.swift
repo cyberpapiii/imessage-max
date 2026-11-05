@@ -54,7 +54,8 @@ public enum MessageMark {
     return grown.subtracting(rounded(grown, width: 2 * radius))
   }
 
-  static func rounded(_ path: CGPath, width: CGFloat) -> CGPath {
+  /// The outline of `path` traced with a round pen `width` wide.
+  public static func rounded(_ path: CGPath, width: CGFloat) -> CGPath {
     path.copy(strokingWithWidth: width, lineCap: .round, lineJoin: .round, miterLimit: 1)
   }
 }

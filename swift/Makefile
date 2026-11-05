@@ -20,12 +20,30 @@
 BINARY       := .build/release/imessage-max
 LAUNCHD_LABEL := local.imessage-max
 PLIST        := $(HOME)/Library/LaunchAgents/$(LAUNCHD_LABEL).plist
-PORT         := 8080
+# The port the installed agent listens on (`--port N` or `--port=N` in its
+# ProgramArguments), so verify and status probe the service that is running.
+# Falls back to the template's 8080. Override with `make status PORT=9191`.
+PORT         := $(or $(shell [ -f "$(PLIST)" ] && plutil -extract ProgramArguments json -o - "$(PLIST)" 2>/dev/null | \
+	tr -d '[]"' | tr ',' '\n' | awk 'take { print; exit } $$0 == "--port" { take = 1 } sub(/^--port=/, "") { print; exit }'),8080)
+URL          := http://127.0.0.1:$(PORT)
 CERT_CN      := iMessage Max Dev
 VERIFY_ATTEMPTS := 45
 # Per-probe cap, so a server that accepts but never answers fails the probe
 # instead of hanging make.
 CURL_MAX_TIME := 5
+INFO_PLIST   := $(CURDIR)/Sources/Resources/Info.plist
+# The legacy (session-based) MCP lane the probes speak.
+MCP_LEGACY_VERSION := 2025-11-25
+
+# $(call mcp_initialize,<clientInfo name>,<extra curl short flags>): POST a
+# legacy initialize to the service and print the reply.
+mcp_initialize = curl -s$(2) --max-time $(CURL_MAX_TIME) "$(URL)" -X POST \
+	-H "Content-Type: application/json" \
+	-H "Accept: application/json, text/event-stream" \
+	-d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"$(MCP_LEGACY_VERSION)","capabilities":{},"clientInfo":{"name":"$(1)","version":"1.0"}}}' 2>/dev/null
+# $(call server_info,<field>): read result.serverInfo.<field> from an
+# initialize reply on stdin.
+server_info = python3 -c "import sys,json; print(json.load(sys.stdin)['result']['serverInfo']['$(1)'])"
 
 # Resolve CERT_CN to a certificate SHA-1. `codesign --sign <name>` fails with
 # "ambiguous" when the login keychain holds more than one cert with that common
@@ -53,11 +71,9 @@ build: ## Build release binary
 	@# Swift 6.4's default build system writes to .build/out/Products/Release.
 	@# Full Disk Access is bound to the executable's path, and the existing
 	@# grant names .build/arm64-apple-macosx/release, so keep the native layout.
+	@# The embedded Info.plist is what lets macOS grant Contacts to the binary.
 	@swift build -c release --build-system native \
-		-Xlinker -sectcreate \
-		-Xlinker __TEXT \
-		-Xlinker __info_plist \
-		-Xlinker "$(CURDIR)/Sources/Resources/Info.plist"
+		-Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker "$(INFO_PLIST)"
 	@echo "✓ Built $(BINARY)"
 
 test: ## Run the full test suite (FILTER=ClassOrMethod to run a subset)
@@ -69,7 +85,7 @@ version: ## Print the version and check all copies agree
 release-check: build test version ## Everything that must pass before tagging
 	@../scripts/check-version.sh --tag || echo "Not on a matching tag yet (expected before tagging)."
 	@ruby -c Formula/imessage-max.rb
-	@echo "Release checks passed. Next: git tag v$$(sed -nE 's/^ *static let current = \"([^\"]+)\"/\1/p' Sources/iMessageMax/Server/Version.swift) && git push --tags"
+	@echo "Release checks passed. Next: git tag v$$(../scripts/check-version.sh --print) && git push --tags"
 
 sign: build ## Build and sign with persistent identity
 	@HASH="$(SIGN_HASH)"; \
@@ -101,33 +117,29 @@ install-agent: ## Install the launchd plist from swift/launchd/
 verify: ## Verify server is healthy
 	@echo "Waiting for server..."
 	@BINARY_VERSION=$$($(BINARY) --version 2>/dev/null | grep -o '[0-9.]*$$'); \
-	URL="http://127.0.0.1:$(PORT)"; \
 	i=1; \
 	LAST_BODY=""; \
 	CURL_OK=0; \
 	while [ $$i -le $(VERIFY_ATTEMPTS) ]; do \
 		[ $$i -gt 1 ] && sleep 1; \
 		CURL_STATUS=0; \
-		RESULT=$$(curl -sf --max-time $(CURL_MAX_TIME) "$$URL" -X POST \
-			-H "Content-Type: application/json" \
-			-H "Accept: application/json, text/event-stream" \
-			-d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"verify","version":"1.0"}}}' 2>/dev/null) || CURL_STATUS=$$?; \
+		RESULT=$$($(call mcp_initialize,verify,f)) || CURL_STATUS=$$?; \
 		if [ $$CURL_STATUS -eq 0 ]; then \
 			CURL_OK=1; \
 			LAST_BODY=$$RESULT; \
 			SERVER_VERSION=""; \
 			if command -v python3 >/dev/null 2>&1; then \
-				SERVER_VERSION=$$(echo "$$RESULT" | python3 -c "import sys,json; print(json.load(sys.stdin)['result']['serverInfo']['version'])" 2>/dev/null) || SERVER_VERSION=""; \
+				SERVER_VERSION=$$(echo "$$RESULT" | $(call server_info,version) 2>/dev/null) || SERVER_VERSION=""; \
 			elif echo "$$RESULT" | grep -q '"result"'; then \
 				SERVER_VERSION=$$BINARY_VERSION; \
 			fi; \
 			if [ -n "$$SERVER_VERSION" ] && [ "$$SERVER_VERSION" = "$$BINARY_VERSION" ]; then \
 				if command -v python3 >/dev/null 2>&1; then \
-					echo "$$RESULT" | python3 -c "import sys,json; r=json.load(sys.stdin)['result']; print(f'✓ Legacy lane: {r[\"serverInfo\"][\"name\"]} v{r[\"serverInfo\"][\"version\"]} healthy on port $(PORT)')"; \
+					echo "✓ Legacy lane: $$(echo "$$RESULT" | $(call server_info,name)) v$$SERVER_VERSION healthy on port $(PORT)"; \
 				else \
 					echo "✓ Legacy lane: v$$SERVER_VERSION healthy on port $(PORT)"; \
 				fi; \
-				MODERN=$$(curl -sf --max-time $(CURL_MAX_TIME) "$$URL" -X POST \
+				MODERN=$$(curl -sf --max-time $(CURL_MAX_TIME) "$(URL)" -X POST \
 					-H "Content-Type: application/json" \
 					-H "Accept: application/json, text/event-stream" \
 					-H "MCP-Protocol-Version: 2026-07-28" \
@@ -145,7 +157,7 @@ verify: ## Verify server is healthy
 		i=$$((i + 1)); \
 	done; \
 	if [ $$CURL_OK -eq 0 ]; then \
-		echo "✗ Server not responding on $$URL"; \
+		echo "✗ Server not responding on $(URL)"; \
 		exit 1; \
 	fi; \
 	printf '%s' "$$LAST_BODY" | head -c 200; echo; \
@@ -153,22 +165,18 @@ verify: ## Verify server is healthy
 	exit 1
 
 verify-db: ## Call diagnose over HTTP and fail if the service cannot read chat.db
-	@URL="http://127.0.0.1:$(PORT)"; \
-	INIT=$$(curl -si --max-time $(CURL_MAX_TIME) "$$URL" -X POST \
-		-H "Content-Type: application/json" \
-		-H "Accept: application/json, text/event-stream" \
-		-d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"verify-db","version":"1.0"}}}' 2>/dev/null) \
-		|| { echo "✗ Server not responding on $$URL"; exit 1; }; \
+	@INIT=$$($(call mcp_initialize,verify-db,i)) \
+		|| { echo "✗ Server not responding on $(URL)"; exit 1; }; \
 	SESSION=$$(printf '%s' "$$INIT" | tr -d '\r' | awk 'tolower($$1)=="mcp-session-id:" {print $$2}'); \
 	if [ -z "$$SESSION" ]; then echo "✗ initialize returned no Mcp-Session-Id header"; exit 1; fi; \
-	BODY=$$(curl -sf --max-time 15 "$$URL" -X POST \
+	BODY=$$(curl -sf --max-time 15 "$(URL)" -X POST \
 		-H "Content-Type: application/json" \
 		-H "Accept: application/json, text/event-stream" \
 		-H "Mcp-Session-Id: $$SESSION" \
-		-H "MCP-Protocol-Version: 2025-11-25" \
+		-H "MCP-Protocol-Version: $(MCP_LEGACY_VERSION)" \
 		-d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"diagnose","arguments":{}}}' 2>/dev/null) \
 		|| { echo "✗ tools/call diagnose failed"; exit 1; }; \
-	curl -s --max-time 2 -o /dev/null "$$URL" -X DELETE -H "Mcp-Session-Id: $$SESSION" -H "MCP-Protocol-Version: 2025-11-25" || true; \
+	curl -s --max-time 2 -o /dev/null "$(URL)" -X DELETE -H "Mcp-Session-Id: $$SESSION" -H "MCP-Protocol-Version: $(MCP_LEGACY_VERSION)" || true; \
 	printf '%s' "$$BODY" | python3 -c '\
 import sys, json; \
 r = json.load(sys.stdin)["result"]; \
@@ -194,12 +202,9 @@ status: ## Show service status and version
 	@codesign -dvv $(BINARY) 2>&1 | grep -E "Signature|Authority|CDHash" || echo "Not signed"
 	@echo ""
 	@echo "=== Health ==="
-	@BODY=$$(curl -sf --max-time $(CURL_MAX_TIME) http://127.0.0.1:$(PORT) -X POST \
-		-H "Content-Type: application/json" \
-		-H "Accept: application/json, text/event-stream" \
-		-d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"status","version":"1.0"}}}' 2>/dev/null) || { echo "✗ Not responding"; exit 0; }; \
+	@BODY=$$($(call mcp_initialize,status,f)) || { echo "✗ Not responding"; exit 0; }; \
 	if command -v python3 >/dev/null 2>&1; then \
-		echo "$$BODY" | python3 -c "import sys,json; r=json.load(sys.stdin)['result']; print(f'✓ Responding, v{r[\"serverInfo\"][\"version\"]}')" 2>/dev/null \
+		VERSION=$$(echo "$$BODY" | $(call server_info,version) 2>/dev/null) && echo "✓ Responding, v$$VERSION" \
 			|| { printf '%s' "$$BODY" | head -c 200; echo; echo "✗ Unexpected response (not JSON)"; }; \
 	elif echo "$$BODY" | grep -q '"result"'; then \
 		echo "✓ Responding"; \
