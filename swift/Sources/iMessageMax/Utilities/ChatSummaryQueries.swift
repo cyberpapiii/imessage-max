@@ -86,8 +86,8 @@ enum ChatSummaryQueries {
         try await participantsByChat(db: db, chatIds: [chatId], resolver: resolver)[chatId] ?? []
     }
 
-    /// Participant-row counts keyed by chat ID. One `COUNT(*)` over the
-    /// candidate set; callers add 1 for "me" themselves.
+    /// Participant counts keyed by chat ID, by the same rule as
+    /// `SQLFragments.participantCount`; callers add 1 for "me" themselves.
     static func participantCountsByChat(
         db: Database,
         chatIds: [Int64]
@@ -96,10 +96,11 @@ enum ChatSummaryQueries {
 
         let placeholders = SQLFragments.placeholders(chatIds.count)
         let sql = """
-            SELECT chat_id, COUNT(*)
-            FROM chat_handle_join
-            WHERE chat_id IN (\(placeholders))
-            GROUP BY chat_id
+            SELECT chj.chat_id, COUNT(DISTINCT h.id)
+            FROM chat_handle_join chj
+            JOIN handle h ON h.ROWID = chj.handle_id
+            WHERE chj.chat_id IN (\(placeholders))
+            GROUP BY chj.chat_id
             """
 
         var result: [Int64: Int] = [:]

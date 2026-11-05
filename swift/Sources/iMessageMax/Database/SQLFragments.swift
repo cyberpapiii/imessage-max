@@ -11,9 +11,15 @@ enum SQLFragments {
     static func shownChat(_ alias: String = "c") -> String { "\(alias).is_filtered = 0" }
     static func hiddenChat(_ alias: String = "c") -> String { "\(alias).is_filtered != 0" }
 
-    /// Number of other participants in chat `alias` (chat_handle_join is unique per pair).
+    /// Number of other participants in chat `alias`, counted by handle
+    /// string. chat_handle_join can hold the same pair twice, and SMS and
+    /// iMessage keep separate handle rows for one address; the participant
+    /// list collapses both, so the count must too.
     static func participantCount(_ alias: String = "c") -> String {
-        "(SELECT COUNT(*) FROM chat_handle_join pc WHERE pc.chat_id = \(alias).ROWID)"
+        """
+        (SELECT COUNT(DISTINCT ph.id) FROM chat_handle_join pc \
+        JOIN handle ph ON ph.ROWID = pc.handle_id WHERE pc.chat_id = \(alias).ROWID)
+        """
     }
 
     /// Tapbacks and other associated messages carry a nonzero type.
