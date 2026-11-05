@@ -31,8 +31,8 @@ enum ModernDispatcher {
     /// Validates the required `_meta` fields and the requested version, then
     /// routes the method. `message.era` must be `.modern`.
     static func handle(_ message: JSONRPCMessage, transport: String, catalog: ToolCatalog) async -> ModernReply {
-        // A notification: the modern core protocol defines none the server
-        // must act on here (stdio cancellation passes through the legacy lane).
+        // A notification: nothing to answer. `notifications/cancelled` is
+        // acted on by the transport, which holds the running requests.
         guard let id = message.id, let method = message.method else {
             return .accepted
         }

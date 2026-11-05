@@ -51,7 +51,7 @@ actor HTTPTransport {
     private let pendingRequests: PendingRequestRegistry
     /// Legacy `tools/call`s answered here rather than by the session's SDK
     /// Server, by (session, JSON-RPC id), for `notifications/cancelled`.
-    private var inFlightToolCalls: [PendingRequestRegistry.Key: Task<ToolCallDispatch.Execution, Never>] = [:]
+    private let inFlightToolCalls = InFlightRequests<PendingRequestRegistry.Key>()
     private var isConnected = false
     private var routingConfigured = false
     private var serverTask: Task<Void, Error>?
@@ -288,7 +288,7 @@ actor HTTPTransport {
             // The SDK cancels the requests it holds; the calls answered here
             // it never saw, so cancel those directly.
             if let cancelled = message.cancelledRequestKey {
-                inFlightToolCalls[PendingRequestRegistry.Key(sessionId: sessionId, requestId: cancelled)]?.cancel()
+                inFlightToolCalls.cancel(PendingRequestRegistry.Key(sessionId: sessionId, requestId: cancelled))
             }
             guard await sessionManager.routeMessage(sessionId: sessionId, data: requestData) else {
                 return errorResponse(.notFound, "Session no longer valid")
@@ -342,29 +342,12 @@ actor HTTPTransport {
         let id = message.id ?? NSNull()
         let arguments = message.toolArguments
         let catalog = self.catalog
-        let call = Task {
+        let call = inFlightToolCalls.start(
+            message.requestKey.map { PendingRequestRegistry.Key(sessionId: sessionId, requestId: $0) }
+        ) {
             await ToolCallDispatch.execute(name: name, arguments: arguments, lane: .legacyHTTP(session: sessionId), catalog: catalog)
         }
-        // A reused in-flight id (a client error) runs untracked rather than
-        // taking over the first call's entry.
-        var trackedKey: PendingRequestRegistry.Key?
-        if let requestKey = message.requestKey {
-            let key = PendingRequestRegistry.Key(sessionId: sessionId, requestId: requestKey)
-            if inFlightToolCalls[key] == nil {
-                inFlightToolCalls[key] = call
-                trackedKey = key
-            }
-        }
-        // A dropped connection cancels the request's task; pass that on, as
-        // when the call ran on that task directly.
-        let execution = await withTaskCancellationHandler {
-            await call.value
-        } onCancel: {
-            call.cancel()
-        }
-        if let trackedKey {
-            inFlightToolCalls[trackedKey] = nil
-        }
+        let execution = await inFlightToolCalls.finish(call)
 
         let body: Data
         switch execution {

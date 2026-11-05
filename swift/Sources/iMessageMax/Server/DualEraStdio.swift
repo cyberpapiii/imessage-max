@@ -8,7 +8,9 @@
 // `tools/call` (a `send` that polls for ~45 s) therefore never blocks legacy
 // session traffic or other modern requests. Legacy messages stay strictly
 // ordered; modern responses may arrive out of order (JSON-RPC ids
-// correlate them).
+// correlate them). Because the SDK never sees a modern request, a
+// `notifications/cancelled` naming one is acted on here, whichever lane the
+// notification itself takes.
 //
 // Every reply goes through one writer task. The SDK's StdioTransport is an
 // actor whose `send` suspends when stdout is full, and a second `send` would
@@ -27,6 +29,7 @@ actor DualEraStdio {
     private let outgoingContinuation: AsyncStream<Data>.Continuation
     private var readLoop: Task<Void, Never>?
     private var writer: Task<Void, Never>?
+    private let inFlight = InFlightRequests<String>()
 
     init(base: any Transport, catalog: ToolCatalog) {
         let (inbound, continuation) = AsyncThrowingStream<Data, Error>.makeStream()
@@ -50,6 +53,7 @@ actor DualEraStdio {
         let continuation = self.continuation
         let outgoing = self.outgoing
         let outgoingContinuation = self.outgoingContinuation
+        let inFlight = self.inFlight
         writer = Task {
             for await data in outgoing {
                 do {
@@ -65,6 +69,9 @@ actor DualEraStdio {
                     for try await data in upstream {
                         let message: JSONRPCMessage? =
                             if case .message(let message) = JSONRPCMessage.parse(data) { message } else { nil }
+                        if let cancelled = message?.cancelledRequestKey {
+                            inFlight.cancel(cancelled)
+                        }
                         guard let message, message.era == .modern else {
                             EraLog.legacy(
                                 message,
@@ -74,8 +81,13 @@ actor DualEraStdio {
                             continuation.yield(data)
                             continue
                         }
+                        // Tracked before the next message is read, so a cancel
+                        // that follows the request at once still finds it.
+                        let call = inFlight.start(message.kind == .request ? message.requestKey : nil) {
+                            await ModernDispatcher.handle(message, transport: "stdio", catalog: catalog)
+                        }
                         group.addTask {
-                            if let response = await ModernDispatcher.handle(message, transport: "stdio", catalog: catalog).body {
+                            if let response = await inFlight.finish(call).body {
                                 outgoingContinuation.yield(response)
                             }
                         }
