@@ -272,22 +272,11 @@ actor GetMessagesTool {
             )
         }
 
-        let reactionsMap: [String: [MessageAnnotations.Reaction]]
-        if includeReactions && !messageRows.isEmpty {
-            reactionsMap = try getReactionsMap(messageGuids: messageRows.map { $0.guid })
-        } else {
-            reactionsMap = [:]
-        }
-
-        let pageIdByGuid = Dictionary(uniqueKeysWithValues: messageRows.map { ($0.guid, $0.id) })
-        let replies = try MessageAnnotations.replyLookup(
-            db: db,
-            pageGuids: messageRows.map(\.guid),
-            pageIdByGuid: pageIdByGuid,
-            originatorGuids: messageRows.compactMap(\.threadOriginatorGuid)
+        let annotations = try MessageAnnotations.load(
+            for: messageRows,
+            include: includeReactions ? [.reactions, .replies, .attachments] : [.replies, .attachments],
+            db: db
         )
-
-        let attachmentsMap = try getAttachmentsMap(messageIds: messageRows.map { $0.id })
         let processor = ImageProcessor()
 
         let uniqueOtherHandles = Set(messageRows.compactMap(\.otherHandle))
@@ -313,8 +302,8 @@ actor GetMessagesTool {
             }
 
             var reactions: [String]? = nil
-            if includeReactions, let rowReactions = reactionsMap[row.guid] {
-                reactions = MessageAnnotations.render(
+            if let rowReactions = annotations.reactions[row.guid] {
+                reactions = MessageRenderer.reactions(
                     rowReactions,
                     reactorName: { handle in
                         if let handle {
@@ -331,7 +320,7 @@ actor GetMessagesTool {
             var messageMediaTotal = 0
             var messageMediaIncluded = 0
 
-            if let rowAttachments = attachmentsMap[row.id] {
+            if let rowAttachments = annotations.attachments[row.id] {
                 for att in rowAttachments {
                     let attachmentType = AttachmentType.from(
                         mimeType: att.mimeType,
@@ -384,7 +373,7 @@ actor GetMessagesTool {
 
             var links: [String]? = nil
             if let text = row.text {
-                let extractedLinks = extractLinks(from: text)
+                let extractedLinks = MessageRenderer.links(in: text)
                 if !extractedLinks.isEmpty {
                     links = Array(extractedLinks.prefix(maxLinks))
                 }
@@ -408,9 +397,9 @@ actor GetMessagesTool {
                     groupTitle: row.groupTitle,
                     otherHandleName: row.otherHandle.flatMap { otherHandleNames[$0] }
                 ),
-                replyTo: row.threadOriginatorGuid.flatMap { replies.originatorIdByGuid[$0] },
-                replyCount: replies.replyCountByGuid[row.guid],
-                edited: row.dateEdited != 0 ? true : nil
+                replyTo: annotations.replyTo(row),
+                replyCount: annotations.replyCount(row),
+                edited: row.isEdited ? true : nil
             ))
         }
 

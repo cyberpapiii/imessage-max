@@ -140,50 +140,23 @@ enum GetContext {
         }
 
         let schema = try database.schema()
-        let targetResult: (msgId: Int64, text: String?, attributedBody: Data?, date: Int64, isFromMe: Bool, senderHandle: String?, chatId: Int64, chatName: String?, guid: String, threadOriginatorGuid: String?, dateEdited: Int64)
+        let targetQuery = """
+            SELECT \(MessageRecord.selectList(schema)), c.ROWID AS chat_id, c.display_name AS chat_name
+            FROM message m
+            JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
+            JOIN chat c ON cmj.chat_id = c.ROWID
+            \(MessageRecord.handleJoinsSQL)
+            """
+        func target(_ row: SQLiteRow) -> (message: MessageRecord, chatId: Int64, chatName: String?) {
+            (MessageRecord(row), row.int(MessageRecord.columnCount), row.string(MessageRecord.columnCount + 1))
+        }
+        let targetResult: (message: MessageRecord, chatId: Int64, chatName: String?)
 
         if let msgIdStr = messageId {
             guard let numericId = MessageIdentifier.parse(msgIdStr) else {
                 throw ToolFailure("invalid_id", "Invalid message ID format: \(msgIdStr)")
             }
-
-            let sql = """
-                SELECT
-                    m.ROWID as msg_id,
-                    m.text,
-                    m.attributedBody,
-                    m.date,
-                    m.is_from_me,
-                    h.id as sender_handle,
-                    c.ROWID as chat_id,
-                    c.display_name as chat_name,
-                        m.guid,
-                    \(schema.threadOriginatorGuidSQL),
-                    \(schema.dateEditedSQL)
-                FROM message m
-                JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
-                JOIN chat c ON cmj.chat_id = c.ROWID
-                LEFT JOIN handle h ON m.handle_id = h.ROWID
-                WHERE m.ROWID = ?
-                """
-
-            let rows = try database.query(sql, params: [numericId]) { row in
-                (
-                    msgId: row.int(0),
-                    text: row.string(1),
-                    attributedBody: row.blob(2),
-                    date: row.int(3),
-                    isFromMe: row.int(4) != 0,
-                    senderHandle: row.string(5),
-                    chatId: row.int(6),
-                    chatName: row.string(7),
-                    guid: row.string(8) ?? "",
-                    threadOriginatorGuid: row.string(9),
-                    dateEdited: row.optionalInt(10) ?? 0
-                )
-            }
-
-            guard let found = rows.first else {
+            guard let found = try database.query("\(targetQuery)\nWHERE m.ROWID = ?", params: [numericId], map: target).first else {
                 throw ToolFailure("not_found", ClientErrorMessages.messageNotFound)
             }
             targetResult = found
@@ -208,57 +181,26 @@ enum GetContext {
             let searchLower = searchText.lowercased()
             var scanned = 0
             var offset = 0
-            var foundRow: (msgId: Int64, text: String?, attributedBody: Data?, date: Int64, isFromMe: Bool, senderHandle: String?, chatId: Int64, chatName: String?, guid: String, threadOriginatorGuid: String?, dateEdited: Int64)?
+            var foundRow: (message: MessageRecord, chatId: Int64, chatName: String?)?
             var exhausted = false
 
             while foundRow == nil && !exhausted && scanned < scanCap {
                 let rows = try database.query(
                     """
-                    SELECT
-                        m.ROWID as msg_id,
-                        m.text,
-                        m.attributedBody,
-                        m.date,
-                        m.is_from_me,
-                        h.id as sender_handle,
-                        c.ROWID as chat_id,
-                        c.display_name as chat_name,
-                        m.guid,
-                        \(schema.threadOriginatorGuidSQL),
-                        \(schema.dateEditedSQL)
-                    FROM message m
-                    JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
-                    JOIN chat c ON cmj.chat_id = c.ROWID
-                    LEFT JOIN handle h ON m.handle_id = h.ROWID
+                    \(targetQuery)
                     WHERE c.ROWID = ?
                       AND \(SQLFragments.notReaction())
                       AND (m.text LIKE ? ESCAPE '\\' OR (m.text IS NULL AND m.attributedBody IS NOT NULL))
                     ORDER BY m.date DESC
                     LIMIT ? OFFSET ?
                     """,
-                    params: [numericChatId, pattern, pageSize, offset]
-                ) { row in
-                    (
-                        msgId: row.int(0),
-                        text: row.string(1),
-                        attributedBody: row.blob(2),
-                        date: row.int(3),
-                        isFromMe: row.int(4) != 0,
-                        senderHandle: row.string(5),
-                        chatId: row.int(6),
-                        chatName: row.string(7),
-                        guid: row.string(8) ?? "",
-                        threadOriginatorGuid: row.string(9),
-                        dateEdited: row.optionalInt(10) ?? 0
-                    )
-                }
+                    params: [numericChatId, pattern, pageSize, offset],
+                    map: target
+                )
                 scanned += rows.count
                 offset += pageSize
                 exhausted = rows.count < pageSize
-                foundRow = rows.first(where: { row in
-                    let extracted = MessageTextExtractor.extract(text: row.text, attributedBody: row.attributedBody)
-                    return extracted?.lowercased().contains(searchLower) ?? false
-                })
+                foundRow = rows.first { $0.message.text?.lowercased().contains(searchLower) ?? false }
             }
 
             guard let found = foundRow else {
@@ -270,78 +212,15 @@ enum GetContext {
             targetResult = found
         }
 
-        let targetDate = targetResult.date
         let targetChatId = targetResult.chatId
-
-        let beforeSql = """
-            SELECT
-                m.ROWID as msg_id,
-                m.text,
-                m.attributedBody,
-                m.date,
-                m.is_from_me,
-                h.id as sender_handle,
-                m.guid,
-                \(schema.threadOriginatorGuidSQL),
-                \(schema.dateEditedSQL)
-            FROM message m
-            JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
-            LEFT JOIN handle h ON m.handle_id = h.ROWID
-            WHERE cmj.chat_id = ?
-            AND m.date < ?
-            AND \(SQLFragments.notReaction())
-            ORDER BY m.date DESC
-            LIMIT ?
-            """
-
-        let beforeRows = try database.query(beforeSql, params: [targetChatId, targetDate, beforeCount]) { row in
-            (
-                msgId: row.int(0),
-                text: row.string(1),
-                attributedBody: row.blob(2),
-                date: row.int(3),
-                isFromMe: row.int(4) != 0,
-                senderHandle: row.string(5),
-                guid: row.string(6) ?? "",
-                threadOriginatorGuid: row.string(7),
-                dateEdited: row.optionalInt(8) ?? 0
-            )
-        }.reversed()
-
-        let afterSql = """
-            SELECT
-                m.ROWID as msg_id,
-                m.text,
-                m.attributedBody,
-                m.date,
-                m.is_from_me,
-                h.id as sender_handle,
-                m.guid,
-                \(schema.threadOriginatorGuidSQL),
-                \(schema.dateEditedSQL)
-            FROM message m
-            JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
-            LEFT JOIN handle h ON m.handle_id = h.ROWID
-            WHERE cmj.chat_id = ?
-            AND m.date > ?
-            AND \(SQLFragments.notReaction())
-            ORDER BY m.date ASC
-            LIMIT ?
-            """
-
-        let afterRows = try database.query(afterSql, params: [targetChatId, targetDate, afterCount]) { row in
-            (
-                msgId: row.int(0),
-                text: row.string(1),
-                attributedBody: row.blob(2),
-                date: row.int(3),
-                isFromMe: row.int(4) != 0,
-                senderHandle: row.string(5),
-                guid: row.string(6) ?? "",
-                threadOriginatorGuid: row.string(7),
-                dateEdited: row.optionalInt(8) ?? 0
-            )
-        }
+        let window = try MessageWindow.around(
+            [MessageWindow.Anchor(chatId: targetChatId, date: targetResult.message.date ?? 0)],
+            before: beforeCount,
+            after: afterCount,
+            db: database
+        ).values.first ?? MessageWindow.Context()
+        let beforeRows = window.before
+        let afterRows = window.after
 
         var people: [String: GetContextResponse.PersonInfo] = [:]
         var handleToKey: [String: String] = [:]
@@ -389,30 +268,10 @@ enum GetContext {
             }
         }
 
-        var pageIdByGuid: [String: Int] = [targetResult.guid: Int(targetResult.msgId)]
-        var originatorGuids: [String] = []
-        if let originator = targetResult.threadOriginatorGuid {
-            originatorGuids.append(originator)
-        }
-        for row in beforeRows {
-            pageIdByGuid[row.guid] = Int(row.msgId)
-            if let originator = row.threadOriginatorGuid {
-                originatorGuids.append(originator)
-            }
-        }
-        for row in afterRows {
-            pageIdByGuid[row.guid] = Int(row.msgId)
-            if let originator = row.threadOriginatorGuid {
-                originatorGuids.append(originator)
-            }
-        }
-        let annotations = try MessageAnnotations.loadIfNeeded(
-            db: database,
-            guids: Array(pageIdByGuid.keys),
-            pageIdByGuid: pageIdByGuid,
-            originatorGuids: originatorGuids,
-            fetchReactions: true,
-            fetchReplies: true
+        let annotations = try MessageAnnotations.load(
+            for: [targetResult.message] + beforeRows + afterRows,
+            include: [.reactions, .replies],
+            db: database
         )
         for recs in annotations.reactions.values {
             for reaction in recs {
@@ -420,28 +279,16 @@ enum GetContext {
             }
         }
 
-        func formatMessage(
-            msgId: Int64,
-            text: String?,
-            attributedBody: Data?,
-            date: Int64,
-            isFromMe: Bool,
-            senderHandle: String?,
-            guid: String,
-            threadOriginatorGuid: String?,
-            dateEdited: Int64
-        ) async -> GetContextResponse.ContextMessage {
-            let messageText = MessageTextExtractor.extract(text: text, attributedBody: attributedBody)
-            let msgDate = AppleTime.toDate(date)
-
+        func formatMessage(_ row: MessageRecord) async -> GetContextResponse.ContextMessage {
+            let msgDate = AppleTime.toDate(row.date)
             return GetContextResponse.ContextMessage(
-                id: MessageIdentifier.format(msgId),
-                from: await getPersonKey(isFromMe: isFromMe, handle: senderHandle),
-                text: messageText,
+                id: MessageIdentifier.format(row.id),
+                from: await getPersonKey(isFromMe: row.isFromMe, handle: row.senderHandle),
+                text: row.text,
                 ago: TimeUtils.formatCompactRelative(msgDate),
                 ts: TimeUtils.formatISO(msgDate),
-                reactions: MessageAnnotations.render(
-                    annotations.reactions[guid] ?? [],
+                reactions: MessageRenderer.reactions(
+                    annotations.reactions[row.guid] ?? [],
                     reactorName: { handle in
                         if let handle {
                             return handleToKey[handle] ?? "unknown"
@@ -449,54 +296,20 @@ enum GetContext {
                         return "me"
                     }
                 ),
-                replyTo: threadOriginatorGuid.flatMap { annotations.replies.originatorIdByGuid[$0] },
-                replyCount: annotations.replies.replyCountByGuid[guid],
-                edited: dateEdited != 0 ? true : nil
+                replyTo: annotations.replyTo(row),
+                replyCount: annotations.replyCount(row),
+                edited: row.isEdited ? true : nil
             )
         }
 
-        let targetMessage = await formatMessage(
-            msgId: targetResult.msgId,
-            text: targetResult.text,
-            attributedBody: targetResult.attributedBody,
-            date: targetResult.date,
-            isFromMe: targetResult.isFromMe,
-            senderHandle: targetResult.senderHandle,
-            guid: targetResult.guid,
-            threadOriginatorGuid: targetResult.threadOriginatorGuid,
-            dateEdited: targetResult.dateEdited
-        )
-
+        let targetMessage = await formatMessage(targetResult.message)
         var beforeMessages: [GetContextResponse.ContextMessage] = []
         for row in beforeRows {
-            let msg = await formatMessage(
-                msgId: row.msgId,
-                text: row.text,
-                attributedBody: row.attributedBody,
-                date: row.date,
-                isFromMe: row.isFromMe,
-                senderHandle: row.senderHandle,
-                guid: row.guid,
-                threadOriginatorGuid: row.threadOriginatorGuid,
-                dateEdited: row.dateEdited
-            )
-            beforeMessages.append(msg)
+            beforeMessages.append(await formatMessage(row))
         }
-
         var afterMessages: [GetContextResponse.ContextMessage] = []
         for row in afterRows {
-            let msg = await formatMessage(
-                msgId: row.msgId,
-                text: row.text,
-                attributedBody: row.attributedBody,
-                date: row.date,
-                isFromMe: row.isFromMe,
-                senderHandle: row.senderHandle,
-                guid: row.guid,
-                threadOriginatorGuid: row.threadOriginatorGuid,
-                dateEdited: row.dateEdited
-            )
-            afterMessages.append(msg)
+            afterMessages.append(await formatMessage(row))
         }
 
         let chatName = try await displayNameForChat(

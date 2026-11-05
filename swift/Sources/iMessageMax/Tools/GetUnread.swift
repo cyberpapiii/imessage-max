@@ -204,19 +204,11 @@ final class GetUnread {
     ) async throws -> UnreadMessagesResponse {
         // Unread = is_read = 0 AND is_from_me = 0
         var queryBuilder = QueryBuilder()
-            .select(
-                "m.ROWID as id",
-                "m.text",
-                "m.attributedBody",
-                "m.date",
-                "h.id as sender_handle",
-                "c.ROWID as chat_id",
-                "c.display_name as chat_display_name"
-            )
+            .selectMessages(try database.schema(), "c.ROWID as chat_id", "c.display_name as chat_display_name")
             .from("message m")
             .join("chat_message_join cmj ON m.ROWID = cmj.message_id")
             .join("chat c ON cmj.chat_id = c.ROWID")
-            .leftJoin("handle h ON m.handle_id = h.ROWID")
+            .joinMessageHandles()
             .where("m.is_read = 0")
             .where("m.is_from_me = 0")
             .where(SQLFragments.notReaction())
@@ -242,13 +234,9 @@ final class GetUnread {
 
         var rows: [UnreadMessageRow] = try database.query(sql, params: params) { row in
             UnreadMessageRow(
-                id: row.int(0),
-                text: row.string(1),
-                attributedBody: row.blob(2),
-                date: row.optionalInt(3),
-                senderHandle: row.string(4),
-                chatId: row.int(5),
-                chatDisplayName: row.string(6)
+                message: MessageRecord(row),
+                chatId: row.int(MessageRecord.columnCount),
+                chatDisplayName: row.string(MessageRecord.columnCount + 1)
             )
         }
         let more = rows.count > limit
@@ -276,7 +264,7 @@ final class GetUnread {
 
         for row in rows {
             let msgChatId = row.chatId
-            let senderHandle = row.senderHandle
+            let senderHandle = row.message.senderHandle
 
             let identity = ChatIdentity.from(
                 chatId: msgChatId,
@@ -285,8 +273,7 @@ final class GetUnread {
                 rows: participantsByChat[msgChatId] ?? []
             )
 
-            let text = MessageTextExtractor.extract(text: row.text, attributedBody: row.attributedBody)
-            let msgDate = AppleTime.toDate(row.date)
+            let msgDate = AppleTime.toDate(row.message.date)
 
             let senderName: String
             if let handle = senderHandle {
@@ -297,10 +284,10 @@ final class GetUnread {
 
             unreadMessages.append(
                 UnreadMessageItem(
-                    id: MessageIdentifier.format(row.id),
+                    id: MessageIdentifier.format(row.message.id),
                     chat: ChatReference(id: identity.mcpId, name: identity.displayName),
                     from: senderName,
-                    text: text,
+                    text: row.message.text,
                     ago: TimeUtils.formatCompactRelative(msgDate),
                     ts: TimeUtils.formatISO(msgDate)
                 )
@@ -485,11 +472,7 @@ final class GetUnread {
 // MARK: - Helper Types
 
 private struct UnreadMessageRow {
-    let id: Int64
-    let text: String?
-    let attributedBody: Data?
-    let date: Int64?
-    let senderHandle: String?
+    let message: MessageRecord
     let chatId: Int64
     let chatDisplayName: String?
 }

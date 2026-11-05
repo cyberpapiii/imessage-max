@@ -408,19 +408,9 @@ enum SearchTool {
 
         var rows = try db.query(sql, params: params) { row in
             SearchRow(
-                msgId: row.int(0),
-                text: row.string(1),
-                attributedBody: row.blob(2),
-                date: row.optionalInt(3),
-                isFromMe: row.int(4) != 0,
-                senderHandle: row.string(5),
-                chatId: row.int(6),
-                chatDisplayName: row.string(7),
-                guid: row.string(8) ?? "",
-                threadOriginatorGuid: row.string(9),
-                dateEdited: row.optionalInt(10) ?? 0,
-                hasReactions: false,
-                hasReplies: row.int(11) != 0
+                message: MessageRecord(row),
+                chatId: row.int(MessageRecord.columnCount),
+                chatDisplayName: row.string(MessageRecord.columnCount + 1)
             )
         }
 
@@ -429,8 +419,7 @@ enum SearchTool {
         // With fuzzy=true, also matches words within 1-2 edits (handles typos)
         if hasQuery, !searchWords.isEmpty {
             rows = rows.filter { row in
-                let extractedText = MessageTextExtractor.extract(text: row.text, attributedBody: row.attributedBody)
-                guard let text = extractedText?.lowercased() else { return false }
+                guard let text = row.message.text?.lowercased() else { return false }
 
                 // Split message text into words for fuzzy matching
                 let textWords = text.split(whereSeparator: { !$0.isLetter && !$0.isNumber })
@@ -457,8 +446,8 @@ enum SearchTool {
                 rows: rows,
                 hours: clampedUnansweredHours,
                 limit: clampedLimit,
-                text: { MessageTextExtractor.extract(text: $0.text, attributedBody: $0.attributedBody) },
-                date: \.date,
+                text: \.message.text,
+                date: \.message.date,
                 chatId: \.chatId
             )
         }

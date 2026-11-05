@@ -169,12 +169,7 @@ final class ListAttachments {
     // MARK: - Private Helpers
 
     private struct SharedMessageRow {
-        let msgId: Int64
-        let text: String?
-        let attributedBody: Data?
-        let date: Int64?
-        let isFromMe: Bool
-        let senderHandle: String?
+        let message: MessageRecord
         let chatId: Int64
         let chatName: String?
     }
@@ -191,7 +186,7 @@ final class ListAttachments {
     ) async throws -> (messages: [SharedMessageItem], more: Bool, cursor: String?) {
         let supportsCursor = sort != .largestFirst
         let fetchLimit = supportsCursor ? limit + 1 : limit
-        let (sql, params) = buildMessageQuery(
+        let (sql, params) = try buildMessageQuery(
             chatId: chatId,
             fromPerson: fromPerson,
             typeFilter: typeFilter,
@@ -204,14 +199,9 @@ final class ListAttachments {
 
         let messageRows = try db.query(sql, params: params) { row in
             SharedMessageRow(
-                msgId: row.int(0),
-                text: row.string(1),
-                attributedBody: row.blob(2),
-                date: row.optionalInt(3),
-                isFromMe: row.int(4) == 1,
-                senderHandle: row.string(5),
-                chatId: row.int(6),
-                chatName: row.string(7)
+                message: MessageRecord(row),
+                chatId: row.int(MessageRecord.columnCount),
+                chatName: row.string(MessageRecord.columnCount + 1)
             )
         }
 
@@ -221,7 +211,7 @@ final class ListAttachments {
         // One lookup for the whole page. Asking per message opened a fresh
         // SQLite connection for each of the twenty rows a default page holds.
         let attachmentsByMessage = try attachmentsForMessages(
-            messageIds: pageRows.map(\.msgId),
+            messageIds: pageRows.map(\.message.id),
             typeFilter: typeFilter
         )
 
@@ -229,13 +219,13 @@ final class ListAttachments {
         var results: [SharedMessageItem] = []
 
         for row in pageRows {
-            let attachments = attachmentsByMessage[row.msgId] ?? []
+            let attachments = attachmentsByMessage[row.message.id] ?? []
             guard !attachments.isEmpty else { continue }
 
             let senderName: String
-            if row.isFromMe {
+            if row.message.isFromMe {
                 senderName = "Me"
-            } else if let handle = row.senderHandle {
+            } else if let handle = row.message.senderHandle {
                 senderName = await IdentityDisplayFormatter.displayName(handle: handle, resolver: resolver)
             } else {
                 senderName = "Unknown"
@@ -251,16 +241,16 @@ final class ListAttachments {
             )
 
             let attachmentTypes = attachments.map(\.type)
-            let date = AppleTime.toDate(row.date)
+            let date = AppleTime.toDate(row.message.date)
             let messagePreview = SummaryPreviewFormatter.formattedTextPreview(
-                text: row.text,
-                attributedBody: row.attributedBody,
+                text: row.message.text,
+                attributedBody: nil,
                 maxLength: 80
             )
 
             results.append(
                 SharedMessageItem(
-                    messageId: MessageIdentifier.format(row.msgId),
+                    messageId: MessageIdentifier.format(row.message.id),
                     chat: chatReference,
                     from: senderName,
                     messagePreview: messagePreview,
@@ -282,7 +272,7 @@ final class ListAttachments {
 
         let nextCursor: String?
         if hasMore, let last = pageRows.last {
-            nextCursor = TimelineCursor.encode(date: last.date, messageId: last.msgId)
+            nextCursor = TimelineCursor.encode(date: last.message.date, messageId: last.message.id)
         } else {
             nextCursor = nil
         }
@@ -299,7 +289,8 @@ final class ListAttachments {
         limit: Int,
         sort: AttachmentSort,
         cursor: TimelineCursor?
-    ) -> (String, [Any]) {
+    ) throws -> (String, [Any]) {
+        let schema = try db.schema()
         let typeClause = AttachmentType.sqlPredicate(for: typeFilter, alias: "a")
             .map { " AND (\($0))" } ?? ""
 
@@ -315,13 +306,8 @@ final class ListAttachments {
 
         if ranksBySize {
             query
-                .select(
-                    "m.ROWID as msg_id",
-                    "m.text",
-                    "m.attributedBody",
-                    "m.date",
-                    "m.is_from_me",
-                    "h.id as sender_handle",
+                .selectMessages(
+                    schema,
                     "c.ROWID as chat_id",
                     "c.display_name as chat_name",
                     "MAX(COALESCE(a.total_bytes, 0)) as max_attachment_size"
@@ -329,7 +315,7 @@ final class ListAttachments {
                 .from("message m")
                 .join("chat_message_join cmj ON m.ROWID = cmj.message_id")
                 .join("chat c ON cmj.chat_id = c.ROWID")
-                .leftJoin("handle h ON m.handle_id = h.ROWID")
+                .joinMessageHandles()
                 .join("message_attachment_join maj ON m.ROWID = maj.message_id")
                 .join("attachment a ON maj.attachment_id = a.ROWID")
                 .where(SQLFragments.notReaction())
@@ -361,20 +347,10 @@ final class ListAttachments {
             chatPick += " ORDER BY cmj.chat_id LIMIT 1"
 
             query
-                .select(
-                    "m.ROWID as msg_id",
-                    "m.text",
-                    "m.attributedBody",
-                    "m.date",
-                    "m.is_from_me",
-                    "h.id as sender_handle",
-                    "c.ROWID as chat_id",
-                    "c.display_name as chat_name",
-                    sizeSelect
-                )
+                .selectMessages(schema, "c.ROWID as chat_id", "c.display_name as chat_name", sizeSelect)
                 .from("message m")
                 .join("chat c ON c.ROWID = (\(chatPick))", params: chatPickParams)
-                .leftJoin("handle h ON m.handle_id = h.ROWID")
+                .joinMessageHandles()
                 .where(SQLFragments.notReaction())
                 .where("""
                     EXISTS (SELECT 1

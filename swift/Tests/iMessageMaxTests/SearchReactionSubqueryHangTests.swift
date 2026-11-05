@@ -22,7 +22,7 @@ final class SearchReactionSubqueryHangTests: XCTestCase {
             "search SQL still has a correlated instr/substr subquery: \(searchSQL)"
         )
 
-        let contextSQL = SearchTool.contextSelectColumns(.assumed)
+        let contextSQL = MessageRecord.selectList(.assumed)
         XCTAssertFalse(
             containsCorrelatedInstrOrSubstr(contextSQL),
             "context SQL still has a correlated instr/substr subquery: \(contextSQL)"
