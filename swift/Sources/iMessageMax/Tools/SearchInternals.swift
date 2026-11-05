@@ -36,7 +36,7 @@ extension SearchTool {
         }
         builder
             .leftJoin(MessageRecord.senderJoin)
-            .where("m.associated_message_type = ?", 0)
+            .where(SQLFragments.notReaction())
 
         if let chatFilterPredicate {
             builder.where(chatFilterPredicate)
@@ -68,12 +68,8 @@ extension SearchTool {
         }
 
         if let cursor {
-            switch sort {
-            case .recentFirst:
-                builder.where(cursor.olderThanSQL, cursor.date, cursor.date, cursor.messageId)
-            case .oldestFirst:
-                builder.where(cursor.newerThanSQL, cursor.date, cursor.date, cursor.messageId)
-            }
+            let after = cursor.predicate(descending: sort == .recentFirst)
+            builder.where(after.sql, params: after.params)
         }
 
         if let chatStr = inChat {

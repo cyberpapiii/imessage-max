@@ -169,14 +169,8 @@ enum SharedMessages {
         }
 
         if let cursor {
-            switch sort {
-            case .recentFirst:
-                query.where(cursor.olderThanSQL, params: cursor.olderThanParams)
-            case .oldestFirst:
-                query.where(cursor.newerThanSQL, params: cursor.newerThanParams)
-            case .largestFirst:
-                break
-            }
+            let after = cursor.predicate(descending: sort == .recentFirst)
+            query.where(after.sql, params: after.params)
         }
 
         switch sort {

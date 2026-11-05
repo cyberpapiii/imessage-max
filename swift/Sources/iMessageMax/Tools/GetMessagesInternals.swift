@@ -85,7 +85,8 @@ extension GetMessagesTool {
         }
 
         if let cursor {
-            query.where(cursor.olderThanSQL, cursor.date, cursor.date, cursor.messageId)
+            let older = cursor.predicate(descending: true)
+            query.where(older.sql, params: older.params)
         }
 
         if let sender {

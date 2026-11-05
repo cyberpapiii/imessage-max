@@ -168,9 +168,9 @@ enum GetContext {
                       AND \(match.sql)
                     """
                 var params: [Any] = [numericChatId] + match.bindings
-                if let resumeAfter {
-                    sql += "\n  AND \(resumeAfter.olderThanSQL)"
-                    params += resumeAfter.olderThanParams
+                if let older = resumeAfter?.predicate(descending: true) {
+                    sql += "\n  AND \(older.sql)"
+                    params += older.params
                 }
                 sql += "\nORDER BY m.date DESC, m.ROWID DESC\nLIMIT ?"
                 params.append(pageSize)
