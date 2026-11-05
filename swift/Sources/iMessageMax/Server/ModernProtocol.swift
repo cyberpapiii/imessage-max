@@ -100,6 +100,9 @@ enum ModernDispatcher {
         guard let name = message.toolName else {
             return error(id, .invalidParams, "Missing required parameter: name")
         }
+        guard !message.hasMalformedToolArguments else {
+            return error(id, .invalidParams, "Invalid parameter: arguments must be an object")
+        }
 
         switch await ToolCallDispatch.perform(name: name, arguments: message.toolArguments, lane: .modern(transport: transport), catalog: catalog) {
         case .unknownTool:

@@ -85,6 +85,20 @@ struct JSONRPCMessage: @unchecked Sendable {
 
     var toolArguments: [String: Value]? { ToolCallDispatch.decodeArguments(params?["arguments"]) }
 
+    /// `params.arguments` is present and neither an object nor null. The
+    /// SDK refuses such a `tools/call`; `toolArguments` alone would read it
+    /// as no arguments and run the tool on its defaults.
+    var hasMalformedToolArguments: Bool {
+        guard let raw = params?["arguments"], !(raw is NSNull) else { return false }
+        return !(raw is [String: Any])
+    }
+
+    /// For `notifications/cancelled`: the key of the request it cancels.
+    var cancelledRequestKey: String? {
+        guard method == "notifications/cancelled" else { return nil }
+        return Self.requestKey(for: params?["requestId"])
+    }
+
     /// The method for log lines; messages without one are named by kind.
     var logMethod: String {
         method ?? (kind == .notification ? "notification" : "response")
@@ -136,7 +150,23 @@ enum JSONRPC {
         message: String,
         data: [String: Any]? = nil
     ) -> Data {
-        var error = #"{"code":\#(code.rawValue),"message":\#(fragment(message))"#
+        envelope(id: id, code: code.rawValue, message: message, data: data)
+    }
+
+    /// An SDK error in the envelope the SDK sends for it: code, its
+    /// `errorDescription` as message, and its detail under `data`.
+    static func error(id: Any?, _ error: MCPError) -> Data {
+        let encoded = jsonValue(encoding: error) as? [String: Any]
+        return envelope(
+            id: id,
+            code: error.code,
+            message: encoded?["message"] as? String ?? error.localizedDescription,
+            data: encoded?["data"] as? [String: Any]
+        )
+    }
+
+    private static func envelope(id: Any?, code: Int, message: String, data: [String: Any]?) -> Data {
+        var error = #"{"code":\#(code),"message":\#(fragment(message))"#
         if let data {
             error += #","data":\#(fragment(data))"#
         }

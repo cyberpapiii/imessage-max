@@ -35,6 +35,9 @@ actor HTTPTransport {
     private let setupPermissions: SetupPermissionService
     /// Maps (session, JSON-RPC id) to the POST waiting for the SDK's answer.
     private let pendingRequests: PendingRequestRegistry
+    /// Legacy `tools/call`s answered here rather than by the session's SDK
+    /// Server, by (session, JSON-RPC id), for `notifications/cancelled`.
+    private var inFlightToolCalls: [PendingRequestRegistry.Key: Task<ToolCallDispatch.Execution, Never>] = [:]
     private var isConnected = false
     private var routingConfigured = false
     private var serverTask: Task<Void, Error>?
@@ -261,9 +264,12 @@ actor HTTPTransport {
         // both eras. Answering it here skips routing the request into the SDK,
         // which re-encodes the whole response through Codable `Value` on the
         // way out. That round-trip cost about 9 ms of the 26 ms a 12 kB
-        // list_chats reply took on this lane. Anything malformed falls through
-        // to the SDK, which owns the error wording.
-        if message.kind == .request, message.method == "tools/call", let toolName = message.toolName {
+        // list_chats reply took on this lane. A call without a string name or
+        // with non-object arguments falls through to the SDK, which owns the
+        // error wording for malformed params.
+        if message.kind == .request, message.method == "tools/call", let toolName = message.toolName,
+            !message.hasMalformedToolArguments
+        {
             return await legacyToolCallResponse(message: message, name: toolName, sessionId: sessionId, headers: responseHeaders)
         }
 
@@ -271,6 +277,11 @@ actor HTTPTransport {
         case .request:
             return await forwardRequest(requestData, key: message.requestKey, sessionId: sessionId, headers: responseHeaders)
         case .notification, .response:
+            // The SDK cancels the requests it holds; the calls answered here
+            // it never saw, so cancel those directly.
+            if let cancelled = message.cancelledRequestKey {
+                inFlightToolCalls[PendingRequestRegistry.Key(sessionId: sessionId, requestId: cancelled)]?.cancel()
+            }
             guard await sessionManager.routeMessage(sessionId: sessionId, data: requestData) else {
                 return errorResponse(.notFound, "Session no longer valid")
             }
@@ -315,18 +326,42 @@ actor HTTPTransport {
     /// always, `structuredContent` only for a single JSON-object text block,
     /// `isError` only when the tool failed, and an unknown tool as a
     /// method-not-found error rather than a result.
+    ///
+    /// The call runs in its own task, listed in `inFlightToolCalls`, so a
+    /// `notifications/cancelled` for its id cancels it the way the SDK cancels
+    /// a stdio call: the tool stops and the reply is its cancelled result.
     private func legacyToolCallResponse(message: JSONRPCMessage, name: String, sessionId: String, headers: HTTPFields) async -> Response {
         let id = message.id ?? NSNull()
+        let arguments = message.toolArguments
+        let catalog = self.catalog
+        let call = Task {
+            await ToolCallDispatch.execute(name: name, arguments: arguments, lane: .legacyHTTP(session: sessionId), catalog: catalog)
+        }
+        // A reused in-flight id (a client error) runs untracked rather than
+        // taking over the first call's entry.
+        var trackedKey: PendingRequestRegistry.Key?
+        if let requestKey = message.requestKey {
+            let key = PendingRequestRegistry.Key(sessionId: sessionId, requestId: requestKey)
+            if inFlightToolCalls[key] == nil {
+                inFlightToolCalls[key] = call
+                trackedKey = key
+            }
+        }
+        // A dropped connection cancels the request's task; pass that on, as
+        // when the call ran on that task directly.
+        let execution = await withTaskCancellationHandler {
+            await call.value
+        } onCancel: {
+            call.cancel()
+        }
+        if let trackedKey {
+            inFlightToolCalls[trackedKey] = nil
+        }
+
         let body: Data
-        switch await ToolCallDispatch.perform(
-            name: name,
-            arguments: message.toolArguments,
-            lane: .legacyHTTP(session: sessionId),
-            catalog: catalog
-        ) {
+        switch ToolCallDispatch.render(execution) {
         case .unknownTool:
-            let detail = "Unknown tool: \(name)"
-            body = JSONRPC.error(id: id, code: .methodNotFound, message: "Method not found: \(detail)", data: ["detail": detail])
+            body = JSONRPC.error(id: id, ToolCallDispatch.unknownToolError(name))
         case .completed(let outcome):
             do {
                 body = try JSONRPC.success(id: id, result: ToolCallDispatch.resultJSON(outcome))

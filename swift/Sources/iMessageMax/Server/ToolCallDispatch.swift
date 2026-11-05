@@ -29,6 +29,12 @@ enum ToolCallDispatch {
         case completed(content: [Tool.Content], isError: Bool)
     }
 
+    /// The legacy-era answer to an unknown tool, on stdio (thrown into the
+    /// SDK) and on HTTP (encoded by `JSONRPC.error(id:_:)`).
+    static func unknownToolError(_ name: String) -> MCPError {
+        .methodNotFound("Unknown tool: \(name)")
+    }
+
     /// Where a call came in, for its log line.
     enum Lane {
         case legacyHTTP(session: String)
@@ -92,7 +98,12 @@ enum ToolCallDispatch {
     /// Arguments arrive already decoded: the raw `Any` a JSON parse yields is
     /// not `Sendable`, so it must not cross into the handler's task.
     static func perform(name: String, arguments: [String: Value]?, lane: Lane, catalog: ToolCatalog) async -> Result {
-        switch await execute(name: name, arguments: arguments, lane: lane, catalog: catalog) {
+        render(await execute(name: name, arguments: arguments, lane: lane, catalog: catalog))
+    }
+
+    /// An execution as JSON-ready objects.
+    static func render(_ execution: Execution) -> Result {
+        switch execution {
         case .unknownTool:
             return .unknownTool
         case .completed(let content, let isError):

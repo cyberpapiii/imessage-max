@@ -106,7 +106,7 @@ extension Server {
         self.withMethodHandler(CallTool.self) { params in
             switch await ToolCallDispatch.execute(name: params.name, arguments: params.arguments, lane: .legacyStdio, catalog: catalog) {
             case .unknownTool:
-                throw MCPError.methodNotFound("Unknown tool: \(params.name)")
+                throw ToolCallDispatch.unknownToolError(params.name)
             case .completed(let content, isError: true):
                 return CallTool.Result(content: content, isError: true)
             case .completed(let content, isError: false):
