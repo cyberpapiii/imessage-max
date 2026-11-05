@@ -72,9 +72,9 @@ final class SSEChannel: @unchecked Sendable {
     /// reader would silently steal events.
     let stream: AsyncStream<String>
 
-    /// - Parameter keepAliveInterval: heartbeat spacing. Production uses the
-    ///   30s default; tests shorten it to keep runtime bounded.
-    init(keepAliveInterval: Duration = .seconds(30)) {
+    /// - Parameter keepAliveInterval: heartbeat spacing, from
+    ///   `HTTPTransport.Configuration.sseKeepAliveInterval`.
+    init(keepAliveInterval: Duration) {
         var cont: AsyncStream<String>.Continuation!
         let baseStream = AsyncStream<String> { cont = $0 }
         self.continuation = cont
@@ -128,7 +128,7 @@ actor SSEConnectionManager {
     private var sessionConnections: [String: Set<String>] = [:]
     private let keepAliveInterval: Duration
 
-    init(keepAliveInterval: Duration = .seconds(30)) {
+    init(keepAliveInterval: Duration) {
         self.keepAliveInterval = keepAliveInterval
     }
 

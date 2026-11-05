@@ -8,8 +8,10 @@ final class SessionManagerTests: XCTestCase {
     func testConcurrentCreatesRespectTheCap() async throws {
         let manager = SessionManager(
             catalog: makeTestCatalog(),
-            maxSessions: 2,
-            cleanupInterval: .milliseconds(20)
+            configuration: .init(
+                maxSessions: 2,
+                cleanupInterval: .milliseconds(20)
+            )
         )
 
         let outcomes = try await withThrowingTaskGroup(of: SessionCreationResult.self) { group in
@@ -53,8 +55,10 @@ final class SessionManagerTests: XCTestCase {
     func testTerminateStopsServer() async {
         let manager = SessionManager(
             catalog: makeTestCatalog(),
-            maxSessions: 2,
-            cleanupInterval: .milliseconds(20)
+            configuration: .init(
+                maxSessions: 2,
+                cleanupInterval: .milliseconds(20)
+            )
         )
 
         let result = await manager.createSession()
@@ -83,8 +87,10 @@ final class SessionManagerTests: XCTestCase {
     func testRouteMessageRefusesAfterTerminateReturns() async {
         let manager = SessionManager(
             catalog: makeTestCatalog(),
-            maxSessions: 2,
-            cleanupInterval: .milliseconds(20)
+            configuration: .init(
+                maxSessions: 2,
+                cleanupInterval: .milliseconds(20)
+            )
         )
         guard case .created(let session) = await manager.createSession() else {
             return XCTFail("session should be created")
@@ -101,8 +107,10 @@ final class SessionManagerTests: XCTestCase {
     func testTerminateSessionTwiceIsIdempotent() async {
         let manager = SessionManager(
             catalog: makeTestCatalog(),
-            maxSessions: 2,
-            cleanupInterval: .milliseconds(20)
+            configuration: .init(
+                maxSessions: 2,
+                cleanupInterval: .milliseconds(20)
+            )
         )
         guard case .created(let session) = await manager.createSession() else {
             return XCTFail("session should be created")
@@ -118,8 +126,10 @@ final class SessionManagerTests: XCTestCase {
     func testNotifyAllSessionsReachesEverySessionResponseHandler() async throws {
         let manager = SessionManager(
             catalog: makeTestCatalog(),
-            maxSessions: 4,
-            cleanupInterval: .milliseconds(20)
+            configuration: .init(
+                maxSessions: 4,
+                cleanupInterval: .milliseconds(20)
+            )
         )
         let collected = Mutex<[(String, Data)]>([])
         await manager.setResponseHandler { sessionId, data in
@@ -163,8 +173,10 @@ final class SessionManagerTests: XCTestCase {
     func testTerminateUnknownIdIsANoOp() async {
         let manager = SessionManager(
             catalog: makeTestCatalog(),
-            maxSessions: 2,
-            cleanupInterval: .milliseconds(20)
+            configuration: .init(
+                maxSessions: 2,
+                cleanupInterval: .milliseconds(20)
+            )
         )
 
         await manager.terminateSession(sessionId: "missing")

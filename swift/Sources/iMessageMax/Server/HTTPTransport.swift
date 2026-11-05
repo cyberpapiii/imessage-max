@@ -11,15 +11,29 @@ import UnixSignals
 /// MCP Streamable HTTP server (Hummingbird): POST for both eras, GET-SSE and
 /// DELETE for legacy sessions, each session with its own SDK Server.
 actor HTTPTransport {
-    /// Production uses the defaults; tests shrink them.
+    /// Production uses the defaults; tests shrink them. The only place these
+    /// values are written: `SessionManager` and the SSE types take them from
+    /// here.
     struct Configuration: Sendable {
         var requestTimeout: Duration = .seconds(300)
         var bodyReadDeadline: Duration = .seconds(30)
         var channelIdleTimeout: Duration = .seconds(60)
-        /// Concurrent-session cap, forwarded to `SessionManager`.
+        /// Concurrent-session cap. A session costs about half a kilobyte of
+        /// resident memory (measured across 100 live sessions), so the cap is
+        /// a guard against runaway clients rather than a resource limit; 100
+        /// turned a fleet of agents that each open their own session into
+        /// 503s within seconds.
         var maxSessions = 512
+        /// Idle span after which a session may be reclaimed to admit a new
+        /// client once `maxSessions` is reached.
+        var reclaimableIdle: TimeInterval = 300
+        /// Expired-session sweep period. Tests shrink it so a leftover sweep
+        /// task cannot pin a `swift test --parallel` worker for five minutes.
         var cleanupInterval: Duration = .seconds(300)
+        /// Idle TTL before a session is reaped.
         var sessionTimeout: TimeInterval = 3600
+        /// SSE heartbeat spacing. It also keeps a listen-only client's
+        /// session from looking idle.
         var sseKeepAliveInterval: Duration = .seconds(30)
         /// Builds each legacy session's SDK Server.
         var makeServer: @Sendable (ToolCatalog) async -> Server = { await Version.makeServer(catalog: $0) }
@@ -64,13 +78,7 @@ actor HTTPTransport {
         self.catalog = catalog
         self.setupPermissions = setupPermissions
         self.pendingRequests = PendingRequestRegistry(timeout: configuration.requestTimeout)
-        let makeServer = configuration.makeServer
-        self.sessionManager = SessionManager(
-            makeServer: { await makeServer(catalog) },
-            sessionTimeout: configuration.sessionTimeout,
-            maxSessions: configuration.maxSessions,
-            cleanupInterval: configuration.cleanupInterval
-        )
+        self.sessionManager = SessionManager(catalog: catalog, configuration: configuration)
         self.sseManager = SSEConnectionManager(keepAliveInterval: configuration.sseKeepAliveInterval)
     }
 
@@ -484,8 +492,9 @@ actor HTTPTransport {
                     for await event in channel.stream {
                         try await writer.write(ByteBuffer(string: event))
                         // An open stream is a live client, even one that only
-                        // listens. Keep-alives land every 30s, so its session
-                        // never looks idle to expiry or reclaim.
+                        // listens. Keep-alives land every
+                        // `sseKeepAliveInterval`, so its session never looks
+                        // idle to expiry or reclaim.
                         await sessionManager.touch(sessionId: sessionId)
                     }
                     // Hummingbird only ends the response on finish. Without

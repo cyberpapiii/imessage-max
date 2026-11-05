@@ -92,26 +92,26 @@ final class SSEEventTests: XCTestCase {
 final class SSEConnectionManagerTests: XCTestCase {
 
     func testInitialConnectionCountIsZero() async {
-        let manager = SSEConnectionManager()
+        let manager = SSEConnectionManager(keepAliveInterval: HTTPTransport.Configuration().sseKeepAliveInterval)
         let count = await manager.connectionCount
         XCTAssertEqual(count, 0)
     }
 
     func testConnectionIdsForNonexistentSession() async {
-        let manager = SSEConnectionManager()
+        let manager = SSEConnectionManager(keepAliveInterval: HTTPTransport.Configuration().sseKeepAliveInterval)
         let connections = await manager.connectionIds(forSession: "nonexistent")
         XCTAssertTrue(connections.isEmpty)
     }
 
     func testTerminateNonexistentSession() async {
-        let manager = SSEConnectionManager()
+        let manager = SSEConnectionManager(keepAliveInterval: HTTPTransport.Configuration().sseKeepAliveInterval)
         await manager.terminateSession(sessionId: "nonexistent")
         let count = await manager.connectionCount
         XCTAssertEqual(count, 0)
     }
 
     func testRegisterCreatesConnection() async {
-        let manager = SSEConnectionManager()
+        let manager = SSEConnectionManager(keepAliveInterval: HTTPTransport.Configuration().sseKeepAliveInterval)
         let info = SSEConnectionInfo(sessionId: "test-session")
 
         let channel = await manager.register(info: info)
@@ -122,7 +122,7 @@ final class SSEConnectionManagerTests: XCTestCase {
     }
 
     func testUnregisterRemovesConnection() async {
-        let manager = SSEConnectionManager()
+        let manager = SSEConnectionManager(keepAliveInterval: HTTPTransport.Configuration().sseKeepAliveInterval)
         let info = SSEConnectionInfo(sessionId: "test-session")
 
         _ = await manager.register(info: info)
@@ -207,8 +207,10 @@ final class SessionManagerLifecycleTests: XCTestCase {
     func testCreateSessionAtCapacityReturnsAtCapacity() async {
         let manager = SessionManager(
             catalog: makeTestCatalog(),
-            maxSessions: 1,
-            cleanupInterval: .milliseconds(20)
+            configuration: .init(
+                maxSessions: 1,
+                cleanupInterval: .milliseconds(20)
+            )
         )
 
         let first = await manager.createSession()
@@ -230,9 +232,11 @@ final class SessionManagerLifecycleTests: XCTestCase {
     func testFreshSessionIsNotReclaimedWhenAtCapacity() async {
         let manager = SessionManager(
             catalog: makeTestCatalog(),
-            maxSessions: 1,
-            reclaimableIdle: 60,
-            cleanupInterval: .milliseconds(20)
+            configuration: .init(
+                maxSessions: 1,
+                reclaimableIdle: 60,
+                cleanupInterval: .milliseconds(20)
+            )
         )
 
         let first = await manager.createSession()
@@ -255,9 +259,11 @@ final class SessionManagerLifecycleTests: XCTestCase {
         // such sessions refused every new client until the service restarted.
         let manager = SessionManager(
             catalog: makeTestCatalog(),
-            maxSessions: 1,
-            reclaimableIdle: 0.05,
-            cleanupInterval: .milliseconds(20)
+            configuration: .init(
+                maxSessions: 1,
+                reclaimableIdle: 0.05,
+                cleanupInterval: .milliseconds(20)
+            )
         )
 
         let first = await manager.createSession()
@@ -286,8 +292,10 @@ final class SessionManagerLifecycleTests: XCTestCase {
     func testExpiredSessionIsCleanedUp() async {
         let manager = SessionManager(
             catalog: makeTestCatalog(),
-            sessionTimeout: 0.01,
-            cleanupInterval: .milliseconds(20)
+            configuration: .init(
+                cleanupInterval: .milliseconds(20),
+                sessionTimeout: 0.01
+            )
         )
 
         let result = await manager.createSession()

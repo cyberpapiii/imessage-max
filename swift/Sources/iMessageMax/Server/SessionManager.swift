@@ -44,6 +44,7 @@ actor SessionManager {
     /// cannot both pass the count check, await registration, and both insert.
     private var reservedSlots = 0
 
+    /// Idle TTL before a session is reaped.
     private let sessionTimeout: TimeInterval
 
     private let maxSessions: Int
@@ -52,9 +53,7 @@ actor SessionManager {
     /// when the table is full.
     private let reclaimableIdle: TimeInterval
 
-    /// How often the expired-session sweep runs. Production uses 300s.
-    /// Tests pass a short interval so a leftover cleanup `Task` cannot pin
-    /// a `swift test --parallel` worker for five minutes.
+    /// How often the expired-session sweep runs.
     private let cleanupInterval: Duration
 
     private var cleanupTask: Task<Void, Never>?
@@ -66,48 +65,15 @@ actor SessionManager {
 
     private var sessionTerminationHandler: ((String) async -> Void)?
 
-    /// - Parameters:
-    ///   - sessionTimeout: idle TTL before a session is reaped. Production
-    ///     uses the 3600s default; tests shrink it to exercise cleanup.
-    ///   - maxSessions: concurrent-session cap. Production uses the default.
-    ///     A session costs about half a kilobyte of resident memory (measured
-    ///     across 100 live sessions), so the cap is a guard against runaway
-    ///     clients rather than a resource limit; 100 turned a fleet of agents
-    ///     that each open their own session into 503s within seconds.
-    ///   - reclaimableIdle: idle span after which a session may be reclaimed
-    ///     to admit a new client once the cap is reached. Production uses the
-    ///     default; tests shrink it to reach the reclaim path.
-    ///   - cleanupInterval: sweep period. Production uses 300s; tests shrink
-    ///     it so cancelled `asyncAfter` work does not occupy a parallel
-    ///     worker until the five-minute deadline.
-    init(
-        makeServer: @escaping @Sendable () async -> Server,
-        sessionTimeout: TimeInterval = 3600,
-        maxSessions: Int = 512,
-        reclaimableIdle: TimeInterval = 300,
-        cleanupInterval: Duration = .seconds(300)
-    ) {
-        self.makeServer = makeServer
-        self.sessionTimeout = sessionTimeout
-        self.maxSessions = maxSessions
-        self.reclaimableIdle = reclaimableIdle
-        self.cleanupInterval = cleanupInterval
-    }
-
-    init(
-        catalog: ToolCatalog,
-        sessionTimeout: TimeInterval = 3600,
-        maxSessions: Int = 512,
-        reclaimableIdle: TimeInterval = 300,
-        cleanupInterval: Duration = .seconds(300)
-    ) {
-        self.init(
-            makeServer: { await Version.makeServer(catalog: catalog) },
-            sessionTimeout: sessionTimeout,
-            maxSessions: maxSessions,
-            reclaimableIdle: reclaimableIdle,
-            cleanupInterval: cleanupInterval
-        )
+    /// Every limit comes from `configuration`, where the production values
+    /// and their reasons live.
+    init(catalog: ToolCatalog, configuration: HTTPTransport.Configuration) {
+        let makeServer = configuration.makeServer
+        self.makeServer = { await makeServer(catalog) }
+        self.sessionTimeout = configuration.sessionTimeout
+        self.maxSessions = configuration.maxSessions
+        self.reclaimableIdle = configuration.reclaimableIdle
+        self.cleanupInterval = configuration.cleanupInterval
     }
 
     deinit {
@@ -273,9 +239,10 @@ actor SessionManager {
     ///
     /// A client that disappears without sending DELETE leaves its session
     /// behind for the full `sessionTimeout`, and the sweep that removes it
-    /// only runs every five minutes. Without this, a table full of abandoned
-    /// sessions refuses every new client for up to an hour, and the only
-    /// recovery is restarting the service. A live client touches its session
+    /// only runs every `cleanupInterval`. Without this, a table full of
+    /// abandoned sessions refuses every new client until they expire (up to
+    /// `sessionTimeout`), and the only faster recovery is restarting the
+    /// service. A live client touches its session
     /// far more often than the reclaim window, so anything staler is a client
     /// that went away. This runs only under capacity pressure, so a quiet but
     /// live session is left alone while there is room.
@@ -292,7 +259,7 @@ actor SessionManager {
 
     /// Removes expired sessions.
     ///
-    /// Driven by the 5-minute timer loop above; also callable directly by
+    /// Driven by the `cleanupInterval` loop above; also callable directly by
     /// tests, which inject a short `sessionTimeout` rather than waiting.
     func cleanupExpiredSessions() async {
         let now = Date()
