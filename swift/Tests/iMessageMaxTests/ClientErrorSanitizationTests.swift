@@ -47,7 +47,6 @@ final class ClientErrorSanitizationTests: XCTestCase {
     func testNonDatabaseErrorPassesThroughUnchanged() {
         let sanitized = ClientErrorMessages.sanitized(SendError.timeout)
 
-        XCTAssertEqual(sanitized, SendError.timeout.localizedDescription)
         XCTAssertEqual(sanitized, "Send operation timed out. Messages.app may be unresponsive.")
     }
 
@@ -91,8 +90,6 @@ final class ClientErrorSanitizationTests: XCTestCase {
             SendError.timeout, context: "Running AppleScript"
         )
 
-        XCTAssertTrue(detail.hasSuffix("failed. Check the server log for details."),
-            "internalDetail guidance wording changed: \(detail)")
         XCTAssertEqual(detail, "Running AppleScript failed. Check the server log for details.")
     }
 }

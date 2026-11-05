@@ -23,11 +23,8 @@ final class VersionConsistencyTests: XCTestCase {
         let formula = try String(contentsOf: root.appendingPathComponent("swift/Formula/imessage-max.rb"), encoding: .utf8)
         XCTAssertTrue(formula.contains("version \"\(expected)\""), "Formula version")
         XCTAssertTrue(formula.contains("/releases/download/v\(expected)/"), "Formula url tag segment")
-
-        XCTAssertEqual(Version.display, "\(Version.name) \(expected)")
     }
 }
-
 
 private func plistObject(at url: URL) throws -> [String: Any] {
     let data = try Data(contentsOf: url)

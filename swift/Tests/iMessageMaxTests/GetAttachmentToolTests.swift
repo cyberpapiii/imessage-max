@@ -165,7 +165,7 @@ final class GetAttachmentToolTests: XCTestCase {
 
         XCTAssertEqual(body["error"] as? String, "attachment_offloaded")
         let message = body["message"] as? String ?? ""
-        XCTAssertTrue(message.contains("offloaded") || message.contains("iCloud"))
+        XCTAssertTrue(message.contains("iCloud"), message)
     }
 }
 

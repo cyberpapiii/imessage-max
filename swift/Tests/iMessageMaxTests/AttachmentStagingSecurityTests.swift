@@ -32,8 +32,7 @@ final class AttachmentStagingSecurityTests: XCTestCase {
     }
 
     private func symlink(_ link: URL, to target: URL) throws {
-        do { try FileManager.default.createSymbolicLink(at: link, withDestinationURL: target) }
-        catch { throw XCTSkip("cannot create symlinks here: \(error)") }
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: target)
     }
 
     private func stagingRootEntryCount() throws -> Int {

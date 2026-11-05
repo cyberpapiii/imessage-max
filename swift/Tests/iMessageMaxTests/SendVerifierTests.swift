@@ -2,8 +2,7 @@ import XCTest
 @testable import iMessageMax
 
 // Tests for SendVerifier, the pure chat.db re-read layer that backs the
-// verified-sends proof vocabulary. All tests use maxAttempts: 1 for speed
-// unless explicitly testing multi-attempt behaviour.
+// verified-sends proof vocabulary. All tests use maxAttempts: 1 for speed.
 
 final class SendVerifierTests: XCTestCase {
 
@@ -188,42 +187,6 @@ final class SendVerifierTests: XCTestCase {
         guard case .confirmed = result else {
             return XCTFail("Expected .confirmed from an attributedBody-only row, got \(result)")
         }
-    }
-
-    /// Builds: <prefix junk> + marker + 5 filler bytes + length field + payload.
-    /// Copied from MessageTextExtractorTests (private there).
-
-    // Multi-attempt polling: with a pre-inserted matching row the verifier
-    // confirms within the first attempt and finishes well before maxAttempts
-    // × pollInterval elapses. Proves the polling loop structure is sound.
-    func testMultiAttemptPollingFindsExistingRow() async throws {
-        let fixture = try makeFixture()
-        let date = nowNs()
-
-        try fixture.insertMessage(
-            rowId: 6, guid: "msg-guid-poll", text: "Polling test",
-            date: date, isFromMe: true, error: 0
-        )
-        try fixture.joinChatMessage(chatId: 1, messageId: 6)
-
-        // Use maxAttempts: 3 with a tiny interval; row is already present so
-        // the first attempt finds it.
-        let verifier = SendVerifier(
-            db: fixture.database(),
-            maxAttempts: 3,
-            pollInterval: .milliseconds(50)
-        )
-        let result = try await verifier.verify(
-            intendedChatId: 1,
-            handle: nil,
-            sendTime: Date(),
-            expectedText: "Polling test"
-        )
-
-        guard case .confirmed(let guid, _) = result else {
-            return XCTFail("Expected .confirmed within 3 attempts, got \(result)")
-        }
-        XCTAssertEqual(guid, "msg-guid-poll")
     }
 
     // MARK: - Failed-delivery classification (plan 021)

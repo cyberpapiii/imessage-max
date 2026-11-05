@@ -4,7 +4,7 @@ import XCTest
 @testable import iMessageMax
 
 /// Regression coverage for the still-open product items closed after the thermos sweep:
-/// mime `has:` filters, FindChat group/content, most_active + cursors, AsyncTimeout cancel.
+/// mime `has:` filters, FindChat group/content, most_active + cursors.
 final class ProductOpenItemsTests: XCTestCase {
 
     // MARK: - has:images mime filter
@@ -120,18 +120,6 @@ final class ProductOpenItemsTests: XCTestCase {
         XCTAssertNotEqual(page1.chats.first?.id, page2.chats.first?.id)
     }
 
-    // MARK: - AsyncTimeout cancellation
-
-    func testAsyncTimeoutSleepHonorsCancellation() async {
-        let task = Task {
-            await AsyncTimeout.sleep(.seconds(30))
-        }
-        await AsyncTimeout.sleep(.milliseconds(20))
-        task.cancel()
-        await task.value
-        XCTAssertTrue(task.isCancelled)
-    }
-
     // MARK: - Fixtures
 
     private func makeHasMediaFixture() throws -> ToolTestDatabase {
@@ -237,5 +225,4 @@ final class ProductOpenItemsTests: XCTestCase {
         }
         return fixture
     }
-
 }

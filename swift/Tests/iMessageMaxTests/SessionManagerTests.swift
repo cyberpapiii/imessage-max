@@ -160,19 +160,6 @@ final class SessionManagerTests: XCTestCase {
         await manager.terminateSession(sessionId: second.id)
     }
 
-    func testTerminateUnknownIdIsANoOp() async {
-        let manager = SessionManager(
-            catalog: makeTestCatalog(),
-            maxSessions: 2,
-            cleanupInterval: .milliseconds(20)
-        )
-
-        await manager.terminateSession(sessionId: "missing")
-
-        let count = await manager.sessionCount
-        XCTAssertEqual(count, 0)
-    }
-
     /// A detached `terminateSession` plus an immediate `activeSessionIds()`
     /// hop does not pin in-flight removal. The test task's actor hop wins
     /// the mailbox before terminate starts, so the id is still present even

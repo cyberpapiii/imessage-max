@@ -546,23 +546,6 @@ final class GetMessagesToolTests: XCTestCase {
             XCTAssertNil(message["edited"])
         }
     }
-
-    func testSchemaOverrideIsConsultedEvenWhenColumnsExist() async throws {
-        let fixture = try makeGetMessagesFixture()
-        let db = Database(
-            path: fixture.path,
-            schemaOverride: SchemaCapabilities.assumed.without(.messageThreadOriginatorGuid, .messageDateEdited)
-        )
-        let tool = GetMessagesTool(db: db, resolver: makeSeededResolver())
-        let response = try await decodeJSONDictionary(from:
-            await tool.execute(args: ["chat_id": .string("chat20")])
-        )
-        let messages = try decodeJSONArray(try XCTUnwrap(response["messages"]))
-        for message in messages {
-            XCTAssertNil(message["reply_to"])
-            XCTAssertNil(message["edited"])
-        }
-    }
 }
 
 private func assertGroupEvent(

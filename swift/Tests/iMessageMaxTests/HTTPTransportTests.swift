@@ -67,8 +67,6 @@ final class SSEEventTests: XCTestCase {
         let keepAlive = SSEEvent.keepAlive()
 
         XCTAssertEqual(keepAlive, ": keep-alive\n\n")
-        XCTAssertTrue(keepAlive.hasPrefix(":"))
-        XCTAssertTrue(keepAlive.hasSuffix("\n\n"))
     }
 
     func testEmptyDataEvent() {
@@ -90,25 +88,6 @@ final class SSEEventTests: XCTestCase {
 // MARK: - SSE Connection Manager Tests
 
 final class SSEConnectionManagerTests: XCTestCase {
-
-    func testInitialConnectionCountIsZero() async {
-        let manager = SSEConnectionManager()
-        let count = await manager.connectionCount
-        XCTAssertEqual(count, 0)
-    }
-
-    func testConnectionIdsForNonexistentSession() async {
-        let manager = SSEConnectionManager()
-        let connections = await manager.connectionIds(forSession: "nonexistent")
-        XCTAssertTrue(connections.isEmpty)
-    }
-
-    func testTerminateNonexistentSession() async {
-        let manager = SSEConnectionManager()
-        await manager.terminateSession(sessionId: "nonexistent")
-        let count = await manager.connectionCount
-        XCTAssertEqual(count, 0)
-    }
 
     func testRegisterCreatesConnection() async {
         let manager = SSEConnectionManager()

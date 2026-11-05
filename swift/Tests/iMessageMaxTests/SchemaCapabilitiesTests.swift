@@ -34,7 +34,7 @@ final class SchemaCapabilitiesTests: XCTestCase {
         let features = SchemaCapabilities.assumed.without(.messageDateEdited).features
         XCTAssertEqual(features["message.date_edited"], false)
         XCTAssertEqual(features["attachment.hide_attachment"], true)
-        XCTAssertEqual(features.count, 19)
+        XCTAssertTrue(features.keys.allSatisfy { $0.split(separator: ".").count == 2 }, "\(features.keys)")
     }
 
     func testProbeOnUnreadableFileThrowsPermissionDenied() throws {

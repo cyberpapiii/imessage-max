@@ -391,18 +391,13 @@ final class HTTPTransportIntegrationTests: XCTestCase {
                 {"jsonrpc":"2.0","id":1e300,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"tests","version":"1.0"}}}
                 """
 
-            let hugeResponse = try await client.executeRequest(
+            // Getting any response at all is the regression test: the
+            // process used to abort before answering.
+            _ = try await client.executeRequest(
                 uri: "/",
                 method: HTTPRequest.Method.post,
                 headers: jsonHeaders(),
                 body: byteBuffer(for: hugeIdPayload)
-            )
-
-            // Reaching this line at all is the regression test: any HTTP
-            // status beats aborting the process.
-            XCTAssertTrue(
-                (100...599).contains(Int(hugeResponse.head.status.code)),
-                "Expected a real HTTP status, got \(hugeResponse.head.status)"
             )
 
             // And the server is still serving afterwards.
