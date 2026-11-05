@@ -6,6 +6,7 @@ import HTTPTypes
 import Logging
 import NIOCore
 import NIOEmbedded
+import Synchronization
 @testable import iMessageMax
 
 final class HTTPTransportIntegrationTests: XCTestCase {
@@ -15,10 +16,9 @@ final class HTTPTransportIntegrationTests: XCTestCase {
             port: 0,
             catalog: makeTestCatalog(),
             setupPermissions: makeTestSetupPermissions(),
-            requestTimeout: .seconds(5),
-            cleanupInterval: .milliseconds(20)
+            configuration: .init(requestTimeout: .seconds(5), cleanupInterval: .milliseconds(20))
         )
-        let app = await transport.makeApplicationForTesting()
+        let app = await transport.application()
 
         try await app.test(TestingSetup.router) { client in
             let initializeResponse = try await client.executeRequest(
@@ -77,10 +77,9 @@ final class HTTPTransportIntegrationTests: XCTestCase {
             port: 0,
             catalog: makeTestCatalog(),
             setupPermissions: makeTestSetupPermissions(),
-            requestTimeout: .seconds(5),
-            cleanupInterval: .milliseconds(20)
+            configuration: .init(requestTimeout: .seconds(5), cleanupInterval: .milliseconds(20))
         )
-        let app = await transport.makeApplicationForTesting()
+        let app = await transport.application()
 
         try await app.test(TestingSetup.router) { client in
             let initializeResponse = try await client.executeRequest(
@@ -105,10 +104,9 @@ final class HTTPTransportIntegrationTests: XCTestCase {
             port: 0,
             catalog: makeTestCatalog(),
             setupPermissions: makeTestSetupPermissions(),
-            requestTimeout: .seconds(5),
-            cleanupInterval: .milliseconds(20)
+            configuration: .init(requestTimeout: .seconds(5), cleanupInterval: .milliseconds(20))
         )
-        let app = await transport.makeApplicationForTesting()
+        let app = await transport.application()
 
         try await app.test(TestingSetup.router) { client in
             let sessionId = try await initializeSession(using: client, protocolVersion: "2025-11-25")
@@ -138,10 +136,9 @@ final class HTTPTransportIntegrationTests: XCTestCase {
             port: 0,
             catalog: makeTestCatalog(),
             setupPermissions: makeTestSetupPermissions(),
-            requestTimeout: .seconds(5),
-            cleanupInterval: .milliseconds(20)
+            configuration: .init(requestTimeout: .seconds(5), cleanupInterval: .milliseconds(20))
         )
-        let app = await transport.makeApplicationForTesting()
+        let app = await transport.application()
 
         try await app.test(TestingSetup.router) { client in
             let response = try await client.executeRequest(
@@ -164,10 +161,9 @@ final class HTTPTransportIntegrationTests: XCTestCase {
             port: 0,
             catalog: makeTestCatalog(),
             setupPermissions: makeTestSetupPermissions(),
-            requestTimeout: .seconds(5),
-            cleanupInterval: .milliseconds(20)
+            configuration: .init(requestTimeout: .seconds(5), cleanupInterval: .milliseconds(20))
         )
-        let app = await transport.makeApplicationForTesting()
+        let app = await transport.application()
 
         try await app.test(TestingSetup.router) { client in
             let sessionId = try await initializeSession(using: client, protocolVersion: "2025-11-25")
@@ -198,10 +194,9 @@ final class HTTPTransportIntegrationTests: XCTestCase {
             port: 0,
             catalog: makeTestCatalog(),
             setupPermissions: makeTestSetupPermissions(),
-            requestTimeout: .seconds(5),
-            cleanupInterval: .milliseconds(20)
+            configuration: .init(requestTimeout: .seconds(5), cleanupInterval: .milliseconds(20))
         )
-        let app = await transport.makeApplicationForTesting()
+        let app = await transport.application()
 
         try await app.test(TestingSetup.router) { client in
             let sessionId = try await initializeSession(using: client, protocolVersion: "2025-11-25")
@@ -252,10 +247,9 @@ final class HTTPTransportIntegrationTests: XCTestCase {
             port: 0,
             catalog: makeTestCatalog(),
             setupPermissions: makeTestSetupPermissions(),
-            requestTimeout: .seconds(5),
-            cleanupInterval: .milliseconds(20)
+            configuration: .init(requestTimeout: .seconds(5), cleanupInterval: .milliseconds(20))
         )
-        let app = await transport.makeApplicationForTesting()
+        let app = await transport.application()
 
         try await app.test(TestingSetup.router) { client in
             let response = try await client.executeRequest(
@@ -277,26 +271,19 @@ final class HTTPTransportIntegrationTests: XCTestCase {
             port: 0,
             catalog: makeTestCatalog(),
             setupPermissions: makeTestSetupPermissions(),
-            requestTimeout: .seconds(2),
-            cleanupInterval: .milliseconds(20)
+            configuration: .init(
+                requestTimeout: .seconds(2),
+                cleanupInterval: .milliseconds(20),
+                // Sessions are created in order: the first answers as
+                // session-a after 20 ms, the second as session-b after 40 ms.
+                makeServer: serversWithSlowMethod([("session-a", .milliseconds(20)), ("session-b", .milliseconds(40))])
+            )
         )
-        let app = await transport.makeApplicationForTesting()
+        let app = await transport.application()
 
         try await app.test(TestingSetup.router) { client in
             let sessionA = try await initializeSession(using: client)
             let sessionB = try await initializeSession(using: client)
-
-            let didRegisterA = await transport.registerMethodHandlerForTesting(sessionId: sessionA, TestSlowMethod.self) { _ in
-                try await Task.sleep(for: .milliseconds(20))
-                return .init(source: "session-a")
-            }
-            XCTAssertTrue(didRegisterA)
-
-            let didRegisterB = await transport.registerMethodHandlerForTesting(sessionId: sessionB, TestSlowMethod.self) { _ in
-                try await Task.sleep(for: .milliseconds(40))
-                return .init(source: "session-b")
-            }
-            XCTAssertTrue(didRegisterB)
 
             async let responseA = client.executeRequest(
                 uri: "/",
@@ -326,10 +313,9 @@ final class HTTPTransportIntegrationTests: XCTestCase {
             port: 0,
             catalog: makeTestCatalog(),
             setupPermissions: makeTestSetupPermissions(),
-            requestTimeout: .milliseconds(200),
-            cleanupInterval: .milliseconds(20)
+            configuration: .init(requestTimeout: .milliseconds(200), cleanupInterval: .milliseconds(20))
         )
-        let app = await transport.makeApplicationForTesting()
+        let app = await transport.application()
 
         try await app.test(TestingSetup.router) { client in
             let sessionId = try await initializeSession(using: client)
@@ -362,19 +348,16 @@ final class HTTPTransportIntegrationTests: XCTestCase {
             port: 0,
             catalog: makeTestCatalog(),
             setupPermissions: makeTestSetupPermissions(),
-            requestTimeout: .milliseconds(200),
-            cleanupInterval: .milliseconds(20)
+            configuration: .init(
+                requestTimeout: .milliseconds(200),
+                cleanupInterval: .milliseconds(20),
+                makeServer: serversWithSlowMethod([("too-late", .seconds(2))])
+            )
         )
-        let app = await transport.makeApplicationForTesting()
+        let app = await transport.application()
 
         try await app.test(TestingSetup.router) { client in
             let sessionId = try await initializeSession(using: client)
-
-            let didRegister = await transport.registerMethodHandlerForTesting(sessionId: sessionId, TestSlowMethod.self) { _ in
-                try await Task.sleep(for: .seconds(2))
-                return .init(source: "too-late")
-            }
-            XCTAssertTrue(didRegister)
 
             let start = ContinuousClock().now
             let response = try await client.executeRequest(
@@ -396,10 +379,9 @@ final class HTTPTransportIntegrationTests: XCTestCase {
             port: 0,
             catalog: makeTestCatalog(),
             setupPermissions: makeTestSetupPermissions(),
-            requestTimeout: .seconds(2),
-            cleanupInterval: .milliseconds(20)
+            configuration: .init(requestTimeout: .seconds(2), cleanupInterval: .milliseconds(20))
         )
-        let app = await transport.makeApplicationForTesting()
+        let app = await transport.application()
 
         try await app.test(TestingSetup.router) { client in
             // `1e300` is a legal JSON number but outside Int's range. The old
@@ -440,10 +422,9 @@ final class HTTPTransportIntegrationTests: XCTestCase {
             port: 0,
             catalog: makeTestCatalog(),
             setupPermissions: makeTestSetupPermissions(),
-            requestTimeout: .seconds(2),
-            cleanupInterval: .milliseconds(20)
+            configuration: .init(requestTimeout: .seconds(2), cleanupInterval: .milliseconds(20))
         )
-        let app = await transport.makeApplicationForTesting()
+        let app = await transport.application()
 
         try await app.test(TestingSetup.router) { client in
             // Backslash + quote is the attack shape: HTTP/1.1 header values
@@ -550,10 +531,9 @@ final class HTTPTransportIntegrationTests: XCTestCase {
             port: 0,
             catalog: makeTestCatalog(),
             setupPermissions: makeTestSetupPermissions(),
-            requestTimeout: .seconds(5),
-            cleanupInterval: .milliseconds(20)
+            configuration: .init(requestTimeout: .seconds(5), cleanupInterval: .milliseconds(20))
         )
-        let app = await transport.makeApplicationForTesting()
+        let app = await transport.application()
 
         try await app.test(TestingSetup.router) { client in
             let response = try await client.executeRequest(
@@ -575,10 +555,9 @@ final class HTTPTransportIntegrationTests: XCTestCase {
             port: 0,
             catalog: makeTestCatalog(),
             setupPermissions: makeTestSetupPermissions(),
-            requestTimeout: .seconds(5),
-            cleanupInterval: .milliseconds(20)
+            configuration: .init(requestTimeout: .seconds(5), cleanupInterval: .milliseconds(20))
         )
-        let app = await transport.makeApplicationForTesting()
+        let app = await transport.application()
 
         try await app.test(TestingSetup.router) { client in
             let response = try await client.executeRequest(
@@ -600,10 +579,9 @@ final class HTTPTransportIntegrationTests: XCTestCase {
             port: 0,
             catalog: makeTestCatalog(),
             setupPermissions: makeTestSetupPermissions(),
-            requestTimeout: .seconds(5),
-            cleanupInterval: .milliseconds(20)
+            configuration: .init(requestTimeout: .seconds(5), cleanupInterval: .milliseconds(20))
         )
-        let app = await transport.makeApplicationForTesting()
+        let app = await transport.application()
 
         try await app.test(TestingSetup.router) { client in
             var headers: HTTPFields = [.accept: "text/event-stream"]
@@ -644,10 +622,9 @@ final class HTTPTransportIntegrationTests: XCTestCase {
             port: 0,
             catalog: makeTestCatalog(),
             setupPermissions: makeTestSetupPermissions(),
-            requestTimeout: .seconds(5),
-            cleanupInterval: .milliseconds(20)
+            configuration: .init(requestTimeout: .seconds(5), cleanupInterval: .milliseconds(20))
         )
-        let app = await transport.makeApplicationForTesting()
+        let app = await transport.application()
 
         try await app.test(TestingSetup.router) { client in
             let sessionId = try await initializeSession(using: client)
@@ -665,14 +642,9 @@ final class HTTPTransportIntegrationTests: XCTestCase {
                 ),
                 body: .init(buffer: ByteBuffer())
             )
-            let context = BasicRequestContext(
-                source: ApplicationRequestContextSource(
-                    channel: EmbeddedChannel(),
-                    logger: Logger(label: #function)
-                )
-            )
-
-            let response = try await transport.handleGet(request: request, context: context)
+            // Called directly: through the test client the open stream would
+            // never complete.
+            let response = await transport.handleGet(request: request)
 
             XCTAssertEqual(response.head.status, .ok)
             let contentType = response.head.headerFields[.contentType]
@@ -691,11 +663,9 @@ final class HTTPTransportIntegrationTests: XCTestCase {
             port: 0,
             catalog: makeTestCatalog(),
             setupPermissions: makeTestSetupPermissions(),
-            requestTimeout: .seconds(5),
-            maxSessions: 1,
-            cleanupInterval: .milliseconds(20)
+            configuration: .init(requestTimeout: .seconds(5), maxSessions: 1, cleanupInterval: .milliseconds(20))
         )
-        let app = await transport.makeApplicationForTesting()
+        let app = await transport.application()
 
         try await app.test(TestingSetup.router) { client in
             let firstResponse = try await client.executeRequest(
@@ -752,6 +722,27 @@ private struct TestSlowMethod: MCP.Method {
 
     struct Result: Codable, Hashable, Sendable {
         let source: String
+    }
+}
+
+/// A Server factory whose nth Server also answers `TestSlowMethod` with the
+/// nth (source, delay).
+private func serversWithSlowMethod(
+    _ answers: [(source: String, delay: Duration)]
+) -> @Sendable (ToolCatalog) async -> Server {
+    let created = Mutex(0)
+    return { catalog in
+        let server = await Version.makeServer(catalog: catalog)
+        let index = created.withLock { count in
+            defer { count += 1 }
+            return min(count, answers.count - 1)
+        }
+        let (source, delay) = answers[index]
+        await server.withMethodHandler(TestSlowMethod.self) { _ in
+            try await Task.sleep(for: delay)
+            return .init(source: source)
+        }
+        return server
     }
 }
 

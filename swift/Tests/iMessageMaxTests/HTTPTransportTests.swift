@@ -319,20 +319,20 @@ final class JsonRpcIdCanonicalizationTests: XCTestCase {
         // `1` and `"1"` are distinct legal JSON-RPC ids. Collapsing both to
         // "1" made the second concurrent request look like a duplicate.
         XCTAssertNotEqual(
-            HTTPTransport.parseJsonRpcId(from: ["id": 1]),
-            HTTPTransport.parseJsonRpcId(from: ["id": "1"])
+            requestKey(["id": 1]),
+            requestKey(["id": "1"])
         )
     }
 
     func testHugeDoubleIdDoesNotTrap() {
         // Reaching this assertion at all is the regression test: the old
         // implementation trapped and aborted the process on this input.
-        let key = HTTPTransport.parseJsonRpcId(from: ["id": 1e300])
-        XCTAssertTrue(key.hasPrefix("d:"), "Expected d: namespace, got \(key)")
+        let key = requestKey(["id": 1e300])
+        XCTAssertTrue(key?.hasPrefix("d:") == true, "Expected d: namespace, got \(key ?? "nil")")
     }
 
     func testFractionalDoubleIdDoesNotTrap() {
-        let key = HTTPTransport.parseJsonRpcId(from: ["id": 1.5])
+        let key = requestKey(["id": 1.5])
         XCTAssertEqual(key, "d:1.5")
     }
 
@@ -340,19 +340,23 @@ final class JsonRpcIdCanonicalizationTests: XCTestCase {
         // JSON does not distinguish 2 from 2.0, so a client sending one and
         // receiving the other back must still correlate.
         XCTAssertEqual(
-            HTTPTransport.parseJsonRpcId(from: ["id": 2.0]),
-            HTTPTransport.parseJsonRpcId(from: ["id": 2])
+            requestKey(["id": 2.0]),
+            requestKey(["id": 2])
         )
     }
 
     func testNullIdIsStable() {
-        XCTAssertEqual(HTTPTransport.parseJsonRpcId(from: ["id": NSNull()]), "n:null")
+        XCTAssertEqual(requestKey(["id": NSNull()]), "n:null")
     }
 
-    func testMissingIdGeneratesUniqueKeys() {
-        XCTAssertNotEqual(
-            HTTPTransport.parseJsonRpcId(from: [:]),
-            HTTPTransport.parseJsonRpcId(from: [:])
-        )
+    /// No id, or one that is not a JSON scalar, can never match a response.
+    func testMissingOrNonScalarIdHasNoKey() {
+        XCTAssertNil(requestKey([:]))
+        XCTAssertNil(requestKey(["id": ["a": 1]]))
+        XCTAssertNil(requestKey(["id": [1]]))
+    }
+
+    private func requestKey(_ object: [String: Any]) -> String? {
+        JSONRPCMessage(object).requestKey
     }
 }

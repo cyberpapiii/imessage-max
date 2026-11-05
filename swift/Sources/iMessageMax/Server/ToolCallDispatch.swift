@@ -45,9 +45,6 @@ enum ToolCallDispatch {
         }
     }
 
-    /// Test seam: the most recent call log line.
-    nonisolated(unsafe) static var lastCallLogForTesting: String?
-
     /// Runs the handler. Cancelling the calling task interrupts the SQLite
     /// queries this call opened, and only those.
     ///
@@ -59,8 +56,7 @@ enum ToolCallDispatch {
         let elapsed = ContinuousClock.now - start
         let ms = Double(elapsed.components.seconds) * 1000
             + Double(elapsed.components.attoseconds) / 1e15
-        let line = "call tool=\(ModernDispatcher.sanitizedLogField(name)) \(lane.logFields) outcome=\(outcome) ms=\(String(format: "%.1f", ms))"
-        lastCallLogForTesting = line
+        let line = "call tool=\(Log.sanitizedField(name)) \(lane.logFields) outcome=\(outcome) ms=\(String(format: "%.1f", ms))"
         Log.info(line)
         return execution
     }
@@ -114,9 +110,7 @@ enum ToolCallDispatch {
     // MARK: - Serialization helpers
 
     static func contentJSON(_ content: [Tool.Content]) -> [[String: Any]] {
-        guard let data = try? JSONEncoder().encode(content),
-            let json = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
-        else {
+        guard let json = JSONRPC.jsonValue(encoding: content) as? [[String: Any]] else {
             // Shape safety still demands an array, but never silently: an
             // empty content array turns a successful tool call into an
             // empty-content success.

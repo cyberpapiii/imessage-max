@@ -71,55 +71,36 @@ struct iMessageMax: AsyncParsableCommand {
             return
         }
 
-        if http {
-            // Per-session Server instances: clean reconnection without "already initialized"
-            let database = Database()
-            let resolver = ContactResolver()
-
-            let (dbOk, dbStatus) = Database.checkAccess()
-            if !dbOk {
-                Log.info("Database: \(dbStatus)")
-                if dbStatus == "permission_denied" {
-                    Log.info(DiagnoseTool.fullDiskAccessFix())
-                }
-            }
-
-            // Warn if binding to a non-loopback address (only reachable when --allow-external-bind is set)
-            if !HostBindingPolicy.isLoopback(host) {
-                Log.warning("Binding to '\(host)' exposes iMessage data to the network. Use 127.0.0.1 for local-only access.")
-            }
-
-            let transport = HTTPTransport(
-                host: host,
-                port: port,
-                catalog: ToolCatalog(database: database, resolver: resolver),
-                setupPermissions: SetupPermissionService(resolver: resolver)
-            )
-
-            try await transport.connect()
-            Log.info("Started version=\(Version.current) pid=\(getpid()) transport=http addr=\(host):\(port)")
-            let resolvedPolicy = ContactsAccessPolicy.resolve(
-                flag: contactsPolicy,
-                environment: ProcessInfo.processInfo.environment,
-                isTTY: ContactsAccessPolicy.stdinIsTTY
-            )
-            Task {
-                let policy = resolvedPolicy
-                await resolver.requestAccessIfAllowed(policy: policy)
-                let contacts = await resolver.status()
-                Log.info("Contacts: authorization=\(contacts.authorization) handles=\(contacts.handleCount)")
-            }
-            let watcher = MessageWatcher(databasePath: Database.defaultPath) { rowid in
-                Task { await transport.notifyNewMessages(maxRowid: rowid) }
-            }
-            watcher.start()
-            defer { watcher.stop() }
-            try await transport.waitForTermination()
-        } else {
-            let server = MCPServerWrapper(contactsPolicy: contactsPolicy)
-            let transport = StdioTransport()
-            try await server.start(transport: transport)
+        guard http else {
+            try await ServerStartup.runStdio(contactsPolicy: contactsPolicy)
+            return
         }
+
+        if !HostBindingPolicy.isLoopback(host) {
+            Log.warning("Binding to '\(host)' exposes iMessage data to the network. Use 127.0.0.1 for local-only access.")
+        }
+
+        let resolver = ContactResolver()
+        let (newRows, newRowsSink) = AsyncStream<Int64>.makeStream()
+        let watcher = MessageWatcher(databasePath: Database.defaultPath) { newRowsSink.yield($0) }
+        let transport = HTTPTransport(
+            host: host,
+            port: port,
+            catalog: ToolCatalog(database: Database(), resolver: resolver, liveInbox: { watcher.isLive }),
+            setupPermissions: SetupPermissionService(resolver: resolver)
+        )
+
+        try await transport.connect()
+        ServerStartup.announce(transport: "http addr=\(host):\(port)", resolver: resolver, contactsPolicy: contactsPolicy)
+
+        Task {
+            for await rowid in newRows {
+                await transport.notifyNewMessages(maxRowid: rowid)
+            }
+        }
+        watcher.start()
+        defer { watcher.stop() }
+        try await transport.waitForTermination()
     }
 }
 

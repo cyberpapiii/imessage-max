@@ -8,20 +8,13 @@ import MCP
 final class CallLogTests: XCTestCase {
     private var definitions: [ToolDefinition] = []
 
-    override func setUp() {
-        super.setUp()
-        ToolCallDispatch.lastCallLogForTesting = nil
-    }
-
     func testSuccessfulCallLogsToolLaneOutcomeAndDuration() async throws {
         register("ok_tool") { _ in [.plainText("{}")] }
-        _ = await ToolCallDispatch.execute(
+        let line = try await callLine(
             name: "ok_tool",
             arguments: ["query": .string("hunter2")],
-            lane: .legacyHTTP(session: "abcdef1234567890"),
-            catalog: ToolCatalog(definitions)
+            lane: .legacyHTTP(session: "abcdef1234567890")
         )
-        let line = try XCTUnwrap(ToolCallDispatch.lastCallLogForTesting)
         XCTAssertTrue(
             line.hasPrefix("call tool=ok_tool lane=legacy-http session=abcdef12 outcome=ok ms="),
             line
@@ -41,20 +34,13 @@ final class CallLogTests: XCTestCase {
             "missing_tool": "unknown_tool",
         ]
         for (name, outcome) in expected {
-            _ = await ToolCallDispatch.execute(name: name, arguments: nil, lane: .modern(transport: "http"), catalog: ToolCatalog(definitions))
-            let line = try XCTUnwrap(ToolCallDispatch.lastCallLogForTesting)
+            let line = try await callLine(name: name, lane: .modern(transport: "http"))
             XCTAssertTrue(line.contains(" lane=modern-http outcome=\(outcome) "), line)
         }
     }
 
     func testToolNameIsSanitized() async throws {
-        _ = await ToolCallDispatch.execute(
-            name: "evil\nINFO forged",
-            arguments: nil,
-            lane: .legacyStdio,
-            catalog: ToolCatalog(definitions)
-        )
-        let line = try XCTUnwrap(ToolCallDispatch.lastCallLogForTesting)
+        let line = try await callLine(name: "evil\nINFO forged", lane: .legacyStdio)
         XCTAssertFalse(line.contains("\n"), line)
         XCTAssertTrue(line.contains(" lane=legacy-stdio outcome=unknown_tool "), line)
     }
@@ -64,6 +50,22 @@ final class CallLogTests: XCTestCase {
             Log.format(.info, "Database: ok", at: Date(timeIntervalSince1970: 1_790_000_000.25)),
             "2026-09-21T14:13:20.250Z [imessage-max] INFO Database: ok\n"
         )
+    }
+
+    /// Runs one call and returns the single line it logged.
+    private func callLine(
+        name: String,
+        arguments: [String: Value]? = nil,
+        lane: ToolCallDispatch.Lane
+    ) async throws -> String {
+        let capture = Log.Capture()
+        let catalog = ToolCatalog(definitions)
+        await Log.$capture.withValue(capture) {
+            _ = await ToolCallDispatch.execute(name: name, arguments: arguments, lane: lane, catalog: catalog)
+        }
+        let calls = capture.lines.filter { $0.hasPrefix("call ") }
+        XCTAssertEqual(calls.count, 1, "\(capture.lines)")
+        return try XCTUnwrap(calls.first)
     }
 
     private func register(

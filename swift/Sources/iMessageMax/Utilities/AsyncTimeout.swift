@@ -2,13 +2,9 @@ import Foundation
 import Synchronization
 
 enum AsyncTimeout {
-    /// Test seam: number of Dispatch timers started by `sleep`. Only
-    /// incremented on the path that actually resumes a timer source.
-    nonisolated(unsafe) static var enqueuedTimersForTesting = 0
-
     /// Dispatch-backed sleep. NEVER sleep Swift tasks inside the launchd service
-    /// (sleeping unstructured tasks abort in swift_task_dealloc at wakeup.
-    /// See HTTPTransport.swift storePendingRequest for the known-good pattern).
+    /// (sleeping unstructured tasks abort in swift_task_dealloc at wakeup;
+    /// PendingRequestRegistry.store has the other known-good timer pattern).
     ///
     /// Honors task cancellation: cancels the Dispatch timer and resumes so the
     /// awaiting task can observe `Task.isCancelled` without leaking a continuation.
@@ -16,7 +12,8 @@ enum AsyncTimeout {
         await sleep(duration, gate: ResumeGate())
     }
 
-    /// Test seam: lets a test hold a weak reference to the gate.
+    /// Takes the gate so a test can watch it: whether it started a timer,
+    /// and when it is released.
     static func sleep(_ duration: Duration, gate: ResumeGate) async {
         await withTaskCancellationHandler {
             await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
@@ -35,7 +32,6 @@ enum AsyncTimeout {
                     timer.activate()
                     return
                 }
-                enqueuedTimersForTesting += 1
                 timer.resume()
             }
         } onCancel: {
@@ -47,23 +43,28 @@ enum AsyncTimeout {
 
     /// Overflow-clamped `Duration` → `DispatchTimeInterval` conversion, shared by
     /// every Dispatch-deadline site in the service (this file's `sleep` and
-    /// HTTPTransport's request-timeout timer).
+    /// PendingRequestRegistry's request-timeout timer).
+    static func dispatchInterval(for duration: Duration) -> DispatchTimeInterval {
+        .nanoseconds(nanoseconds(for: duration))
+    }
+
+    /// `duration` in whole nanoseconds, also behind the HTTP channel idle
+    /// timeout.
     ///
     /// It saturates at `Int.max` nanoseconds rather than trapping: `Duration`
     /// spans far more than the ~292 years `Int` nanoseconds can hold, so both the
     /// whole-seconds multiply and the fractional add would otherwise overflow on
     /// large or adversarial values. Keep the saturation if you change this.
     /// A trap here would take down the launchd service.
-    static func dispatchInterval(for duration: Duration) -> DispatchTimeInterval {
+    static func nanoseconds(for duration: Duration) -> Int {
         let components = duration.components
         let maxWholeSeconds = Int64(Int.max / 1_000_000_000)
         let clampedSeconds = max(0, min(components.seconds, maxWholeSeconds))
         let secondNanoseconds = Int(clampedSeconds) * 1_000_000_000
         let fractionalNanoseconds = max(0, Int(components.attoseconds / 1_000_000_000))
-        let nanoseconds = secondNanoseconds > Int.max - fractionalNanoseconds
+        return secondNanoseconds > Int.max - fractionalNanoseconds
             ? Int.max
             : secondNanoseconds + fractionalNanoseconds
-        return .nanoseconds(nanoseconds)
     }
 
     /// Single-resume gate for Dispatch sleep + cancellation.
@@ -86,6 +87,13 @@ enum AsyncTimeout {
         private var continuation: CheckedContinuation<Void, Never>?
         private var resumed = false
         private var cancelled = false
+        private var timerStarted = false
+
+        /// Whether `arm` handed back a timer to start. A sleep cancelled
+        /// before it began must not leave one on the global queue.
+        var startedTimer: Bool {
+            state.withLock { _ in timerStarted }
+        }
 
         /// Returns true when the gate now holds `timer` and `continuation`, i.e.
         /// the caller must start `timer`. Returns false when cancellation
@@ -101,6 +109,7 @@ enum AsyncTimeout {
                 }
                 self.timer = timer
                 self.continuation = continuation
+                timerStarted = true
                 return true
             }
         }

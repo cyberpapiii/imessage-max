@@ -74,11 +74,14 @@ final class MessageWatcher: @unchecked Sendable {
         queue.sync { running }
     }
 
-    func watchedIdentitiesForTesting() -> [String: FileIdentity?] {
-        queue.sync { identities }
+    /// Running and has read chat.db at least once, so growth will be reported.
+    /// What diagnose calls the live inbox.
+    var isLive: Bool {
+        queue.sync { running && lastMax != nil }
     }
 
-    func pollNowForTesting() {
+    /// Polls now instead of at the next file event or fallback tick.
+    func pollNow() {
         queue.sync { poll() }
     }
 
@@ -95,7 +98,6 @@ final class MessageWatcher: @unchecked Sendable {
         lastMax = nil
         pollFailing = false
         running = false
-        LiveInboxState.set(running: false)
     }
 
     private func refreshFileSources() {
@@ -166,7 +168,6 @@ final class MessageWatcher: @unchecked Sendable {
         }
         guard let previous = lastMax else {
             lastMax = maxRowid
-            LiveInboxState.set(running: true)
             return
         }
         guard maxRowid != previous else { return }

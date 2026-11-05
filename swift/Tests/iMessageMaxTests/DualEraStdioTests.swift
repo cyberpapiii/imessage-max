@@ -7,16 +7,16 @@ import MCP
 /// Verifies era routing in the stdio dual-era adapter: modern 2026-07-28
 /// messages are answered directly by ModernDispatcher, while legacy traffic
 /// passes through untouched to the SDK Server's receive stream.
-final class DualEraStdioTransportTests: XCTestCase {
+final class DualEraStdioTests: XCTestCase {
     private var definitions: [ToolDefinition] = []
     private var catalog: ToolCatalog { ToolCatalog(definitions) }
 
     func testModernDiscoverIsAnsweredDirectlyAndLegacyPassesThrough() async throws {
         let base = FakeBaseTransport()
-        let dual = DualEraStdioTransport(base: base, catalog: catalog)
-        try await dual.connect()
+        let dual = DualEraStdio(base: base, catalog: catalog)
+        try await dual.start()
 
-        let downstream = await dual.receive()
+        let downstream = await dual.legacy.receive()
         var iterator = downstream.makeAsyncIterator()
 
         let discover = Data(
@@ -45,31 +45,52 @@ final class DualEraStdioTransportTests: XCTestCase {
         let sentCount = await base.sentCount()
         XCTAssertEqual(sentCount, 1, "legacy message must not be answered by the dispatcher")
 
-        await dual.disconnect()
+        await dual.stop()
     }
 
     func testSendPassesThroughToBase() async throws {
         let base = FakeBaseTransport()
-        let dual = DualEraStdioTransport(base: base, catalog: catalog)
-        try await dual.connect()
+        let dual = DualEraStdio(base: base, catalog: catalog)
+        try await dual.start()
 
         let payload = Data(#"{"jsonrpc":"2.0","id":3,"result":{}}"#.utf8)
-        try await dual.send(payload)
+        try await dual.legacy.send(payload)
 
         let sent = try await base.waitForFirstSend()
         XCTAssertEqual(sent, payload)
 
-        await dual.disconnect()
+        await dual.stop()
+    }
+
+    /// The SDK's initialize result leaves through the legacy lane, which adds
+    /// the server icons the SDK cannot carry.
+    func testLegacyInitializeResultGainsServerIcons() async throws {
+        let base = FakeBaseTransport()
+        let dual = DualEraStdio(base: base, catalog: catalog)
+        try await dual.start()
+
+        let result = Data(
+            #"{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-11-25","serverInfo":{"name":"iMessage Max"},"capabilities":{}}}"#.utf8
+        )
+        try await dual.legacy.send(result)
+
+        let sent = try await base.waitForFirstSend()
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: sent) as? [String: Any])
+        let serverInfo = try XCTUnwrap((object["result"] as? [String: Any])?["serverInfo"] as? [String: Any])
+        let icons = try XCTUnwrap(serverInfo["icons"] as? [[String: Any]])
+        XCTAssertEqual(icons.compactMap { ($0["sizes"] as? [String])?.first }, ["64x64", "32x32", "16x16"])
+
+        await dual.stop()
     }
 
     // MARK: - Matrix row 1: modern tools/list
 
     func testModernToolsListIsAnsweredDirectly() async throws {
         let base = FakeBaseTransport()
-        let dual = DualEraStdioTransport(base: base, catalog: catalog)
-        try await dual.connect()
+        let dual = DualEraStdio(base: base, catalog: catalog)
+        try await dual.start()
 
-        let downstream = await dual.receive()
+        let downstream = await dual.legacy.receive()
         var iterator = downstream.makeAsyncIterator()
 
         let toolsList = Data(
@@ -98,7 +119,7 @@ final class DualEraStdioTransportTests: XCTestCase {
         let sentCount = await base.sentCount()
         XCTAssertEqual(sentCount, 1, "only the tools/list response should have been sent")
 
-        await dual.disconnect()
+        await dual.stop()
     }
 
     // MARK: - Matrix row 2: modern tools/call
@@ -107,10 +128,10 @@ final class DualEraStdioTransportTests: XCTestCase {
         registerFakeTool(named: "stdio_echo")
 
         let base = FakeBaseTransport()
-        let dual = DualEraStdioTransport(base: base, catalog: catalog)
-        try await dual.connect()
+        let dual = DualEraStdio(base: base, catalog: catalog)
+        try await dual.start()
 
-        let downstream = await dual.receive()
+        let downstream = await dual.legacy.receive()
         var iterator = downstream.makeAsyncIterator()
 
         let toolCall = Data(
@@ -137,17 +158,17 @@ final class DualEraStdioTransportTests: XCTestCase {
         let sentCount = await base.sentCount()
         XCTAssertEqual(sentCount, 1, "only the tools/call response should have been sent")
 
-        await dual.disconnect()
+        await dual.stop()
     }
 
     // MARK: - Matrix row 3: modern notification
 
     func testModernNotificationIsConsumedSilently() async throws {
         let base = FakeBaseTransport()
-        let dual = DualEraStdioTransport(base: base, catalog: catalog)
-        try await dual.connect()
+        let dual = DualEraStdio(base: base, catalog: catalog)
+        try await dual.start()
 
-        let downstream = await dual.receive()
+        let downstream = await dual.legacy.receive()
         var iterator = downstream.makeAsyncIterator()
 
         // Modern-shaped message with no `id`: a notification. The dispatcher
@@ -174,17 +195,17 @@ final class DualEraStdioTransportTests: XCTestCase {
         let sentCount = await base.sentCount()
         XCTAssertEqual(sentCount, 0, "a notification must produce no response")
 
-        await dual.disconnect()
+        await dual.stop()
     }
 
     // MARK: - Matrix row 4: initialize carrying modern _meta
 
     func testInitializeWithModernMetaStaysLegacy() async throws {
         let base = FakeBaseTransport()
-        let dual = DualEraStdioTransport(base: base, catalog: catalog)
-        try await dual.connect()
+        let dual = DualEraStdio(base: base, catalog: catalog)
+        try await dual.start()
 
-        let downstream = await dual.receive()
+        let downstream = await dual.legacy.receive()
         var iterator = downstream.makeAsyncIterator()
 
         // An `initialize` request whose params carry the modern protocol
@@ -205,17 +226,17 @@ final class DualEraStdioTransportTests: XCTestCase {
         let sentCount = await base.sentCount()
         XCTAssertEqual(sentCount, 0, "the dispatcher must never answer initialize directly")
 
-        await dual.disconnect()
+        await dual.stop()
     }
 
     // MARK: - Matrix row 6: unparseable line
 
     func testUnparseableLinePassesThroughToLegacyLane() async throws {
         let base = FakeBaseTransport()
-        let dual = DualEraStdioTransport(base: base, catalog: catalog)
-        try await dual.connect()
+        let dual = DualEraStdio(base: base, catalog: catalog)
+        try await dual.start()
 
-        let downstream = await dual.receive()
+        let downstream = await dual.legacy.receive()
         var iterator = downstream.makeAsyncIterator()
 
         let notJSON = Data("not json".utf8)
@@ -230,7 +251,7 @@ final class DualEraStdioTransportTests: XCTestCase {
         let sentCount = await base.sentCount()
         XCTAssertEqual(sentCount, 0, "the dispatcher must never see unparseable input")
 
-        await dual.disconnect()
+        await dual.stop()
     }
 
     // MARK: - Concurrency: slow modern calls don't block the pump
@@ -244,10 +265,10 @@ final class DualEraStdioTransportTests: XCTestCase {
         }
 
         let base = FakeBaseTransport()
-        let dual = DualEraStdioTransport(base: base, catalog: catalog)
-        try await dual.connect()
+        let dual = DualEraStdio(base: base, catalog: catalog)
+        try await dual.start()
 
-        let downstream = await dual.receive()
+        let downstream = await dual.legacy.receive()
         var iterator = downstream.makeAsyncIterator()
 
         let slowCall = Data(
@@ -283,15 +304,15 @@ final class DualEraStdioTransportTests: XCTestCase {
         let result = try XCTUnwrap(response["result"] as? [String: Any])
         XCTAssertEqual(result["resultType"] as? String, "complete")
 
-        await dual.disconnect()
+        await dual.stop()
     }
 
     // MARK: - Write-failure resilience
 
     func testWriteFailureIsSwallowedButLogged() async throws {
         let base = FakeBaseTransport()
-        let dual = DualEraStdioTransport(base: base, catalog: catalog)
-        try await dual.connect()
+        let dual = DualEraStdio(base: base, catalog: catalog)
+        try await dual.start()
 
         await base.failNextSend()
 
@@ -328,7 +349,7 @@ final class DualEraStdioTransportTests: XCTestCase {
         )
         XCTAssertEqual(response["id"] as? Int, 2)
 
-        await dual.disconnect()
+        await dual.stop()
     }
 
     // MARK: - Helpers
@@ -417,7 +438,7 @@ private actor FakeBaseTransport: Transport {
             try await Task.sleep(for: .milliseconds(10))
         }
         throw NSError(
-            domain: "DualEraStdioTransportTests",
+            domain: "DualEraStdioTests",
             code: 1,
             userInfo: [NSLocalizedDescriptionKey: "Timed out waiting for transport send"]
         )

@@ -11,7 +11,7 @@ import NIOCore
 /// the wire, and coexistence with the legacy session lane on one endpoint.
 final class ModernHTTPIntegrationTests: XCTestCase {
     func testDiscoverOverHTTPReturnsSupportedVersions() async throws {
-        let app = await makeModernTestTransport().makeApplicationForTesting()
+        let app = await makeModernTestTransport().application()
         try await app.test(TestingSetup.router) { client in
             let response = try await client.executeRequest(
                 uri: "/",
@@ -32,7 +32,7 @@ final class ModernHTTPIntegrationTests: XCTestCase {
     }
 
     func testModernToolsListReturnsFullCatalogWithCacheHints() async throws {
-        let app = await makeModernTestTransport().makeApplicationForTesting()
+        let app = await makeModernTestTransport().application()
         try await app.test(TestingSetup.router) { client in
             let response = try await client.executeRequest(
                 uri: "/",
@@ -56,7 +56,7 @@ final class ModernHTTPIntegrationTests: XCTestCase {
     }
 
     func testModernToolCallWithMcpNameHeader() async throws {
-        let app = await makeModernTestTransport().makeApplicationForTesting()
+        let app = await makeModernTestTransport().application()
         try await app.test(TestingSetup.router) { client in
             let response = try await client.executeRequest(
                 uri: "/",
@@ -81,7 +81,7 @@ final class ModernHTTPIntegrationTests: XCTestCase {
     }
 
     func testModernToolCallAcceptsBase64SentinelName() async throws {
-        let app = await makeModernTestTransport().makeApplicationForTesting()
+        let app = await makeModernTestTransport().application()
         try await app.test(TestingSetup.router) { client in
             let sentinel = "=?base64?" + Data("diagnose".utf8).base64EncodedString() + "?="
             let response = try await client.executeRequest(
@@ -104,7 +104,7 @@ final class ModernHTTPIntegrationTests: XCTestCase {
     // MARK: - Header validation (-32020 HeaderMismatch)
 
     func testMissingMcpMethodHeaderIsHeaderMismatch() async throws {
-        let app = await makeModernTestTransport().makeApplicationForTesting()
+        let app = await makeModernTestTransport().application()
         try await app.test(TestingSetup.router) { client in
             var headers = modernHeaders(method: "tools/list")
             headers[.mcpMethod] = nil
@@ -120,7 +120,7 @@ final class ModernHTTPIntegrationTests: XCTestCase {
     }
 
     func testMcpMethodHeaderBodyMismatchIsHeaderMismatch() async throws {
-        let app = await makeModernTestTransport().makeApplicationForTesting()
+        let app = await makeModernTestTransport().application()
         try await app.test(TestingSetup.router) { client in
             let response = try await client.executeRequest(
                 uri: "/",
@@ -134,7 +134,7 @@ final class ModernHTTPIntegrationTests: XCTestCase {
     }
 
     func testMissingProtocolVersionHeaderIsHeaderMismatch() async throws {
-        let app = await makeModernTestTransport().makeApplicationForTesting()
+        let app = await makeModernTestTransport().application()
         try await app.test(TestingSetup.router) { client in
             var headers = modernHeaders(method: "tools/list")
             headers[.mcpProtocolVersion] = nil
@@ -150,7 +150,7 @@ final class ModernHTTPIntegrationTests: XCTestCase {
     }
 
     func testProtocolVersionHeaderBodyMismatchIsHeaderMismatch() async throws {
-        let app = await makeModernTestTransport().makeApplicationForTesting()
+        let app = await makeModernTestTransport().application()
         try await app.test(TestingSetup.router) { client in
             var headers = modernHeaders(method: "tools/list")
             headers[.mcpProtocolVersion] = "2026-07-28"
@@ -166,7 +166,7 @@ final class ModernHTTPIntegrationTests: XCTestCase {
     }
 
     func testMcpNameHeaderBodyMismatchIsHeaderMismatch() async throws {
-        let app = await makeModernTestTransport().makeApplicationForTesting()
+        let app = await makeModernTestTransport().application()
         try await app.test(TestingSetup.router) { client in
             let response = try await client.executeRequest(
                 uri: "/",
@@ -187,7 +187,7 @@ final class ModernHTTPIntegrationTests: XCTestCase {
     // MARK: - Version negotiation and routing over the wire
 
     func testUnsupportedVersionReturns32022WithSupportedList() async throws {
-        let app = await makeModernTestTransport().makeApplicationForTesting()
+        let app = await makeModernTestTransport().application()
         try await app.test(TestingSetup.router) { client in
             var headers = modernHeaders(method: "tools/list")
             headers[.mcpProtocolVersion] = "2027-01-01"
@@ -208,7 +208,7 @@ final class ModernHTTPIntegrationTests: XCTestCase {
     }
 
     func testUnknownModernMethodReturns404MethodNotFound() async throws {
-        let app = await makeModernTestTransport().makeApplicationForTesting()
+        let app = await makeModernTestTransport().application()
         try await app.test(TestingSetup.router) { client in
             let response = try await client.executeRequest(
                 uri: "/",
@@ -225,7 +225,7 @@ final class ModernHTTPIntegrationTests: XCTestCase {
     }
 
     func testModernNotificationReturns202NoBody() async throws {
-        let app = await makeModernTestTransport().makeApplicationForTesting()
+        let app = await makeModernTestTransport().application()
         try await app.test(TestingSetup.router) { client in
             let payload = #"{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":9,"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}"#
             let response = try await client.executeRequest(
@@ -247,7 +247,7 @@ final class ModernHTTPIntegrationTests: XCTestCase {
     /// presence must NOT reroute a legacy-body request to the modern lane;
     /// only modern `_meta` in the body (or server/discover) selects the era.
     func testLegacyRequestWithModernHeadersStaysOnLegacyLane() async throws {
-        let app = await makeModernTestTransport().makeApplicationForTesting()
+        let app = await makeModernTestTransport().application()
         try await app.test(TestingSetup.router) { client in
             let initialize = try await client.executeRequest(
                 uri: "/",
@@ -284,7 +284,7 @@ final class ModernHTTPIntegrationTests: XCTestCase {
     /// legacy SDK handshake, not the modern dispatcher. `initialize` always
     /// selects the legacy lane regardless of what `_meta` it carries.
     func testInitializeWithModernMetaInBodyStaysLegacy() async throws {
-        let app = await makeModernTestTransport().makeApplicationForTesting()
+        let app = await makeModernTestTransport().application()
         try await app.test(TestingSetup.router) { client in
             let initialize = try await client.executeRequest(
                 uri: "/",
@@ -312,7 +312,7 @@ final class ModernHTTPIntegrationTests: XCTestCase {
     }
 
     func testLegacySessionFlowStillWorksAlongsideModernRequests() async throws {
-        let app = await makeModernTestTransport().makeApplicationForTesting()
+        let app = await makeModernTestTransport().application()
         try await app.test(TestingSetup.router) { client in
             // Modern request first (would previously have hit an empty catalog).
             let discover = try await client.executeRequest(
@@ -363,8 +363,7 @@ private func makeModernTestTransport() -> HTTPTransport {
         port: 0,
         catalog: makeTestCatalog(),
         setupPermissions: makeTestSetupPermissions(),
-        requestTimeout: .seconds(5),
-        cleanupInterval: .milliseconds(20)
+        configuration: .init(requestTimeout: .seconds(5), cleanupInterval: .milliseconds(20))
     )
 }
 

@@ -32,16 +32,16 @@ final class AsyncTimeoutTests: XCTestCase {
     /// global queue: at 639529e arm() resumes but sleep() still calls
     /// asyncAfter, and the item is retained until its deadline.
     func testPreCancelledSleepDoesNotEnqueueTimer() {
-        AsyncTimeout.enqueuedTimersForTesting = 0
+        let gate = AsyncTimeout.ResumeGate()
         let finished = expectation(description: "sleep returns")
         let task = Task.detached {
             while !Task.isCancelled { await Task.yield() }
-            await AsyncTimeout.sleep(.seconds(300))
+            await AsyncTimeout.sleep(.seconds(300), gate: gate)
             finished.fulfill()
         }
         task.cancel()
         wait(for: [finished], timeout: 2)
-        XCTAssertEqual(AsyncTimeout.enqueuedTimersForTesting, 0)
+        XCTAssertFalse(gate.startedTimer)
     }
 
     /// The normal path: an uncancelled sleep returns after its duration.

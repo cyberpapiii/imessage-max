@@ -14,8 +14,8 @@ final class BodyReadDeadlineTests: XCTestCase {
         let result = try await HTTPRequestParsing.collectBodyDrainingOverflow(
             body,
             declaredLength: 64,
-            maxBytes: HTTPTransport.maxRequestBodyBytes,
-            drainLimit: HTTPTransport.overLimitDrainBytes,
+            maxBytes: HTTPRequestParsing.maxRequestBodyBytes,
+            drainLimit: HTTPRequestParsing.overLimitDrainBytes,
             deadline: .milliseconds(200)
         )
         let elapsed = ContinuousClock.now - start
@@ -33,8 +33,8 @@ final class BodyReadDeadlineTests: XCTestCase {
         }
         let result = try await HTTPRequestParsing.collectBodyDrainingOverflow(
             body, declaredLength: 2,
-            maxBytes: HTTPTransport.maxRequestBodyBytes,
-            drainLimit: HTTPTransport.overLimitDrainBytes,
+            maxBytes: HTTPRequestParsing.maxRequestBodyBytes,
+            drainLimit: HTTPRequestParsing.overLimitDrainBytes,
             deadline: .seconds(5)
         )
         guard case .complete(let data) = result else { return XCTFail("Expected .complete") }
