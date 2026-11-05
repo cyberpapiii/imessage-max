@@ -89,7 +89,8 @@ actor SendResolver {
     private func resolveRecipient(_ to: String) async -> SendResolution {
         // A leading "+" stays on the phone path even when isPhoneNumber says
         // no ("+55555"), so it fails as a number instead of a contact name.
-        if to.hasPrefix("+") || (PhoneUtils.isPhoneNumber(to) && PhoneUtils.normalizeToE164(to) != nil) {
+        // Short codes ("12345") are phone-shaped too; see resolvePhoneNumber.
+        if to.hasPrefix("+") || PhoneUtils.isPhoneNumber(to) {
             return await resolvePhoneNumber(to)
         }
 
@@ -101,28 +102,37 @@ actor SendResolver {
     }
 
     private func resolvePhoneNumber(_ phone: String) async -> SendResolution {
-        guard let normalized = PhoneUtils.normalizeToE164(phone) else {
+        let raw = phone.trimmingCharacters(in: .whitespaces)
+        // Short codes have no E.164 form and are stored as typed. A "+" that
+        // does not normalize is not a number at all.
+        let normalized = PhoneUtils.normalizeToE164(raw)
+        if normalized == nil && raw.hasPrefix("+") {
             return .failure("Invalid phone number format: \(phone)")
         }
 
         do {
             var handles: [String] = try db.query(
                 "SELECT id FROM handle WHERE id = ?",
-                params: [normalized]
+                params: [normalized ?? raw]
             ) { row in
                 row.string(0) ?? ""
             }
 
-            if handles.isEmpty {
+            if handles.isEmpty, normalized != nil {
                 handles = try db.query(
                     "SELECT id FROM handle WHERE id = ?",
-                    params: [phone]
+                    params: [raw]
                 ) { row in
                     row.string(0) ?? ""
                 }
             }
 
             guard let handle = handles.first else {
+                // A digit string with no conversation may still be a contact's
+                // name ("55555"); only a real number fails here.
+                if normalized == nil {
+                    return await resolveContactName(phone)
+                }
                 return .failure("No conversation found with \(phone)")
             }
             let name = await IdentityDisplayFormatter.displayName(handle: handle, resolver: resolver)

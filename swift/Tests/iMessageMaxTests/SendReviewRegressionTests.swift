@@ -110,4 +110,21 @@ final class SendReviewRegressionTests: XCTestCase {
         insertOutbound(fixture, rowId: 42, text: "x", date: Date())
         XCTAssertEqual(try verifier.baseline(), 42)
     }
+
+    // MARK: - 2. Short codes
+
+    /// A carrier short code with a conversation resolves to its handle. It
+    /// used to skip the phone path and fail as a contact name.
+    func testShortCodeResolvesToItsHandle() async throws {
+        let fixture = try makeFixture()
+        try fixture.insertHandle(rowId: 9, handle: "12345", service: "SMS")
+        try fixture.insertChat(rowId: 9, guid: "SMS;-;12345")
+        try fixture.joinChatHandle(chatId: 9, handleId: 9)
+
+        let resolver = SendResolver(db: fixture.database(), resolver: ContactResolver(seedCache: [:]))
+        guard case .success(let resolved) = await resolver.resolve(.recipient("12345")) else {
+            return XCTFail("a short code with a conversation should resolve")
+        }
+        XCTAssertEqual(resolved.target, .participant(handle: "12345", chatId: 9))
+    }
 }
