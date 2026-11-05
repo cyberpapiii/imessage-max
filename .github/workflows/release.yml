@@ -7,7 +7,12 @@ on:
   workflow_dispatch:
 
 jobs:
+  # The same build, test, and companion checks as a push to main.
+  checks:
+    uses: ./.github/workflows/build.yml
+
   build-and-release:
+    needs: checks
     runs-on: macos-26
     timeout-minutes: 30
     permissions:
@@ -36,19 +41,11 @@ jobs:
             scripts/check-version.sh
           fi
 
-      - name: Build and run tests
-        # Same command as build.yml on purpose; see its comment.
-        run: |
-          swift build --build-tests
-          swift test --skip-build
-
-      - name: Build release binary (arm64) with embedded Info.plist
-        run: |
-          swift build -c release --arch arm64 \
-            -Xlinker -sectcreate \
-            -Xlinker __TEXT \
-            -Xlinker __info_plist \
-            -Xlinker "$PWD/Sources/Resources/Info.plist"
+      # `make build` is the one release build: native build system (so the
+      # binary lands in .build/arm64-apple-macosx/release) with the embedded
+      # Info.plist. The runner is Apple silicon; the next steps assert arm64.
+      - name: Build release binary with embedded Info.plist
+        run: make build
 
       - name: Re-sign binary with bundle identifier
         run: |
@@ -63,7 +60,7 @@ jobs:
           BINARY=".build/arm64-apple-macosx/release/imessage-max"
           lipo -info "$BINARY" | grep -q "arm64" || { echo "not arm64"; exit 1; }
           codesign -dvv "$BINARY" 2>&1 | grep -q "Identifier=com.cyberpapiii.imessage-max" || { echo "wrong identifier"; exit 1; }
-          EXPECTED=$(sed -nE 's/^ *static let current = "([^"]+)"/\1/p' Sources/iMessageMax/Server/Version.swift)
+          EXPECTED=$(../scripts/check-version.sh --print)
           REPORTED=$("$BINARY" --version)
           echo "Binary reports version: $REPORTED"
           [[ "$REPORTED" == *"$EXPECTED"* ]] || { echo "version mismatch: binary '$REPORTED' vs Version.swift '$EXPECTED'"; exit 1; }
@@ -76,7 +73,7 @@ jobs:
           DIGEST=$(shasum -a 256 imessage-max-macos.tar.gz | cut -d' ' -f1)
           echo "sha256=$DIGEST" >> "$GITHUB_OUTPUT"
           echo "imessage-max-macos.tar.gz sha256 $DIGEST"
-          mv imessage-max-macos.tar.gz $GITHUB_WORKSPACE/
+          mv imessage-max-macos.tar.gz "$GITHUB_WORKSPACE/"
 
       - name: Upload tarball as workflow artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
