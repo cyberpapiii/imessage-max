@@ -120,7 +120,7 @@ enum GetActiveConversations {
         let clampedLimit = max(1, min(limit, 50))
 
         let now = Date()
-        let windowStart = now.addingTimeInterval(-Double(clampedHours) * 3600)
+        let windowStart = now.addingTimeInterval(-Double(clampedHours) * Seconds.hour)
         let windowStartApple = AppleTime.fromDate(windowStart)
 
         let query = QueryBuilder()

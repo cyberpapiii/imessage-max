@@ -17,30 +17,29 @@ enum TimeUtils {
         return f
     }()
 
-    /// Format date as compact relative string for AI consumption
+    /// "just now", "5m ago", "3h ago", "2d ago", then "Mar 4".
     static func formatCompactRelative(_ date: Date?) -> String? {
         guard let date = date else { return nil }
 
         let now = Date()
         let interval = now.timeIntervalSince(date)
 
-        if interval < 60 {
+        if interval < Seconds.minute {
             return "just now"
-        } else if interval < 3600 {
-            let mins = Int(interval / 60)
+        } else if interval < Seconds.hour {
+            let mins = Int(interval / Seconds.minute)
             return "\(mins)m ago"
-        } else if interval < 86400 {
-            let hours = Int(interval / 3600)
+        } else if interval < Seconds.day {
+            let hours = Int(interval / Seconds.hour)
             return "\(hours)h ago"
-        } else if interval < 604800 {
-            let days = Int(interval / 86400)
+        } else if interval < Seconds.week {
+            let days = Int(interval / Seconds.day)
             return "\(days)d ago"
         } else {
             return monthDayFormatter.string(from: date)
         }
     }
 
-    /// Format date as ISO 8601 for precise timestamps
     static func formatISO(_ date: Date?) -> String? {
         guard let date = date else { return nil }
         return isoFormatter.string(from: date)
