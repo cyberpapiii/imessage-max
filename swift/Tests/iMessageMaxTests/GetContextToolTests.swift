@@ -39,6 +39,30 @@ final class GetContextToolTests: XCTestCase {
         XCTAssertEqual(response.after.map(\.id), ["msg_4", "msg_5"])
     }
 
+    func testPeopleLeaveOutSendersOfUnmappedAssociatedTypes() async throws {
+        let fixture = try ToolTestDatabase(name: "context-type-4000")
+        try fixture.insertHandle(rowId: 1, handle: "+15550000001")
+        try fixture.insertHandle(rowId: 2, handle: "+15550000002")
+        try fixture.insertChat(rowId: 1, guid: "type-4000-chat", displayName: "Polls")
+        try fixture.joinChatHandle(chatId: 1, handleId: 1)
+        try fixture.joinChatHandle(chatId: 1, handleId: 2)
+        try fixture.insertMessage(rowId: 1, guid: "g1", text: "anchor", date: 100, isFromMe: false, handleId: 1)
+        try fixture.joinChatMessage(chatId: 1, messageId: 1)
+        try fixture.insertMessage(
+            rowId: 2, guid: "g2", text: nil, date: 200, isFromMe: false, handleId: 2,
+            associatedMessageType: 4000, associatedMessageGuid: "p:0/g1"
+        )
+        try fixture.joinChatMessage(chatId: 1, messageId: 2)
+
+        let response = try unwrapSuccess(await capture { try await GetContext.execute(
+            messageId: "msg_1",
+            database: fixture.database(),
+            resolver: makeSeededResolver()
+        ) })
+        XCTAssertEqual(Set(response.people.keys), ["alice"])
+        XCTAssertNil(response.message.reactions)
+    }
+
     func testBeforeAndAfterDefaultsAreFiveAndTen() async throws {
         let fixture = try makeLongChatFixture(messageCount: 40)
         let result = await capture { try await GetContext.execute(

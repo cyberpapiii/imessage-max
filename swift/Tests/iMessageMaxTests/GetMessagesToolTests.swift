@@ -185,6 +185,32 @@ final class GetMessagesToolTests: XCTestCase {
         XCTAssertEqual(reactions, ["🥕 bob", "🩵 sticker me"])
     }
 
+    func testTapbackOnALinkPreviewBalloonIsShown() async throws {
+        let fixture = try makeGetMessagesFixture()
+        let base: Int64 = 1_000_000_000_000
+        let minute: Int64 = 60 * 1_000_000_000
+        try fixture.insertMessage(
+            rowId: 405,
+            guid: "reaction-on-balloon",
+            text: nil,
+            date: base + (6 * minute),
+            isFromMe: false,
+            handleId: 1,
+            associatedMessageType: 2003,
+            associatedMessageGuid: "bp:gm202"
+        )
+        try fixture.joinChatMessage(chatId: 20, messageId: 405)
+
+        let tool = GetMessagesTool(db: fixture.database(), resolver: makeSeededResolver())
+        let response = try await decodeGetMessagesResponse(
+            await tool.execute(args: ["chat_id": .string("chat20"), "limit": .int(10)])
+        )
+
+        let messages = try decodeJSONArray(try XCTUnwrap(response["messages"]))
+        let target = try XCTUnwrap(messages.first(where: { $0["id"] as? String == "msg_202" }))
+        XCTAssertEqual(target["reactions"] as? [String], ["😂 alice"])
+    }
+
     func testRemovalBeforeAddKeepsReaction() async throws {
         let fixture = try makeGetMessagesFixture()
         let base: Int64 = 1_000_000_000_000

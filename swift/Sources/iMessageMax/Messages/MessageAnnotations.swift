@@ -69,23 +69,19 @@ struct MessageAnnotations {
     static func reactionsByGuid(db: Database, messageGuids: [String]) throws -> [String: [Reaction]] {
         guard !messageGuids.isEmpty else { return [:] }
 
-        let placeholders = SQLFragments.placeholders(messageGuids.count)
         let schema = try db.schema()
+        let target = SQLFragments.associatedTargetGuid()
         let sql = """
-            SELECT m.associated_message_guid, m.associated_message_type, h.id,
+            SELECT \(target), m.associated_message_type, h.id,
                    \(schema.associatedMessageEmojiSQL), m.date
             FROM message m
             LEFT JOIN handle h ON m.handle_id = h.ROWID
-            WHERE m.associated_message_type >= 2000
-            AND (
-                m.associated_message_guid IN (\(placeholders))
-                OR substr(m.associated_message_guid, instr(m.associated_message_guid, '/') + 1)
-                   IN (\(placeholders))
-            )
+            WHERE \(SQLFragments.tapbackOrRemoval())
+              AND \(target) IN (\(SQLFragments.placeholders(messageGuids.count)))
             """
 
         var map: [String: [Reaction]] = [:]
-        let rows = try db.query(sql, params: messageGuids + messageGuids) { row in
+        let rows = try db.query(sql, params: messageGuids) { row in
             (
                 guid: row.string(0) ?? "",
                 reaction: Reaction(
@@ -97,10 +93,7 @@ struct MessageAnnotations {
             )
         }
         for row in rows {
-            let originalGuid = row.guid.hasPrefix("p:") || row.guid.hasPrefix("bp:")
-                ? String(row.guid.split(separator: "/").last ?? "")
-                : row.guid
-            map[originalGuid, default: []].append(row.reaction)
+            map[row.guid, default: []].append(row.reaction)
         }
         return map
     }
