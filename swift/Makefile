@@ -47,9 +47,9 @@ server_info = python3 -c "import sys,json; print(json.load(sys.stdin)['result'][
 
 # Resolve CERT_CN to a certificate SHA-1. `codesign --sign <name>` fails with
 # "ambiguous" when the login keychain holds more than one cert with that common
-# name, which is a state setup-signing itself used to create. A hash is unique
-# by construction, and find-identity lists only certs that have a usable
-# private key, so this both disambiguates and filters out orphaned certs.
+# name. A hash is unique by construction, and find-identity lists only certs
+# that have a usable private key, so this both disambiguates and filters out
+# orphaned certs.
 # Evaluated lazily (`=`, not `:=`) so that a target running later in the same
 # make invocation (e.g. `make setup-signing install`) sees an identity created
 # by an earlier target instead of the parse-time snapshot.
@@ -235,8 +235,8 @@ clean: ## Remove debug artifacts and old logs
 # setup-signing runs as a SINGLE shell program (one `\`-continued line) so that
 # the private key lives in a `mktemp -d` directory removed by an EXIT trap on
 # every path: success, failure, or interrupt. Splitting it back into separate
-# `@` lines would give each line its own shell, which is what previously let the
-# early "already works" exit fall through into regenerating the cert.
+# `@` lines would give each line its own shell, so the early "already works"
+# exit would fall through into regenerating the cert.
 #
 # Step notes, in recipe order:
 #   - openssl req: generate cert with the code signing EKU
@@ -247,13 +247,12 @@ clean: ## Remove debug artifacts and old logs
 #     removes the manual Keychain Access trust step. Pops a login-password
 #     dialog (expected). Signing already works without this; trust only affects
 #     how the cert is reported, not signability.
-#     This step is now load-bearing for idempotency: SIGN_HASH reads
+#     This step is load-bearing for idempotency: SIGN_HASH reads
 #     `find-identity -v`, and an untrusted self-signed cert is reported
 #     CSSMERR_TP_NOT_TRUSTED and excluded from `-v`. If the trust dialog is
 #     cancelled, SIGN_HASH stays empty, the guard above will not fire, and a
-#     re-run imports another cert, the original cumulative bug. If that shows
-#     up, prefer fixing trust over dropping `-v`: without `-v` the hash could
-#     point at a cert that has no usable private key.
+#     re-run imports another cert. Fix trust rather than dropping `-v`:
+#     without `-v` the hash could point at a cert that has no usable private key.
 setup-signing: ## Create persistent code signing identity (one-time)
 	@if [ -n "$(SIGN_HASH)" ]; then \
 		echo "✓ Signing identity '$(CERT_CN)' already exists ($(SIGN_HASH))"; \

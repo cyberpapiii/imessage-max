@@ -198,8 +198,7 @@ actor HTTPTransport {
         case .complete(let data):
             requestData = data
         case .tooLarge:
-            // Same observable shape as the old `collect(upTo:)` throw that
-            // Hummingbird converted to 413: empty body, Content-Length: 0.
+            // An empty 413, the shape Hummingbird gives an oversized body.
             return Response(status: .contentTooLarge)
         case .timedOut:
             return errorResponse(.requestTimeout, "Request body read timed out")

@@ -115,7 +115,8 @@ struct SendResponse: Encodable, Sendable {
         }
     }
 
-    // Returned only when verification cannot run (DB unreadable).
+    // Transport accepted, nothing verified: a file-only send, or a text send
+    // whose chat.db check could not run (DB unreadable, call cancelled).
     static func sent(deliveredTo: [String], chat: ChatReference?) -> SendResponse {
         SendResponse(.sent, disposition: .completed, chat: chat, deliveredTo: deliveredTo)
     }

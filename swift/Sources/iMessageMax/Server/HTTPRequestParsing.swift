@@ -15,8 +15,7 @@ extension HTTPField.Name {
 }
 
 enum HTTPRequestParsing {
-    /// Largest request body accepted on POST. Same 512 KB bound the old
-    /// `collect(upTo:)` call enforced.
+    /// Largest request body accepted on POST.
     static let maxRequestBodyBytes = 512 * 1024
 
     /// Upper bound on how many over-limit bytes get read and discarded before
@@ -49,8 +48,7 @@ enum HTTPRequestParsing {
     /// The body is a single-iteration sequence, so draining cannot happen
     /// after `collect` throws; this helper owns the one iteration and does
     /// both jobs. Bodies whose declared Content-Length exceeds `drainLimit`
-    /// are rejected without reading; that keeps the work bounded and matches
-    /// the old behavior for absurd sizes.
+    /// are rejected without reading, which keeps the work bounded.
     static func collectBodyDrainingOverflow(
         _ body: RequestBody,
         declaredLength: Int?,
