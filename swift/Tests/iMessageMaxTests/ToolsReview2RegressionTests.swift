@@ -79,6 +79,42 @@ final class ToolsReview2RegressionTests: XCTestCase {
         }
     }
 
+    // MARK: - search with only single-character words
+
+    func testSearchForOnlySingleCharactersMatchesThemAsASubstring() async throws {
+        let f = try ToolTestDatabase(name: "short-query")
+        try f.insertHandle(rowId: 1, handle: "+15550000001")
+        try f.insertChat(rowId: 1, guid: "iMessage;-;+15550000001")
+        let texts = ["我的猫很可爱", "a dog", "nothing here", "b c d"]
+        for (i, text) in texts.enumerated() {
+            try f.insertMessage(rowId: i + 1, guid: "g\(i)", text: text, date: base + Int64(i), isFromMe: false, handleId: 1)
+            try f.joinChatMessage(chatId: 1, messageId: i + 1)
+        }
+        let cat = try await callTool("search", ["query": "猫"], database: f.database())
+        XCTAssertEqual(try ids(cat, "results"), ["msg_1"])
+        let a = try await callTool("search", ["query": " A "], database: f.database())
+        XCTAssertEqual(try ids(a, "results"), ["msg_2"])
+        let phrase = try await callTool("search", ["query": "c d"], database: f.database())
+        XCTAssertEqual(try ids(phrase, "results"), ["msg_4"])
+    }
+
+    // MARK: - Excerpts index the text they were matched in
+
+    func testExcerptSurvivesTextWhoseLowercaseIsLonger() {
+        let text = String(repeating: "İ", count: 300) + " needle " + String(repeating: "x", count: 300)
+        let excerpt = SearchTool.makeExcerpt(text: text, query: "needle")
+        XCTAssertTrue(excerpt.contains("needle"), excerpt)
+    }
+
+    func testExcerptCentresOnTheMatchPastEmoji() {
+        let text = String(repeating: "👍", count: 200) + " needle " + String(repeating: "👍", count: 200)
+        let excerpt = SearchTool.makeExcerpt(text: text, query: "NEEDLE")
+        XCTAssertTrue(excerpt.contains("needle"), excerpt)
+        XCTAssertTrue(excerpt.hasPrefix("..."))
+        XCTAssertTrue(excerpt.hasSuffix("..."))
+        XCTAssertFalse(excerpt.contains("\u{FFFD}"), "an emoji was split")
+    }
+
     // MARK: - One chat-id resolver
 
     private func twoChatFixture() throws -> ToolTestDatabase {

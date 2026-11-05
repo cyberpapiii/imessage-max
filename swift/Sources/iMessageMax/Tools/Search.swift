@@ -326,12 +326,15 @@ enum SearchTool {
         let senderFilter = await SenderFilter.resolve(fromPerson, resolver: resolver)
         let chatFilter = try inChat.map { try ChatIdentifier.resolve($0, db: db) }
 
-        // Single characters match nearly everything, so they are dropped.
+        // Single characters match nearly everything, so they are dropped
+        // from a query with longer words; a query of only single characters
+        // (or one CJK character) is matched whole, as a substring.
         let searchWords: [String]
         if hasQuery, let searchQuery = query?.trimmingCharacters(in: .whitespaces).lowercased(), !searchQuery.isEmpty {
-            searchWords = searchQuery.split(separator: " ")
+            let words = searchQuery.split(separator: " ")
                 .map(String.init)
                 .filter { $0.count >= 2 }
+            searchWords = words.isEmpty ? [searchQuery] : words
         } else {
             searchWords = []
         }
