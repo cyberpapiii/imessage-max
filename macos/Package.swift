@@ -1,6 +1,8 @@
 // swift-tools-version: 6.3
 import PackageDescription
 
+let contract: Target.Dependency = .product(name: "IMessageMaxContract", package: "contract")
+
 let package = Package(
     name: "iMessageMaxMenu",
     platforms: [.macOS(.v15)],
@@ -8,12 +10,15 @@ let package = Package(
         .library(name: "MaxCore", targets: ["MaxCore"]),
         .executable(name: "iMessageMaxMenu", targets: ["iMessageMaxMenu"])
     ],
+    dependencies: [
+        .package(path: "../contract")
+    ],
     targets: [
-        .target(name: "MaxCore"),
+        .target(name: "MaxCore", dependencies: [contract]),
         .target(name: "MaxBrand"),
-        .executableTarget(name: "iMessageMaxMenu", dependencies: ["MaxCore", "MaxBrand"]),
-        .testTarget(name: "MaxCoreTests", dependencies: ["MaxCore"]),
-        .testTarget(name: "CompanionTests", dependencies: ["iMessageMaxMenu", "MaxCore", "MaxBrand"])
+        .executableTarget(name: "iMessageMaxMenu", dependencies: ["MaxCore", "MaxBrand", contract]),
+        .testTarget(name: "MaxCoreTests", dependencies: ["MaxCore", contract]),
+        .testTarget(name: "CompanionTests", dependencies: ["iMessageMaxMenu", "MaxCore", "MaxBrand", contract])
     ],
     swiftLanguageModes: [.v6]
 )

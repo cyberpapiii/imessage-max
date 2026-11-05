@@ -1,3 +1,4 @@
+import IMessageMaxContract
 import MaxCore
 import ServiceManagement
 import SwiftUI
@@ -12,7 +13,7 @@ struct SetupStep: View {
       if let diagnosis = model.diagnosis {
         switch diagnosis.readiness {
         case .messages:
-          if diagnosis.database.status == "permission_denied" {
+          if diagnosis.database.status == .permissionDenied {
             heading("Let Messages in")
             line(
               "In Full Disk Access, click + and add the iMessage Max helper shown in Finder. Then come back and restart it."
@@ -50,7 +51,7 @@ struct SetupStep: View {
               "Allow Contacts so your assistants can recognize people. This does not change your contacts."
             )
             buttons {
-              if ["denied", "restricted"].contains(diagnosis.contacts.status) {
+              if [.denied, .restricted].contains(diagnosis.contacts.status) {
                 Button("Open Contacts Settings") { model.openSettings("Privacy_Contacts") }
                   .buttonStyle(MaxButtonStyle(primary: true))
               } else {
@@ -68,7 +69,7 @@ struct SetupStep: View {
               : "Allow iMessage Max to work with Messages. Your assistant sends only when you ask. Setup sends no message."
           )
           buttons {
-            if diagnosis[.automation]?.isPermissionGated == true {
+            if diagnosis[.permAutomation]?.isPermissionGated == true {
               Button("Open Automation Settings") { model.openSettings("Privacy_Automation") }
                 .buttonStyle(MaxButtonStyle(primary: true))
             } else {

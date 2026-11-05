@@ -1,6 +1,7 @@
 import Foundation
 import Hummingbird
 import HTTPTypes
+import IMessageMaxContract
 
 /// Validates Origin and Host headers to prevent DNS rebinding attacks.
 ///
@@ -14,7 +15,7 @@ struct OriginValidationMiddleware<Context: RequestContext>: RouterMiddleware {
     /// Whether to require an Origin header (strict mode)
     let requireOrigin: Bool
 
-    init(boundHost: String = "127.0.0.1", requireOrigin: Bool = false) {
+    init(boundHost: String = ServiceDefaults.host, requireOrigin: Bool = false) {
         self.boundHost = boundHost
         self.requireOrigin = requireOrigin
     }

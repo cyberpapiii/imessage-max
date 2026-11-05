@@ -1,4 +1,5 @@
 import Foundation
+import IMessageMaxContract
 
 /// Whether this process may put up the macOS Contacts permission dialog.
 /// A process with no terminal (launchd, an MCP client's stdio pipe) cannot
@@ -9,9 +10,7 @@ enum ContactsAccessPolicy: Equatable, Sendable {
     case skipIfNotDetermined
 
     /// CLI / environment override. `auto` follows stdin.
-    enum Override: String, CaseIterable, Sendable {
-        case auto, request, skip
-    }
+    typealias Override = ContactsPolicyOption
 
     static let environmentKey = "IMESSAGE_MAX_CONTACTS_POLICY"
 

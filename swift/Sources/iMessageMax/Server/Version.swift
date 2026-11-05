@@ -1,4 +1,5 @@
 import Foundation
+import IMessageMaxContract
 import MCP
 
 /// Server identity. `current` is the version source of truth: keep the
@@ -63,6 +64,6 @@ enum LegacyProtocol {
 
 /// Modern-era (MCP 2026-07-28, stateless) revisions.
 enum ModernProtocol {
-    static let version = "2026-07-28"
+    static let version = ModernMCP.protocolVersion
     static let supported = [version]
 }

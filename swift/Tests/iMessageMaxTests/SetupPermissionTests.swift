@@ -3,6 +3,7 @@ import Hummingbird
 import HummingbirdTesting
 import HTTPTypes
 import NIOCore
+import IMessageMaxContract
 @testable import iMessageMax
 
 final class SetupPermissionTests: XCTestCase {
@@ -42,8 +43,8 @@ final class SetupPermissionTests: XCTestCase {
             let response = try await client.executeRequest(uri: "/setup/permissions", method: .post,
                 headers: setupHeaders(), body: ByteBuffer(string: "{\"permission\":\"automation\"}"))
             XCTAssertEqual(response.head.status, .ok)
-            let result = try JSONDecoder().decode(SetupPermissionResult.self, from: Data(response.body.readableBytesView))
-            XCTAssertEqual(result.processId, getpid())
+            let result = try JSONDecoder().decode(SetupPermissionReply.self, from: Data(response.body.readableBytesView))
+            XCTAssertEqual(result.processID, getpid())
             XCTAssertEqual(result.permission, .automation)
             XCTAssertTrue(result.authorized)
         }

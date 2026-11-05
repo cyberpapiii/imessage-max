@@ -1,6 +1,7 @@
 import Foundation
 import Hummingbird
 import HTTPTypes
+import IMessageMaxContract
 import Logging
 import MCP
 import NIOCore
@@ -48,8 +49,8 @@ actor HTTPTransport {
     static let maximumGracefulShutdownDuration: Duration = .seconds(15)
 
     init(
-        host: String = "127.0.0.1",
-        port: Int = 8080,
+        host: String = ServiceDefaults.host,
+        port: Int = ServiceDefaults.port,
         catalog: ToolCatalog,
         setupPermissions: SetupPermissionService,
         configuration: Configuration = .init()
@@ -122,7 +123,7 @@ actor HTTPTransport {
         router.post("/") { request, _ in
             try await self.handlePost(request: request)
         }
-        router.post("/setup/permissions") { request, _ in
+        router.post(RouterPath(SetupPermissionRoute.path)) { request, _ in
             try await self.handleSetupPermission(request: request)
         }
         router.get("/") { request, _ in
@@ -511,7 +512,7 @@ actor HTTPTransport {
         // Browser requests are never setup requests, including loopback origins.
         // The explicit header forces a browser preflight; no CORS is offered.
         guard request.headers[.origin] == nil,
-              request.headers[.setupRequest] == "permission-request-v1" else {
+              request.headers[.setupRequest] == SetupPermissionRoute.headerValue else {
             return Response(status: .forbidden)
         }
         guard request.headers[.contentType]?.lowercased() == "application/json" else {
@@ -520,13 +521,14 @@ actor HTTPTransport {
         let data: Data
         switch try await HTTPRequestParsing.collectBodyDrainingOverflow(request.body,
             declaredLength: request.headers[.contentLength].flatMap(Int.init),
-            maxBytes: 256, drainLimit: 1024, deadline: .seconds(5)) {
+            maxBytes: SetupPermissionRoute.maxRequestBytes, drainLimit: 1024, deadline: .seconds(5)) {
         case .complete(let body): data = body
         case .tooLarge: return Response(status: .contentTooLarge)
         case .timedOut: return Response(status: .requestTimeout)
         }
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: String],
-              json.count == 1, let name = json["permission"], let permission = SetupPermission(rawValue: name) else {
+              json.count == 1, let name = json[SetupPermissionRoute.bodyKey],
+              let permission = SetupPermission(rawValue: name) else {
             return Response(status: .badRequest)
         }
         do {

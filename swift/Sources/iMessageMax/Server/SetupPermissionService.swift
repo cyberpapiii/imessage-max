@@ -1,18 +1,5 @@
 import Foundation
-
-enum SetupPermission: String, Codable, Sendable { case contacts, automation }
-
-struct SetupPermissionResult: Codable, Sendable {
-    let permission: SetupPermission
-    let authorized: Bool
-    let status: String
-    let processId: Int32
-
-    enum CodingKeys: String, CodingKey {
-        case permission, authorized, status
-        case processId = "process_id"
-    }
-}
+import IMessageMaxContract
 
 /// Permission requests must originate in the process that uses the grant.
 /// A companion-spawned CLI inherits the companion's TCC responsibility and
@@ -20,7 +7,7 @@ struct SetupPermissionResult: Codable, Sendable {
 /// This service is used only by the explicit native setup route, never sends,
 /// MCP tools, or startup. Ordinary headless starts remain non-prompting.
 actor SetupPermissionService {
-    typealias Request = @Sendable () async -> (ok: Bool, status: String)
+    typealias Request = @Sendable () async -> (ok: Bool, status: PermissionStatus)
     enum RequestError: Error { case alreadyRequesting }
 
     private let contactsRequest: Request
@@ -37,19 +24,20 @@ actor SetupPermissionService {
             await resolver.requestAccessIfAllowed(policy: .requestIfNeeded)
             await resolver.invalidate()
             let contacts = await resolver.status()
+            let status = PermissionStatus(rawValue: contacts.authorization)
             if contacts.authorized, contacts.loadFailed {
-                return (true, "\(contacts.authorization)_load_failed")
+                return (true, .loadFailed(status))
             }
-            return (contacts.authorized, contacts.authorization)
+            return (contacts.authorized, status)
         }
         automationRequest = { await AutomationPermission.requestAccess() }
     }
 
-    func request(_ permission: SetupPermission) async throws -> SetupPermissionResult {
+    func request(_ permission: SetupPermission) async throws -> SetupPermissionReply {
         guard !requesting else { throw RequestError.alreadyRequesting }
         requesting = true
         defer { requesting = false }
         let result = await (permission == .contacts ? contactsRequest() : automationRequest())
-        return SetupPermissionResult(permission: permission, authorized: result.ok, status: result.status, processId: getpid())
+        return SetupPermissionReply(permission: permission, authorized: result.ok, status: result.status, processID: getpid())
     }
 }

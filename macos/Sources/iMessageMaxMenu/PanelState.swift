@@ -1,3 +1,4 @@
+import IMessageMaxContract
 import MaxBrand
 import MaxCore
 
@@ -31,7 +32,7 @@ struct Notice: Equatable {
     text: "Setup isn’t finished yet. Check the step below.", tone: .neutral)
   static let noLog = Notice(text: "No service log yet. Start iMessage Max first.")
 
-  static func granted(_ permission: PermissionKind) -> Notice {
+  static func granted(_ permission: SetupPermission) -> Notice {
     Notice(text: permission == .automation ? "Sending is ready." : "Contact names are ready.")
   }
 }

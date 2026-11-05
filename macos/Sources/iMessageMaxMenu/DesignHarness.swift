@@ -1,4 +1,5 @@
 import AppKit
+import IMessageMaxContract
 import MaxBrand
 import MaxCore
 import SwiftUI
@@ -109,11 +110,11 @@ actor FixtureService: ServiceControlling {
     land(on: action == .stop ? "stopped" : "ready")
   }
 
-  func requestPermission(_ permission: PermissionKind) async throws -> SetupPermissionReply {
+  func requestPermission(_ permission: SetupPermission) async throws -> SetupPermissionReply {
     await Self.pause()
     land(on: "ready")
     return SetupPermissionReply(
-      permission: permission, authorized: true, status: "authorized", processID: Self.processID)
+      permission: permission, authorized: true, status: .authorized, processID: Self.processID)
   }
 
   private func land(on state: String) {
@@ -132,44 +133,43 @@ actor FixtureService: ServiceControlling {
     let installed = try PropertyListSerialization.data(
       fromPropertyList: [
         "Label": ServiceConfiguration.label,
-        "ProgramArguments": ["/usr/local/bin/imessage-max", "--http"],
+        "ProgramArguments": [
+          "/usr/local/bin/\(ServiceDefaults.executableName)", ServerOption.http.flag,
+        ],
       ], format: .xml, options: 0)
-    func diagnosis(messages: Bool, contacts: String, sending: String, detail: String? = nil)
-      -> Diagnosis?
-    {
-      typealias Key = Diagnosis.Capability.Key
-      let supported = Diagnosis.Capability.supported
-      let json: [String: Any] = [
-        "version": "1.8.0", "process_id": processID, "status": "ok",
-        "database": [
-          "accessible": messages, "status": messages ? "accessible" : "permission_denied",
-        ],
-        "contacts": ["authorized": contacts == "authorized", "status": contacts],
-        "capabilities": [
-          Key.automation.rawValue: ["state": sending, "detail": detail as Any? ?? NSNull()],
-          Key.sendText.rawValue: ["state": supported], Key.liveInbox.rawValue: ["state": supported],
-        ],
-      ]
-      return (try? JSONSerialization.data(withJSONObject: json)).flatMap {
-        try? JSONDecoder().decode(Diagnosis.self, from: $0)
-      }
+    func diagnosis(
+      messages: Bool, contacts: PermissionStatus, sending: CapabilityState,
+      detail: PermissionStatus? = nil
+    ) -> DiagnoseResult {
+      DiagnoseResult(
+        version: "1.8.0", processID: processID,
+        status: messages && contacts == .authorized ? .ready : .needsSetup,
+        database: .init(
+          accessible: messages, status: messages ? .accessible : .permissionDenied,
+          path: "~/Library/Messages/chat.db", fix: nil),
+        contacts: .init(
+          authorized: contacts == .authorized, status: contacts, loaded: nil, fix: nil),
+        capabilities: [
+          CapabilityKey.permAutomation.rawValue: Capability(state: sending, detail: detail?.rawValue),
+          CapabilityKey.sendTextDM.rawValue: Capability(state: .supported),
+          CapabilityKey.liveInbox.rawValue: Capability(state: .supported),
+        ])
     }
-    let ready = diagnosis(
-      messages: true, contacts: "authorized", sending: Diagnosis.Capability.supported)
+    let ready = diagnosis(messages: true, contacts: .authorized, sending: .supported)
     var loaded = true
     var data: Data? = installed
-    var result: Diagnosis?
+    var result: DiagnoseResult?
     var trouble: String?
     switch name {
     case "fresh": (loaded, data) = (false, nil)
     case "stopped": loaded = false
     case "setup-messages":
-      result = diagnosis(messages: false, contacts: "not_determined", sending: "unknown")
+      result = diagnosis(messages: false, contacts: .notDetermined, sending: .unverified)
     case "setup-contacts":
-      result = diagnosis(messages: true, contacts: "not_determined", sending: "unknown")
+      result = diagnosis(messages: true, contacts: .notDetermined, sending: .unverified)
     case "setup-sending":
       result = diagnosis(
-        messages: true, contacts: "authorized", sending: "unknown", detail: "messages_not_running")
+        messages: true, contacts: .authorized, sending: .unverified, detail: .messagesNotRunning)
     case "problem": trouble = CoreError.invalidResponse.errorDescription
     default: result = ready
     }

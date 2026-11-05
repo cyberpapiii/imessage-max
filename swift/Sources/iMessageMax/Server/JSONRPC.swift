@@ -3,6 +3,7 @@
 // The JSON-RPC layer both transports share: one parse per inbound message,
 // one era rule, one error-code table, one envelope builder, one era log line.
 import Foundation
+import IMessageMaxContract
 import MCP
 
 /// JSON-RPC error codes this server sends.
@@ -18,14 +19,6 @@ enum JSONRPCErrorCode: Int {
     case headerMismatch = -32020
     /// MCP 2026-07-28: the requested `_meta` protocol version is not served.
     case unsupportedProtocolVersion = -32022
-}
-
-/// Reserved `_meta` keys defined by MCP 2026-07-28.
-enum ModernMetaKey {
-    static let protocolVersion = "io.modelcontextprotocol/protocolVersion"
-    static let clientInfo = "io.modelcontextprotocol/clientInfo"
-    static let clientCapabilities = "io.modelcontextprotocol/clientCapabilities"
-    static let serverInfo = "io.modelcontextprotocol/serverInfo"
 }
 
 /// One inbound JSON-RPC message, decoded once at the transport boundary.

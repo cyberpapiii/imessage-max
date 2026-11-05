@@ -1,5 +1,6 @@
 import XCTest
 import MCP
+import IMessageMaxContract
 @testable import iMessageMax
 
 final class ResponseContractTests: XCTestCase {
@@ -210,7 +211,7 @@ final class ResponseContractTests: XCTestCase {
     func testDiagnoseResultEncodesGroupedSections() throws {
         let sample = DiagnoseResult(
             version: "1.2.1",
-            processId: 123,
+            processID: 123,
             status: "ready",
             database: .init(accessible: true, status: "ok", path: "/tmp/chat.db", fix: nil),
             contacts: .init(authorized: true, status: "authorized", loaded: 10, fix: nil),

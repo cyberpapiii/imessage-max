@@ -1,4 +1,5 @@
 import Foundation
+import IMessageMaxContract
 import MCP
 
 /// Process startup for both transports.
@@ -16,7 +17,7 @@ enum ServerStartup {
         let (dbOk, dbStatus) = Database.checkAccess()
         if !dbOk {
             Log.info("Database: \(dbStatus)")
-            if dbStatus == "permission_denied" {
+            if dbStatus == DatabaseStatus.permissionDenied.rawValue {
                 Log.info(DiagnoseTool.fullDiskAccessFix())
             }
         }

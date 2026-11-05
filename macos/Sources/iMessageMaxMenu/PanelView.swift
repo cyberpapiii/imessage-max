@@ -1,4 +1,5 @@
 import AppKit
+import IMessageMaxContract
 import MaxCore
 import SwiftUI
 
@@ -140,7 +141,7 @@ struct PanelView: View {
 
   private var status: some View {
     let diagnosis = model.diagnosis
-    let sending = diagnosis?[.automation]
+    let sending = diagnosis?[.permAutomation]
     return Card {
       VStack(spacing: Space.hairline) {
         StatusLine(
@@ -151,7 +152,7 @@ struct PanelView: View {
         StatusLine(
           glyph: .contacts, title: "Contact names",
           detail: diagnosis?.namesReady == true
-            ? (diagnosis?.contacts.status == "limited" ? "Some names" : "Ready")
+            ? (diagnosis?.contacts.status == .limited ? "Some names" : "Ready")
             : (diagnosis?.contacts.authorized == true ? "Needs a check" : "Needs access"),
           good: diagnosis?.namesReady == true, attention: diagnosis?.namesReady == false)
         StatusLine(

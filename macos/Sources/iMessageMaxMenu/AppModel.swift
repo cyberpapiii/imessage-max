@@ -1,8 +1,9 @@
 import AppKit
 import Foundation
+import IMessageMaxContract
 import MaxCore
-import OSLog
 import Observation
+import OSLog
 import ServiceManagement
 
 @MainActor @Observable
@@ -52,7 +53,7 @@ final class AppModel {
     return AppModel(
       service: ServiceController(
         bundledHelper: resources.appendingPathComponent("imessage-max"),
-        template: resources.appendingPathComponent("local.imessage-max.plist")),
+        template: resources.appendingPathComponent("\(ServiceDefaults.launchdLabel).plist")),
       milestones: milestones,
       prepareMessages: { try await MessagesApp.ensureRunning() })
   }
@@ -60,12 +61,13 @@ final class AppModel {
   var state: PanelState {
     PanelState(inspection: inspection, busy: busy, problem: problem, checked: lastCheck != nil)
   }
-  var diagnosis: Diagnosis? { inspection?.diagnosis }
+  var diagnosis: DiagnoseResult? { inspection?.diagnosis }
   var stopped: Bool {
     inspection != nil && inspection?.loaded == false && inspection?.conflict == false
   }
   var endpoint: String {
-    inspection?.configuration.endpoint.absoluteString ?? "http://127.0.0.1:8080/"
+    inspection?.configuration.endpoint.absoluteString
+      ?? "http://\(ServiceDefaults.host):\(ServiceDefaults.port)/"
   }
   var canControl: Bool { inspection != nil && inspection?.conflict == false && busy == nil }
   var ready: Bool { diagnosis?.readiness == .ready }
@@ -187,7 +189,7 @@ final class AppModel {
     }
   }
 
-  func request(_ permission: PermissionKind) {
+  func request(_ permission: SetupPermission) {
     guard busy == nil else { return }
     generation += 1
     busy = permission == .automation && messagesNeedOpening ? .checkingSending : .askingPermission
@@ -200,9 +202,9 @@ final class AppModel {
         let result = try await service.requestPermission(permission)
         if !result.authorized {
           permissionProblem =
-            result.status == "denied"
+            result.status == .denied
             ? "Access is off. You can enable iMessage Max in Privacy & Security, then check again."
-            : (result.status == "messages_not_running"
+            : (result.status == .messagesNotRunning
               ? "Messages needs a moment to open. Check again."
               : "macOS did not finish the permission request. Open Privacy & Security and check again.")
         }
@@ -267,7 +269,7 @@ final class AppModel {
 
   func openLogs() {
     let file = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(
-      "Library/Logs/imessage-max.stderr.log")
+      ServiceDefaults.stderrLogPath)
     if FileManager.default.fileExists(atPath: file.path) {
       NSWorkspace.shared.open(file)
     } else {
@@ -331,10 +333,10 @@ final class AppModel {
     Checked: \(lastCheck?.ISO8601Format() ?? "Not checked")
     Version: \(diagnosis?.version ?? "Unknown")
     Service loaded: \(inspection?.loaded == true)
-    Messages: \(diagnosis?.database.status ?? "Unknown")
-    Contacts: \(diagnosis?.contacts.status ?? "Unknown")
-    Sending permission: \(diagnosis?[.automation]?.state ?? "unknown")
-    Live inbox: \(diagnosis?[.liveInbox]?.state ?? "Unknown")
+    Messages: \(diagnosis?.database.status.rawValue ?? "Unknown")
+    Contacts: \(diagnosis?.contacts.status.rawValue ?? "Unknown")
+    Sending permission: \(diagnosis?[.permAutomation]?.state.rawValue ?? "unknown")
+    Live inbox: \(diagnosis?[.liveInbox]?.state.rawValue ?? "Unknown")
     Local connection: \(endpoint)
     Check duration: \(checkMilliseconds.map { "\($0) ms" } ?? "Unknown")
     """

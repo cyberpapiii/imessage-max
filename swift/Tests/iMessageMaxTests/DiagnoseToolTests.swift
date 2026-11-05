@@ -1,4 +1,5 @@
 import XCTest
+import IMessageMaxContract
 @testable import iMessageMax
 
 /// Plan 049: diagnose is the one tool whose response legitimately names the
