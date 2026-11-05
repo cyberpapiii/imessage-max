@@ -40,7 +40,7 @@ final class SendVerifierTests: XCTestCase {
         let result = try await verifier.verify(
             intendedChatId: 1,
             handle: "+15550000001",
-            sendTime: Date(),
+            afterRowId: 0,
             expectedText: "Hello Alice"
         )
 
@@ -66,7 +66,7 @@ final class SendVerifierTests: XCTestCase {
         let result = try await verifier.verify(
             intendedChatId: 1,
             handle: "+15550000001",
-            sendTime: Date(),
+            afterRowId: 0,
             expectedText: "Hello Alice"
         )
 
@@ -81,17 +81,16 @@ final class SendVerifierTests: XCTestCase {
         let result = try await verifier.verify(
             intendedChatId: 1,
             handle: "+15550000001",
-            sendTime: Date(),
+            afterRowId: 0,
             expectedText: "Hello Alice"
         )
 
         XCTAssertEqual(result, .notFound)
     }
 
-    // Row older than the look-behind window (> 2s before sendTime) → notFound.
+    // Row at or below the pre-send ROWID baseline → notFound.
     func testOldRowOutsideWindowIsIgnored() async throws {
         let fixture = try makeFixture()
-        // Insert a row 5 seconds before "now", outside the 2s skew window.
         let oldDate = AppleTime.fromDate(Date().addingTimeInterval(-5))
 
         try fixture.insertMessage(
@@ -104,11 +103,11 @@ final class SendVerifierTests: XCTestCase {
         let result = try await verifier.verify(
             intendedChatId: 1,
             handle: nil,
-            sendTime: Date(),   // window lower bound = now - 2s; row is at now - 5s
+            afterRowId: 3,      // baseline read after row 3 was written
             expectedText: "Hello Alice"
         )
 
-        XCTAssertEqual(result, .notFound, "Row older than the 2s skew should be outside the window")
+        XCTAssertEqual(result, .notFound, "A row at or below the baseline predates the send")
     }
 
     func testMismatchWhenRowIsInDifferentChat() async throws {
@@ -125,7 +124,7 @@ final class SendVerifierTests: XCTestCase {
         let result = try await verifier.verify(
             intendedChatId: 1,          // intended: chat 1
             handle: "+15550000001",     // handle is in chat 1 AND chat 2
-            sendTime: Date(),
+            afterRowId: 0,
             expectedText: "Hello Alice"
         )
 
@@ -154,7 +153,7 @@ final class SendVerifierTests: XCTestCase {
         let result = try await verifier.verify(
             intendedChatId: 1,
             handle: nil,
-            sendTime: Date(),
+            afterRowId: 0,
             expectedText: "Hello Alice"
         )
 
@@ -181,7 +180,7 @@ final class SendVerifierTests: XCTestCase {
         let result = try await verifier.verify(
             intendedChatId: 1,
             handle: nil,
-            sendTime: Date(),
+            afterRowId: 0,
             expectedText: "Hello Alice"
         )
 
@@ -216,7 +215,7 @@ final class SendVerifierTests: XCTestCase {
         let result = try await verifier.verify(
             intendedChatId: 1,
             handle: nil,
-            sendTime: Date(),
+            afterRowId: 0,
             expectedText: "Polling test"
         )
 
@@ -251,7 +250,7 @@ final class SendVerifierTests: XCTestCase {
         let result = try await verifier.verify(
             intendedChatId: 1,
             handle: "+15550000001",
-            sendTime: Date(),
+            afterRowId: 0,
             expectedText: "Hello Alice"
         )
 
@@ -279,7 +278,7 @@ final class SendVerifierTests: XCTestCase {
         let result = try await verifier.verify(
             intendedChatId: 1,
             handle: "+15550000001",
-            sendTime: Date(),
+            afterRowId: 0,
             expectedText: "Hello Alice"
         )
 
@@ -302,7 +301,7 @@ final class SendVerifierTests: XCTestCase {
         let result = try await verifier.verify(
             intendedChatId: nil,        // no intended chat → fallback handle scan only
             handle: "+15550000001",
-            sendTime: Date(),
+            afterRowId: 0,
             expectedText: "Hello Alice"
         )
 

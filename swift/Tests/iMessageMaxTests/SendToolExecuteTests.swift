@@ -195,20 +195,21 @@ final class SendToolExecuteTests: XCTestCase {
     // Uses the FULL multi-chat fixture (DM chat 1 + group chat 2, both containing Alice):
     // this is the common real-world topology that previously produced a false mismatch
     // via the findDirectChatForHandle resolver bug.
-    // Row is inserted before execute() so its date falls within the 2s skew window
-    // (date = now, sendTime = now + tiny delta; skew covers this).
     func testStubSendWithMatchingRowConfirms() async throws {
         let fixture = try makeSendFixture()  // DM chat 1 (Alice) + group chat 2 (Alice+Bob)
         let stub = StubScriptRunner()
         stub.nextResult = .success(())
 
-        // Pre-insert the expected outbound row in chat 1 (Alice DM).
+        // The expected outbound row in chat 1 (Alice DM).
         let rowDate = AppleTime.fromDate(Date())
-        try fixture.insertMessage(
-            rowId: 100, guid: "msg-guid-confirm", text: "Hello Alice",
-            date: rowDate, isFromMe: true, error: 0, isSent: 0
-        )
-        try fixture.joinChatMessage(chatId: 1, messageId: 100)
+        // Messages.app writes the row during the send, after the baseline.
+        stub.onSend = {
+            try? fixture.insertMessage(
+                rowId: 100, guid: "msg-guid-confirm", text: "Hello Alice",
+                date: rowDate, isFromMe: true, error: 0, isSent: 0
+            )
+            try? fixture.joinChatMessage(chatId: 1, messageId: 100)
+        }
 
         let tool = SendTool(
             db: fixture.database(),
@@ -241,11 +242,14 @@ final class SendToolExecuteTests: XCTestCase {
         stub.nextResult = .success(())
 
         let rowDate = AppleTime.fromDate(Date())
-        try fixture.insertMessage(
-            rowId: 103, guid: "msg-guid-mismatch", text: "Hello Alice",
-            date: rowDate, isFromMe: true, error: 0, isSent: 0
-        )
-        try fixture.joinChatMessage(chatId: 2, messageId: 103)
+        // Messages.app writes the row during the send, after the baseline.
+        stub.onSend = {
+            try? fixture.insertMessage(
+                rowId: 103, guid: "msg-guid-mismatch", text: "Hello Alice",
+                date: rowDate, isFromMe: true, error: 0, isSent: 0
+            )
+            try? fixture.joinChatMessage(chatId: 2, messageId: 103)
+        }
 
         let tool = SendTool(
             db: fixture.database(),
@@ -353,11 +357,14 @@ final class SendToolExecuteTests: XCTestCase {
         stub.nextResult = .success(())
 
         let rowDate = AppleTime.fromDate(Date())
-        try fixture.insertMessage(
-            rowId: 101, guid: "msg-guid-error-row", text: "Hello Alice",
-            date: rowDate, isFromMe: true, error: 22, isSent: 0
-        )
-        try fixture.joinChatMessage(chatId: 1, messageId: 101)
+        // Messages.app writes the row during the send, after the baseline.
+        stub.onSend = {
+            try? fixture.insertMessage(
+                rowId: 101, guid: "msg-guid-error-row", text: "Hello Alice",
+                date: rowDate, isFromMe: true, error: 22, isSent: 0
+            )
+            try? fixture.joinChatMessage(chatId: 1, messageId: 101)
+        }
 
         let tool = SendTool(
             db: fixture.database(),
@@ -678,11 +685,14 @@ final class SendToolExecuteTests: XCTestCase {
         let fixture = try makeSendFixture()
         let stub = StubScriptRunner()
         stub.nextResult = .success(())
-        try fixture.insertMessage(
-            rowId: 130, guid: "msg-guid-079-confirm", text: "Hello Alice",
-            date: AppleTime.fromDate(Date()), isFromMe: true, error: 0, isSent: 0
-        )
-        try fixture.joinChatMessage(chatId: 1, messageId: 130)
+        // Messages.app writes the row during the send, after the baseline.
+        stub.onSend = {
+            try? fixture.insertMessage(
+                rowId: 130, guid: "msg-guid-079-confirm", text: "Hello Alice",
+                date: AppleTime.fromDate(Date()), isFromMe: true, error: 0, isSent: 0
+            )
+            try? fixture.joinChatMessage(chatId: 1, messageId: 130)
+        }
         let tool = SendTool(
             db: fixture.database(),
             resolver: makeSeededResolver(),
@@ -787,11 +797,14 @@ final class SendToolExecuteTests: XCTestCase {
         let fixture = try makeSendFixture()
         let stub = StubScriptRunner()
         stub.nextResult = .success(())
-        try fixture.insertMessage(
-            rowId: 131, guid: "msg-guid-079-fail-row", text: "Hello Alice",
-            date: AppleTime.fromDate(Date()), isFromMe: true, error: 22, isSent: 0
-        )
-        try fixture.joinChatMessage(chatId: 1, messageId: 131)
+        // Messages.app writes the row during the send, after the baseline.
+        stub.onSend = {
+            try? fixture.insertMessage(
+                rowId: 131, guid: "msg-guid-079-fail-row", text: "Hello Alice",
+                date: AppleTime.fromDate(Date()), isFromMe: true, error: 22, isSent: 0
+            )
+            try? fixture.joinChatMessage(chatId: 1, messageId: 131)
+        }
         let tool = SendTool(
             db: fixture.database(),
             resolver: makeSeededResolver(),

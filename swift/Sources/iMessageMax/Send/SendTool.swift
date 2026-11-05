@@ -127,8 +127,13 @@ actor SendTool {
         // stacks. Do not reintroduce without session-level proof of a working
         // channel.
 
-        // Capture send time before dispatch.
-        let sendTime = Date()
+        // Only text is verified against chat.db, and SendPayload.build puts
+        // text last. A file-only send keeps the transfer-observation status.
+        let verifiedIndex: Int? = {
+            guard case .text? = payloads.last else { return nil }
+            return payloads.count - 1
+        }()
+        var verificationBaseline: Int64? = nil
 
         // Sequential by design: Messages.app ordering matters, so a text that
         // follows a file must be sent after that file. Do not parallelize.
@@ -137,6 +142,12 @@ actor SendTool {
         // reporting below. Soft transfer outcomes keep sending.
         var pendingMessages: [String] = []
         for (index, payload) in payloads.enumerated() {
+            if index == verifiedIndex {
+                // Read right before this dispatch, so rows from earlier payloads
+                // and earlier identical texts sit at or below it. Unreadable:
+                // nil, and the send reports transport-only `sent`.
+                verificationBaseline = try? verifier.baseline()
+            }
             guard case .failure(let failure) = await runner.send(payload, to: resolved.target) else {
                 continue
             }
@@ -166,9 +177,8 @@ actor SendTool {
             )
         }
 
-        // Only text is verified against chat.db. A file-only send keeps the
-        // transfer-observation status.
-        guard case .text(let expectedText)? = payloads.last(where: { if case .text = $0 { return true }; return false }) else {
+        guard let verifiedIndex, case .text(let expectedText) = payloads[verifiedIndex],
+              let verificationBaseline else {
             return .sent(deliveredTo: resolved.deliveredTo, chat: resolved.chat)
         }
 
@@ -176,7 +186,7 @@ actor SendTool {
             let verification = try await verifier.verify(
                 intendedChatId: resolved.target.chatId,
                 handle: resolved.target.participantHandle,
-                sendTime: sendTime,
+                afterRowId: verificationBaseline,
                 expectedText: expectedText
             )
             switch verification {

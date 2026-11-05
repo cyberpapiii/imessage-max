@@ -1,0 +1,113 @@
+import XCTest
+import MCP
+@testable import iMessageMax
+
+/// Regressions for the send-path review (verification window, short codes,
+/// chat names, staged-file cleanup). Never touches Messages.app.
+final class SendReviewRegressionTests: XCTestCase {
+
+    /// Records payloads and runs `onSend` for each, standing in for
+    /// Messages.app writing its chat.db row during the dispatch.
+    private final class RecordingRunner: ScriptRunning, @unchecked Sendable {
+        var payloads: [SendPayload] = []
+        var onSend: ((SendPayload) -> Void)?
+
+        func send(_ payload: SendPayload, to target: SendTarget) async -> Result<Void, SendFailure> {
+            payloads.append(payload)
+            onSend?(payload)
+            return .success(())
+        }
+    }
+
+    private func makeFixture() throws -> ToolTestDatabase {
+        let fixture = try ToolTestDatabase(name: "send-review")
+        try fixture.insertHandle(rowId: 1, handle: "+15550000001")
+        try fixture.insertChat(rowId: 1, guid: "iMessage;-;alice-review-guid")
+        try fixture.joinChatHandle(chatId: 1, handleId: 1)
+        return fixture
+    }
+
+    private func makeTool(_ fixture: ToolTestDatabase, runner: RecordingRunner) -> SendTool {
+        SendTool(
+            db: fixture.database(),
+            resolver: makeSeededResolver(),
+            runner: runner,
+            verifier: SendVerifier(db: fixture.database(), maxAttempts: 1, pollInterval: .milliseconds(0))
+        )
+    }
+
+    private func insertOutbound(_ fixture: ToolTestDatabase, rowId: Int, text: String, date: Date) {
+        try? fixture.insertMessage(
+            rowId: rowId, guid: "review-\(rowId)", text: text,
+            date: AppleTime.fromDate(date), isFromMe: true, error: 0
+        )
+        try? fixture.joinChatMessage(chatId: 1, messageId: rowId)
+    }
+
+    // MARK: - 1. Verification baseline
+
+    /// A quick retry of the same text must not confirm against the first
+    /// attempt's row. The old 2 s look-behind matched it.
+    func testEarlierIdenticalTextDoesNotConfirmARetry() async throws {
+        let fixture = try makeFixture()
+        insertOutbound(fixture, rowId: 50, text: "Hello Alice", date: Date())
+        let runner = RecordingRunner()   // this send writes no row
+
+        let json = try decodeJSONDictionary(from: try await makeTool(fixture, runner: runner).execute(args: [
+            "to": .string("+15550000001"),
+            "text": .string("Hello Alice"),
+        ]))
+
+        XCTAssertEqual(json["status"] as? String, "uncertain")
+        XCTAssertNil(json["verified_message_guid"])
+    }
+
+    /// Files go first; a slow transfer can push the text's row well past the
+    /// old 60 s forward window. It still confirms.
+    func testTextAfterSlowFileTransferStillConfirms() async throws {
+        let fixture = try makeFixture()
+        let runner = RecordingRunner()
+        runner.onSend = { [fixture] payload in
+            guard case .text(let text) = payload else { return }
+            self.insertOutbound(fixture, rowId: 60, text: text, date: Date().addingTimeInterval(90))
+        }
+
+        let json = try decodeJSONDictionary(from: try await makeTool(fixture, runner: runner).execute(args: [
+            "to": .string("+15550000001"),
+            "text": .string("Here is the file"),
+            "file_paths": .array([.string("/tmp/review.jpg")]),
+        ]))
+
+        XCTAssertEqual(runner.payloads.count, 2)
+        XCTAssertEqual(json["status"] as? String, "confirmed")
+        XCTAssertEqual(json["verified_message_guid"] as? String, "review-60")
+    }
+
+    /// Two concurrent identical sends share one verifier. Each row confirms
+    /// at most one of them.
+    func testIdenticalSendsCannotConfirmTheSameRow() async throws {
+        let fixture = try makeFixture()
+        let verifier = SendVerifier(db: fixture.database(), maxAttempts: 1, pollInterval: .milliseconds(0))
+        let baseline = try verifier.baseline()
+        insertOutbound(fixture, rowId: 70, text: "Same text", date: Date())
+
+        let first = try await verifier.verify(intendedChatId: 1, handle: nil, afterRowId: baseline, expectedText: "Same text")
+        let second = try await verifier.verify(intendedChatId: 1, handle: nil, afterRowId: baseline, expectedText: "Same text")
+        guard case .confirmed(let guid, _) = first else { return XCTFail("expected confirmed, got \(first)") }
+        XCTAssertEqual(guid, "review-70")
+        XCTAssertEqual(second, .notFound, "the row is already claimed by the first send")
+
+        insertOutbound(fixture, rowId: 71, text: "Same text", date: Date())
+        let third = try await verifier.verify(intendedChatId: 1, handle: nil, afterRowId: baseline, expectedText: "Same text")
+        guard case .confirmed(let thirdGuid, _) = third else { return XCTFail("expected confirmed, got \(third)") }
+        XCTAssertEqual(thirdGuid, "review-71", "the second send confirms its own row")
+    }
+
+    func testBaselineIsTheNewestMessageRowId() throws {
+        let fixture = try makeFixture()
+        let verifier = SendVerifier(db: fixture.database())
+        XCTAssertEqual(try verifier.baseline(), 0)
+        insertOutbound(fixture, rowId: 42, text: "x", date: Date())
+        XCTAssertEqual(try verifier.baseline(), 42)
+    }
+}
