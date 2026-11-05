@@ -1,4 +1,3 @@
-// Sources/iMessageMax/Utilities/AppleScript.swift
 import Foundation
 
 // MARK: - ScriptRunning protocol

@@ -1,4 +1,3 @@
-// Sources/iMessageMax/Tools/Send.swift
 import Foundation
 import MCP
 

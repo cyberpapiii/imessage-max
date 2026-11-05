@@ -1,4 +1,3 @@
-// Sources/iMessageMax/Tools/SendVerifier.swift
 import Foundation
 
 // MARK: - Result
