@@ -146,7 +146,9 @@ enum GetActiveConversations {
             .groupBy("c.ROWID")
             .having("my_count >= 1 AND their_count >= 1")
         if let filterGroup = isGroup {
-            query.having(filterGroup ? "participant_count > 1" : "participant_count <= 1")
+            query.having(filterGroup
+                ? SQLFragments.isGroup(count: "participant_count")
+                : SQLFragments.isDirect(count: "participant_count"))
         }
         // Fetch more than limit to account for filtering
         let fetchLimit = clampedLimit * 3

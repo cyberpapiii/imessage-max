@@ -265,10 +265,7 @@ enum FindChatTool {
     /// SQL fragment filtering chats by handle count before LIMIT (groups > 1, DMs <= 1).
     private static func groupFilterSQL(isGroup: Bool?) -> String {
         guard let isGroup else { return "" }
-        if isGroup {
-            return " AND \(SQLFragments.participantCount()) > 1"
-        }
-        return " AND \(SQLFragments.participantCount()) <= 1"
+        return " AND " + (isGroup ? SQLFragments.isGroup() : SQLFragments.isDirect())
     }
 
     private static func filteredSQL(includeFiltered: Bool) -> String {
@@ -462,7 +459,7 @@ enum FindChatTool {
             JOIN handle h ON h.ROWID = chj.handle_id
             WHERE (c.display_name IS NULL OR TRIM(c.display_name) = '')
               AND h.id IN (\(placeholders))
-              AND \(SQLFragments.participantCount()) <= 1
+              AND \(SQLFragments.isDirect())
               \(filterSQL)
             LIMIT ?
             """

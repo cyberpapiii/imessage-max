@@ -22,6 +22,26 @@ enum SQLFragments {
         """
     }
 
+    /// A group chat has more than one other participant; every other chat,
+    /// including one with no handles left, is a DM.
+    static func isGroup(_ alias: String = "c") -> String { isGroup(count: participantCount(alias)) }
+    static func isDirect(_ alias: String = "c") -> String { isDirect(count: participantCount(alias)) }
+
+    /// The same rule over a `participantCount` the query already selected,
+    /// so a HAVING clause does not run the subquery a second time.
+    static func isGroup(count: String) -> String { "\(count) > 1" }
+    static func isDirect(count: String) -> String { "\(count) <= 1" }
+
+    /// Received messages not yet read. A tapback is never unread.
+    static func unreadInbound(_ alias: String = "m") -> String {
+        "(\(alias).is_read = 0 AND \(alias).is_from_me = 0 AND \(notReaction(alias)))"
+    }
+
+    /// Attachments Messages.app shows.
+    static func shownAttachment(_ alias: String = "a") -> String {
+        "COALESCE(\(alias).hide_attachment, 0) = 0"
+    }
+
     /// Tapbacks and other associated messages carry a nonzero type.
     static func notReaction(_ alias: String = "m") -> String { "\(alias).associated_message_type = 0" }
 
@@ -56,7 +76,7 @@ enum SQLFragments {
               SELECT 1 FROM attachment a
               JOIN message_attachment_join maj ON a.ROWID = maj.attachment_id
               WHERE maj.message_id = \(alias).ROWID
-                AND COALESCE(a.hide_attachment, 0) = 0\(typeClause)
+                AND \(shownAttachment("a"))\(typeClause)
             )
             """
     }

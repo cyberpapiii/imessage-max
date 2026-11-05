@@ -251,11 +251,9 @@ enum ListChatsTool {
                 qb.having("participant_count <= ?", maxP)
             }
             if let isGroup = isGroup {
-                if isGroup {
-                    qb.having("participant_count > 1")
-                } else {
-                    qb.having("participant_count <= 1")
-                }
+                qb.having(isGroup
+                    ? SQLFragments.isGroup(count: "participant_count")
+                    : SQLFragments.isDirect(count: "participant_count"))
             }
 
             if let cursor, let decoded = ChatListCursor.decode(cursor) {
@@ -428,14 +426,12 @@ enum ListChatsTool {
         let sql = """
             SELECT
                 COUNT(*) as total,
-                SUM(CASE WHEN cnt > 1 THEN 1 ELSE 0 END) as groups,
-                SUM(CASE WHEN cnt <= 1 THEN 1 ELSE 0 END) as dms
+                SUM(CASE WHEN \(SQLFragments.isGroup(count: "cnt")) THEN 1 ELSE 0 END) as groups,
+                SUM(CASE WHEN \(SQLFragments.isDirect(count: "cnt")) THEN 1 ELSE 0 END) as dms
             FROM (
-                SELECT c.ROWID, COUNT(chj.handle_id) as cnt
+                SELECT \(SQLFragments.participantCount()) as cnt
                 FROM chat c
-                LEFT JOIN chat_handle_join chj ON c.ROWID = chj.chat_id
                 \(filter)
-                GROUP BY c.ROWID
             )
             """
 

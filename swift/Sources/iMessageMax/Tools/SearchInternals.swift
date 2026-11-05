@@ -110,16 +110,8 @@ extension SearchTool {
             builder.where(sender)
         }
 
-        if let isGroupChat = isGroup {
-            if isGroupChat {
-                builder.where(
-                    "\(SQLFragments.participantCount()) > ?",
-                    1)
-            } else {
-                builder.where(
-                    "\(SQLFragments.participantCount()) = ?",
-                    1)
-            }
+        if let isGroup {
+            builder.where(isGroup ? SQLFragments.isGroup() : SQLFragments.isDirect())
         }
 
         switch has {
