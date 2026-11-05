@@ -55,13 +55,17 @@ struct PeopleMap {
     mutating func add(handle: String, name: String?, position: Int = 0) -> String {
         if let key = keyByHandle[handle] { return key }
 
-        let key: String
+        // Every candidate is checked against `taken`: a contact named
+        // "Unknown B" can claim `unknown1` before an unnamed handle does.
+        var key: String
         if let name {
             let base = (name.split(separator: " ").first.map(String.init) ?? name).lowercased()
             key = unique(base, position: position)
         } else {
-            unnamedCount += 1
-            key = "\(rules.unnamedPrefix)\(unnamedCount)"
+            repeat {
+                unnamedCount += 1
+                key = "\(rules.unnamedPrefix)\(unnamedCount)"
+            } while taken.contains(key)
         }
         taken.insert(key)
         keyByHandle[handle] = key
@@ -71,14 +75,13 @@ struct PeopleMap {
 
     private func unique(_ base: String, position: Int) -> String {
         guard taken.contains(base) else { return base }
+        var suffix: Int
         switch rules.collision {
-        case .appendPosition:
-            return "\(base)\(position)"
-        case .appendCounter:
-            var suffix = 2
-            while taken.contains("\(base)\(suffix)") { suffix += 1 }
-            return "\(base)\(suffix)"
+        case .appendPosition: suffix = position
+        case .appendCounter: suffix = 2
         }
+        while taken.contains("\(base)\(suffix)") { suffix += 1 }
+        return "\(base)\(suffix)"
     }
 
     /// `noHandle` is the label for a received message with a NULL handle.
