@@ -267,7 +267,7 @@ final class ListAttachments {
                 .join("message_attachment_join maj ON m.ROWID = maj.message_id")
                 .join("attachment a ON maj.attachment_id = a.ROWID")
                 .where(SQLFragments.notReaction())
-                .where("COALESCE(a.hide_attachment, 0) = 0")
+                .where(SQLFragments.shownAttachment("a"))
             if let chatId {
                 query.where("c.ROWID = ?", chatId)
             }
@@ -280,7 +280,7 @@ final class ListAttachments {
                 (SELECT MAX(COALESCE(a.total_bytes, 0))
                  FROM message_attachment_join maj
                  JOIN attachment a ON maj.attachment_id = a.ROWID
-                 WHERE maj.message_id = m.ROWID AND COALESCE(a.hide_attachment, 0) = 0\(typeClause)) as max_attachment_size
+                 WHERE maj.message_id = m.ROWID AND \(SQLFragments.shownAttachment("a"))\(typeClause)) as max_attachment_size
                 """
             // A message can belong to more than one chat, so picking the chat
             // with a subquery keeps the result one row per message without the
@@ -348,38 +348,21 @@ final class ListAttachments {
         typeFilter: String?,
         allowedRoots: [String] = AttachmentPathPolicy.defaultRoots
     ) throws -> [Int64: [AttachmentSummary]] {
-        guard !messageIds.isEmpty else { return [:] }
-
-        let placeholders = SQLFragments.placeholders(messageIds.count)
-        let query = QueryBuilder()
-            .select("maj.message_id", "a.ROWID", "a.filename", "a.mime_type", "a.uti", "a.total_bytes")
-            .from("attachment a")
-            .join("message_attachment_join maj ON a.ROWID = maj.attachment_id")
-            .where("maj.message_id IN (\(placeholders))", params: messageIds.map { $0 as Any })
-            .where("COALESCE(a.hide_attachment, 0) = 0")
-        if let predicate = AttachmentType.sqlPredicate(for: typeFilter, alias: "a") {
-            query.where("(\(predicate))")
-        }
-        query.orderBy("maj.message_id ASC", "a.ROWID ASC")
-        let (sql, params) = query.build()
-
-        var byMessage: [Int64: [AttachmentSummary]] = [:]
-        _ = try db.query(sql, params: params) { row in
-            let path = row.string(2)
-            // Route through policy: paths outside allowed roots are treated as unavailable,
-            // identical to a missing file. List output stays total (no error thrown).
-            let validatedPath = path.flatMap { AttachmentPathPolicy.validatedPath($0, allowedRoots: allowedRoots) }
-            let available = validatedPath.map { FileManager.default.fileExists(atPath: $0) } ?? false
-            let name = path.map { ($0 as NSString).lastPathComponent }
-            let bytes = row.optionalInt(5).map { Int($0) }
-            byMessage[row.int(0), default: []].append((
-                id: row.int(1),
-                type: AttachmentType.from(mimeType: row.string(3), uti: row.string(4)),
-                name: name,
-                available: available,
-                sizeHuman: bytes.map { FormatUtils.fileSize($0) }
-            ))
-        }
-        return byMessage
+        try MessageAnnotations.attachmentsByMessage(db: db, messageIds: messageIds, ofType: typeFilter)
+            .mapValues { attachments in
+                attachments.map { attachment in
+                    // Route through policy: paths outside allowed roots are treated as unavailable,
+                    // identical to a missing file. List output stays total (no error thrown).
+                    let path = attachment.filename
+                    let validatedPath = path.flatMap { AttachmentPathPolicy.validatedPath($0, allowedRoots: allowedRoots) }
+                    return (
+                        id: attachment.id,
+                        type: AttachmentType.from(mimeType: attachment.mimeType, uti: attachment.uti),
+                        name: path.map { ($0 as NSString).lastPathComponent },
+                        available: validatedPath.map { FileManager.default.fileExists(atPath: $0) } ?? false,
+                        sizeHuman: attachment.totalBytes.map { FormatUtils.fileSize($0) }
+                    )
+                }
+            }
     }
 }

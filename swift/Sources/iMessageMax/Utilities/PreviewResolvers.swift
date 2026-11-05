@@ -18,32 +18,14 @@ enum MessagePreviewResolver {
         return SummaryPreviewFormatter.attachmentPlaceholder(for: attachmentTypes)
     }
 
+    /// Kinds of the attachments Messages.app shows, per message.
     static func attachmentTypesByMessage(
         db: Database,
         messageIds: [Int64]
     ) throws -> [Int64: [AttachmentType]] {
-        guard !messageIds.isEmpty else { return [:] }
-
-        let placeholders = SQLFragments.placeholders(messageIds.count)
-        let sql = """
-            SELECT maj.message_id, a.mime_type, a.uti
-            FROM attachment a
-            JOIN message_attachment_join maj ON a.ROWID = maj.attachment_id
-            WHERE maj.message_id IN (\(placeholders))
-            ORDER BY a.ROWID ASC
-            """
-
-        var map: [Int64: [AttachmentType]] = [:]
-        let rows = try db.query(sql, params: messageIds.map { $0 as Any }) { row in
-            (
-                messageId: row.int(0),
-                type: AttachmentType.from(mimeType: row.string(1), uti: row.string(2))
-            )
+        try MessageAnnotations.attachmentsByMessage(db: db, messageIds: messageIds).mapValues { attachments in
+            attachments.map { AttachmentType.from(mimeType: $0.mimeType, uti: $0.uti) }
         }
-        for row in rows {
-            map[row.messageId, default: []].append(row.type)
-        }
-        return map
     }
 }
 

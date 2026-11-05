@@ -136,13 +136,22 @@ struct MessageAnnotations {
         }
     }
 
-    private static func attachmentsByMessage(db: Database, messageIds: [Int64]) throws -> [Int64: [Attachment]] {
+    /// Attachments Messages.app shows on each message, optionally only one
+    /// `AttachmentType.sqlPredicate` kind, in attachment order.
+    static func attachmentsByMessage(
+        db: Database,
+        messageIds: [Int64],
+        ofType type: String? = nil
+    ) throws -> [Int64: [Attachment]] {
+        guard !messageIds.isEmpty else { return [:] }
+        let typeClause = AttachmentType.sqlPredicate(for: type, alias: "a").map { "\n  AND (\($0))" } ?? ""
         let sql = """
             SELECT maj.message_id, a.ROWID, a.filename, a.mime_type, a.uti, a.total_bytes
             FROM attachment a
             JOIN message_attachment_join maj ON a.ROWID = maj.attachment_id
             WHERE maj.message_id IN (\(SQLFragments.placeholders(messageIds.count)))
-              AND COALESCE(a.hide_attachment, 0) = 0
+              AND \(SQLFragments.shownAttachment("a"))\(typeClause)
+            ORDER BY maj.message_id, a.ROWID
             """
         var map: [Int64: [Attachment]] = [:]
         let rows = try db.query(sql, params: messageIds) { row in

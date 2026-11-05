@@ -391,4 +391,48 @@ final class ToolsReviewRegressionTests: XCTestCase {
         let found = try await call("find_chat", ["name": "Team", "limit": 2], db: db)
         XCTAssertEqual(try decodeJSONArray(found["chats"]).compactMap { $0["id"] as? String }, ["chat2", "chat1"])
     }
+
+    // MARK: - Attachments
+
+    func testPreviewsSkipHiddenAttachments() async throws {
+        let db = try ToolTestDatabase(name: "hidden-attachment")
+        try db.insertHandle(rowId: 1, handle: "+15550000001")
+        try db.insertChat(rowId: 1, guid: "iMessage;-;+15550000001")
+        try db.joinChatHandle(chatId: 1, handleId: 1)
+        try db.insertMessage(rowId: 1, guid: "IMG", text: "\u{FFFC}", date: now() - minute, isFromMe: false, handleId: 1)
+        try db.joinChatMessage(chatId: 1, messageId: 1)
+        for id in 1...2 {
+            try db.insertAttachment(rowId: id, filename: "~/Library/Messages/Attachments/\(id).jpeg", mimeType: "image/jpeg",
+                                    uti: "public.jpeg", totalBytes: 10, transferName: "\(id).jpeg")
+            try db.joinMessageAttachment(messageId: 1, attachmentId: id)
+        }
+        try db.execute("UPDATE attachment SET hide_attachment = 1 WHERE ROWID = 2")
+
+        let page = try await call("list_chats", [:], db: db)
+        let chat = try XCTUnwrap(try decodeJSONArray(page["chats"]).first)
+        XCTAssertEqual((chat["last_message"] as? [String: Any])?["text"] as? String, "[Photo]")
+    }
+
+    func testAttachmentKindsAgreeBetweenSwiftAndSQL() throws {
+        let db = try ToolTestDatabase(name: "attachment-kinds")
+        let samples: [(String?, String?)] = [
+            ("image/heic", "public.heic"), (nil, "public.png"), ("video/quicktime", "com.apple.quicktime-movie"),
+            ("audio/x-m4a", nil), ("application/pdf", "com.adobe.pdf"), ("application/msword", nil),
+            ("text/plain", "public.plain-text"),
+        ]
+        for (id, sample) in samples.enumerated() {
+            try db.execute("""
+                INSERT INTO attachment (ROWID, mime_type, uti) VALUES (\(id + 1), \(sample.0.map { "'\($0)'" } ?? "NULL"), \(sample.1.map { "'\($0)'" } ?? "NULL"))
+                """)
+        }
+        for kind in ["image", "video", "audio", "pdf", "document"] {
+            let predicate = try XCTUnwrap(AttachmentType.sqlPredicate(for: kind, alias: "a"))
+            let matched: [Int64] = try db.database().query("SELECT a.ROWID FROM attachment a WHERE \(predicate) ORDER BY 1", params: []) { $0.int(0) }
+            let expected = samples.enumerated().filter { AttachmentType.from(mimeType: $0.element.0, uti: $0.element.1).rawValue == kind }
+                .map { Int64($0.offset + 1) }
+            XCTAssertEqual(matched, expected, kind)
+        }
+        XCTAssertNil(AttachmentType.sqlPredicate(for: "any"))
+        XCTAssertNil(AttachmentType.sqlPredicate(for: "other"))
+    }
 }
