@@ -35,7 +35,7 @@ final class SearchReactionSubqueryHangTests: XCTestCase {
         let resolver = makeSeededResolver()
 
         let searchStart = ContinuousClock.now
-        let search = try await decodeSearchResponse(
+        let search = try await decodeJSONDictionary(from:
             SearchTool.execute(
                 query: "lisbon",
                 db: db,
@@ -64,7 +64,7 @@ final class SearchReactionSubqueryHangTests: XCTestCase {
 
     func testSearchFindsAttributedBodyMatchOlderThanFiveHundredAttributedBodyOnlyRows() async throws {
         let fixture = try makeHangFixture(fillerCount: 600)
-        let search = try await decodeSearchResponse(
+        let search = try await decodeJSONDictionary(from:
             SearchTool.execute(
                 query: "lisbon",
                 db: fixture.database(),

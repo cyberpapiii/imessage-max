@@ -65,7 +65,7 @@ final class URLPreviewBalloonTests: XCTestCase {
 
     func testSearchFindsBalloonRowOnce() async throws {
         let fixture = try makeBalloonFixture()
-        let json = try decodeSearchResponse(
+        let json = try decodeJSONDictionary(from:
             await SearchTool.execute(
                 query: "example.com",
                 db: fixture.database(),
@@ -90,7 +90,7 @@ final class URLPreviewBalloonTests: XCTestCase {
 
     func testSearchHasLinkReturnsBalloonRow() async throws {
         let fixture = try makeBalloonFixture()
-        let json = try decodeSearchResponse(
+        let json = try decodeJSONDictionary(from:
             await SearchTool.execute(
                 query: "example",
                 has: "link",
@@ -164,7 +164,7 @@ final class URLPreviewBalloonTests: XCTestCase {
 
     func testSearchHasAttachmentIgnoresHiddenPayload() async throws {
         let fixture = try makeBalloonFixture()
-        let hidden = try decodeSearchResponse(
+        let hidden = try decodeJSONDictionary(from:
             await SearchTool.execute(
                 query: "example",
                 has: "attachment",
@@ -180,7 +180,7 @@ final class URLPreviewBalloonTests: XCTestCase {
             totalBytes: 12, hideAttachment: false
         )
         try fixture.joinMessageAttachment(messageId: 701, attachmentId: 7002)
-        let visible = try decodeSearchResponse(
+        let visible = try decodeJSONDictionary(from:
             await SearchTool.execute(
                 query: "example",
                 has: "attachment",

@@ -174,7 +174,7 @@ final class ResponseContractTests: XCTestCase {
         let fixture = try makeSearchFixture()
         let resolver = makeSeededResolver()
 
-        let response = try await decodeSearchResponse(
+        let response = try await decodeJSONDictionary(from:
             SearchTool.execute(
                 query: "appointment",
                 limit: 10,

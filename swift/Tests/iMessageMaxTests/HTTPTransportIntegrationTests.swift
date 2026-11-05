@@ -782,17 +782,6 @@ private func byteBuffer(for string: String) -> ByteBuffer {
     ByteBuffer(string: string)
 }
 
-private func decodeJSONString(from buffer: ByteBuffer) throws -> String {
-    var body = buffer
-    return try XCTUnwrap(body.readString(length: body.readableBytes))
-}
-
-private func decodeJSON(from buffer: ByteBuffer) throws -> [String: Any] {
-    let body = try decodeJSONString(from: buffer)
-    let data = Data(body.utf8)
-    return try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
-}
-
 private func assertIconMetadata(
     _ value: Any?,
     context: String,

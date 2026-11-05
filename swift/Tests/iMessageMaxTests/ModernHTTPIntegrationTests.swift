@@ -20,9 +20,9 @@ final class ModernHTTPIntegrationTests: XCTestCase {
                 body: modernByteBuffer(for: modernPayload(method: "server/discover"))
             )
 
-            let bodyText = try modernDecodeJSONString(from: response.body)
+            let bodyText = try decodeJSONString(from: response.body)
             XCTAssertEqual(response.head.status, .ok, bodyText)
-            let json = try modernDecodeJSON(from: response.body)
+            let json = try decodeJSON(from: response.body)
             let result = try XCTUnwrap(json["result"] as? [String: Any])
             XCTAssertEqual(result["supportedVersions"] as? [String], ["2026-07-28"])
             XCTAssertEqual(result["resultType"] as? String, "complete")
@@ -41,9 +41,9 @@ final class ModernHTTPIntegrationTests: XCTestCase {
                 body: modernByteBuffer(for: modernPayload(method: "tools/list"))
             )
 
-            let bodyText = try modernDecodeJSONString(from: response.body)
+            let bodyText = try decodeJSONString(from: response.body)
             XCTAssertEqual(response.head.status, .ok, bodyText)
-            let json = try modernDecodeJSON(from: response.body)
+            let json = try decodeJSON(from: response.body)
             let result = try XCTUnwrap(json["result"] as? [String: Any])
             XCTAssertEqual(result["resultType"] as? String, "complete")
             XCTAssertNotNil(result["ttlMs"] as? Int)
@@ -70,9 +70,9 @@ final class ModernHTTPIntegrationTests: XCTestCase {
                 )
             )
 
-            let bodyText = try modernDecodeJSONString(from: response.body)
+            let bodyText = try decodeJSONString(from: response.body)
             XCTAssertEqual(response.head.status, .ok, bodyText)
-            let json = try modernDecodeJSON(from: response.body)
+            let json = try decodeJSON(from: response.body)
             let result = try XCTUnwrap(json["result"] as? [String: Any])
             XCTAssertEqual(result["resultType"] as? String, "complete")
             let content = try XCTUnwrap(result["content"] as? [[String: Any]])
@@ -96,7 +96,7 @@ final class ModernHTTPIntegrationTests: XCTestCase {
                 )
             )
 
-            let bodyText = try modernDecodeJSONString(from: response.body)
+            let bodyText = try decodeJSONString(from: response.body)
             XCTAssertEqual(response.head.status, .ok, bodyText)
         }
     }
@@ -199,7 +199,7 @@ final class ModernHTTPIntegrationTests: XCTestCase {
             )
 
             XCTAssertEqual(response.head.status, .badRequest)
-            let json = try modernDecodeJSON(from: response.body)
+            let json = try decodeJSON(from: response.body)
             let error = try XCTUnwrap(json["error"] as? [String: Any])
             XCTAssertEqual(error["code"] as? Int, -32022)
             let data = try XCTUnwrap(error["data"] as? [String: Any])
@@ -218,7 +218,7 @@ final class ModernHTTPIntegrationTests: XCTestCase {
             )
 
             XCTAssertEqual(response.head.status, .notFound)
-            let json = try modernDecodeJSON(from: response.body)
+            let json = try decodeJSON(from: response.body)
             let error = try XCTUnwrap(json["error"] as? [String: Any])
             XCTAssertEqual(error["code"] as? Int, -32601)
         }
@@ -270,9 +270,9 @@ final class ModernHTTPIntegrationTests: XCTestCase {
                 body: modernByteBuffer(for: #"{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}"#)
             )
 
-            let bodyText = try modernDecodeJSONString(from: tools.body)
+            let bodyText = try decodeJSONString(from: tools.body)
             XCTAssertEqual(tools.head.status, .ok, bodyText)
-            let json = try modernDecodeJSON(from: tools.body)
+            let json = try decodeJSON(from: tools.body)
             let result = try XCTUnwrap(json["result"] as? [String: Any])
             let toolList = try XCTUnwrap(result["tools"] as? [[String: Any]])
             XCTAssertEqual(toolList.count, 13)
@@ -295,13 +295,13 @@ final class ModernHTTPIntegrationTests: XCTestCase {
                 )
             )
 
-            let bodyText = try modernDecodeJSONString(from: initialize.body)
+            let bodyText = try decodeJSONString(from: initialize.body)
             XCTAssertEqual(initialize.head.status, .ok, bodyText)
             XCTAssertNotNil(
                 initialize.head.headerFields[.mcpSessionId],
                 "initialize with modern _meta in the body must still create a legacy session"
             )
-            let json = try modernDecodeJSON(from: initialize.body)
+            let json = try decodeJSON(from: initialize.body)
             XCTAssertNil(json["error"], "initialize with modern _meta must not be a dispatcher error")
             let result = try XCTUnwrap(json["result"] as? [String: Any])
             XCTAssertEqual(
@@ -332,7 +332,7 @@ final class ModernHTTPIntegrationTests: XCTestCase {
                     for: #"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"tests","version":"1.0"}}}"#
                 )
             )
-            let initializeBody = try modernDecodeJSONString(from: initialize.body)
+            let initializeBody = try decodeJSONString(from: initialize.body)
             XCTAssertEqual(initialize.head.status, .ok, initializeBody)
             let sessionId = try XCTUnwrap(initialize.head.headerFields[.mcpSessionId])
 
@@ -346,7 +346,7 @@ final class ModernHTTPIntegrationTests: XCTestCase {
                 body: modernByteBuffer(for: #"{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}"#)
             )
             XCTAssertEqual(tools.head.status, .ok)
-            let json = try modernDecodeJSON(from: tools.body)
+            let json = try decodeJSON(from: tools.body)
             let result = try XCTUnwrap(json["result"] as? [String: Any])
             let toolList = try XCTUnwrap(result["tools"] as? [[String: Any]])
             XCTAssertEqual(toolList.count, 13)
@@ -402,25 +402,13 @@ private func modernByteBuffer(for string: String) -> ByteBuffer {
     ByteBuffer(string: string)
 }
 
-private func modernDecodeJSONString(from buffer: ByteBuffer) throws -> String {
-    var body = buffer
-    return try XCTUnwrap(body.readString(length: body.readableBytes))
-}
-
-private func modernDecodeJSON(from buffer: ByteBuffer) throws -> [String: Any] {
-    let body = try modernDecodeJSONString(from: buffer)
-    return try XCTUnwrap(
-        JSONSerialization.jsonObject(with: Data(body.utf8)) as? [String: Any]
-    )
-}
-
 private func assertHeaderMismatch(
     _ response: TestResponse,
     file: StaticString = #filePath,
     line: UInt = #line
 ) throws {
     XCTAssertEqual(response.head.status, .badRequest, file: file, line: line)
-    let json = try modernDecodeJSON(from: response.body)
+    let json = try decodeJSON(from: response.body)
     let error = try XCTUnwrap(json["error"] as? [String: Any], file: file, line: line)
     XCTAssertEqual(error["code"] as? Int, -32020, file: file, line: line)
 }

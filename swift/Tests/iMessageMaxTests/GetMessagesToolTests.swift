@@ -8,7 +8,7 @@ final class GetMessagesToolTests: XCTestCase {
         let resolver = makeSeededResolver()
         let tool = GetMessagesTool(db: fixture.database(), resolver: resolver)
 
-        let response = try await decodeGetMessagesResponse(
+        let response = try await decodeJSONDictionary(from:
             await tool.execute(args: ["chat_id": .string("chat20")])
         )
 
@@ -26,7 +26,7 @@ final class GetMessagesToolTests: XCTestCase {
         let fixture = try makeGetMessagesFixture()
         let tool = GetMessagesTool(db: fixture.database(), resolver: makeSeededResolver())
 
-        let response = try await decodeGetMessagesResponse(
+        let response = try await decodeJSONDictionary(from:
             await tool.execute(args: [
                 "participants": .array([.string("Alice"), .string("Bob")]),
                 "limit": .int(10),
@@ -59,7 +59,7 @@ final class GetMessagesToolTests: XCTestCase {
         let fixture = try makeGetMessagesFixture()
         let tool = GetMessagesTool(db: fixture.database(), resolver: makeSeededResolver())
 
-        let response = try await decodeGetMessagesResponse(
+        let response = try await decodeJSONDictionary(from:
             await tool.execute(args: [
                 "chat_id": .string("chat20"),
                 "from_person": .string("Bob"),
@@ -72,7 +72,7 @@ final class GetMessagesToolTests: XCTestCase {
         XCTAssertEqual(messages.count, 1)
         XCTAssertEqual(messages.first?["id"] as? String, "msg_200")
 
-        let linksResponse = try await decodeGetMessagesResponse(
+        let linksResponse = try await decodeJSONDictionary(from:
             await tool.execute(args: [
                 "chat_id": .string("chat20"),
                 "has": .string("links"),
@@ -103,7 +103,7 @@ final class GetMessagesToolTests: XCTestCase {
         let tool = GetMessagesTool(db: fixture.database(), resolver: makeSeededResolver())
 
         func ids(containing term: String) async throws -> [String] {
-            let response = try await decodeGetMessagesResponse(
+            let response = try await decodeJSONDictionary(from:
                 await tool.execute(args: ["chat_id": .string("chat1"), "contains": .string(term)])
             )
             return try decodeJSONArray(response["messages"]).compactMap { $0["id"] as? String }
@@ -119,7 +119,7 @@ final class GetMessagesToolTests: XCTestCase {
         let tool = GetMessagesTool(db: fixture.database(), resolver: makeSeededResolver())
 
         for person in ["nobody@example.com", "Zed Nobody"] {
-            let response = try await decodeGetMessagesResponse(
+            let response = try await decodeJSONDictionary(from:
                 await tool.execute(args: ["chat_id": .string("chat20"), "from_person": .string(person)])
             )
             XCTAssertEqual(try decodeJSONArray(try XCTUnwrap(response["messages"])).count, 0, person)
@@ -131,7 +131,7 @@ final class GetMessagesToolTests: XCTestCase {
         // Fixture images live in the temp dir; the tool contains chat.db paths to allowed roots, so the test supplies its own root.
         let tool = GetMessagesTool(db: fixture.database(), resolver: makeSeededResolver(), allowedRoots: [FileManager.default.temporaryDirectory.path])
 
-        let response = try await decodeGetMessagesResponse(
+        let response = try await decodeJSONDictionary(from:
             await tool.execute(args: [
                 "chat_id": .string("chat20"),
                 "limit": .int(10),
@@ -154,7 +154,7 @@ final class GetMessagesToolTests: XCTestCase {
         let fixture = try makeGetMessagesFixture()
         let tool = GetMessagesTool(db: fixture.database(), resolver: makeSeededResolver())
 
-        let response = try await decodeGetMessagesResponse(
+        let response = try await decodeJSONDictionary(from:
             await tool.execute(args: [
                 "chat_id": .string("chat20"),
                 "limit": .int(10),
@@ -182,7 +182,7 @@ final class GetMessagesToolTests: XCTestCase {
         let fixture = try makeGetMessagesFixture()
         let tool = GetMessagesTool(db: fixture.database(), resolver: makeSeededResolver())
 
-        let response = try await decodeGetMessagesResponse(
+        let response = try await decodeJSONDictionary(from:
             await tool.execute(args: [
                 "chat_id": .string("chat20"),
                 "limit": .int(10),
@@ -214,7 +214,7 @@ final class GetMessagesToolTests: XCTestCase {
         try fixture.joinChatMessage(chatId: 20, messageId: 403)
 
         let tool = GetMessagesTool(db: fixture.database(), resolver: makeSeededResolver())
-        let response = try await decodeGetMessagesResponse(
+        let response = try await decodeJSONDictionary(from:
             await tool.execute(args: [
                 "chat_id": .string("chat20"),
                 "limit": .int(10),
@@ -244,7 +244,7 @@ final class GetMessagesToolTests: XCTestCase {
         try fixture.joinChatMessage(chatId: 20, messageId: 405)
 
         let tool = GetMessagesTool(db: fixture.database(), resolver: makeSeededResolver())
-        let response = try await decodeGetMessagesResponse(
+        let response = try await decodeJSONDictionary(from:
             await tool.execute(args: ["chat_id": .string("chat20"), "limit": .int(10)])
         )
 
@@ -270,7 +270,7 @@ final class GetMessagesToolTests: XCTestCase {
         try fixture.joinChatMessage(chatId: 20, messageId: 404)
 
         let tool = GetMessagesTool(db: fixture.database(), resolver: makeSeededResolver())
-        let response = try await decodeGetMessagesResponse(
+        let response = try await decodeJSONDictionary(from:
             await tool.execute(args: [
                 "chat_id": .string("chat20"),
                 "limit": .int(10),
@@ -287,7 +287,7 @@ final class GetMessagesToolTests: XCTestCase {
         let fixture = try makeGetMessagesFixture()
         let tool = GetMessagesTool(db: fixture.database(), resolver: makeSeededResolver())
 
-        let unanswered = try await decodeGetMessagesResponse(
+        let unanswered = try await decodeJSONDictionary(from:
             await tool.execute(args: [
                 "chat_id": .string("chat20"),
                 "unanswered": .bool(true),
@@ -299,7 +299,7 @@ final class GetMessagesToolTests: XCTestCase {
         XCTAssertEqual(unansweredMessages.count, 1)
         XCTAssertEqual(unansweredMessages.first?["id"] as? String, "msg_203")
 
-        let fullResponse = try await decodeGetMessagesResponse(
+        let fullResponse = try await decodeJSONDictionary(from:
             await tool.execute(args: [
                 "chat_id": .string("chat20"),
                 "limit": .int(10),
@@ -311,7 +311,7 @@ final class GetMessagesToolTests: XCTestCase {
         let sessionStartMessage = try XCTUnwrap(fullMessages.first(where: { $0["id"] as? String == "msg_202" }))
         XCTAssertEqual(sessionStartMessage["session_gap_hours"] as? Double, 16.0)
 
-        let sessionFiltered = try await decodeGetMessagesResponse(
+        let sessionFiltered = try await decodeJSONDictionary(from:
             await tool.execute(args: [
                 "chat_id": .string("chat20"),
                 "session": .string("session_2"),
@@ -327,7 +327,7 @@ final class GetMessagesToolTests: XCTestCase {
         let fixture = try makeGetMessagesFixture()
         let tool = GetMessagesTool(db: fixture.database(), resolver: makeSeededResolver())
 
-        let firstPage = try await decodeGetMessagesResponse(
+        let firstPage = try await decodeJSONDictionary(from:
             await tool.execute(args: [
                 "chat_id": .string("chat20"),
                 "limit": .int(1),
@@ -339,7 +339,7 @@ final class GetMessagesToolTests: XCTestCase {
         XCTAssertEqual(firstMessages.first?["id"] as? String, "msg_203")
         let cursor = try XCTUnwrap(firstPage["cursor"] as? String)
 
-        let secondPage = try await decodeGetMessagesResponse(
+        let secondPage = try await decodeJSONDictionary(from:
             await tool.execute(args: [
                 "chat_id": .string("chat20"),
                 "limit": .int(1),
@@ -360,7 +360,7 @@ final class GetMessagesToolTests: XCTestCase {
             allowedRoots: [FileManager.default.temporaryDirectory.path]
         )
 
-        let response = try await decodeGetMessagesResponse(
+        let response = try await decodeJSONDictionary(from:
             await tool.execute(args: [
                 "chat_id": .string("chat40"),
                 "limit": .int(10),
@@ -407,7 +407,7 @@ final class GetMessagesToolTests: XCTestCase {
         try fixture.insertChat(rowId: 50, guid: "iMessage;-;50%_off", displayName: "Percent Chat")
         let tool = GetMessagesTool(db: fixture.database(), resolver: makeSeededResolver())
 
-        let response = try await decodeGetMessagesResponse(
+        let response = try await decodeJSONDictionary(from:
             await tool.execute(args: ["chat_id": .string("50%_off")])
         )
 
@@ -436,7 +436,7 @@ final class GetMessagesToolTests: XCTestCase {
         try fixture.execute("UPDATE message SET date = NULL WHERE ROWID = 1")
 
         let tool = GetMessagesTool(db: fixture.database(), resolver: ContactResolver(seedCache: [:]))
-        let response = try await decodeGetMessagesResponse(
+        let response = try await decodeJSONDictionary(from:
             await tool.execute(args: [
                 "chat_id": .string("chat7"),
                 "limit": .int(3),
@@ -452,7 +452,7 @@ final class GetMessagesToolTests: XCTestCase {
         let fixture = try makeGroupEventFixture()
         let tool = GetMessagesTool(db: fixture.database(), resolver: makeSeededResolver())
 
-        let response = try await decodeGetMessagesResponse(
+        let response = try await decodeJSONDictionary(from:
             await tool.execute(args: [
                 "chat_id": .string("chat40"),
                 "limit": .int(10),
@@ -476,7 +476,7 @@ final class GetMessagesToolTests: XCTestCase {
         let fixture = try makeGroupEventFixture()
         let tool = GetMessagesTool(db: fixture.database(), resolver: makeSeededResolver())
 
-        let response = try await decodeGetMessagesResponse(
+        let response = try await decodeJSONDictionary(from:
             await tool.execute(args: [
                 "chat_id": .string("chat40"),
                 "limit": .int(10),
@@ -492,7 +492,7 @@ final class GetMessagesToolTests: XCTestCase {
         let fixture = try makeGetMessagesFixture()
         let tool = GetMessagesTool(db: fixture.database(), resolver: makeSeededResolver())
 
-        let response = try await decodeGetMessagesResponse(
+        let response = try await decodeJSONDictionary(from:
             await tool.execute(args: ["chat_id": .string("chat20")])
         )
 
@@ -521,7 +521,7 @@ final class GetMessagesToolTests: XCTestCase {
         try fixture.joinChatMessage(chatId: 9, messageId: 1)
 
         let tool = GetMessagesTool(db: fixture.database(), resolver: ContactResolver(seedCache: [:]))
-        let response = try await decodeGetMessagesResponse(
+        let response = try await decodeJSONDictionary(from:
             await tool.execute(args: ["chat_id": .string("chat9")])
         )
         let messages = try decodeJSONArray(try XCTUnwrap(response["messages"]))
@@ -535,7 +535,7 @@ final class GetMessagesToolTests: XCTestCase {
         try fixture.execute("ALTER TABLE message DROP COLUMN date_edited")
         try fixture.execute("ALTER TABLE message DROP COLUMN associated_message_emoji")
         let tool = GetMessagesTool(db: fixture.database(), resolver: makeSeededResolver())
-        let response = try await decodeGetMessagesResponse(
+        let response = try await decodeJSONDictionary(from:
             await tool.execute(args: ["chat_id": .string("chat20")])
         )
         let messages = try decodeJSONArray(try XCTUnwrap(response["messages"]))
@@ -554,7 +554,7 @@ final class GetMessagesToolTests: XCTestCase {
             schemaOverride: SchemaCapabilities.assumed.without(.messageThreadOriginatorGuid, .messageDateEdited)
         )
         let tool = GetMessagesTool(db: db, resolver: makeSeededResolver())
-        let response = try await decodeGetMessagesResponse(
+        let response = try await decodeJSONDictionary(from:
             await tool.execute(args: ["chat_id": .string("chat20")])
         )
         let messages = try decodeJSONArray(try XCTUnwrap(response["messages"]))
@@ -563,10 +563,6 @@ final class GetMessagesToolTests: XCTestCase {
             XCTAssertNil(message["edited"])
         }
     }
-}
-
-private func decodeGetMessagesResponse(_ contents: [Tool.Content]) async throws -> [String: Any] {
-    return try decodeJSONDictionary(from: contents)
 }
 
 private func assertGroupEvent(

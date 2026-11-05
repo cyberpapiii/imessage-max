@@ -83,7 +83,7 @@ final class ArgumentClampTests: XCTestCase {
             resolver: makeSeededResolver()
         )
 
-        let json = try decodeSearchResponse(result)
+        let json = try decodeJSONDictionary(from: result)
         XCTAssertNotEqual(json["error"] as? String, "internal_error", "static execute must clamp unanswered_hours: \(json)")
         XCTAssertNotNil(json["results"], "static execute should answer normally with a clamped window: \(json)")
     }

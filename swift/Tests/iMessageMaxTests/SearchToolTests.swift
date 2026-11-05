@@ -6,7 +6,7 @@ final class SearchToolTests: XCTestCase {
         let fixture = try makeSearchFixture()
         let resolver = makeSeededResolver()
 
-        let anyWord = try await decodeSearchResponse(
+        let anyWord = try await decodeJSONDictionary(from:
             SearchTool.execute(
                 query: "costa trip",
                 cursor: nil,
@@ -25,7 +25,7 @@ final class SearchToolTests: XCTestCase {
         let anyResults = try decodeJSONArray(try XCTUnwrap(anyWord["results"]))
         XCTAssertEqual(Set(anyResults.compactMap { $0["id"] as? String }), Set(["msg_200", "msg_250", "msg_300"]))
 
-        let allWords = try await decodeSearchResponse(
+        let allWords = try await decodeJSONDictionary(from:
             SearchTool.execute(
                 query: "costa trip",
                 cursor: nil,
@@ -71,7 +71,7 @@ final class SearchToolTests: XCTestCase {
             try fixture.joinChatMessage(chatId: chatId, messageId: chatId)
         }
 
-        let hidden = try await decodeSearchResponse(
+        let hidden = try await decodeJSONDictionary(from:
             SearchTool.execute(
                 query: "zebra",
                 cursor: nil,
@@ -91,7 +91,7 @@ final class SearchToolTests: XCTestCase {
         XCTAssertEqual(hiddenResults.compactMap { $0["id"] as? String }, ["msg_1"])
         XCTAssertEqual(hidden["filtered_hidden"] as? Int, 2)
 
-        let shown = try await decodeSearchResponse(
+        let shown = try await decodeJSONDictionary(from:
             SearchTool.execute(
                 query: "zebra",
                 cursor: nil,
@@ -152,7 +152,7 @@ final class SearchToolTests: XCTestCase {
         let fixture = try makeSearchFixture()
         let resolver = makeSeededResolver()
 
-        let response = try await decodeSearchResponse(
+        let response = try await decodeJSONDictionary(from:
             SearchTool.execute(
                 query: "volcno",
                 cursor: nil,
@@ -186,7 +186,7 @@ final class SearchToolTests: XCTestCase {
         let fixture = try makeSearchFixture()
         let resolver = makeSeededResolver()
 
-        let response = try await decodeSearchResponse(
+        let response = try await decodeJSONDictionary(from:
             SearchTool.execute(
                 inChat: "chat20",
                 has: "link",
@@ -236,7 +236,7 @@ final class SearchToolTests: XCTestCase {
         )
         try fixture.joinChatMessage(chatId: 1, messageId: 2)
 
-        let response = try await decodeSearchResponse(
+        let response = try await decodeJSONDictionary(from:
             SearchTool.execute(
                 has: "link",
                 cursor: nil,
@@ -281,7 +281,7 @@ final class SearchToolTests: XCTestCase {
         try fixture.insertMessage(rowId: 2, guid: "g2", text: "https://example.com", date: 2_000, isFromMe: false, handleId: 1)
         try fixture.joinChatMessage(chatId: 1, messageId: 2)
 
-        let response = try await decodeSearchResponse(
+        let response = try await decodeJSONDictionary(from:
             SearchTool.execute(has: "link", db: fixture.database(), resolver: makeSeededResolver())
         )
         let results = try decodeJSONArray(try XCTUnwrap(response["results"]))
@@ -292,7 +292,7 @@ final class SearchToolTests: XCTestCase {
         let fixture = try makeSearchFixture()
         let resolver = makeSeededResolver()
 
-        let response = try await decodeSearchResponse(
+        let response = try await decodeJSONDictionary(from:
             SearchTool.execute(
                 fromPerson: "Bob",
                 cursor: nil,
@@ -334,7 +334,7 @@ final class SearchToolTests: XCTestCase {
             try fixture.joinChatMessage(chatId: chat, messageId: chat)
         }
 
-        let response = try await decodeSearchResponse(
+        let response = try await decodeJSONDictionary(from:
             SearchTool.execute(
                 query: "hello", cursor: nil, limit: 10, sort: "recent_first", format: "grouped_by_chat",
                 includeContext: false, unanswered: false, unansweredHours: 24, matchAll: false, fuzzy: false,
@@ -350,7 +350,7 @@ final class SearchToolTests: XCTestCase {
         let fixture = try makeSearchFixture()
         let resolver = makeSeededResolver()
 
-        let response = try await decodeSearchResponse(
+        let response = try await decodeJSONDictionary(from:
             SearchTool.execute(
                 cursor: nil,
                 limit: 10,
@@ -376,7 +376,7 @@ final class SearchToolTests: XCTestCase {
         let fixture = try makeSearchFixture()
         let resolver = makeSeededResolver()
 
-        let pageOne = try await decodeSearchResponse(
+        let pageOne = try await decodeJSONDictionary(from:
             SearchTool.execute(
                 fromPerson: "Bob",
                 cursor: nil,
@@ -401,7 +401,7 @@ final class SearchToolTests: XCTestCase {
         }
         XCTAssertEqual(firstPageResult["id"] as? String, "msg_250")
 
-        let pageTwo = try await decodeSearchResponse(
+        let pageTwo = try await decodeJSONDictionary(from:
             SearchTool.execute(
                 fromPerson: "Bob",
                 cursor: cursor,
@@ -430,7 +430,7 @@ final class SearchToolTests: XCTestCase {
         let fixture = try makeSearchFixture()
         let resolver = makeSeededResolver()
 
-        let response = try await decodeSearchResponse(
+        let response = try await decodeJSONDictionary(from:
             SearchTool.execute(
                 query: "appointment",
                 cursor: nil,
@@ -490,7 +490,7 @@ final class SearchToolTests: XCTestCase {
         Database.queryCountForTesting = 0
         defer { Database.queryCountForTesting = nil }
 
-        let response = try await decodeSearchResponse(
+        let response = try await decodeJSONDictionary(from:
             SearchTool.execute(
                 query: "batchctx",
                 cursor: nil,
@@ -558,7 +558,7 @@ final class SearchToolTests: XCTestCase {
         )
         try fixture.joinChatMessage(chatId: 1, messageId: 32)
 
-        let response = try await decodeSearchResponse(
+        let response = try await decodeJSONDictionary(from:
             SearchTool.execute(
                 query: "anchorword",
                 cursor: nil,
@@ -604,7 +604,7 @@ final class SearchToolTests: XCTestCase {
             try fixture.joinChatMessage(chatId: 1, messageId: row.id)
         }
 
-        let response = try await decodeSearchResponse(
+        let response = try await decodeJSONDictionary(from:
             SearchTool.execute(query: "hit", includeContext: true, db: fixture.database(), resolver: makeSeededResolver())
         )
         let results = try decodeJSONArray(try XCTUnwrap(response["results"]))
@@ -636,7 +636,7 @@ final class SearchToolTests: XCTestCase {
         }
 
         Database.queryCountForTesting = 0
-        let baseline = try await decodeSearchResponse(
+        let baseline = try await decodeJSONDictionary(from:
             SearchTool.execute(
                 query: "status",
                 cursor: nil,
@@ -658,7 +658,7 @@ final class SearchToolTests: XCTestCase {
         Database.queryCountForTesting = 0
         defer { Database.queryCountForTesting = nil }
 
-        let unanswered = try await decodeSearchResponse(
+        let unanswered = try await decodeJSONDictionary(from:
             SearchTool.execute(
                 cursor: nil,
                 limit: 50,
@@ -704,7 +704,7 @@ final class SearchToolTests: XCTestCase {
         Database.queryCountForTesting = 0
         defer { Database.queryCountForTesting = nil }
 
-        let response = try await decodeSearchResponse(
+        let response = try await decodeJSONDictionary(from:
             SearchTool.execute(
                 query: "batchname",
                 cursor: nil,
@@ -765,7 +765,7 @@ final class SearchToolTests: XCTestCase {
             try fixture.joinChatMessage(chatId: 10, messageId: rowId)
         }
 
-        let response = try await decodeSearchResponse(
+        let response = try await decodeJSONDictionary(from:
             SearchTool.execute(
                 query: "unnamedpreview",
                 cursor: nil,
@@ -832,7 +832,7 @@ final class SearchToolTests: XCTestCase {
         try fixture.joinChatMessage(chatId: 3, messageId: 3)
 
         func ids(_ isGroup: Bool?) async throws -> Set<String> {
-            let response = try await decodeSearchResponse(
+            let response = try await decodeJSONDictionary(from:
                 SearchTool.execute(
                     query: "grpword",
                     isGroup: isGroup,
@@ -864,7 +864,7 @@ final class SearchToolTests: XCTestCase {
         let fixture = try makeSearchFixture()
         let resolver = makeSeededResolver()
 
-        let response = try await decodeSearchResponse(
+        let response = try await decodeJSONDictionary(from:
             SearchTool.execute(
                 query: "costa trip",
                 cursor: nil,
@@ -931,10 +931,6 @@ final class SearchToolTests: XCTestCase {
         XCTAssertFalse(json.contains("\"reply_to\""))
         XCTAssertFalse(json.contains("\"edited\""))
     }
-}
-
-func decodeSearchResponse(_ json: String) throws -> [String: Any] {
-    try decodeJSONDictionary(from: json)
 }
 
 func makeSearchFixture() throws -> ToolTestDatabase {

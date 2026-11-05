@@ -167,20 +167,3 @@ private func pngSize(_ data: Data) throws -> (width: Int, height: Int) {
     let height = data[20..<24].reduce(0) { ($0 << 8) | Int($1) }
     return (width, height)
 }
-
-private func jsonObject(at url: URL) throws -> [String: Any] {
-    let data = try Data(contentsOf: url)
-    return try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
-}
-
-private func findRepoRoot(from fileURL: URL) throws -> URL {
-    var directory = fileURL.deletingLastPathComponent()
-    while directory.path != "/" {
-        let iconURL = directory.appendingPathComponent("icon.png")
-        if FileManager.default.fileExists(atPath: iconURL.path) {
-            return directory
-        }
-        directory.deleteLastPathComponent()
-    }
-    throw CocoaError(.fileNoSuchFile)
-}

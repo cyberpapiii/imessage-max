@@ -842,24 +842,6 @@ final class SendToolExecuteTests: XCTestCase {
     }
 }
 
-// MARK: - Decode helper (reuse pattern from existing tests)
-
-private func decodeJSONDictionary(from contents: [Tool.Content]) throws -> [String: Any] {
-    let text: String
-    switch contents.first {
-    case .text(let t, _, _):
-        text = t
-    default:
-        throw NSError(domain: "SendToolExecuteTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Expected text content"])
-    }
-    let data = Data(text.utf8)
-    return try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
-}
-
-private func decodeJSONDictionary(from error: ToolFailure) throws -> [String: Any] {
-    return try decodeJSONDictionary(from: error.content)
-}
-
 // MARK: - Moved from PlaceholderTests.swift (plan 032)
 
 final class SendToolExecutionTests: XCTestCase {
