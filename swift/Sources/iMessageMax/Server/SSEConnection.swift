@@ -68,10 +68,8 @@ final class SSEChannel: @unchecked Sendable {
 
     /// The event stream with interleaved keep-alives.
     ///
-    /// Single-consumer: built once at init and consumed exactly once. It used
-    /// to be a computed property, so every access spawned a fresh merging task
-    /// group over the same single-consumer base stream. A second reader would
-    /// silently steal events and leak a task group per access.
+    /// Single-consumer: built once at init and consumed exactly once. A second
+    /// reader would silently steal events.
     let stream: AsyncStream<String>
 
     /// - Parameter keepAliveInterval: heartbeat spacing. Production uses the

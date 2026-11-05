@@ -59,7 +59,6 @@ struct SchemaType {
     }
 }
 
-/// Input schema builder for tools
 enum InputSchema {
     static func object(
         properties: [String: SchemaType],
@@ -99,10 +98,7 @@ extension Tool.Content {
     }
 }
 
-// MARK: - Server Extension
-
 extension Server {
-    /// Register built-in handlers for ListTools and CallTool
     func registerToolHandlers(_ catalog: ToolCatalog) async {
         self.withMethodHandler(ListTools.self) { _ in
             ListTools.Result(tools: catalog.tools)
@@ -189,8 +185,6 @@ extension Server {
         }
     }
 }
-
-// MARK: - Value Extension
 
 extension Value {
     var stringValue: String? {

@@ -22,7 +22,7 @@ enum SendStatus: String, Encodable, Sendable {
     case confirmed
     /// Transport accepted but no row appeared within the polling window.
     case uncertain
-    /// Row found in a different chat than intended (R5).
+    /// Row found in a different chat than intended.
     case mismatch
     /// Row found in the intended chat with error ≠ 0.
     case failedDelivery = "failed_delivery"
@@ -43,7 +43,6 @@ enum SendStatus: String, Encodable, Sendable {
     var dispatched: Bool { self != .failed && self != .ambiguous }
 }
 
-/// Response from the send tool
 struct SendResponse: Encodable, Sendable {
     let status: SendStatus
     let timestamp: String?
@@ -116,7 +115,7 @@ struct SendResponse: Encodable, Sendable {
         }
     }
 
-    // Returned only when verification cannot run (DB unreadable). Option D §4.3.
+    // Returned only when verification cannot run (DB unreadable).
     static func sent(deliveredTo: [String], chat: ChatReference?) -> SendResponse {
         SendResponse(.sent, disposition: .completed, chat: chat, deliveredTo: deliveredTo)
     }

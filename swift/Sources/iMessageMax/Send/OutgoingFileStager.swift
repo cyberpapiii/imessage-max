@@ -57,7 +57,7 @@ struct OutgoingFileStager: Sendable {
         } catch AttachmentSource.Failure.notAbsolute {
             throw SendError.invalidParams("Attachment path for '\(basename)' must be absolute (or start with ~/).")
         } catch {
-            // notFound, notPermitted, other: same client-facing wording as before.
+            // notFound, notPermitted, other: one client-facing wording.
             throw SendError.fileNotFound(basename)
         }
     }

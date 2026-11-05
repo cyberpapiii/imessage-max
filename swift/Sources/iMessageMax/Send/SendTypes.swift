@@ -43,7 +43,7 @@ enum SendPayload: Sendable, Equatable {
     }
 
     /// Client-facing description, for the partial-failure breakdown.
-    /// Files are named by filename only, never the full path (plan 023).
+    /// Files are named by filename only, never the full path.
     var clientDescription: String {
         switch self {
         case .text: return "text message"
