@@ -109,8 +109,15 @@ restart: ## Restart the launchd service
 	@launchctl bootstrap gui/$$(id -u) $(PLIST)
 	@echo "✓ Service restarted"
 
+# launchd does not expand ~, so the log paths get $(HOME) here, as the
+# companion's ServiceConfiguration.renderTemplate does. A loaded agent is
+# booted out first: bootstrap refuses a label that is already loaded.
 install-agent: ## Install the launchd plist from swift/launchd/
-	@sed "s|__BIN__|$(shell pwd)/.build/release/imessage-max|" launchd/local.imessage-max.plist > $(PLIST)
+	@if launchctl print gui/$$(id -u)/$(LAUNCHD_LABEL) >/dev/null 2>&1; then \
+		launchctl bootout gui/$$(id -u)/$(LAUNCHD_LABEL); \
+	fi
+	@sed -e "s|__BIN__|$(shell pwd)/.build/release/imessage-max|" -e "s|~/|$(HOME)/|g" \
+		launchd/local.imessage-max.plist > $(PLIST)
 	@launchctl bootstrap gui/$$(id -u) $(PLIST)
 	@echo "✓ Installed $(PLIST)"
 
