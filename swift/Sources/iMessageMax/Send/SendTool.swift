@@ -141,8 +141,26 @@ actor SendTool {
         // Stops at the first hard failure: firing later payloads after one has
         // failed produces out-of-order conversations and compounds the partial
         // reporting below. Soft transfer outcomes keep sending.
+        // A cancelled call (notifications/cancelled, dropped connection)
+        // dispatches nothing further. A payload already handed to osascript
+        // is never interrupted: killing it mid-send cannot undo the send and
+        // would only make its outcome unknowable.
         var pendingMessages: [String] = []
         for (index, payload) in payloads.enumerated() {
+            if Task.isCancelled {
+                let cancelled = "Send cancelled before \(payload.clientDescription) was dispatched."
+                if index == 0 {
+                    return .error(cancelled)
+                }
+                return .partialFailure(
+                    sentDescriptions: payloads.prefix(index).map(\.clientDescription),
+                    failedDescription: payload.clientDescription,
+                    error: cancelled,
+                    deliveredTo: resolved.deliveredTo,
+                    chat: resolved.chat,
+                    disposition: .notStarted
+                )
+            }
             if index == verifiedIndex {
                 // Read right before this dispatch, so rows from earlier payloads
                 // and earlier identical texts sit at or below it. Unreadable:
