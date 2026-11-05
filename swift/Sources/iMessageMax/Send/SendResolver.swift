@@ -275,8 +275,8 @@ actor SendResolver {
         if let displayName, !displayName.isEmpty {
             name = displayName
         } else {
-            name = "chat\(chatId)"
+            name = ChatIdentifier.format(chatId)
         }
-        return ChatReference(id: "chat\(chatId)", name: name)
+        return ChatReference(id: ChatIdentifier.format(chatId), name: name)
     }
 }

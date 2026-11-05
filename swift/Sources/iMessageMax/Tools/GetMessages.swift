@@ -327,7 +327,7 @@ actor GetMessagesTool {
 
             var media: [GetMessagesResponse.MediaInfo]? = nil
             var attachments: [GetMessagesResponse.AttachmentSummary]? = nil
-            let messageId = "msg_\(row.id)"
+            let messageId = MessageIdentifier.format(row.id)
             var messageMediaTotal = 0
             var messageMediaIncluded = 0
 
@@ -337,7 +337,7 @@ actor GetMessagesTool {
                         mimeType: att.mimeType,
                         uti: att.uti
                     )
-                    let attachmentId = "att\(att.id)"
+                    let attachmentId = AttachmentIdentifier.format(att.id)
 
                     if attachmentType == .image,
                        let path = att.filename {
@@ -448,7 +448,7 @@ actor GetMessagesTool {
         let nextCursor = Self.nextCursor(from: messageRows, limit: limit)
 
         return GetMessagesResponse(
-            chat: .init(id: "chat\(numericChatId)", name: displayName),
+            chat: .init(id: ChatIdentifier.format(numericChatId), name: displayName),
             people: people,
             messages: finalMessages,
             sessions: finalSessions,

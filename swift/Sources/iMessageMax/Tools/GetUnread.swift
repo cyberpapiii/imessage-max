@@ -316,7 +316,7 @@ final class GetUnread {
 
             unreadMessages.append(
                 UnreadMessageItem(
-                    id: "msg_\(row.id)",
+                    id: MessageIdentifier.format(row.id),
                     chat: ChatReference(id: identity.mcpId, name: identity.displayName),
                     from: senderName,
                     text: text,
@@ -482,7 +482,7 @@ final class GetUnread {
         participants: [ChatSummaryQueries.Participant]
     ) -> ChatIdentity {
         ChatIdentity(
-            mcpId: "chat\(chatId)",
+            mcpId: ChatIdentifier.format(chatId),
             guid: nil,
             explicitName: explicitName,
             participants: participants.map {

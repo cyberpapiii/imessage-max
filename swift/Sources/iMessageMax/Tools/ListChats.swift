@@ -454,7 +454,7 @@ enum ListChatsTool {
             }
 
             let identity = ChatIdentity(
-                mcpId: "chat\(chatRow.id)",
+                mcpId: ChatIdentifier.format(chatRow.id),
                 guid: chatRow.guid,
                 explicitName: chatRow.displayName,
                 participants: identityParticipants

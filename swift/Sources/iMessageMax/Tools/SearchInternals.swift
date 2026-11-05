@@ -406,8 +406,8 @@ extension SearchTool {
             let chatName = identityByChat[row.chatId]?.displayName ?? "Unknown Chat"
 
             var result = SearchResult(
-                id: "msg_\(row.msgId)",
-                chat: ChatReference(id: "chat\(row.chatId)", name: chatName),
+                id: MessageIdentifier.format(row.msgId),
+                chat: ChatReference(id: ChatIdentifier.format(row.chatId), name: chatName),
                 from: senderName,
                 excerpt: makeExcerpt(text: text, query: query),
                 ago: TimeUtils.formatCompactRelative(msgDate),
@@ -515,7 +515,7 @@ extension SearchTool {
 
             if chat.results.count < 3 {
                 chat.results.append(SearchSampleMessage(
-                    id: "msg_\(row.msgId)",
+                    id: MessageIdentifier.format(row.msgId),
                     from: senderName,
                     excerpt: makeExcerpt(text: text, query: query),
                     ts: TimeUtils.formatISO(msgDate)
@@ -764,7 +764,7 @@ extension SearchTool {
         let msgDate = AppleTime.toDate(row.date)
 
         return SearchContextMessage(
-            id: "msg_\(row.msgId)",
+            id: MessageIdentifier.format(row.msgId),
             from: await resolveSenderName(
                 isFromMe: row.isFromMe,
                 handle: row.senderHandle,

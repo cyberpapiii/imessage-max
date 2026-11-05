@@ -54,7 +54,7 @@ struct ChatIdentity: Codable {
         rows: [ChatSummaryQueries.Participant]
     ) -> ChatIdentity {
         ChatIdentity(
-            mcpId: "chat\(chatId)",
+            mcpId: ChatIdentifier.format(chatId),
             guid: guid,
             explicitName: explicitName,
             participants: rows.map { makeParticipant(handle: $0.handle, contactName: $0.name) }

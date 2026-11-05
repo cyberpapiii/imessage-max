@@ -132,7 +132,7 @@ enum GetContext {
         // Reject malformed ids before touching chat.db, so a bad id reads as
         // invalid_id even when the database cannot be opened.
         if let msgIdStr = messageId {
-            if parseMessageId(msgIdStr) == nil {
+            if MessageIdentifier.parse(msgIdStr) == nil {
                 throw ToolFailure("invalid_id", "Invalid message ID format: \(msgIdStr)")
             }
         } else if let cId = chatId, ChatIdentifier.parseRowId(cId) == nil {
@@ -143,7 +143,7 @@ enum GetContext {
         let targetResult: (msgId: Int64, text: String?, attributedBody: Data?, date: Int64, isFromMe: Bool, senderHandle: String?, chatId: Int64, chatName: String?, guid: String, threadOriginatorGuid: String?, dateEdited: Int64)
 
         if let msgIdStr = messageId {
-            guard let numericId = parseMessageId(msgIdStr) else {
+            guard let numericId = MessageIdentifier.parse(msgIdStr) else {
                 throw ToolFailure("invalid_id", "Invalid message ID format: \(msgIdStr)")
             }
 
@@ -435,7 +435,7 @@ enum GetContext {
             let msgDate = AppleTime.toDate(date)
 
             return GetContextResponse.ContextMessage(
-                id: "msg_\(msgId)",
+                id: MessageIdentifier.format(msgId),
                 from: await getPersonKey(isFromMe: isFromMe, handle: senderHandle),
                 text: messageText,
                 ago: TimeUtils.formatCompactRelative(msgDate),
@@ -508,7 +508,7 @@ enum GetContext {
 
         let response = GetContextResponse(
             chat: GetContextResponse.ChatInfo(
-                id: "chat\(targetChatId)",
+                id: ChatIdentifier.format(targetChatId),
                 name: chatName
             ),
             people: people,
@@ -521,16 +521,6 @@ enum GetContext {
     }
 
     // MARK: - Private Helpers
-
-    private static func parseMessageId(_ idStr: String) -> Int64? {
-        var numStr = idStr
-        if numStr.hasPrefix("msg_") {
-            numStr = String(numStr.dropFirst(4))
-        } else if numStr.hasPrefix("msg") {
-            numStr = String(numStr.dropFirst(3))
-        }
-        return Int64(numStr)
-    }
 
     private static func displayNameForChat(
         chatId: Int64,

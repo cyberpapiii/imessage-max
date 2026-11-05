@@ -98,14 +98,7 @@ struct GetAttachment {
             throw ToolFailure("validation_error", "attachment_id is required")
         }
 
-        let numericId: Int?
-        if attachmentId.hasPrefix("att") {
-            numericId = Int(attachmentId.dropFirst(3))
-        } else {
-            numericId = Int(attachmentId)
-        }
-
-        guard let rowId = numericId else {
+        guard let rowId = AttachmentIdentifier.parse(attachmentId) else {
             throw ToolFailure("validation_error", "Invalid attachment_id format: \(attachmentId)")
         }
 
@@ -174,7 +167,7 @@ struct GetAttachment {
 
             return AttachmentImage(
                 metadata: AttachmentMetadataSummary(
-                    id: "att\(rowId)",
+                    id: AttachmentIdentifier.format(rowId),
                     type: attType,
                     name: displayName,
                     chat: chat,
@@ -227,7 +220,7 @@ struct GetAttachment {
                 resolver: resolver
             )
             let identity = ChatIdentity(
-                mcpId: "chat\(row.0)",
+                mcpId: ChatIdentifier.format(row.0),
                 guid: nil,
                 explicitName: nil,
                 participants: participants.map {
@@ -237,7 +230,7 @@ struct GetAttachment {
             name = identity.displayName
         }
         return ChatReference(
-            id: "chat\(row.0)",
+            id: ChatIdentifier.format(row.0),
             name: name
         )
     }

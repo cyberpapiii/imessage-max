@@ -101,7 +101,7 @@ enum MessageAnnotations {
         }
         var originatorIdByGuid: [String: String] = [:]
         for (guid, id) in pageIdByGuid {
-            originatorIdByGuid[guid] = "msg_\(id)"
+            originatorIdByGuid[guid] = MessageIdentifier.format(id)
         }
 
         let missing = Array(Set(originatorGuids.filter { !$0.isEmpty }).subtracting(pageIdByGuid.keys))
@@ -114,7 +114,7 @@ enum MessageAnnotations {
                 (guid: row.string(0) ?? "", id: Int(row.int(1)))
             }
             for row in rows {
-                originatorIdByGuid[row.guid] = "msg_\(row.id)"
+                originatorIdByGuid[row.guid] = MessageIdentifier.format(row.id)
             }
         }
 
@@ -286,14 +286,14 @@ extension GetMessagesTool {
         }
 
         if exactMatches.count == 1 {
-            return "chat\(exactMatches[0].id)"
+            return ChatIdentifier.format(exactMatches[0].id)
         } else if !exactMatches.isEmpty {
             throw ToolFailure(code: "ambiguous_participants", body: GetMessagesErrorResponse(
                 error: "ambiguous_participants",
                 message: "Multiple chats found with participants: \(participants)",
                 candidates: exactMatches.prefix(5).map { row in
                     GetMessagesErrorResponse.Candidate(
-                        chatId: "chat\(row.id)",
+                        chatId: ChatIdentifier.format(row.id),
                         name: row.displayName ?? "(Unnamed)",
                         participantCount: row.participantCount
                     )
@@ -301,14 +301,14 @@ extension GetMessagesTool {
                 suggestion: "Please specify chat_id to target the exact conversation."
             ))
         } else if rows.count == 1 {
-            return "chat\(rows[0].id)"
+            return ChatIdentifier.format(rows[0].id)
         } else if !rows.isEmpty {
             throw ToolFailure(code: "ambiguous_participants", body: GetMessagesErrorResponse(
                 error: "ambiguous_participants",
                 message: "Multiple chats found with participants: \(participants)",
                 candidates: rows.prefix(5).map { row in
                     GetMessagesErrorResponse.Candidate(
-                        chatId: "chat\(row.id)",
+                        chatId: ChatIdentifier.format(row.id),
                         name: row.displayName ?? "(Unnamed)",
                         participantCount: row.participantCount
                     )
@@ -334,7 +334,7 @@ extension GetMessagesTool {
         }
 
         guard let info = rows.first else {
-            throw ToolFailure("chat_not_found", ClientErrorMessages.chatNotFound("chat\(chatId)"))
+            throw ToolFailure("chat_not_found", ClientErrorMessages.chatNotFound(ChatIdentifier.format(chatId)))
         }
 
         return info

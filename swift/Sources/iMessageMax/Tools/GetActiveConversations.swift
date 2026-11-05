@@ -230,7 +230,7 @@ enum GetActiveConversations {
             let participantRows = participantsByChat[row.chatId] ?? []
 
             let identity = ChatIdentity(
-                mcpId: "chat\(row.chatId)",
+                mcpId: ChatIdentifier.format(row.chatId),
                 guid: nil,
                 explicitName: row.displayName,
                 participants: participantRows.map {

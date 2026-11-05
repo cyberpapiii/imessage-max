@@ -248,7 +248,7 @@ actor GetMessagesSinceTool {
             if let rowAttachments = attachmentsMap[row.id] {
                 attachments = rowAttachments.map {
                     GetMessagesResponse.AttachmentSummary(
-                        id: "att\($0.id)",
+                        id: AttachmentIdentifier.format($0.id),
                         type: AttachmentType.from(mimeType: $0.mimeType, uti: $0.uti).rawValue,
                         filename: $0.filename?.components(separatedBy: "/").last,
                         size: $0.totalBytes
@@ -266,7 +266,7 @@ actor GetMessagesSinceTool {
             let ts = row.date.flatMap { AppleTime.toDate($0) }.flatMap { TimeUtils.formatISO($0) } ?? ""
 
             items.append(GetMessagesSinceResponse.Item(
-                id: "msg_\(row.id)",
+                id: MessageIdentifier.format(row.id),
                 rowid: row.id,
                 chat: ChatReference(id: identity.mcpId, name: identity.displayName),
                 from: from,

@@ -242,7 +242,7 @@ final class ListAttachments {
             }
 
             let chatReference = ChatReference(
-                id: "chat\(row.chatId)",
+                id: ChatIdentifier.format(row.chatId),
                 name: try await resolveChatName(
                     chatId: row.chatId,
                     explicitName: row.chatName,
@@ -260,7 +260,7 @@ final class ListAttachments {
 
             results.append(
                 SharedMessageItem(
-                    messageId: "msg_\(row.msgId)",
+                    messageId: MessageIdentifier.format(row.msgId),
                     chat: chatReference,
                     from: senderName,
                     messagePreview: messagePreview,
@@ -269,7 +269,7 @@ final class ListAttachments {
                     ago: TimeUtils.formatCompactRelative(date),
                     attachments: attachments.map { attachment in
                         SharedAttachmentSummary(
-                            id: "att\(attachment.id)",
+                            id: AttachmentIdentifier.format(attachment.id),
                             type: attachment.type.rawValue,
                             name: attachment.name,
                             available: attachment.available,

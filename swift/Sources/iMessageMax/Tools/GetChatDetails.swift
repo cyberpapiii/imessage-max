@@ -71,7 +71,7 @@ enum GetChatDetailsTool {
         }
         let participants = try await loadParticipants(chatId: numericChatId, resolver: resolver, database: database)
         let identity = ChatIdentity(
-            mcpId: "chat\(numericChatId)",
+            mcpId: ChatIdentifier.format(numericChatId),
             guid: chatRow.guid,
             explicitName: chatRow.displayName,
             participants: participants

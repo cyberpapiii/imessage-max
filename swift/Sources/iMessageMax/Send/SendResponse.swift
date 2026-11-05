@@ -141,7 +141,7 @@ struct SendResponse: Encodable, Sendable {
             .mismatch, disposition: .completed, deliveredTo: deliveredTo,
             message: "Message was found in a different chat than intended. This is a routing mismatch. Do not treat as confirmed.",
             intendedChat: intendedChat,
-            actualChatId: "chat\(actualChatId)"
+            actualChatId: ChatIdentifier.format(actualChatId)
         )
     }
 
