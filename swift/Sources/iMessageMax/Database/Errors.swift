@@ -1,4 +1,5 @@
 import Foundation
+import IMessageMaxContract
 
 enum DatabaseError: LocalizedError {
     case permissionDenied(String)
@@ -24,8 +25,8 @@ enum DatabaseError: LocalizedError {
 
     var clientCode: String {
         switch self {
-        case .notFound: "database_not_found"
-        case .permissionDenied: "permission_denied"
+        case .notFound: DatabaseStatus.databaseNotFound.rawValue
+        case .permissionDenied: DatabaseStatus.permissionDenied.rawValue
         case .queryFailed: "query_failed"
         case .invalidData: "invalid_data"
         case .cancelled: "cancelled"

@@ -43,7 +43,7 @@ final class DiagnoseToolTests: XCTestCase {
         final class Counter: @unchecked Sendable {
             let lock = NSLock()
             var calls = 0
-            func next() -> (ok: Bool, status: String) {
+            func next() -> (ok: Bool, status: DatabaseStatus) {
                 lock.lock(); defer { lock.unlock() }
                 calls += 1
                 return calls == 1 ? (false, "permission_denied") : (true, "accessible")

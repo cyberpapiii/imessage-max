@@ -75,7 +75,7 @@ final class ServiceFilesContractTests: XCTestCase {
         XCTAssertEqual(DatabaseError.permissionDenied("").clientCode, DatabaseStatus.permissionDenied.rawValue)
         XCTAssertEqual(DatabaseError.notFound("").clientCode, DatabaseStatus.databaseNotFound.rawValue)
         XCTAssertEqual(
-            Database.checkAccess(path: "/nonexistent/chat.db").status, DatabaseStatus.databaseNotFound.rawValue)
+            Database.checkAccess(path: "/nonexistent/chat.db").status, DatabaseStatus.databaseNotFound)
     }
 }
 
