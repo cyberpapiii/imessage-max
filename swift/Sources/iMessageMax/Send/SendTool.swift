@@ -1,7 +1,7 @@
 import Foundation
 import MCP
 
-actor SendTool {
+struct SendTool: Sendable {
     private let db: Database
     private let resolver: ContactResolver
     private let runner: any ScriptRunning
