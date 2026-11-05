@@ -163,13 +163,11 @@ actor HTTPTransport {
         )
     }
 
-    /// Ends every open SSE stream. An SSE GET never finishes on its own, and
-    /// graceful shutdown waits for open requests, so without this a single
-    /// connected client kept the process alive until launchd's SIGKILL.
+    /// Ends every open SSE stream, and any opened after. An SSE GET never
+    /// finishes on its own, and graceful shutdown waits for open requests,
+    /// so one left open holds the process until the shutdown cap.
     fileprivate func closeAllSSEStreams() async {
-        for sessionId in await sessionManager.activeSessionIds() {
-            await sseManager.terminateSession(sessionId: sessionId)
-        }
+        await sseManager.closeAll()
     }
 
     // MARK: - POST
@@ -469,6 +467,12 @@ actor HTTPTransport {
         let connectionId = connectionInfo.id
         let sseManager = self.sseManager
         let sessionManager = self.sessionManager
+        // A session terminated between the check above and the register
+        // already closed its streams, so this one would never be closed.
+        guard await sessionManager.validate(sessionId: sessionId) else {
+            await sseManager.unregister(connectionId: connectionId)
+            return errorResponse(.notFound, "Invalid or expired session. Please re-initialize.")
+        }
 
         return Response(
             status: .ok,
