@@ -210,11 +210,13 @@ actor ContactResolver {
         guard q.count >= 2 else { return [] }
         refreshIfStale()
         let queryWords = q.split(separator: " ").map(String.init)
+        // Sorted, so callers that take the first match pick the same one every time.
         return cache.compactMap { handle, name in
             let nameWords = name.lowercased().split(whereSeparator: { $0 == " " || $0 == "-" }).map(String.init)
             let ok = queryWords.allSatisfy { qw in nameWords.contains { $0.hasPrefix(qw) } }
             return ok ? (handle, name) : nil
         }
+        .sorted { ($0.name, $0.handle) < ($1.name, $1.handle) }
     }
 
     struct Status: Sendable {

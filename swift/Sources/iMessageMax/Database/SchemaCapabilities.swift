@@ -78,17 +78,6 @@ struct SchemaCapabilities: Sendable, Equatable {
     var associatedMessageEmojiSQL: String {
         has(.messageAssociatedMessageEmoji) ? "m.associated_message_emoji" : "NULL AS associated_message_emoji"
     }
-    /// The `has_replies` EXISTS subquery, or a literal 0.
-    var hasRepliesSQL: String {
-        has(.messageThreadOriginatorGuid)
-            ? """
-              EXISTS (
-                  SELECT 1 FROM message r
-                  WHERE r.thread_originator_guid = m.guid
-              ) AS has_replies
-              """
-            : "0 AS has_replies"
-    }
 
     private static func tableColumns(_ conn: OpaquePointer, table: String) throws -> Set<String> {
         var stmt: OpaquePointer?

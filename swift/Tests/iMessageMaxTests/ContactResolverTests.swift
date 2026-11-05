@@ -49,6 +49,16 @@ final class ContactResolverTests: XCTestCase {
         XCTAssertTrue(whitespace.isEmpty)
     }
 
+    func testMatchesComeBackSortedByNameThenHandle() async {
+        let resolver = ContactResolver(seedCache: [
+            "+15550000009": "Sam Lee",
+            "sam@example.com": "Sam Lee",
+            "+15550000001": "Sam Adams",
+        ])
+        let matches = await resolver.searchByName("sam")
+        XCTAssertEqual(matches.map(\.handle), ["+15550000001", "+15550000009", "sam@example.com"])
+    }
+
     func testSingleCharacterMatchesNothing() async {
         let resolver = seeded()
         let matches = await resolver.searchByName("j")
