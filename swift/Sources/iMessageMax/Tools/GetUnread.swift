@@ -1,4 +1,3 @@
-// Sources/iMessageMax/Tools/GetUnread.swift
 import Foundation
 import MCP
 
@@ -202,9 +201,8 @@ final class GetUnread {
         limit: Int,
         includeFiltered: Bool
     ) async throws -> UnreadMessagesResponse {
-        // Unread = is_read = 0 AND is_from_me = 0
         var queryBuilder = QueryBuilder()
-            .selectMessages(try database.schema(), "c.ROWID as chat_id", "c.display_name as chat_display_name")
+            .selectMessages(try database.schema(), MessageInChat.chatColumns)
             .from("message m")
             .join("chat_message_join cmj ON m.ROWID = cmj.message_id")
             .join("chat c ON cmj.chat_id = c.ROWID")
@@ -232,13 +230,7 @@ final class GetUnread {
 
         let (sql, params) = queryBuilder.build()
 
-        var rows: [UnreadMessageRow] = try database.query(sql, params: params) { row in
-            UnreadMessageRow(
-                message: MessageRecord(row),
-                chatId: row.int(MessageRecord.columnCount),
-                chatDisplayName: row.string(MessageRecord.columnCount + 1)
-            )
-        }
+        var rows = try database.query(sql, params: params, map: MessageInChat.init)
         let more = rows.count > limit
         if more {
             rows = Array(rows.prefix(limit))
@@ -253,12 +245,7 @@ final class GetUnread {
             ? nil
             : try getFilteredHiddenCount(chatId: chatId, sinceApple: sinceApple)
 
-        var chats: [ChatPage.Chat] = []
-        var seen: Set<Int64> = []
-        for row in rows where seen.insert(row.chatId).inserted {
-            chats.append(ChatPage.Chat(id: row.chatId, explicitName: row.chatDisplayName))
-        }
-        let identities = try await ChatPage.identities(chats, db: database, resolver: contactResolver)
+        let chatByID = try await ChatReferences(rows.chats, db: database, resolver: contactResolver)
         let renderer = MessageRenderer(
             annotations: .none,
             labels: await SenderLabels.displayNames(
@@ -268,10 +255,9 @@ final class GetUnread {
 
         let unreadMessages = rows.map { row in
             let message = renderer.render(row.message)
-            let name = identities[row.chatId]?.displayName ?? DisplayNameGenerator.fromNames([])
             return UnreadMessageItem(
                 id: message.id,
-                chat: ChatReference(id: ChatIdentifier.format(row.chatId), name: name),
+                chat: chatByID[row.chatId],
                 from: message.from,
                 text: message.text,
                 ago: message.ago,
@@ -455,12 +441,6 @@ final class GetUnread {
 }
 
 // MARK: - Helper Types
-
-private struct UnreadMessageRow {
-    let message: MessageRecord
-    let chatId: Int64
-    let chatDisplayName: String?
-}
 
 private struct SummaryRow {
     let chatId: Int64

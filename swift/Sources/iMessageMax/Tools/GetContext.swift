@@ -1,4 +1,3 @@
-// Sources/iMessageMax/Tools/GetContext.swift
 import Foundation
 import MCP
 
@@ -120,22 +119,19 @@ enum GetContext {
 
         let schema = try database.schema()
         let targetQuery = """
-            SELECT \(MessageRecord.selectList(schema)), c.ROWID AS chat_id, c.display_name AS chat_name
+            SELECT \(MessageRecord.selectList(schema)), \(MessageInChat.chatColumns)
             FROM message m
             JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
             JOIN chat c ON cmj.chat_id = c.ROWID
             \(MessageRecord.handleJoinsSQL)
             """
-        func target(_ row: SQLiteRow) -> (message: MessageRecord, chatId: Int64, chatName: String?) {
-            (MessageRecord(row), row.int(MessageRecord.columnCount), row.string(MessageRecord.columnCount + 1))
-        }
-        let targetResult: (message: MessageRecord, chatId: Int64, chatName: String?)
+        let targetResult: MessageInChat
 
         if let msgIdStr = messageId {
             guard let numericId = MessageIdentifier.parse(msgIdStr) else {
                 throw ToolFailure("invalid_id", "Invalid message ID format: \(msgIdStr)")
             }
-            guard let found = try database.query("\(targetQuery)\nWHERE m.ROWID = ?", params: [numericId], map: target).first else {
+            guard let found = try database.query("\(targetQuery)\nWHERE m.ROWID = ?", params: [numericId], map: MessageInChat.init).first else {
                 throw ToolFailure("not_found", ClientErrorMessages.messageNotFound)
             }
             targetResult = found
@@ -160,7 +156,7 @@ enum GetContext {
             let searchLower = searchText.lowercased()
             var scanned = 0
             var offset = 0
-            var foundRow: (message: MessageRecord, chatId: Int64, chatName: String?)?
+            var foundRow: MessageInChat?
             var exhausted = false
 
             while foundRow == nil && !exhausted && scanned < scanCap {
@@ -174,7 +170,7 @@ enum GetContext {
                     LIMIT ? OFFSET ?
                     """,
                     params: [numericChatId, pattern, pageSize, offset],
-                    map: target
+                    map: MessageInChat.init
                 )
                 scanned += rows.count
                 offset += pageSize
@@ -226,14 +222,10 @@ enum GetContext {
             rows.map { ContextMessage(renderer.render($0), showAgo: true) }
         }
 
-        let chatName = try await ChatPage.identities(
-            [ChatPage.Chat(id: targetChatId, explicitName: targetResult.chatName)],
-            db: database,
-            resolver: resolver
-        )[targetChatId]?.displayName ?? DisplayNameGenerator.fromNames([])
+        let chat = try await ChatReferences([targetResult].chats, db: database, resolver: resolver)[targetChatId]
 
         let response = GetContextResponse(
-            chat: ChatReference(id: ChatIdentifier.format(targetChatId), name: chatName),
+            chat: chat,
             people: Dictionary(uniqueKeysWithValues: people.people.map { person in
                 (person.key, GetContextResponse.PersonInfo(
                     name: person.name ?? person.handle ?? "Me",

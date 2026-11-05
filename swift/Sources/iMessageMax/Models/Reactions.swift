@@ -1,4 +1,3 @@
-// Sources/iMessageMax/Models/Reactions.swift
 import Foundation
 
 /// A tapback's `associated_message_type`. Removing a tapback writes a new

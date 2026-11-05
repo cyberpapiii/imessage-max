@@ -1,4 +1,3 @@
-// Sources/iMessageMax/Tools/GetAttachment.swift
 import Foundation
 import MCP
 
@@ -209,15 +208,11 @@ struct GetAttachment {
         }
 
         guard let row = rows.first else { return nil }
-        let identity = try await ChatPage.identities(
+        return try await ChatReferences(
             [ChatPage.Chat(id: row.0, explicitName: row.1)],
             db: db,
             resolver: resolver
         )[row.0]
-        return ChatReference(
-            id: ChatIdentifier.format(row.0),
-            name: identity?.displayName ?? DisplayNameGenerator.fromNames([])
-        )
     }
 
     /// iCloud offload: nil = not ubiquitous, false = download started (retry), true = available.

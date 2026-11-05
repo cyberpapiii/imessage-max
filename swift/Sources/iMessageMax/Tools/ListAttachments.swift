@@ -1,8 +1,6 @@
-// Sources/iMessageMax/Tools/ListAttachments.swift
 import Foundation
 import MCP
 
-/// Sort options for attachments
 enum AttachmentSort: String {
     case recentFirst = "recent_first"
     case oldestFirst = "oldest_first"
@@ -16,8 +14,6 @@ struct ListAttachmentsResponse: Codable {
     let cursor: String?
 }
 
-/// Error result
-/// List attachments tool implementation
 final class ListAttachments {
     private let db: Database
     private let resolver: ContactResolver
@@ -109,15 +105,6 @@ final class ListAttachments {
         }
     }
 
-    /// List attachments with filters
-    /// - Parameters:
-    ///   - chatId: Filter to specific chat (e.g., "chat123" or "123")
-    ///   - fromPerson: Filter by sender handle (or "me")
-    ///   - type: Filter by type: "image", "video", "audio", "pdf", "document", "any"
-    ///   - since: Lower time bound (ISO, relative like "24h", or natural like "yesterday")
-    ///   - before: Upper time bound
-    ///   - limit: Max results (default 50, max 100)
-    ///   - sort: "recent_first" (default), "oldest_first", "largest_first"
     func execute(
         chatId: String? = nil,
         fromPerson: String? = nil,
@@ -128,11 +115,9 @@ final class ListAttachments {
         sort: String = "recent_first",
         cursor: String? = nil
     ) async throws -> ListAttachmentsResponse {
-        // Validate and constrain inputs
         let effectiveLimit = max(1, min(limit, 100))
         let effectiveSort = AttachmentSort(rawValue: sort) ?? .recentFirst
 
-        // Validate type filter
         let validTypes = Set(["image", "video", "audio", "pdf", "document", "any"])
         let typeFilter: String? = if let t = type, validTypes.contains(t) { t } else { nil }
 
@@ -168,12 +153,6 @@ final class ListAttachments {
 
     // MARK: - Private Helpers
 
-    private struct SharedMessageRow {
-        let message: MessageRecord
-        let chatId: Int64
-        let chatName: String?
-    }
-
     func browseSharedMessages(
         chatId: Int64?,
         fromPerson: String?,
@@ -197,30 +176,17 @@ final class ListAttachments {
             cursor: supportsCursor ? cursor : nil
         )
 
-        let messageRows = try db.query(sql, params: params) { row in
-            SharedMessageRow(
-                message: MessageRecord(row),
-                chatId: row.int(MessageRecord.columnCount),
-                chatName: row.string(MessageRecord.columnCount + 1)
-            )
-        }
+        let messageRows = try db.query(sql, params: params, map: MessageInChat.init)
 
         let hasMore = supportsCursor && messageRows.count > limit
         let pageRows = Array(messageRows.prefix(limit))
 
-        // One lookup for the whole page. Asking per message opened a fresh
-        // SQLite connection for each of the twenty rows a default page holds.
         let attachmentsByMessage = try attachmentsForMessages(
             messageIds: pageRows.map(\.message.id),
             typeFilter: typeFilter
         )
 
-        var chats: [ChatPage.Chat] = []
-        var seen: Set<Int64> = []
-        for row in pageRows where seen.insert(row.chatId).inserted {
-            chats.append(ChatPage.Chat(id: row.chatId, explicitName: row.chatName))
-        }
-        let identities = try await ChatPage.identities(chats, db: db, resolver: resolver)
+        let chatByID = try await ChatReferences(pageRows.chats, db: db, resolver: resolver)
         let labels = await SenderLabels.displayNames(
             me: "Me", unknown: "Unknown", for: pageRows.map(\.message), resolver: resolver
         )
@@ -229,11 +195,6 @@ final class ListAttachments {
         for row in pageRows {
             let attachments = attachmentsByMessage[row.message.id] ?? []
             guard !attachments.isEmpty else { continue }
-
-            let chatReference = ChatReference(
-                id: ChatIdentifier.format(row.chatId),
-                name: identities[row.chatId]?.displayName ?? DisplayNameGenerator.fromNames([])
-            )
 
             let attachmentTypes = attachments.map(\.type)
             let date = AppleTime.toDate(row.message.date)
@@ -246,7 +207,7 @@ final class ListAttachments {
             results.append(
                 SharedMessageItem(
                     messageId: MessageIdentifier.format(row.message.id),
-                    chat: chatReference,
+                    chat: chatByID[row.chatId],
                     from: labels.sender(row.message),
                     messagePreview: messagePreview,
                     sharedSummary: SummaryPreviewFormatter.sharedSummary(for: attachmentTypes),
@@ -296,12 +257,7 @@ final class ListAttachments {
 
         if ranksBySize {
             query
-                .selectMessages(
-                    schema,
-                    "c.ROWID as chat_id",
-                    "c.display_name as chat_name",
-                    "MAX(COALESCE(a.total_bytes, 0)) as max_attachment_size"
-                )
+                .selectMessages(schema, MessageInChat.chatColumns, "MAX(COALESCE(a.total_bytes, 0)) as max_attachment_size")
                 .from("message m")
                 .join("chat_message_join cmj ON m.ROWID = cmj.message_id")
                 .join("chat c ON cmj.chat_id = c.ROWID")
@@ -337,7 +293,7 @@ final class ListAttachments {
             chatPick += " ORDER BY cmj.chat_id LIMIT 1"
 
             query
-                .selectMessages(schema, "c.ROWID as chat_id", "c.display_name as chat_name", sizeSelect)
+                .selectMessages(schema, MessageInChat.chatColumns, sizeSelect)
                 .from("message m")
                 .join("chat c ON c.ROWID = (\(chatPick))", params: chatPickParams)
                 .joinMessageHandles()

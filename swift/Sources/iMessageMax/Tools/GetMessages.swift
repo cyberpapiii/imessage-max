@@ -1,4 +1,3 @@
-// Sources/iMessageMax/Tools/GetMessages.swift
 import Foundation
 import MCP
 

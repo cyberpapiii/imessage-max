@@ -1,4 +1,3 @@
-// Sources/iMessageMax/Utilities/MessageTextExtractor.swift
 import Foundation
 
 enum MessageTextExtractor {

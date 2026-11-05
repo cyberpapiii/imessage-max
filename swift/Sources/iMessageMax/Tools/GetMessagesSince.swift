@@ -189,12 +189,11 @@ actor GetMessagesSinceTool {
             db: db
         )
 
-        var chats: [ChatPage.Chat] = []
-        var seen: Set<Int64> = []
-        for row in kept where seen.insert(row.chatId ?? 0).inserted {
-            chats.append(ChatPage.Chat(id: row.chatId ?? 0, explicitName: row.chatDisplayName))
-        }
-        let identities = try await ChatPage.identities(chats, db: db, resolver: resolver)
+        let chatByID = try await ChatReferences(
+            ChatPage.Chat.distinct(kept, id: { $0.chatId ?? 0 }, explicitName: \.chatDisplayName),
+            db: db,
+            resolver: resolver
+        )
 
         let renderer = MessageRenderer(
             annotations: annotations,
@@ -205,15 +204,11 @@ actor GetMessagesSinceTool {
         )
 
         let items = kept.map { scanned in
-            let chatId = scanned.chatId ?? 0
             let message = renderer.render(scanned.message)
             return GetMessagesSinceResponse.Item(
                 id: message.id,
                 rowid: Int(message.rowid),
-                chat: ChatReference(
-                    id: ChatIdentifier.format(chatId),
-                    name: identities[chatId]?.displayName ?? DisplayNameGenerator.fromNames([])
-                ),
+                chat: chatByID[scanned.chatId ?? 0],
                 from: message.from,
                 text: message.text,
                 ts: message.ts ?? "",

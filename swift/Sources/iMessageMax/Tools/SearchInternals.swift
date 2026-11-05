@@ -1,11 +1,5 @@
 import Foundation
 
-struct SearchRow {
-    let message: MessageRecord
-    let chatId: Int64
-    let chatDisplayName: String?
-}
-
 struct GroupedChatData {
     let id: String
     var name: String
@@ -155,7 +149,7 @@ extension SearchTool {
         schema: SchemaCapabilities = .assumed
     ) -> (String, [Any]) {
         let builder = QueryBuilder()
-            .selectMessages(schema, "c.ROWID as chat_id", "c.display_name as chat_display_name")
+            .selectMessages(schema, MessageInChat.chatColumns)
         applySearchFilters(
             to: builder,
             query: query,
@@ -260,7 +254,7 @@ extension SearchTool {
 
     static func buildFlatResponse(
         db: Database,
-        rows: [SearchRow],
+        rows: [MessageInChat],
         query: String?,
         limit: Int,
         includeContext: Bool,
@@ -268,20 +262,15 @@ extension SearchTool {
         filteredHidden: Int?
     ) async throws -> String {
         var results: [SearchResult] = []
-        let identityByChat = try await ChatPage.identities(chatsInFirstAppearanceOrder(rows), db: db, resolver: resolver)
+        let chatByID = try await ChatReferences(rows.chats, db: db, resolver: resolver)
         var windows: [MessageWindow.Anchor: MessageWindow.Context] = [:]
         if includeContext {
             let anchors = rows.map { MessageWindow.Anchor(chatId: $0.chatId, message: $0.message) }
             windows = try MessageWindow.around(anchors, before: 2, after: 2, db: db)
         }
 
-        let contextRows = windows.values.flatMap { $0.before + $0.after }
-        let annotations = try MessageAnnotations.load(
-            for: rows.map(\.message) + contextRows,
-            include: [.reactions, .replies],
-            db: db
-        )
-        let records = rows.map(\.message) + contextRows
+        let records = rows.map(\.message) + windows.values.flatMap { $0.before + $0.after }
+        let annotations = try MessageAnnotations.load(for: records, include: [.reactions, .replies], db: db)
         let renderer = MessageRenderer(
             annotations: annotations,
             labels: await SenderLabels.displayNames(
@@ -294,11 +283,10 @@ extension SearchTool {
 
         for searchRow in rows {
             let message = renderer.render(searchRow.message)
-            let chatName = identityByChat[searchRow.chatId]?.displayName ?? DisplayNameGenerator.fromNames([])
 
             var result = SearchResult(
                 id: message.id,
-                chat: ChatReference(id: ChatIdentifier.format(searchRow.chatId), name: chatName),
+                chat: chatByID[searchRow.chatId],
                 from: message.from,
                 excerpt: makeExcerpt(text: message.text, query: query),
                 ago: message.ago,
@@ -332,7 +320,7 @@ extension SearchTool {
 
     static func buildGroupedResponse(
         db: Database,
-        rows: [SearchRow],
+        rows: [MessageInChat],
         query: String?,
         limit: Int,
         resolver: ContactResolver,
@@ -340,7 +328,7 @@ extension SearchTool {
     ) async throws -> String {
         var chatsData: [Int64: GroupedChatData] = [:]
         let page = try await ChatPage.build(
-            chatsInFirstAppearanceOrder(rows),
+            rows.chats,
             lastMessages: nil,
             db: db,
             resolver: resolver
@@ -487,14 +475,6 @@ extension SearchTool {
         let excerpt = nsText.substring(to: min(excerptLength, nsText.length))
         let head = nsText.length > excerptLength ? excerpt + "..." : excerpt
         return withWindowPrefix(head)
-    }
-
-    /// Each distinct chat in `rows`, named as the first row for it names it.
-    static func chatsInFirstAppearanceOrder(_ rows: [SearchRow]) -> [ChatPage.Chat] {
-        var seen: Set<Int64> = []
-        return rows.compactMap { row in
-            seen.insert(row.chatId).inserted ? ChatPage.Chat(id: row.chatId, explicitName: row.chatDisplayName) : nil
-        }
     }
 
     static func wordMatches(searchWord: String, in text: String, textWords: [String], fuzzy: Bool) -> Bool {

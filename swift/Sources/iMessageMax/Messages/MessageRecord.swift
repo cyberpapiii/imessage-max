@@ -61,6 +61,23 @@ struct MessageRecord {
     }
 }
 
+/// A message with the chat a query found it in.
+struct MessageInChat {
+    let message: MessageRecord
+    let chatId: Int64
+    /// `chat.display_name`, possibly blank.
+    let chatName: String?
+
+    /// Selected right after `MessageRecord.selectList`, from chat alias `c`.
+    static let chatColumns = "c.ROWID AS chat_id, c.display_name AS chat_name"
+
+    init(_ row: SQLiteRow) {
+        message = MessageRecord(row)
+        chatId = row.int(MessageRecord.columnCount)
+        chatName = row.string(MessageRecord.columnCount + 1)
+    }
+}
+
 extension QueryBuilder {
     /// `MessageRecord.selectList`, then the caller's own columns.
     @discardableResult
