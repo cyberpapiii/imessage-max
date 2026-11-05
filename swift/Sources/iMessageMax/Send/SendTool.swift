@@ -123,12 +123,11 @@ actor SendTool {
         // harness-level tool approval. The server does not gate exact sends.
         // Ambiguity and validation failures refuse above, and post-send
         // verification reports the truth below. Interactive confirmation (MCP
-        // elicitation) was removed 2026-06-11 after it proved unable to
-        // round-trip through real agent stacks. See "Elicitation channel
-        // findings" in plans/README.md. Do not reintroduce without
-        // session-level proof of a working channel.
+        // elicitation) is not used: it cannot round-trip through real agent
+        // stacks. Do not reintroduce without session-level proof of a working
+        // channel.
 
-        // Capture send time before dispatch (design §5.2 option 1).
+        // Capture send time before dispatch.
         let sendTime = Date()
 
         // Sequential by design: Messages.app ordering matters, so a text that
@@ -198,7 +197,7 @@ actor SendTool {
                 return .uncertain(deliveredTo: resolved.deliveredTo, chat: resolved.chat)
             }
         } catch {
-            // DB unreadable or task cancelled → Option D: transport-only fallback.
+            // DB unreadable or task cancelled: transport-only fallback.
             return .sent(deliveredTo: resolved.deliveredTo, chat: resolved.chat)
         }
     }

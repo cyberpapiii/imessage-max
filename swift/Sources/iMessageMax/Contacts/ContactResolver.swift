@@ -5,8 +5,7 @@ import Foundation
 actor ContactResolver {
     /// Contacts access behind three closures so tests never touch
     /// CNContactStore (mirrors imsg's ContactCatalogSource). Closures run
-    /// inside the actor; `@unchecked` for the same reason the old
-    /// `nonisolated(unsafe) store` existed: CNContactStore is not Sendable.
+    /// inside the actor; `@unchecked` because CNContactStore is not Sendable.
     struct Source: @unchecked Sendable {
         let authorization: () -> (authorized: Bool, status: String)
         let load: () throws -> [String: String]

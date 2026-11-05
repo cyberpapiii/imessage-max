@@ -122,9 +122,6 @@ actor SessionManager {
         self.sessionTerminationHandler = handler
     }
 
-    /// Creates a new session with its own Server instance
-    ///
-    /// This is the key to supporting reconnection - each session gets a fresh Server.
     func createSession(
         protocolVersion: String = LegacyProtocol.latest
     ) async -> SessionCreationResult {
@@ -255,7 +252,6 @@ actor SessionManager {
         sessions.count
     }
 
-    /// Starts the background cleanup task
     private func startCleanupTask() {
         let interval = cleanupInterval
         cleanupTask = Task { [weak self] in

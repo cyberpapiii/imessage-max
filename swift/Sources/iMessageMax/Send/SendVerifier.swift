@@ -1,7 +1,5 @@
 import Foundation
 
-// MARK: - Result
-
 /// The outcome of a post-send chat.db verification attempt.
 enum VerificationResult: Equatable {
     /// Row found in the intended chat within the polling window, with error = 0.
@@ -14,16 +12,14 @@ enum VerificationResult: Equatable {
     case notFound
 }
 
-// MARK: - Verifier
-
 /// Verifies that a sent text message appeared in chat.db within a polling window.
 ///
-/// Design: §2.2 primary query (chatId-scoped) + §2.2 fallback handle-scan when primary
-/// finds no clean row and a handle is available. §3 finding 3: rows with error ≠ 0 must not
+/// Primary query is chatId-scoped, with a fallback handle-scan when the primary
+/// finds no clean row and a handle is available. Rows with error ≠ 0 must not
 /// confirm. They classify as `.failedDelivery` when they match in the intended chat
 /// (failed iMessage sends write error=22 rows immediately). Text comparison uses
-/// MessageTextExtractor to handle attributedBody-only rows (§3 finding 2). Multiple
-/// matches take the earliest (§2.3).
+/// MessageTextExtractor to handle attributedBody-only rows. Multiple
+/// matches take the earliest.
 ///
 /// Inject `maxAttempts: 1` and `pollInterval: .milliseconds(0)` in tests for speed.
 struct SendVerifier: Sendable {
@@ -36,8 +32,6 @@ struct SendVerifier: Sendable {
         self.maxAttempts = maxAttempts
         self.pollInterval = pollInterval
     }
-
-    // MARK: - Public API
 
     /// Poll chat.db to verify a text send landed in the intended chat.
     ///
@@ -189,8 +183,6 @@ struct SendVerifier: Sendable {
         return nil
     }
 
-    // MARK: - Text Matching (§2.3)
-
     private func textMatches(row: MessageRow, expected: String) -> Bool {
         guard let extracted = MessageTextExtractor.extract(
             text: row.text,
@@ -201,7 +193,7 @@ struct SendVerifier: Sendable {
 
         if normalized == expected { return true }
 
-        // Case-insensitive + diacritic-insensitive fallback (§2.3).
+        // Case-insensitive + diacritic-insensitive fallback.
         return normalized.compare(
             expected,
             options: [.caseInsensitive, .diacriticInsensitive]

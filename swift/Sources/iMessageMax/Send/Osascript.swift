@@ -87,7 +87,7 @@ enum Osascript {
     /// Path fragments that must never reach a client: the operator's home
     /// directory, temp directories, and the private staged attachment copy.
     /// Lowercase, because matching runs on a lowercased copy so a mixed-case
-    /// "/Users/" still scrubs (plan 049).
+    /// "/Users/" still scrubs.
     private static let privatePathMarkers = ["/users/", "/private/", "/var/", OutgoingFileStager.directoryName]
 
     /// Untrusted, unbounded osascript stderr reduced to its first line,

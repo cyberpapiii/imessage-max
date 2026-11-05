@@ -134,7 +134,7 @@ enum SendScript {
     /// checks below only have to spell the straight form.
     ///
     /// `sentFileName` is the filename alone. The full argument is the private
-    /// staged copy, not the path the caller asked to send (plan 023).
+    /// staged copy, not the path the caller asked to send.
     static func classifyStderr(
         _ rawStderr: String,
         sentFileName: String,

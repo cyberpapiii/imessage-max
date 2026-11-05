@@ -1,9 +1,7 @@
 import Foundation
 
-/// Batched query layer for list/overview tools.
-///
-/// Replaces per-chat N+1 participant and last-message queries with two
-/// IN-clause queries that cover all requested chat IDs at once.
+/// Batched query layer for list/overview tools: one IN-clause query covers
+/// all requested chat IDs at once instead of one query per chat.
 enum ChatSummaryQueries {
 
     struct Participant {
@@ -89,7 +87,7 @@ enum ChatSummaryQueries {
     }
 
     /// Participant-row counts keyed by chat ID. One `COUNT(*)` over the
-    /// candidate set; callers that historically added 1 for "me" still do so.
+    /// candidate set; callers add 1 for "me" themselves.
     static func participantCountsByChat(
         db: Database,
         chatIds: [Int64]
@@ -160,8 +158,7 @@ enum ChatSummaryQueries {
         return result
     }
 
-    /// Newest `message.date` keyed by chat ID. Same join as the former
-    /// per-chat `MAX(m.date)` lookup: `chat_message_join` to `message`.
+    /// Newest `message.date` keyed by chat ID, via `chat_message_join` to `message`.
     static func lastMessageDatesByChat(
         db: Database,
         chatIds: [Int64]
@@ -191,11 +188,10 @@ enum ChatSummaryQueries {
 
     /// Returns the newest non-reaction message per chat, keyed by chat ID.
     ///
-    /// One query for all chats using a window function. Formatting defaults
-    /// preserve `ListChats`' historical behavior exactly (maxLength 50,
-    /// "unknown" sender fallback, `ago ?? "unknown"`). Callers with different
-    /// historical output (GetActiveConversations: maxLength 80, "Unknown",
-    /// nullable `ago`) pass their own values. `awaitingReply = !isFromMe`.
+    /// One query for all chats. Formatting defaults are `ListChats`'
+    /// (maxLength 50, "unknown" sender fallback, `ago ?? "unknown"`).
+    /// GetActiveConversations passes its own (maxLength 80, "Unknown",
+    /// nullable `ago`). `awaitingReply = !isFromMe`.
     ///
     /// - Parameters:
     ///   - sinceApple: When non-nil, adds `AND m.date >= ?` so only messages
@@ -265,10 +261,8 @@ enum ChatSummaryQueries {
             ? "\n                  AND m2.is_read = 0 AND m2.is_from_me = 0"
             : ""
 
-        // One correlated LIMIT 1 per requested chat. The previous form ranked
-        // every message in every requested chat with ROW_NUMBER() and then kept
-        // rank 1, so a caller asking for 20 chats sorted tens of thousands of
-        // rows to return 20. Ordering on m2.date (not the cached
+        // One correlated LIMIT 1 per requested chat, not a ROW_NUMBER() rank over
+        // every message in every requested chat. Ordering on m2.date (not the cached
         // chat_message_join.message_date) keeps message.date as the single
         // source of truth for recency.
         // Both forms pick the same row: newest date first, highest ROWID to

@@ -12,7 +12,7 @@ enum ChatIdentifier {
         return Int64(digits)
     }
 
-    /// parseRowId, then the GUID-substring fallback that get_messages historically allowed.
+    /// parseRowId, then the GUID-substring fallback get_messages allows.
     static func resolve(_ raw: String, db: Database) throws -> Int64? {
         if let id = parseRowId(raw) { return id }
 
