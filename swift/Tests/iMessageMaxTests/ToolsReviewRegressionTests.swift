@@ -435,4 +435,26 @@ final class ToolsReviewRegressionTests: XCTestCase {
         XCTAssertNil(AttachmentType.sqlPredicate(for: "any"))
         XCTAssertNil(AttachmentType.sqlPredicate(for: "other"))
     }
+
+    // MARK: - `has` spellings
+
+    func testHasAcceptsEitherToolsSpelling() async throws {
+        let db = try ToolTestDatabase(name: "has-alias")
+        try db.insertHandle(rowId: 1, handle: "+15550000001")
+        try db.insertChat(rowId: 1, guid: "iMessage;-;+15550000001")
+        try db.joinChatHandle(chatId: 1, handleId: 1)
+        try db.insertMessage(rowId: 1, guid: "IMG", text: "\u{FFFC}", date: now() - 2 * minute, isFromMe: false, handleId: 1)
+        try db.joinChatMessage(chatId: 1, messageId: 1)
+        try db.insertAttachment(rowId: 1, filename: "~/x.jpeg", mimeType: "image/jpeg", uti: "public.jpeg", totalBytes: 1, transferName: "x.jpeg")
+        try db.joinMessageAttachment(messageId: 1, attachmentId: 1)
+        try db.insertMessage(rowId: 2, guid: "TXT", text: "plain", date: now() - minute, isFromMe: false, handleId: 1)
+        try db.joinChatMessage(chatId: 1, messageId: 2)
+
+        for has in ["image", "images"] {
+            let search = try await call("search", ["has": .string(has)], db: db)
+            XCTAssertEqual(try decodeJSONArray(search["results"]).compactMap { $0["id"] as? String }, ["msg_1"], has)
+            let messages = try await call("get_messages", ["chat_id": "chat1", "has": .string(has)], db: db)
+            XCTAssertEqual(try decodeJSONArray(messages["messages"]).compactMap { $0["id"] as? String }, ["msg_1"], has)
+        }
+    }
 }

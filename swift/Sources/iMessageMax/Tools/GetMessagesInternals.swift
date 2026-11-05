@@ -97,10 +97,11 @@ extension GetMessagesTool {
             query.where(match.sql, params: match.bindings)
         }
 
+        // search's singular spellings are accepted too.
         switch has {
-        case "links": query.where(SQLFragments.hasLink())
-        case "attachments": query.where(SQLFragments.hasAttachment())
-        case "images": query.where(SQLFragments.hasAttachment(ofType: "image"))
+        case "links", "link": query.where(SQLFragments.hasLink())
+        case "attachments", "attachment": query.where(SQLFragments.hasAttachment())
+        case "images", "image": query.where(SQLFragments.hasAttachment(ofType: "image"))
         default: break
         }
 

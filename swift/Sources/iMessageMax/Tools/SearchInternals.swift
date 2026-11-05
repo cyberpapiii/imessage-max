@@ -92,10 +92,12 @@ extension SearchTool {
             builder.where(isGroup ? SQLFragments.isGroup() : SQLFragments.isDirect())
         }
 
+        // get_messages' plural spellings are accepted too.
         switch has {
-        case "link": builder.where(SQLFragments.hasLink())
-        case "attachment": builder.where(SQLFragments.hasAttachment())
-        case "image", "video": builder.where(SQLFragments.hasAttachment(ofType: has))
+        case "link", "links": builder.where(SQLFragments.hasLink())
+        case "attachment", "attachments": builder.where(SQLFragments.hasAttachment())
+        case "image", "images": builder.where(SQLFragments.hasAttachment(ofType: "image"))
+        case "video", "videos": builder.where(SQLFragments.hasAttachment(ofType: "video"))
         default: break
         }
     }
