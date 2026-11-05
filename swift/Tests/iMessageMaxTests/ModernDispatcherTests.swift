@@ -7,15 +7,8 @@ import MCP
 /// `_meta` validation, version negotiation, discovery, catalog cache hints,
 /// deterministic ordering, and protocol/tool error separation.
 final class ModernDispatcherTests: XCTestCase {
-    override func setUp() {
-        super.setUp()
-        ToolHandlerRegistry.shared.resetForTesting()
-    }
-
-    override func tearDown() {
-        ToolHandlerRegistry.shared.resetForTesting()
-        super.tearDown()
-    }
+    private var definitions: [ToolDefinition] = []
+    private var catalog: ToolCatalog { ToolCatalog(definitions) }
 
     // MARK: - Era detection
 
@@ -46,7 +39,7 @@ final class ModernDispatcherTests: XCTestCase {
     // MARK: - server/discover
 
     func testDiscoverReturnsSupportedVersionsCapabilitiesAndCacheHints() async throws {
-        let outcome = await ModernDispatcher.handle(discoverPayload(), transport: "test")
+        let outcome = await ModernDispatcher.handle(discoverPayload(), transport: "test", catalog: catalog)
         XCTAssertEqual(outcome.httpStatus, 200)
         let result = try result(from: outcome)
 
@@ -77,7 +70,7 @@ final class ModernDispatcherTests: XCTestCase {
             "method": "server/discover",
             "params": ["_meta": ["io.modelcontextprotocol/clientCapabilities": [:]]],
         ])
-        let outcome = await ModernDispatcher.handle(payload, transport: "test")
+        let outcome = await ModernDispatcher.handle(payload, transport: "test", catalog: catalog)
         XCTAssertEqual(outcome.httpStatus, 400)
         let error = try error(from: outcome)
         XCTAssertEqual(error["code"] as? Int, -32602)
@@ -90,7 +83,7 @@ final class ModernDispatcherTests: XCTestCase {
             "method": "tools/list",
             "params": ["_meta": ["io.modelcontextprotocol/protocolVersion": "2026-07-28"]],
         ])
-        let outcome = await ModernDispatcher.handle(payload, transport: "test")
+        let outcome = await ModernDispatcher.handle(payload, transport: "test", catalog: catalog)
         XCTAssertEqual(outcome.httpStatus, 400)
         let error = try error(from: outcome)
         XCTAssertEqual(error["code"] as? Int, -32602)
@@ -100,7 +93,7 @@ final class ModernDispatcherTests: XCTestCase {
     func testUnsupportedVersionReturnsSupportedList() async throws {
         let outcome = await ModernDispatcher.handle(
             modernRequest(method: "tools/list", protocolVersion: "2027-01-01"),
-            transport: "test"
+            transport: "test", catalog: catalog
         )
         XCTAssertEqual(outcome.httpStatus, 400)
         let error = try error(from: outcome)
@@ -114,7 +107,7 @@ final class ModernDispatcherTests: XCTestCase {
         for legacyOnlyMethod in ["ping", "logging/setLevel", "subscriptions/listen", "no/such"] {
             let outcome = await ModernDispatcher.handle(
                 modernRequest(method: legacyOnlyMethod),
-                transport: "test"
+                transport: "test", catalog: catalog
             )
             XCTAssertEqual(outcome.httpStatus, 404, legacyOnlyMethod)
             let error = try error(from: outcome)
@@ -131,7 +124,7 @@ final class ModernDispatcherTests: XCTestCase {
                 "_meta": modernMeta(),
             ],
         ])
-        let outcome = await ModernDispatcher.handle(payload, transport: "test")
+        let outcome = await ModernDispatcher.handle(payload, transport: "test", catalog: catalog)
         XCTAssertEqual(outcome.httpStatus, 202)
         XCTAssertNil(outcome.data)
     }
@@ -145,7 +138,7 @@ final class ModernDispatcherTests: XCTestCase {
 
         let outcome = await ModernDispatcher.handle(
             modernRequest(method: "tools/list"),
-            transport: "test"
+            transport: "test", catalog: catalog
         )
         XCTAssertEqual(outcome.httpStatus, 200)
         let result = try result(from: outcome)
@@ -174,7 +167,7 @@ final class ModernDispatcherTests: XCTestCase {
                 method: "tools/call",
                 extraParams: ["name": "modern_echo", "arguments": ["x": 1]]
             ),
-            transport: "test"
+            transport: "test", catalog: catalog
         )
         XCTAssertEqual(outcome.httpStatus, 200)
         let result = try result(from: outcome)
@@ -198,7 +191,7 @@ final class ModernDispatcherTests: XCTestCase {
                 method: "tools/call",
                 extraParams: ["name": "modern_fail", "arguments": [:]]
             ),
-            transport: "test"
+            transport: "test", catalog: catalog
         )
         // Tool execution failures are results with isError, not JSON-RPC errors.
         XCTAssertEqual(outcome.httpStatus, 200)
@@ -213,7 +206,7 @@ final class ModernDispatcherTests: XCTestCase {
                 method: "tools/call",
                 extraParams: ["name": "does_not_exist", "arguments": [:]]
             ),
-            transport: "test"
+            transport: "test", catalog: catalog
         )
         XCTAssertEqual(outcome.httpStatus, 400)
         let error = try error(from: outcome)
@@ -231,31 +224,6 @@ final class ModernDispatcherTests: XCTestCase {
 
     // MARK: - Catalog cache
 
-    func testCatalogCacheInvalidatesOnRegistryChange() async throws {
-        registerFakeTool(named: "first_tool")
-
-        let firstOutcome = await ModernDispatcher.handle(
-            modernRequest(method: "tools/list"),
-            transport: "test"
-        )
-        let firstTools = try XCTUnwrap(try result(from: firstOutcome)["tools"] as? [[String: Any]])
-        XCTAssertEqual(firstTools.map { $0["name"] as? String }, ["first_tool"])
-
-        // Registering bumps catalogVersion. Without that bump the second list
-        // would serve the stale single-tool cache.
-        registerFakeTool(named: "second_tool")
-
-        let secondOutcome = await ModernDispatcher.handle(
-            modernRequest(method: "tools/list"),
-            transport: "test"
-        )
-        let secondTools = try XCTUnwrap(try result(from: secondOutcome)["tools"] as? [[String: Any]])
-        XCTAssertEqual(
-            secondTools.map { $0["name"] as? String },
-            ["first_tool", "second_tool"]
-        )
-    }
-
     func testCatalogCacheServesConsistentResultAcrossCalls() async throws {
         registerFakeTool(named: "zeta_tool")
         registerFakeTool(named: "alpha_tool")
@@ -263,11 +231,11 @@ final class ModernDispatcherTests: XCTestCase {
 
         let firstOutcome = await ModernDispatcher.handle(
             modernRequest(method: "tools/list"),
-            transport: "test"
+            transport: "test", catalog: catalog
         )
         let secondOutcome = await ModernDispatcher.handle(
             modernRequest(method: "tools/list"),
-            transport: "test"
+            transport: "test", catalog: catalog
         )
 
         let firstTools = try XCTUnwrap(try result(from: firstOutcome)["tools"] as? [[String: Any]])
@@ -315,12 +283,9 @@ final class ModernDispatcherTests: XCTestCase {
             [.plainText("ok")]
         }
     ) {
-        let tool = Tool(
-            name: name,
-            description: "test tool",
-            inputSchema: InputSchema.object(properties: [:])
+        definitions.append(
+            ToolDefinition(name: name, description: "test tool", inputSchema: InputSchema.object(properties: [:]), handler: handler)
         )
-        ToolHandlerRegistry.shared.register(tool: tool, handler: handler)
     }
 
     private func modernMeta(protocolVersion: String = "2026-07-28") -> [String: Any] {

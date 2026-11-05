@@ -85,14 +85,14 @@ struct DiagnoseResult: Codable {
 enum DiagnoseTool {
     // MARK: - Tool Registration
 
-    static func register(on server: Server, db: Database, resolver: ContactResolver) {
+    static func definition(db: Database, resolver: ContactResolver) -> ToolDefinition {
         let inputSchema: Value = .object([
             "type": "object",
             "properties": .object([:]),
             "additionalProperties": false,
         ])
 
-        server.registerTool(
+        return ToolDefinition(
             name: "diagnose",
             description: """
                 Use diagnose before attempting any send, attachment, or live inbox \

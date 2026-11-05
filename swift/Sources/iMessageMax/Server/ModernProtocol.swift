@@ -7,7 +7,6 @@
 // transport boundary (HTTPTransport.handlePost, DualEraStdioTransport).
 import Foundation
 import MCP
-import Synchronization
 
 /// Protocol versions served by the modern (stateless, per-request-metadata) lane.
 enum ModernProtocolVersion {
@@ -34,32 +33,6 @@ struct ModernDispatchResult {
     let httpStatus: Int
 
     static let accepted = ModernDispatchResult(data: nil, httpStatus: 202)
-}
-
-/// Lock-guarded memo for the encoded tool catalog, keyed by
-/// `ToolHandlerRegistry.catalogVersion`.
-///
-/// Uses `Mutex<Void>` rather than an actor, because `[[String: Any]]` is not
-/// Sendable (so it cannot live inside `Mutex<State>`) and the dispatcher's
-/// entry points are synchronous static functions.
-final class CatalogCache: @unchecked Sendable {
-    private var cached: (version: Int, tools: [[String: Any]])?
-    private let lock = Mutex(())
-
-    /// Returns the memoized catalog only if it matches the current registry
-    /// version; a stale entry is treated as a miss.
-    func tools(forVersion version: Int) -> [[String: Any]]? {
-        lock.withLock { _ in
-            guard let cached, cached.version == version else { return nil }
-            return cached.tools
-        }
-    }
-
-    func store(tools: [[String: Any]], version: Int) {
-        lock.withLock { _ in
-            cached = (version, tools)
-        }
-    }
 }
 
 enum ModernDispatcher {
@@ -113,7 +86,7 @@ enum ModernDispatcher {
     /// routing; HTTP header/body validation happens in HTTPTransport before
     /// this is called. Takes raw `Data` so callers can cross isolation
     /// boundaries without sending non-Sendable JSON dictionaries.
-    static func handle(_ requestData: Data, transport: String) async -> ModernDispatchResult {
+    static func handle(_ requestData: Data, transport: String, catalog: ToolCatalog) async -> ModernDispatchResult {
         guard let json = try? JSONSerialization.jsonObject(with: requestData) as? [String: Any] else {
             return errorResult(
                 id: nil,
@@ -178,9 +151,9 @@ enum ModernDispatcher {
         case "server/discover":
             return successResult(id: id, result: discoverResult())
         case "tools/list":
-            return successResult(id: id, result: toolsListResult())
+            return successResult(id: id, result: toolsListResult(catalog))
         case "tools/call":
-            return await callTool(id: id, params: params, transport: transport)
+            return await callTool(id: id, params: params, transport: transport, catalog: catalog)
         default:
             return errorResult(
                 id: id,
@@ -209,15 +182,15 @@ enum ModernDispatcher {
         ]
     }
 
-    private static func toolsListResult() -> [String: Any] {
+    private static func toolsListResult(_ catalog: ToolCatalog) -> [String: Any] {
         var result = completeResult()
-        result["tools"] = toolsJSON()
+        result["tools"] = catalog.toolsJSON
         result["ttlMs"] = catalogTTLMs
         result["cacheScope"] = catalogCacheScope
         return result
     }
 
-    private static func callTool(id: Any, params: [String: Any], transport: String) async -> ModernDispatchResult {
+    private static func callTool(id: Any, params: [String: Any], transport: String, catalog: ToolCatalog) async -> ModernDispatchResult {
         guard let name = params["name"] as? String else {
             return errorResult(
                 id: id,
@@ -229,7 +202,7 @@ enum ModernDispatcher {
 
         let arguments = ToolCallDispatch.decodeArguments(params["arguments"])
 
-        switch await ToolCallDispatch.perform(name: name, arguments: arguments, lane: .modern(transport: transport)) {
+        switch await ToolCallDispatch.perform(name: name, arguments: arguments, lane: .modern(transport: transport), catalog: catalog) {
         case .unknownTool:
             return errorResult(
                 id: id,
@@ -270,29 +243,6 @@ enum ModernDispatcher {
         else { return nil }
         return json
     }()
-
-    /// Encoded tool catalog, memoized against the registry's catalog version.
-    /// The dispatcher advertises a one-hour catalog TTL to clients; it should
-    /// believe itself rather than re-encoding ~13 schemas per request.
-    private static let catalogCache = CatalogCache()
-
-    private static func toolsJSON() -> [[String: Any]] {
-        let currentVersion = ToolHandlerRegistry.shared.catalogVersion
-        if let cached = catalogCache.tools(forVersion: currentVersion) {
-            return cached
-        }
-
-        let tools = ToolHandlerRegistry.shared.getTools()
-        guard let data = try? JSONEncoder().encode(tools),
-            let json = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
-        else {
-            // Deliberately not cached: an empty catalog must not become sticky.
-            Log.error("modern toolsJSON encode failed; returning empty catalog")
-            return []
-        }
-        catalogCache.store(tools: json, version: currentVersion)
-        return json
-    }
 
     private static func successResult(id: Any, result: [String: Any]) -> ModernDispatchResult {
         let envelope: [String: Any] = [

@@ -4,12 +4,9 @@ import MCP
 
 final class ToolRegistryTests: XCTestCase {
     func testRegisterAllDoesNotExposeLegacyUpdateTool() async {
-        ToolHandlerRegistry.shared.resetForTesting()
+        let catalog = ToolCatalog(database: Database(), resolver: ContactResolver(seedCache: [:]))
 
-        let server = Server(name: "test", version: "0")
-        await ToolRegistry.registerAll(on: server, db: Database(), resolver: ContactResolver(seedCache: [:]))
-
-        let tools = ToolHandlerRegistry.shared.getTools()
+        let tools = catalog.tools
         let names = Set(tools.map(\.name))
 
         XCTAssertFalse(names.contains("update"))
@@ -31,13 +28,10 @@ final class ToolRegistryTests: XCTestCase {
     }
 
     func testCatchUpToolDescriptionsBiasTowardBroadOverviewThenNarrowing() async throws {
-        ToolHandlerRegistry.shared.resetForTesting()
-
-        let server = Server(name: "test", version: "0")
-        await ToolRegistry.registerAll(on: server, db: Database(), resolver: ContactResolver(seedCache: [:]))
+        let catalog = ToolCatalog(database: Database(), resolver: ContactResolver(seedCache: [:]))
 
         let tools = Dictionary(
-            uniqueKeysWithValues: ToolHandlerRegistry.shared.getTools().map { ($0.name, $0) }
+            uniqueKeysWithValues: catalog.tools.map { ($0.name, $0) }
         )
 
         let listChats = try XCTUnwrap(tools["list_chats"])
@@ -62,13 +56,10 @@ final class ToolRegistryTests: XCTestCase {
     }
 
     func testChatToolDescriptionsKeepIdsInternalAndNamesUserFacing() async throws {
-        ToolHandlerRegistry.shared.resetForTesting()
-
-        let server = Server(name: "test", version: "0")
-        await ToolRegistry.registerAll(on: server, db: Database(), resolver: ContactResolver(seedCache: [:]))
+        let catalog = ToolCatalog(database: Database(), resolver: ContactResolver(seedCache: [:]))
 
         let tools = Dictionary(
-            uniqueKeysWithValues: ToolHandlerRegistry.shared.getTools().map { ($0.name, $0) }
+            uniqueKeysWithValues: catalog.tools.map { ($0.name, $0) }
         )
 
         for name in [

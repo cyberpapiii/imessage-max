@@ -206,8 +206,7 @@ final class SessionManagerLifecycleTests: XCTestCase {
 
     func testCreateSessionAtCapacityReturnsAtCapacity() async {
         let manager = SessionManager(
-            database: Database(),
-            resolver: ContactResolver(seedCache: [:]),
+            catalog: makeTestCatalog(),
             maxSessions: 1,
             cleanupInterval: .milliseconds(20)
         )
@@ -230,8 +229,7 @@ final class SessionManagerLifecycleTests: XCTestCase {
 
     func testFreshSessionIsNotReclaimedWhenAtCapacity() async {
         let manager = SessionManager(
-            database: Database(),
-            resolver: ContactResolver(seedCache: [:]),
+            catalog: makeTestCatalog(),
             maxSessions: 1,
             reclaimableIdle: 60,
             cleanupInterval: .milliseconds(20)
@@ -256,8 +254,7 @@ final class SessionManagerLifecycleTests: XCTestCase {
         // the sweep that reclaims it only runs every five minutes. A hundred
         // such sessions refused every new client until the service restarted.
         let manager = SessionManager(
-            database: Database(),
-            resolver: ContactResolver(seedCache: [:]),
+            catalog: makeTestCatalog(),
             maxSessions: 1,
             reclaimableIdle: 0.05,
             cleanupInterval: .milliseconds(20)
@@ -288,8 +285,7 @@ final class SessionManagerLifecycleTests: XCTestCase {
 
     func testExpiredSessionIsCleanedUp() async {
         let manager = SessionManager(
-            database: Database(),
-            resolver: ContactResolver(seedCache: [:]),
+            catalog: makeTestCatalog(),
             sessionTimeout: 0.01,
             cleanupInterval: .milliseconds(20)
         )

@@ -23,7 +23,7 @@ struct GetChatDetailsError: Codable {
 enum GetChatDetailsTool {
     static let name = "get_chat_details"
 
-    static func register(on server: Server, db: Database, resolver: ContactResolver) {
+    static func definition(db: Database, resolver: ContactResolver) -> ToolDefinition {
         let inputSchema: Value = .object([
             "type": "object",
             "properties": .object([
@@ -41,7 +41,7 @@ enum GetChatDetailsTool {
             "additionalProperties": false,
         ])
 
-        server.registerTool(
+        return ToolDefinition(
             name: name,
             description: "Get factual details for a known chat. Useful when you already have chat_id and need exact participants, handles, thread state, and recent shared-item context without reading the full conversation. Use chat.id for follow-up tool calls only; when explaining results to the user, refer to chat.name or participant names, not the id.",
             inputSchema: inputSchema,

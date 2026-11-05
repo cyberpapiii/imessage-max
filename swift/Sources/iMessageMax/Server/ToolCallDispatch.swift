@@ -53,9 +53,9 @@ enum ToolCallDispatch {
     ///
     /// Logs one line per call with the tool, lane, outcome and duration. It
     /// never logs arguments: they carry message text and phone numbers.
-    static func execute(name: String, arguments: [String: Value]?, lane: Lane) async -> Execution {
+    static func execute(name: String, arguments: [String: Value]?, lane: Lane, catalog: ToolCatalog) async -> Execution {
         let start = ContinuousClock.now
-        let (execution, outcome) = await run(name: name, arguments: arguments)
+        let (execution, outcome) = await run(catalog.handler(named: name), arguments: arguments)
         let elapsed = ContinuousClock.now - start
         let ms = Double(elapsed.components.seconds) * 1000
             + Double(elapsed.components.attoseconds) / 1e15
@@ -65,8 +65,8 @@ enum ToolCallDispatch {
         return execution
     }
 
-    private static func run(name: String, arguments: [String: Value]?) async -> (Execution, String) {
-        guard let handler = ToolHandlerRegistry.shared.getHandler(for: name) else {
+    private static func run(_ handler: ToolHandler?, arguments: [String: Value]?) async -> (Execution, String) {
+        guard let handler else {
             return (.unknownTool, "unknown_tool")
         }
 
@@ -97,8 +97,8 @@ enum ToolCallDispatch {
 
     /// Arguments arrive already decoded: the raw `Any` a JSON parse yields is
     /// not `Sendable`, so it must not cross into the handler's task.
-    static func perform(name: String, arguments: [String: Value]?, lane: Lane) async -> Result {
-        switch await execute(name: name, arguments: arguments, lane: lane) {
+    static func perform(name: String, arguments: [String: Value]?, lane: Lane, catalog: ToolCatalog) async -> Result {
+        switch await execute(name: name, arguments: arguments, lane: lane, catalog: catalog) {
         case .unknownTool:
             return .unknownTool
         case .completed(let content, let isError):

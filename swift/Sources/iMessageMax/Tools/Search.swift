@@ -151,7 +151,7 @@ struct SearchError: Error, Codable {
 enum SearchTool {
     // MARK: - Tool Registration
 
-    static func register(on server: Server, db: Database, resolver: ContactResolver) {
+    static func definition(db: Database, resolver: ContactResolver) -> ToolDefinition {
         let inputSchema: Value = .object([
             "type": "object",
             "properties": .object([
@@ -238,7 +238,7 @@ enum SearchTool {
             "additionalProperties": false
         ])
 
-        server.registerTool(
+        return ToolDefinition(
             name: "search",
             description: """
                 Full-text search across messages. Best when you know the topic or phrase you want to find, but not which conversation it appeared in.

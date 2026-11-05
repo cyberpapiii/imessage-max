@@ -13,8 +13,8 @@ final class HTTPTransportIntegrationTests: XCTestCase {
         let transport = HTTPTransport(
             host: "127.0.0.1",
             port: 0,
-            database: Database(),
-            resolver: ContactResolver(seedCache: [:]),
+            catalog: makeTestCatalog(),
+            setupPermissions: makeTestSetupPermissions(),
             requestTimeout: .seconds(5),
             cleanupInterval: .milliseconds(20)
         )
@@ -75,8 +75,8 @@ final class HTTPTransportIntegrationTests: XCTestCase {
         let transport = HTTPTransport(
             host: "127.0.0.1",
             port: 0,
-            database: Database(),
-            resolver: ContactResolver(seedCache: [:]),
+            catalog: makeTestCatalog(),
+            setupPermissions: makeTestSetupPermissions(),
             requestTimeout: .seconds(5),
             cleanupInterval: .milliseconds(20)
         )
@@ -103,8 +103,8 @@ final class HTTPTransportIntegrationTests: XCTestCase {
         let transport = HTTPTransport(
             host: "127.0.0.1",
             port: 0,
-            database: Database(),
-            resolver: ContactResolver(seedCache: [:]),
+            catalog: makeTestCatalog(),
+            setupPermissions: makeTestSetupPermissions(),
             requestTimeout: .seconds(5),
             cleanupInterval: .milliseconds(20)
         )
@@ -136,8 +136,8 @@ final class HTTPTransportIntegrationTests: XCTestCase {
         let transport = HTTPTransport(
             host: "127.0.0.1",
             port: 0,
-            database: Database(),
-            resolver: ContactResolver(seedCache: [:]),
+            catalog: makeTestCatalog(),
+            setupPermissions: makeTestSetupPermissions(),
             requestTimeout: .seconds(5),
             cleanupInterval: .milliseconds(20)
         )
@@ -162,8 +162,8 @@ final class HTTPTransportIntegrationTests: XCTestCase {
         let transport = HTTPTransport(
             host: "127.0.0.1",
             port: 0,
-            database: Database(),
-            resolver: ContactResolver(seedCache: [:]),
+            catalog: makeTestCatalog(),
+            setupPermissions: makeTestSetupPermissions(),
             requestTimeout: .seconds(5),
             cleanupInterval: .milliseconds(20)
         )
@@ -196,8 +196,8 @@ final class HTTPTransportIntegrationTests: XCTestCase {
         let transport = HTTPTransport(
             host: "127.0.0.1",
             port: 0,
-            database: Database(),
-            resolver: ContactResolver(seedCache: [:]),
+            catalog: makeTestCatalog(),
+            setupPermissions: makeTestSetupPermissions(),
             requestTimeout: .seconds(5),
             cleanupInterval: .milliseconds(20)
         )
@@ -250,8 +250,8 @@ final class HTTPTransportIntegrationTests: XCTestCase {
         let transport = HTTPTransport(
             host: "127.0.0.1",
             port: 0,
-            database: Database(),
-            resolver: ContactResolver(seedCache: [:]),
+            catalog: makeTestCatalog(),
+            setupPermissions: makeTestSetupPermissions(),
             requestTimeout: .seconds(5),
             cleanupInterval: .milliseconds(20)
         )
@@ -275,8 +275,8 @@ final class HTTPTransportIntegrationTests: XCTestCase {
         let transport = HTTPTransport(
             host: "127.0.0.1",
             port: 0,
-            database: Database(),
-            resolver: ContactResolver(seedCache: [:]),
+            catalog: makeTestCatalog(),
+            setupPermissions: makeTestSetupPermissions(),
             requestTimeout: .seconds(2),
             cleanupInterval: .milliseconds(20)
         )
@@ -324,8 +324,8 @@ final class HTTPTransportIntegrationTests: XCTestCase {
         let transport = HTTPTransport(
             host: "127.0.0.1",
             port: 0,
-            database: Database(),
-            resolver: ContactResolver(seedCache: [:]),
+            catalog: makeTestCatalog(),
+            setupPermissions: makeTestSetupPermissions(),
             requestTimeout: .milliseconds(200),
             cleanupInterval: .milliseconds(20)
         )
@@ -360,8 +360,8 @@ final class HTTPTransportIntegrationTests: XCTestCase {
         let transport = HTTPTransport(
             host: "127.0.0.1",
             port: 0,
-            database: Database(),
-            resolver: ContactResolver(seedCache: [:]),
+            catalog: makeTestCatalog(),
+            setupPermissions: makeTestSetupPermissions(),
             requestTimeout: .milliseconds(200),
             cleanupInterval: .milliseconds(20)
         )
@@ -394,8 +394,8 @@ final class HTTPTransportIntegrationTests: XCTestCase {
         let transport = HTTPTransport(
             host: "127.0.0.1",
             port: 0,
-            database: Database(),
-            resolver: ContactResolver(seedCache: [:]),
+            catalog: makeTestCatalog(),
+            setupPermissions: makeTestSetupPermissions(),
             requestTimeout: .seconds(2),
             cleanupInterval: .milliseconds(20)
         )
@@ -438,8 +438,8 @@ final class HTTPTransportIntegrationTests: XCTestCase {
         let transport = HTTPTransport(
             host: "127.0.0.1",
             port: 0,
-            database: Database(),
-            resolver: ContactResolver(seedCache: [:]),
+            catalog: makeTestCatalog(),
+            setupPermissions: makeTestSetupPermissions(),
             requestTimeout: .seconds(2),
             cleanupInterval: .milliseconds(20)
         )
@@ -548,8 +548,8 @@ final class HTTPTransportIntegrationTests: XCTestCase {
         let transport = HTTPTransport(
             host: "127.0.0.1",
             port: 0,
-            database: Database(),
-            resolver: ContactResolver(seedCache: [:]),
+            catalog: makeTestCatalog(),
+            setupPermissions: makeTestSetupPermissions(),
             requestTimeout: .seconds(5),
             cleanupInterval: .milliseconds(20)
         )
@@ -573,8 +573,8 @@ final class HTTPTransportIntegrationTests: XCTestCase {
         let transport = HTTPTransport(
             host: "127.0.0.1",
             port: 0,
-            database: Database(),
-            resolver: ContactResolver(seedCache: [:]),
+            catalog: makeTestCatalog(),
+            setupPermissions: makeTestSetupPermissions(),
             requestTimeout: .seconds(5),
             cleanupInterval: .milliseconds(20)
         )
@@ -598,8 +598,8 @@ final class HTTPTransportIntegrationTests: XCTestCase {
         let transport = HTTPTransport(
             host: "127.0.0.1",
             port: 0,
-            database: Database(),
-            resolver: ContactResolver(seedCache: [:]),
+            catalog: makeTestCatalog(),
+            setupPermissions: makeTestSetupPermissions(),
             requestTimeout: .seconds(5),
             cleanupInterval: .milliseconds(20)
         )
@@ -642,8 +642,8 @@ final class HTTPTransportIntegrationTests: XCTestCase {
         let transport = HTTPTransport(
             host: "127.0.0.1",
             port: 0,
-            database: Database(),
-            resolver: ContactResolver(seedCache: [:]),
+            catalog: makeTestCatalog(),
+            setupPermissions: makeTestSetupPermissions(),
             requestTimeout: .seconds(5),
             cleanupInterval: .milliseconds(20)
         )
@@ -689,8 +689,8 @@ final class HTTPTransportIntegrationTests: XCTestCase {
         let transport = HTTPTransport(
             host: "127.0.0.1",
             port: 0,
-            database: Database(),
-            resolver: ContactResolver(seedCache: [:]),
+            catalog: makeTestCatalog(),
+            setupPermissions: makeTestSetupPermissions(),
             requestTimeout: .seconds(5),
             maxSessions: 1,
             cleanupInterval: .milliseconds(20)

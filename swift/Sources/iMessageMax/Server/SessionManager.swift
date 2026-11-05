@@ -65,11 +65,7 @@ actor SessionManager {
     /// Task for periodic cleanup
     private var cleanupTask: Task<Void, Never>?
 
-    /// Database for tool registration
-    private let database: Database
-
-    /// Contact resolver for tool registration
-    private let resolver: ContactResolver
+    private let catalog: ToolCatalog
 
     /// Callback to route Server responses back to HTTP
     private var responseHandler: ((String, Data) async -> Void)?
@@ -92,15 +88,13 @@ actor SessionManager {
     ///     it so cancelled `asyncAfter` work does not occupy a parallel
     ///     worker until the five-minute deadline.
     init(
-        database: Database,
-        resolver: ContactResolver,
+        catalog: ToolCatalog,
         sessionTimeout: TimeInterval = 3600,
         maxSessions: Int = 512,
         reclaimableIdle: TimeInterval = 300,
         cleanupInterval: Duration = .seconds(300)
     ) {
-        self.database = database
-        self.resolver = resolver
+        self.catalog = catalog
         self.sessionTimeout = sessionTimeout
         self.maxSessions = maxSessions
         self.reclaimableIdle = reclaimableIdle
@@ -154,7 +148,7 @@ actor SessionManager {
         )
 
         // Register tools on this server instance
-        await ToolRegistry.registerAll(on: server, db: database, resolver: resolver)
+        await server.registerToolHandlers(catalog)
 
         // Create message stream for this session
         var continuation: AsyncThrowingStream<Data, Error>.Continuation!

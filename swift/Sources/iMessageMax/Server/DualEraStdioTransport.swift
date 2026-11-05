@@ -25,11 +25,13 @@ actor DualEraStdioTransport: Transport {
     private let messageStream: AsyncThrowingStream<Data, Error>
     private let continuation: AsyncThrowingStream<Data, Error>.Continuation
     private var pumpTask: Task<Void, Never>?
+    private let catalog: ToolCatalog
 
     nonisolated let logger: Logger
 
-    init(base: any Transport) {
+    init(base: any Transport, catalog: ToolCatalog) {
         self.base = base
+        self.catalog = catalog
         self.logger = Logger(
             label: "mcp.transport.dual-era",
             factory: { _ in SwiftLogNoOpLogHandler() }
@@ -45,6 +47,7 @@ actor DualEraStdioTransport: Transport {
         let upstream = await base.receive()
         let base = self.base
         let continuation = self.continuation
+        let catalog = self.catalog
         pumpTask = Task {
             await withDiscardingTaskGroup { group in
                 do {
@@ -57,7 +60,7 @@ actor DualEraStdioTransport: Transport {
                             // concurrently. Never block the read loop on a
                             // tool call.
                             group.addTask {
-                                let result = await ModernDispatcher.handle(data, transport: "stdio")
+                                let result = await ModernDispatcher.handle(data, transport: "stdio", catalog: catalog)
                                 if let responseData = result.data {
                                     do {
                                         try await base.send(responseData)

@@ -59,9 +59,9 @@ actor GetMessagesSinceTool {
         max(1, min(raw ?? defaultLimit, maxLimit))
     }
 
-    static func register(on server: Server, db: Database, resolver: ContactResolver) {
+    static func definition(db: Database, resolver: ContactResolver) -> ToolDefinition {
         let tool = GetMessagesSinceTool(db: db, resolver: resolver)
-        server.registerTool(
+        return ToolDefinition(
             name: "get_messages_since",
             description: """
                 Messages across all chats with ROWID greater than since_rowid, in arrival order. \

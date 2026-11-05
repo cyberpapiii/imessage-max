@@ -291,3 +291,11 @@ func makeFixtureImage(name: String = "fixture.jpg", width: Int = 1200, height: I
 private func escape(_ input: String) -> String {
     input.replacingOccurrences(of: "'", with: "''")
 }
+
+func makeTestCatalog() -> ToolCatalog {
+    ToolCatalog(database: Database(), resolver: ContactResolver(seedCache: [:]))
+}
+
+func makeTestSetupPermissions() -> SetupPermissionService {
+    SetupPermissionService(contactsRequest: { (true, "authorized") }, automationRequest: { (true, "authorized") })
+}

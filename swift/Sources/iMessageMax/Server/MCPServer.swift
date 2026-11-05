@@ -6,6 +6,7 @@ actor MCPServerWrapper {
     private let database: Database
     private let resolver: ContactResolver
     private let contactsPolicy: ContactsAccessPolicy.Override
+    private let catalog: ToolCatalog
 
     init(contactsPolicy: ContactsAccessPolicy.Override = .auto) {
         self.server = Server(
@@ -18,15 +19,15 @@ actor MCPServerWrapper {
         self.database = Database()
         self.resolver = ContactResolver()
         self.contactsPolicy = contactsPolicy
+        self.catalog = ToolCatalog(database: database, resolver: resolver)
     }
 
     func start(transport: any Transport) async throws {
-        // Register tools and start server FIRST so MCP handshake can complete
-        await ToolRegistry.registerAll(on: server, db: database, resolver: resolver)
+        await server.registerToolHandlers(catalog)
         // Dual-era stdio: modern 2026-07-28 messages are answered by
         // ModernDispatcher inside DualEraStdioTransport; legacy traffic
         // continues through the SDK Server (with icon injection on send).
-        let transport = IconMetadataTransport(base: DualEraStdioTransport(base: transport))
+        let transport = IconMetadataTransport(base: DualEraStdioTransport(base: transport, catalog: catalog))
 
         Log.info("Started version=\(Version.current) pid=\(getpid()) transport=stdio")
 

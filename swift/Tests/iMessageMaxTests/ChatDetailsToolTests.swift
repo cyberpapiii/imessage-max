@@ -4,12 +4,9 @@ import MCP
 
 final class ChatDetailsToolTests: XCTestCase {
     func testToolRegistryIncludesGetChatDetails() async {
-        ToolHandlerRegistry.shared.resetForTesting()
+        let catalog = ToolCatalog(database: Database(), resolver: ContactResolver(seedCache: [:]))
 
-        let server = Server(name: "test", version: "0")
-        await ToolRegistry.registerAll(on: server, db: Database(), resolver: ContactResolver(seedCache: [:]))
-
-        let names = Set(ToolHandlerRegistry.shared.getTools().map(\.name))
+        let names = Set(catalog.tools.map(\.name))
         XCTAssertTrue(names.contains("get_chat_details"))
     }
 

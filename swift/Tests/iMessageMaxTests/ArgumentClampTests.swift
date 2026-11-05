@@ -9,16 +9,6 @@ import XCTest
 /// returns a normal, decodable response instead.
 final class ArgumentClampTests: XCTestCase {
 
-    override func setUp() {
-        super.setUp()
-        ToolHandlerRegistry.shared.resetForTesting()
-    }
-
-    override func tearDown() {
-        ToolHandlerRegistry.shared.resetForTesting()
-        super.tearDown()
-    }
-
     // MARK: - Fixture
 
     /// Two handles, a DM and a group chat, plus one outgoing question in the
@@ -54,21 +44,11 @@ final class ArgumentClampTests: XCTestCase {
         return fixture
     }
 
-    private func makeServer() -> Server {
-        Server(
-            name: Version.name,
-            version: Version.current,
-            title: Version.title,
-            instructions: Version.instructions,
-            capabilities: Version.serverCapabilities
-        )
-    }
-
     /// Runs a tool through its registered handler (the closure that parses the
     /// raw argument dictionary) and returns the JSON body whether the tool
     /// answered normally or threw a structured `ToolError`.
-    private func callRegistered(_ name: String, arguments: [String: Value]) async throws -> [String: Any] {
-        let handler = try XCTUnwrap(ToolHandlerRegistry.shared.getHandler(for: name), "\(name) should be registered")
+    private func callRegistered(_ name: String, in catalog: ToolCatalog, arguments: [String: Value]) async throws -> [String: Any] {
+        let handler = try XCTUnwrap(catalog.handler(named: name), "\(name) should be registered")
         do {
             return try decodeJSONDictionary(from: try await handler(arguments))
         } catch let error as ToolError {
@@ -80,9 +60,9 @@ final class ArgumentClampTests: XCTestCase {
 
     func testSearchWithHugeUnansweredHoursReturns() async throws {
         let fixture = try makeFixture()
-        SearchTool.register(on: makeServer(), db: fixture.database(), resolver: makeSeededResolver())
+        let catalog = ToolCatalog([SearchTool.definition(db: fixture.database(), resolver: makeSeededResolver())])
 
-        let json = try await callRegistered("search", arguments: [
+        let json = try await callRegistered("search", in: catalog, arguments: [
             "query": .string("hello"),
             "unanswered": .bool(true),
             "unanswered_hours": .int(Int.max),

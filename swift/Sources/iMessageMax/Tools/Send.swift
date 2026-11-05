@@ -269,10 +269,10 @@ actor SendTool {
 
     // MARK: - Tool Registration
 
-    static func register(on server: Server, resolver: ContactResolver) {
-        let tool = SendTool(resolver: resolver)
+    static func definition(db: Database, resolver: ContactResolver) -> ToolDefinition {
+        let tool = SendTool(db: db, resolver: resolver)
 
-        server.registerTool(
+        return ToolDefinition(
             name: "send",
             description: """
                 Send a message or file to a person or an existing chat.

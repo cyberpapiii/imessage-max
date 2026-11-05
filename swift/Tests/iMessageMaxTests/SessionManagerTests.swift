@@ -7,8 +7,7 @@ final class SessionManagerTests: XCTestCase {
 
     func testConcurrentCreatesRespectTheCap() async throws {
         let manager = SessionManager(
-            database: Database(),
-            resolver: ContactResolver(seedCache: [:]),
+            catalog: makeTestCatalog(),
             maxSessions: 2,
             cleanupInterval: .milliseconds(20)
         )
@@ -53,8 +52,7 @@ final class SessionManagerTests: XCTestCase {
 
     func testTerminateStopsServer() async {
         let manager = SessionManager(
-            database: Database(),
-            resolver: ContactResolver(seedCache: [:]),
+            catalog: makeTestCatalog(),
             maxSessions: 2,
             cleanupInterval: .milliseconds(20)
         )
@@ -84,8 +82,7 @@ final class SessionManagerTests: XCTestCase {
 
     func testRouteMessageRefusesAfterTerminateReturns() async {
         let manager = SessionManager(
-            database: Database(),
-            resolver: ContactResolver(seedCache: [:]),
+            catalog: makeTestCatalog(),
             maxSessions: 2,
             cleanupInterval: .milliseconds(20)
         )
@@ -103,8 +100,7 @@ final class SessionManagerTests: XCTestCase {
 
     func testTerminateSessionTwiceIsIdempotent() async {
         let manager = SessionManager(
-            database: Database(),
-            resolver: ContactResolver(seedCache: [:]),
+            catalog: makeTestCatalog(),
             maxSessions: 2,
             cleanupInterval: .milliseconds(20)
         )
@@ -121,8 +117,7 @@ final class SessionManagerTests: XCTestCase {
 
     func testNotifyAllSessionsReachesEverySessionResponseHandler() async throws {
         let manager = SessionManager(
-            database: Database(),
-            resolver: ContactResolver(seedCache: [:]),
+            catalog: makeTestCatalog(),
             maxSessions: 4,
             cleanupInterval: .milliseconds(20)
         )
@@ -167,8 +162,7 @@ final class SessionManagerTests: XCTestCase {
 
     func testTerminateUnknownIdIsANoOp() async {
         let manager = SessionManager(
-            database: Database(),
-            resolver: ContactResolver(seedCache: [:]),
+            catalog: makeTestCatalog(),
             maxSessions: 2,
             cleanupInterval: .milliseconds(20)
         )

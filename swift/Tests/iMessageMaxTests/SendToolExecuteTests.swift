@@ -826,13 +826,10 @@ private func decodeJSONDictionary(from error: ToolError) throws -> [String: Any]
 
 final class SendToolExecutionTests: XCTestCase {
     func testSendSchemaDoesNotAdvertiseReplyTo() async throws {
-        ToolHandlerRegistry.shared.resetForTesting()
-
-        let server = Server(name: "test", version: "0")
-        await ToolRegistry.registerAll(on: server, db: Database(), resolver: ContactResolver(seedCache: [:]))
+        let catalog = ToolCatalog(database: Database(), resolver: ContactResolver(seedCache: [:]))
 
         let tools = Dictionary(
-            uniqueKeysWithValues: ToolHandlerRegistry.shared.getTools().map { ($0.name, $0) }
+            uniqueKeysWithValues: catalog.tools.map { ($0.name, $0) }
         )
         let send = try XCTUnwrap(tools["send"])
         guard case .object(let schema) = send.inputSchema,

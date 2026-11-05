@@ -89,69 +89,6 @@ enum OutputSchema {
     ])
 }
 
-// MARK: - Tool Handler Registry
-
-/// Registry to hold tool handlers and definitions
-final class ToolHandlerRegistry: Sendable {
-    static let shared = ToolHandlerRegistry()
-
-    private struct State: Sendable {
-        var tools: [String: Tool] = [:]
-        var registrationOrder: [String] = []
-        var handlers: [String: @Sendable ([String: Value]?) async throws -> [Tool.Content]] = [:]
-        var version: Int = 0
-    }
-    private let state = Mutex(State())
-
-    private init() {}
-
-    /// Monotonic catalog version: bumps on every register/reset. Consumers may
-    /// cache derived catalog data keyed by this value.
-    ///
-    /// Correctness of any such cache rests on one invariant: **every mutation
-    /// of tool state bumps `version` under the lock**. Any future
-    /// unregister/replace must do the same.
-    var catalogVersion: Int {
-        state.withLock { $0.version }
-    }
-
-    func register(
-        tool: Tool,
-        handler: @escaping @Sendable ([String: Value]?) async throws -> [Tool.Content]
-    ) {
-        state.withLock { state in
-            if state.tools[tool.name] == nil {
-                state.registrationOrder.append(tool.name)
-            }
-            state.tools[tool.name] = tool
-            state.handlers[tool.name] = handler
-            state.version += 1
-        }
-    }
-
-    /// Returns tools in registration order. The MCP 2026-07-28 spec asks for
-    /// deterministic `tools/list` ordering so clients can cache catalogs and
-    /// LLM prompt caches stay warm.
-    func getTools() -> [Tool] {
-        state.withLock { state in
-            state.registrationOrder.compactMap { state.tools[$0] }
-        }
-    }
-
-    func getHandler(for name: String) -> (@Sendable ([String: Value]?) async throws -> [Tool.Content])? {
-        state.withLock { $0.handlers[name] }
-    }
-
-    func resetForTesting() {
-        state.withLock { state in
-            state.tools.removeAll()
-            state.registrationOrder.removeAll()
-            state.handlers.removeAll()
-            state.version += 1
-        }
-    }
-}
-
 // MARK: - Tool Error
 
 /// Error type that tools throw to signal failure with content.
@@ -174,44 +111,14 @@ extension Tool.Content {
 // MARK: - Server Extension
 
 extension Server {
-    /// Register a tool with the server
-    @discardableResult
-    nonisolated func registerTool(
-        name: String,
-        title: String? = nil,
-        description: String,
-        inputSchema: Value,
-        outputSchema: Value? = nil,
-        icons: [Icon]? = nil,
-        annotations: Tool.Annotations = nil,
-        handler: @escaping @Sendable ([String: Value]?) async throws -> [Tool.Content]
-    ) -> Self {
-        let tool = Tool(
-            name: name,
-            title: title ?? annotations.title,
-            description: description,
-            inputSchema: inputSchema,
-            annotations: annotations,
-            outputSchema: outputSchema,
-            icons: icons ?? IconMetadata.toolIcons
-        )
-
-        ToolHandlerRegistry.shared.register(tool: tool, handler: handler)
-
-        return self
-    }
-
     /// Register built-in handlers for ListTools and CallTool
-    func registerToolHandlers() async {
-        // Register ListTools handler
+    func registerToolHandlers(_ catalog: ToolCatalog) async {
         self.withMethodHandler(ListTools.self) { _ in
-            let tools = ToolHandlerRegistry.shared.getTools()
-            return ListTools.Result(tools: tools)
+            ListTools.Result(tools: catalog.tools)
         }
 
-        // Register CallTool handler
         self.withMethodHandler(CallTool.self) { params in
-            switch await ToolCallDispatch.execute(name: params.name, arguments: params.arguments, lane: .legacyStdio) {
+            switch await ToolCallDispatch.execute(name: params.name, arguments: params.arguments, lane: .legacyStdio, catalog: catalog) {
             case .unknownTool:
                 throw MCPError.methodNotFound("Unknown tool: \(params.name)")
             case .completed(let content, isError: true):

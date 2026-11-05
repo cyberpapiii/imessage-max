@@ -250,8 +250,8 @@ final class HTTPTransportLiveSocketTests: XCTestCase {
             let transport = HTTPTransport(
                 host: "127.0.0.1",
                 port: port,
-                database: Database(),
-                resolver: ContactResolver(seedCache: [:]),
+                catalog: makeTestCatalog(),
+                setupPermissions: makeTestSetupPermissions(),
                 requestTimeout: .seconds(5),
                 channelIdleTimeout: channelIdleTimeout,
                 cleanupInterval: .milliseconds(20),

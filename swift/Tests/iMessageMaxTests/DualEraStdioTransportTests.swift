@@ -8,19 +8,12 @@ import MCP
 /// messages are answered directly by ModernDispatcher, while legacy traffic
 /// passes through untouched to the SDK Server's receive stream.
 final class DualEraStdioTransportTests: XCTestCase {
-    override func setUp() {
-        super.setUp()
-        ToolHandlerRegistry.shared.resetForTesting()
-    }
-
-    override func tearDown() {
-        ToolHandlerRegistry.shared.resetForTesting()
-        super.tearDown()
-    }
+    private var definitions: [ToolDefinition] = []
+    private var catalog: ToolCatalog { ToolCatalog(definitions) }
 
     func testModernDiscoverIsAnsweredDirectlyAndLegacyPassesThrough() async throws {
         let base = FakeBaseTransport()
-        let dual = DualEraStdioTransport(base: base)
+        let dual = DualEraStdioTransport(base: base, catalog: catalog)
         try await dual.connect()
 
         let downstream = await dual.receive()
@@ -57,7 +50,7 @@ final class DualEraStdioTransportTests: XCTestCase {
 
     func testSendPassesThroughToBase() async throws {
         let base = FakeBaseTransport()
-        let dual = DualEraStdioTransport(base: base)
+        let dual = DualEraStdioTransport(base: base, catalog: catalog)
         try await dual.connect()
 
         let payload = Data(#"{"jsonrpc":"2.0","id":3,"result":{}}"#.utf8)
@@ -73,7 +66,7 @@ final class DualEraStdioTransportTests: XCTestCase {
 
     func testModernToolsListIsAnsweredDirectly() async throws {
         let base = FakeBaseTransport()
-        let dual = DualEraStdioTransport(base: base)
+        let dual = DualEraStdioTransport(base: base, catalog: catalog)
         try await dual.connect()
 
         let downstream = await dual.receive()
@@ -114,7 +107,7 @@ final class DualEraStdioTransportTests: XCTestCase {
         registerFakeTool(named: "stdio_echo")
 
         let base = FakeBaseTransport()
-        let dual = DualEraStdioTransport(base: base)
+        let dual = DualEraStdioTransport(base: base, catalog: catalog)
         try await dual.connect()
 
         let downstream = await dual.receive()
@@ -151,7 +144,7 @@ final class DualEraStdioTransportTests: XCTestCase {
 
     func testModernNotificationIsConsumedSilently() async throws {
         let base = FakeBaseTransport()
-        let dual = DualEraStdioTransport(base: base)
+        let dual = DualEraStdioTransport(base: base, catalog: catalog)
         try await dual.connect()
 
         let downstream = await dual.receive()
@@ -188,7 +181,7 @@ final class DualEraStdioTransportTests: XCTestCase {
 
     func testInitializeWithModernMetaStaysLegacy() async throws {
         let base = FakeBaseTransport()
-        let dual = DualEraStdioTransport(base: base)
+        let dual = DualEraStdioTransport(base: base, catalog: catalog)
         try await dual.connect()
 
         let downstream = await dual.receive()
@@ -219,7 +212,7 @@ final class DualEraStdioTransportTests: XCTestCase {
 
     func testUnparseableLinePassesThroughToLegacyLane() async throws {
         let base = FakeBaseTransport()
-        let dual = DualEraStdioTransport(base: base)
+        let dual = DualEraStdioTransport(base: base, catalog: catalog)
         try await dual.connect()
 
         let downstream = await dual.receive()
@@ -251,7 +244,7 @@ final class DualEraStdioTransportTests: XCTestCase {
         }
 
         let base = FakeBaseTransport()
-        let dual = DualEraStdioTransport(base: base)
+        let dual = DualEraStdioTransport(base: base, catalog: catalog)
         try await dual.connect()
 
         let downstream = await dual.receive()
@@ -297,7 +290,7 @@ final class DualEraStdioTransportTests: XCTestCase {
 
     func testWriteFailureIsSwallowedButLogged() async throws {
         let base = FakeBaseTransport()
-        let dual = DualEraStdioTransport(base: base)
+        let dual = DualEraStdioTransport(base: base, catalog: catalog)
         try await dual.connect()
 
         await base.failNextSend()
@@ -346,12 +339,9 @@ final class DualEraStdioTransportTests: XCTestCase {
             [.plainText("ok")]
         }
     ) {
-        let tool = Tool(
-            name: name,
-            description: "test tool",
-            inputSchema: InputSchema.object(properties: [:])
+        definitions.append(
+            ToolDefinition(name: name, description: "test tool", inputSchema: InputSchema.object(properties: [:]), handler: handler)
         )
-        ToolHandlerRegistry.shared.register(tool: tool, handler: handler)
     }
 }
 

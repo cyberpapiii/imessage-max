@@ -29,8 +29,7 @@ public actor HTTPTransport: Transport {
     private var isConnected = false
     private let sessionManager: SessionManager
     private let sseManager: SSEConnectionManager
-    private let database: Database
-    private let resolver: ContactResolver
+    private let catalog: ToolCatalog
     private let setupPermissions: SetupPermissionService
 
     // Request correlation: maps JSON-RPC id to continuation for response
@@ -49,8 +48,6 @@ public actor HTTPTransport: Transport {
     /// - Parameters:
     ///   - host: The host to listen on (default: "127.0.0.1")
     ///   - port: The port to listen on (default: 8080)
-    ///   - database: Database instance for tool access
-    ///   - resolver: Contact resolver for tool access
     ///   - logger: Optional logger instance for transport events
     ///   - maxSessions: concurrent-session cap, forwarded to `SessionManager`.
     ///     Production uses the default; tests lower it to reach the 503 path.
@@ -59,8 +56,8 @@ public actor HTTPTransport: Transport {
     init(
         host: String = "127.0.0.1",
         port: Int = 8080,
-        database: Database,
-        resolver: ContactResolver,
+        catalog: ToolCatalog,
+        setupPermissions: SetupPermissionService,
         logger: Logger? = nil,
         requestTimeout: Duration = .seconds(300),
         bodyReadDeadline: Duration = .seconds(30),
@@ -68,8 +65,7 @@ public actor HTTPTransport: Transport {
         maxSessions: Int = 512,
         cleanupInterval: Duration = .seconds(300),
         sessionTimeout: TimeInterval = 3600,
-        sseKeepAliveInterval: Duration = .seconds(30),
-        setupPermissions: SetupPermissionService? = nil
+        sseKeepAliveInterval: Duration = .seconds(30)
     ) {
         self.host = host
         self.port = port
@@ -77,9 +73,8 @@ public actor HTTPTransport: Transport {
         self.bodyReadDeadline = bodyReadDeadline
         self.channelIdleTimeout = channelIdleTimeout
         self.pendingRequests = PendingRequestRegistry(timeout: requestTimeout)
-        self.database = database
-        self.resolver = resolver
-        self.setupPermissions = setupPermissions ?? SetupPermissionService(resolver: resolver)
+        self.catalog = catalog
+        self.setupPermissions = setupPermissions
         self.logger =
             logger
             ?? Logger(
@@ -87,8 +82,7 @@ public actor HTTPTransport: Transport {
                 factory: { _ in SwiftLogNoOpLogHandler() }
             )
         self.sessionManager = SessionManager(
-            database: database,
-            resolver: resolver,
+            catalog: catalog,
             sessionTimeout: sessionTimeout,
             maxSessions: maxSessions,
             cleanupInterval: cleanupInterval
@@ -110,7 +104,6 @@ public actor HTTPTransport: Transport {
         guard !isConnected else { return }
 
         await configureRoutingIfNeeded()
-        await ensureToolCatalogRegistered()
 
         let app = buildApplication()
 
@@ -155,24 +148,8 @@ public actor HTTPTransport: Transport {
 
     func makeApplicationForTesting() async -> some ApplicationProtocol {
         await configureRoutingIfNeeded()
-        await ensureToolCatalogRegistered()
         isConnected = true
         return buildApplication()
-    }
-
-    /// Populates the global tool registry at startup so the stateless modern
-    /// lane can serve `tools/list`/`tools/call` before (or without) any
-    /// legacy session ever being created.
-    private func ensureToolCatalogRegistered() async {
-        guard ToolHandlerRegistry.shared.getTools().isEmpty else { return }
-        let server = Server(
-            name: Version.name,
-            version: Version.current,
-            title: Version.title,
-            instructions: Version.instructions,
-            capabilities: Version.serverCapabilities
-        )
-        await ToolRegistry.registerAll(on: server, db: database, resolver: resolver)
     }
 
     func registerMethodHandlerForTesting<M: MCP.Method>(
@@ -469,7 +446,8 @@ public actor HTTPTransport: Transport {
         let outcome = await ToolCallDispatch.perform(
             name: name,
             arguments: arguments,
-            lane: .legacyHTTP(session: sessionId)
+            lane: .legacyHTTP(session: sessionId),
+            catalog: catalog
         )
 
         let envelope: [String: Any]
@@ -539,7 +517,7 @@ public actor HTTPTransport: Transport {
             return modernResponse(mismatch)
         }
 
-        let result = await ModernDispatcher.handle(requestData, transport: "http")
+        let result = await ModernDispatcher.handle(requestData, transport: "http", catalog: catalog)
         return modernResponse(result)
     }
 

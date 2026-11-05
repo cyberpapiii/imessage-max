@@ -6,15 +6,11 @@ import MCP
 /// duration, and never its arguments. Before this there was no record of how
 /// long a call took or how it ended, only an era line saying one arrived.
 final class CallLogTests: XCTestCase {
+    private var definitions: [ToolDefinition] = []
+
     override func setUp() {
         super.setUp()
-        ToolHandlerRegistry.shared.resetForTesting()
         ToolCallDispatch.lastCallLogForTesting = nil
-    }
-
-    override func tearDown() {
-        ToolHandlerRegistry.shared.resetForTesting()
-        super.tearDown()
     }
 
     func testSuccessfulCallLogsToolLaneOutcomeAndDuration() async throws {
@@ -22,7 +18,8 @@ final class CallLogTests: XCTestCase {
         _ = await ToolCallDispatch.execute(
             name: "ok_tool",
             arguments: ["query": .string("hunter2")],
-            lane: .legacyHTTP(session: "abcdef1234567890")
+            lane: .legacyHTTP(session: "abcdef1234567890"),
+            catalog: ToolCatalog(definitions)
         )
         let line = try XCTUnwrap(ToolCallDispatch.lastCallLogForTesting)
         XCTAssertTrue(
@@ -44,7 +41,7 @@ final class CallLogTests: XCTestCase {
             "missing_tool": "unknown_tool",
         ]
         for (name, outcome) in expected {
-            _ = await ToolCallDispatch.execute(name: name, arguments: nil, lane: .modern(transport: "http"))
+            _ = await ToolCallDispatch.execute(name: name, arguments: nil, lane: .modern(transport: "http"), catalog: ToolCatalog(definitions))
             let line = try XCTUnwrap(ToolCallDispatch.lastCallLogForTesting)
             XCTAssertTrue(line.contains(" lane=modern-http outcome=\(outcome) "), line)
         }
@@ -54,7 +51,8 @@ final class CallLogTests: XCTestCase {
         _ = await ToolCallDispatch.execute(
             name: "evil\nINFO forged",
             arguments: nil,
-            lane: .legacyStdio
+            lane: .legacyStdio,
+            catalog: ToolCatalog(definitions)
         )
         let line = try XCTUnwrap(ToolCallDispatch.lastCallLogForTesting)
         XCTAssertFalse(line.contains("\n"), line)
@@ -72,9 +70,6 @@ final class CallLogTests: XCTestCase {
         _ name: String,
         handler: @escaping @Sendable ([String: Value]?) async throws -> [Tool.Content]
     ) {
-        ToolHandlerRegistry.shared.register(
-            tool: Tool(name: name, description: "test", inputSchema: InputSchema.object(properties: [:])),
-            handler: handler
-        )
+        definitions.append(ToolDefinition(name: name, description: "test", inputSchema: InputSchema.object(properties: [:]), handler: handler))
     }
 }

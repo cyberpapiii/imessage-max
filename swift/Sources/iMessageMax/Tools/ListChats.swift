@@ -112,7 +112,7 @@ struct ListChatsError: Error, Codable {
 enum ListChatsTool {
     // MARK: - Tool Registration
 
-    static func register(on server: Server, db: Database, resolver: ContactResolver) {
+    static func definition(db: Database, resolver: ContactResolver) -> ToolDefinition {
         let inputSchema: Value = .object([
             "type": "object",
             "properties": .object([
@@ -153,7 +153,7 @@ enum ListChatsTool {
             "additionalProperties": false,
         ])
 
-        server.registerTool(
+        return ToolDefinition(
             name: "list_chats",
             description: "List recent chats with previews. Returns chat ids for follow-up tool calls and chat names for user-facing summaries. When explaining results to the user, refer to chats by name, not by id. Good starting point for broad catch-ups and discovery before drilling deeper. Totals (total_chats, total_groups, total_dms) appear on the first page only.",
             inputSchema: inputSchema,

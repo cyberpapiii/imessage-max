@@ -141,10 +141,10 @@ actor GetMessagesTool {
 
     // MARK: - Tool Registration
 
-    static func register(on server: Server, db: Database, resolver: ContactResolver) {
+    static func definition(db: Database, resolver: ContactResolver) -> ToolDefinition {
         let tool = GetMessagesTool(db: db, resolver: resolver)
 
-        server.registerTool(
+        return ToolDefinition(
             name: "get_messages",
             description: """
                 Retrieve messages from a chat, filtered by time, sender, content type, or text. Either chat_id or participants must be provided.

@@ -84,6 +84,6 @@ private func setupHeaders() -> HTTPFields {
 }
 
 private func setupTestTransport(host: String = "127.0.0.1") -> HTTPTransport {
-    HTTPTransport(host: host, database: Database(), resolver: ContactResolver(seedCache: [:]),
+    HTTPTransport(host: host, catalog: makeTestCatalog(),
         setupPermissions: SetupPermissionService(contactsRequest: { (true, "authorized") }, automationRequest: { (true, "authorized") }))
 }

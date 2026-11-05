@@ -113,8 +113,8 @@ enum FindChatTool {
 
     // MARK: - Tool Registration
 
-    static func register(on server: Server, database: Database, resolver: ContactResolver) {
-        server.registerTool(
+    static func definition(db database: Database, resolver: ContactResolver) -> ToolDefinition {
+        return ToolDefinition(
             name: name,
             description: description,
             inputSchema: inputSchema,

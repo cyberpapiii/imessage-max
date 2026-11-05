@@ -93,8 +93,8 @@ struct iMessageMax: AsyncParsableCommand {
             let transport = HTTPTransport(
                 host: host,
                 port: port,
-                database: database,
-                resolver: resolver
+                catalog: ToolCatalog(database: database, resolver: resolver),
+                setupPermissions: SetupPermissionService(resolver: resolver)
             )
 
             try await transport.connect()

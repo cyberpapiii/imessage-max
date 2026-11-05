@@ -82,20 +82,16 @@ final class DatabaseCancellationTests: XCTestCase {
         let fixture = try ToolTestDatabase(name: "db-cancel-dispatch")
         try fixture.insertChat(rowId: 1, guid: "dispatch-chat")
         let db = fixture.database()
-        ToolHandlerRegistry.shared.resetForTesting()
-        defer { ToolHandlerRegistry.shared.resetForTesting() }
-        ToolHandlerRegistry.shared.register(
-            tool: Tool(name: "slow_count", description: "test", inputSchema: InputSchema.object(properties: [:]))
-        ) { _ in
+        let catalog = ToolCatalog([ToolDefinition(name: "slow_count", description: "test", inputSchema: InputSchema.object(properties: [:])) { _ in
             let rows = try db.query("""
                 WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c WHERE x < 3000000)
                 SELECT count(*) FROM c
                 """) { $0.int(0) }
             return [.plainText("\(rows[0])")]
-        }
+        }])
 
-        let cancelled = Task { await ToolCallDispatch.execute(name: "slow_count", arguments: nil, lane: .legacyStdio) }
-        let bystander = Task { await ToolCallDispatch.execute(name: "slow_count", arguments: nil, lane: .legacyStdio) }
+        let cancelled = Task { await ToolCallDispatch.execute(name: "slow_count", arguments: nil, lane: .legacyStdio, catalog: catalog) }
+        let bystander = Task { await ToolCallDispatch.execute(name: "slow_count", arguments: nil, lane: .legacyStdio, catalog: catalog) }
         await AsyncTimeout.sleep(.milliseconds(15))
         cancelled.cancel()
 
