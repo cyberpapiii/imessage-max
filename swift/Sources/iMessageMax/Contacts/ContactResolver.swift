@@ -1,6 +1,7 @@
 // Sources/iMessageMax/Contacts/ContactResolver.swift
 import Contacts
 import Foundation
+import IMessageMaxContract
 
 actor ContactResolver {
     /// Contacts access behind three closures so tests never touch
@@ -74,11 +75,11 @@ actor ContactResolver {
     private static func authorizationStatus() -> (authorized: Bool, status: String) {
         let status = CNContactStore.authorizationStatus(for: .contacts)
         switch status {
-        case .authorized: return (true, "authorized")
-        case .denied: return (false, "denied")
-        case .restricted: return (false, "restricted")
-        case .notDetermined: return (false, "not_determined")
-        case .limited: return (true, "limited")
+        case .authorized: return (true, PermissionStatus.authorized.rawValue)
+        case .denied: return (false, PermissionStatus.denied.rawValue)
+        case .restricted: return (false, PermissionStatus.restricted.rawValue)
+        case .notDetermined: return (false, PermissionStatus.notDetermined.rawValue)
+        case .limited: return (true, PermissionStatus.limited.rawValue)
         @unknown default: return (false, "unknown")
         }
     }
@@ -96,7 +97,7 @@ actor ContactResolver {
 
     func requestAccessIfAllowed(policy: ContactsAccessPolicy) async {
         let (_, status) = source.authorization()
-        guard status == "not_determined" else { return }
+        guard status == PermissionStatus.notDetermined.rawValue else { return }
         switch policy {
         case .requestIfNeeded:
             let granted = await source.requestAccess()
