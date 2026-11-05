@@ -163,4 +163,54 @@ final class SendReviewRegressionTests: XCTestCase {
         }
         XCTAssertEqual(resolved.chat?.name, "Alice Work")
     }
+
+    // MARK: - 4. Staged copy cleanup
+
+    private struct StatusQueryFailure: Error {}
+
+    private func stagedFile(root: URL) throws -> (OutgoingFileStager, OutgoingFileStager.StagedFile) {
+        let source = root.deletingLastPathComponent().appendingPathComponent("review-source.txt")
+        try Data("payload".utf8).write(to: source)
+        let stager = OutgoingFileStager(root: root)
+        let opened = try stager.openSource(source.path)
+        defer { opened.close() }
+        return (stager, try stager.stage(opened))
+    }
+
+    /// Waits on a Dispatch timer (no Task.sleep) for the staged directory to go.
+    private func waitForRemoval(of staged: OutgoingFileStager.StagedFile) async -> Bool {
+        let directory = staged.fileURL.deletingLastPathComponent().path
+        for _ in 0..<100 {
+            if !FileManager.default.fileExists(atPath: directory) { return true }
+            await AsyncTimeout.sleep(.milliseconds(20))
+        }
+        return false
+    }
+
+    /// A failed status query used to leave the staged copy behind until the
+    /// hourly sweep. Both catch arms now schedule its removal.
+    func testFailedStatusQueryRemovesTheStagedCopy() async throws {
+        let errors: [any Error] = [SendError.failed("status probe failed"), StatusQueryFailure()]
+        for error in errors {
+            // /private form: the stager refuses a root behind the /var symlink.
+            let tmp = try XCTUnwrap(SecurePath.absoluteLexicalPath(FileManager.default.temporaryDirectory.path))
+            let scratch = URL(fileURLWithPath: tmp, isDirectory: true)
+                .appendingPathComponent("send-review-\(UUID().uuidString)", isDirectory: true)
+            try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(at: scratch) }
+            let (stager, staged) = try stagedFile(root: scratch.appendingPathComponent("staging", isDirectory: true))
+            XCTAssertTrue(FileManager.default.fileExists(atPath: staged.fileURL.path))
+
+            let result = TransferMonitor.waitForCompletion(
+                of: staged, baseline: 0, stager: stager,
+                statusQuery: { _ in throw error },
+                removalDelay: .zero
+            )
+
+            guard case .failure(let failure) = result else { return XCTFail("expected failure for \(error)") }
+            XCTAssertEqual(failure.disposition, .mayHaveCompleted)
+            let removed = await waitForRemoval(of: staged)
+            XCTAssertTrue(removed, "staged copy should be removed after \(error)")
+        }
+    }
 }
