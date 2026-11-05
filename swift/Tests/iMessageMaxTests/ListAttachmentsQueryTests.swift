@@ -176,6 +176,10 @@ final class ListAttachmentsQueryTests: XCTestCase {
 
         let theirs = try await run(try makeFixture(), fromPerson: "+15550000002")
         XCTAssertEqual(ids(theirs), ["msg_104", "msg_103"])
+
+        // A contact name resolves like it does for search and get_messages.
+        let byName = try await run(try makeFixture(), fromPerson: "Bob")
+        XCTAssertEqual(ids(byName), ["msg_104", "msg_103"])
     }
 
     func testTimeBoundsAreInclusive() async throws {

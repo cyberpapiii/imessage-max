@@ -188,7 +188,7 @@ final class ListAttachments {
         let fetchLimit = supportsCursor ? limit + 1 : limit
         let (sql, params) = try buildMessageQuery(
             chatId: chatId,
-            fromPerson: fromPerson,
+            sender: await SenderFilter.resolve(fromPerson, resolver: resolver),
             typeFilter: typeFilter,
             since: since,
             before: before,
@@ -277,7 +277,7 @@ final class ListAttachments {
 
     private func buildMessageQuery(
         chatId: Int64?,
-        fromPerson: String?,
+        sender: SenderFilter?,
         typeFilter: String?,
         since: String?,
         before: String?,
@@ -347,20 +347,11 @@ final class ListAttachments {
                 .join("chat c ON c.ROWID = (\(chatPick))", params: chatPickParams)
                 .joinMessageHandles()
                 .where(SQLFragments.notReaction())
-                .where("""
-                    EXISTS (SELECT 1
-                            FROM message_attachment_join maj
-                            JOIN attachment a ON maj.attachment_id = a.ROWID
-                            WHERE maj.message_id = m.ROWID AND COALESCE(a.hide_attachment, 0) = 0\(typeClause))
-                    """)
+                .where(SQLFragments.hasAttachment(ofType: typeFilter))
         }
 
-        if let fromPerson {
-            if fromPerson.lowercased() == "me" {
-                query.where("m.is_from_me = 1")
-            } else {
-                query.where("h.id LIKE ? ESCAPE '\\'", "%\(QueryBuilder.escapeLike(fromPerson))%")
-            }
+        if let sender {
+            query.where(sender)
         }
 
         if let since, let sinceTs = AppleTime.parse(since) {

@@ -84,6 +84,18 @@ final class GetMessagesToolTests: XCTestCase {
         XCTAssertEqual(linkMessages.first?["id"] as? String, "msg_201")
     }
 
+    func testUnresolvedFromPersonFiltersInsteadOfReturningEveryone() async throws {
+        let fixture = try makeGetMessagesFixture()
+        let tool = GetMessagesTool(db: fixture.database(), resolver: makeSeededResolver())
+
+        for person in ["nobody@example.com", "Zed Nobody"] {
+            let response = try await decodeGetMessagesResponse(
+                await tool.execute(args: ["chat_id": .string("chat20"), "from_person": .string(person)])
+            )
+            XCTAssertEqual(try decodeJSONArray(try XCTUnwrap(response["messages"])).count, 0, person)
+        }
+    }
+
     func testReactionsAndAttachmentMediaSummariesAreIncluded() async throws {
         let fixture = try makeGetMessagesFixture()
         // Fixture images live in the temp dir; the tool contains chat.db paths to allowed roots, so the test supplies its own root.

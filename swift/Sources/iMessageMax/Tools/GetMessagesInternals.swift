@@ -118,42 +118,13 @@ extension GetMessagesTool {
         return info
     }
 
-    func resolveFromPerson(
-        fromPerson: String?,
-        unanswered: Bool
-    ) async -> (fromHandle: String?, fromMeOnly: Bool) {
-        if unanswered {
-            return (nil, true)
-        }
-
-        guard let fromPerson = fromPerson else {
-            return (nil, false)
-        }
-
-        if fromPerson.lowercased() == "me" {
-            return (nil, true)
-        }
-
-        if let normalized = PhoneUtils.normalizeToE164(fromPerson) {
-            return (normalized, false)
-        }
-
-        let matches = await resolver.searchByName(fromPerson)
-        if let first = matches.first {
-            return (first.handle, false)
-        }
-
-        return (nil, false)
-    }
-
     func queryMessages(
         chatId: Int,
         sinceApple: Int64?,
         beforeApple: Int64?,
         cursor: TimelineCursor?,
         limit: Int,
-        fromHandle: String?,
-        fromMeOnly: Bool,
+        sender: SenderFilter?,
         contains: String?,
         has: String?
     ) throws -> [MessageRecord] {
@@ -177,10 +148,8 @@ extension GetMessagesTool {
             query.where(cursor.olderThanSQL, cursor.date, cursor.date, cursor.messageId)
         }
 
-        if fromMeOnly {
-            query.where("m.is_from_me = 1")
-        } else if let handle = fromHandle {
-            query.where("h.id = ?", handle)
+        if let sender {
+            query.where(sender)
         }
 
         if let contains = contains {
@@ -188,34 +157,11 @@ extension GetMessagesTool {
             query.where("m.text LIKE ? ESCAPE '\\'", "%\(escaped)%")
         }
 
-        if let has = has {
-            switch has {
-            case "links":
-                query.where("(m.text LIKE '%http://%' OR m.text LIKE '%https://%' OR m.balloon_bundle_id = '\(BalloonBundle.urlPreview)')")
-            case "attachments":
-                query.where("""
-                    EXISTS (
-                        SELECT 1 FROM attachment a
-                        JOIN message_attachment_join maj ON a.ROWID = maj.attachment_id
-                        WHERE maj.message_id = m.ROWID
-                          AND COALESCE(a.hide_attachment, 0) = 0
-                    )
-                    """)
-            case "images":
-                if let imagePredicate = AttachmentType.sqlPredicate(for: "image", alias: "a") {
-                    query.where("""
-                        EXISTS (
-                            SELECT 1 FROM attachment a
-                            JOIN message_attachment_join maj ON a.ROWID = maj.attachment_id
-                            WHERE maj.message_id = m.ROWID
-                              AND (\(imagePredicate))
-                              AND COALESCE(a.hide_attachment, 0) = 0
-                        )
-                        """)
-                }
-            default:
-                break
-            }
+        switch has {
+        case "links": query.where(SQLFragments.hasLink())
+        case "attachments": query.where(SQLFragments.hasAttachment())
+        case "images": query.where(SQLFragments.hasAttachment(ofType: "image"))
+        default: break
         }
 
         query.orderBy("m.date DESC", "m.ROWID DESC")

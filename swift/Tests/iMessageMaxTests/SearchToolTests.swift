@@ -255,7 +255,7 @@ final class SearchToolTests: XCTestCase {
         let results = try decodeJSONArray(try XCTUnwrap(response["results"]))
         XCTAssertEqual(results.compactMap { $0["id"] as? String }, ["msg_2"])
 
-        let (sql, params) = SearchTool.buildQuery(
+        let (sql, _) = SearchTool.buildQuery(
             query: nil,
             fromPerson: nil,
             inChat: nil,
@@ -268,8 +268,24 @@ final class SearchToolTests: XCTestCase {
             sort: .recentFirst,
             unanswered: false
         )
-        XCTAssertTrue(sql.contains("m.text LIKE ? ESCAPE '\\'"), "link LIKE missing ESCAPE: \(sql)")
-        XCTAssertEqual(params.last as? String, "%http%")
+        XCTAssertTrue(sql.contains(SQLFragments.hasLink()), "search has=link must use the shared predicate: \(sql)")
+    }
+
+    func testHasLinkNeedsAURLNotTheWordHttp() async throws {
+        let fixture = try ToolTestDatabase(name: "search-link-word")
+        try fixture.insertHandle(rowId: 1, handle: "+15550000001")
+        try fixture.insertChat(rowId: 1, guid: "chat-link-word", displayName: "Links")
+        try fixture.joinChatHandle(chatId: 1, handleId: 1)
+        try fixture.insertMessage(rowId: 1, guid: "g1", text: "the http spec", date: 1_000, isFromMe: false, handleId: 1)
+        try fixture.joinChatMessage(chatId: 1, messageId: 1)
+        try fixture.insertMessage(rowId: 2, guid: "g2", text: "https://example.com", date: 2_000, isFromMe: false, handleId: 1)
+        try fixture.joinChatMessage(chatId: 1, messageId: 2)
+
+        let response = try await decodeSearchResponse(
+            SearchTool.execute(has: "link", db: fixture.database(), resolver: makeSeededResolver())
+        )
+        let results = try decodeJSONArray(try XCTUnwrap(response["results"]))
+        XCTAssertEqual(results.compactMap { $0["id"] as? String }, ["msg_2"])
     }
 
     func testFromPersonGroupedResponseUsesStablePeopleKeysAndGeneratedChatNames() async throws {

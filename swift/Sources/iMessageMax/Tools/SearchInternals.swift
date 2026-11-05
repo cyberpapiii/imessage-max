@@ -1,10 +1,5 @@
 import Foundation
 
-struct SearchSenderFilter {
-    let value: String
-    let exact: Bool
-}
-
 struct SearchRow {
     let message: MessageRecord
     let chatId: Int64
@@ -27,7 +22,7 @@ extension SearchTool {
     static func applySearchFilters(
         to builder: QueryBuilder,
         query: String?,
-        fromPerson: SearchSenderFilter?,
+        fromPerson: SenderFilter?,
         inChat: String?,
         isGroup: Bool?,
         has: String?,
@@ -117,16 +112,8 @@ extension SearchTool {
             }
         }
 
-        if unanswered {
-            builder.where("m.is_from_me = ?", 1)
-        } else if let person = fromPerson {
-            if person.value.lowercased() == "me" {
-                builder.where("m.is_from_me = ?", 1)
-            } else if person.exact {
-                builder.where("h.id = ?", person.value)
-            } else {
-                builder.where("h.id LIKE ? ESCAPE '\\'", "%\(QueryBuilder.escapeLike(person.value))%")
-            }
+        if let sender = unanswered ? .me : fromPerson {
+            builder.where(sender)
         }
 
         if let isGroupChat = isGroup {
@@ -141,40 +128,17 @@ extension SearchTool {
             }
         }
 
-        if let hasType = has {
-            switch hasType {
-            case "link":
-                builder.where("(m.text LIKE ? ESCAPE '\\' OR m.balloon_bundle_id = '\(BalloonBundle.urlPreview)')", "%http%")
-            case "attachment":
-                builder.where("""
-                    EXISTS (
-                        SELECT 1 FROM attachment a
-                        JOIN message_attachment_join maj ON a.ROWID = maj.attachment_id
-                        WHERE maj.message_id = m.ROWID
-                          AND COALESCE(a.hide_attachment, 0) = 0
-                    )
-                    """)
-            case "image", "video":
-                if let typePredicate = AttachmentType.sqlPredicate(for: hasType, alias: "a") {
-                    builder.where("""
-                        EXISTS (
-                            SELECT 1 FROM attachment a
-                            JOIN message_attachment_join maj ON a.ROWID = maj.attachment_id
-                            WHERE maj.message_id = m.ROWID
-                              AND (\(typePredicate))
-                              AND COALESCE(a.hide_attachment, 0) = 0
-                        )
-                        """)
-                }
-            default:
-                break
-            }
+        switch has {
+        case "link": builder.where(SQLFragments.hasLink())
+        case "attachment": builder.where(SQLFragments.hasAttachment())
+        case "image", "video": builder.where(SQLFragments.hasAttachment(ofType: has))
+        default: break
         }
     }
 
     static func buildQuery(
         query: String?,
-        fromPerson: SearchSenderFilter?,
+        fromPerson: SenderFilter?,
         inChat: String?,
         isGroup: Bool?,
         has: String?,
@@ -228,7 +192,7 @@ extension SearchTool {
     static func countFilteredHidden(
         db: Database,
         query: String?,
-        fromPerson: SearchSenderFilter?,
+        fromPerson: SenderFilter?,
         inChat: String?,
         isGroup: Bool?,
         has: String?,
@@ -260,7 +224,7 @@ extension SearchTool {
 
     static func filteredHiddenQuery(
         query: String?,
-        fromPerson: SearchSenderFilter?,
+        fromPerson: SenderFilter?,
         inChat: String?,
         isGroup: Bool?,
         has: String?,
@@ -581,26 +545,6 @@ extension SearchTool {
         }
 
         return prevRow[n]
-    }
-
-    static func resolveFromPersonFilter(
-        _ fromPerson: String?,
-        resolver: ContactResolver
-    ) async -> SearchSenderFilter? {
-        guard let fromPerson, !fromPerson.isEmpty else { return nil }
-        if fromPerson.lowercased() == "me" {
-            return SearchSenderFilter(value: "me", exact: true)
-        }
-        if let normalized = PhoneUtils.normalizeToE164(fromPerson) {
-            return SearchSenderFilter(value: normalized, exact: true)
-        }
-        if PhoneUtils.isEmail(fromPerson) {
-            return SearchSenderFilter(value: fromPerson.lowercased(), exact: true)
-        }
-        if let firstMatch = await resolver.searchByName(fromPerson).first {
-            return SearchSenderFilter(value: firstMatch.handle, exact: true)
-        }
-        return SearchSenderFilter(value: fromPerson, exact: false)
     }
 
     static func nextCursor(from rows: [SearchRow], limit: Int) -> String? {

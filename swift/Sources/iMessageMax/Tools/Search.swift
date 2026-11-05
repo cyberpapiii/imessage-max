@@ -335,7 +335,7 @@ enum SearchTool {
         // filters. attributedBody is prefiltered in SQL via instr.
         let fetchLimit = (hasQuery || unanswered) ? max(500, clampedLimit * 10) : clampedLimit
 
-        let senderFilter = await resolveFromPersonFilter(fromPerson, resolver: resolver)
+        let senderFilter = await SenderFilter.resolve(fromPerson, resolver: resolver)
 
         // Split query into words (minimum 2 chars each to avoid noise)
         let searchWords: [String]

@@ -249,10 +249,7 @@ actor GetMessagesTool {
 
         let sinceApple = since.flatMap { AppleTime.parse($0) }
         let beforeApple = before.flatMap { AppleTime.parse($0) }
-        let (fromHandle, fromMeOnly) = await resolveFromPerson(
-            fromPerson: fromPerson,
-            unanswered: unanswered
-        )
+        let sender = unanswered ? .me : await SenderFilter.resolve(fromPerson, resolver: resolver)
 
         let fetchLimit = unanswered ? limit * 3 : limit
         var messageRows = try queryMessages(
@@ -261,8 +258,7 @@ actor GetMessagesTool {
             beforeApple: beforeApple,
             cursor: cursor.flatMap(TimelineCursor.decode),
             limit: fetchLimit,
-            fromHandle: fromHandle,
-            fromMeOnly: fromMeOnly,
+            sender: sender,
             contains: contains,
             has: has
         )

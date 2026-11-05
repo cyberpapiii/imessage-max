@@ -34,4 +34,24 @@ enum SQLFragments {
         return "(CASE WHEN \(column) LIKE 'bp:%' THEN substr(\(column), 4)"
             + " ELSE substr(\(column), instr(\(column), '/') + 1) END)"
     }
+
+    /// Text carrying an http(s) URL, or a message Messages.app shows as a link preview.
+    static func hasLink(_ alias: String = "m") -> String {
+        "(\(alias).text LIKE '%http://%' OR \(alias).text LIKE '%https://%'"
+            + " OR \(alias).balloon_bundle_id = '\(BalloonBundle.urlPreview)')"
+    }
+
+    /// At least one attachment Messages.app shows, optionally only of one
+    /// `AttachmentType.sqlPredicate` kind.
+    static func hasAttachment(ofType type: String? = nil, _ alias: String = "m") -> String {
+        let typeClause = AttachmentType.sqlPredicate(for: type, alias: "a").map { "\n  AND (\($0))" } ?? ""
+        return """
+            EXISTS (
+              SELECT 1 FROM attachment a
+              JOIN message_attachment_join maj ON a.ROWID = maj.attachment_id
+              WHERE maj.message_id = \(alias).ROWID
+                AND COALESCE(a.hide_attachment, 0) = 0\(typeClause)
+            )
+            """
+    }
 }
