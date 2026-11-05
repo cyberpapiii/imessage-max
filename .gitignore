@@ -25,6 +25,8 @@ swift/.build/
 swift/.swiftpm/
 macos/.build/
 macos/.swiftpm/
+contract/.build/
+contract/.swiftpm/
 dist/
 *.xcodeproj
 *.xcworkspace
