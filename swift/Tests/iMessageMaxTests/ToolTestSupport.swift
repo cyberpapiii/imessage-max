@@ -329,7 +329,6 @@ extension ContactResolver {
                 load: { seedCache },
                 requestAccess: { authorization.authorized }
             ),
-            refreshInterval: .infinity,
             now: { 0 }
         )
     }
