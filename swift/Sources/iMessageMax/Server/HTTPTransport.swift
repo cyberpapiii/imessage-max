@@ -104,7 +104,7 @@ actor HTTPTransport {
     }
 
     /// Does what SIGTERM does, waits for the server to exit, then ends every
-    /// session and fails whatever is still pending.
+    /// session (which closes its streams and fails its waiting requests).
     func shutdown() async {
         await serviceGroup?.triggerGracefulShutdown()
         _ = try? await serverTask?.value
@@ -112,6 +112,7 @@ actor HTTPTransport {
         for sessionId in await sessionManager.activeSessionIds() {
             await sessionManager.terminateSession(sessionId: sessionId)
         }
+        // A POST that stored its entry as its session ended.
         await pendingRequests.removeAll()
     }
 
@@ -249,7 +250,6 @@ actor HTTPTransport {
                 return errorResponse(.notFound, "Invalid or expired session. Please re-initialize.")
             }
             sessionId = requestSessionId
-            await sessionManager.touch(sessionId: sessionId)
             responseHeaders[.mcpSessionId] = sessionId
             EraLog.legacy(
                 message,
@@ -462,8 +462,6 @@ actor HTTPTransport {
             return errorResponse(.notFound, "Invalid or expired session. Please re-initialize.")
         }
 
-        await sessionManager.touch(sessionId: sessionId)
-
         var responseHeaders = HTTPFields()
         responseHeaders[.contentType] = "text/event-stream"
         responseHeaders[.cacheControl] = "no-cache"
@@ -507,11 +505,10 @@ actor HTTPTransport {
             return errorResponse(.notFound, "Invalid or expired session")
         }
 
-        // Cancels the session's task, stops its SDK Server (2 s bound), and
-        // drops it from the table. SSE and pending requests are separate.
+        // Stops the session's SDK Server (2 s bound), drops it from the
+        // table, and through the termination handler closes its SSE streams
+        // and fails its waiting requests.
         await sessionManager.terminateSession(sessionId: sessionId)
-        await sseManager.terminateSession(sessionId: sessionId)
-        await pendingRequests.cleanup(for: sessionId)
         return Response(status: .noContent)
     }
 

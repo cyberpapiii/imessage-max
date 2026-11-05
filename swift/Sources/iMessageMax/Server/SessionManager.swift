@@ -185,16 +185,20 @@ actor SessionManager {
         await responseHandler?(sessionId, data)
     }
 
+    /// The live session for a client request, marked active; nil when the
+    /// id is unknown or expired (an expired one is terminated here).
     func validate(sessionId: String) async -> MCPSessionState? {
         guard let session = sessions[sessionId] else {
             return nil
         }
 
-        if Date().timeIntervalSince(session.lastActivity) > sessionTimeout {
+        let now = Date()
+        if now.timeIntervalSince(session.lastActivity) > sessionTimeout {
             await terminateSession(sessionId: sessionId)
             return nil
         }
 
+        session.lastActivity = now
         return session
     }
 
@@ -222,7 +226,10 @@ actor SessionManager {
         sessions[sessionId]?.protocolVersion
     }
 
-    /// Terminates a session and stops its SDK Server.
+    /// Terminates a session: stops its SDK Server, then runs the termination
+    /// handler (the transport closes the session's SSE streams and fails its
+    /// waiting requests there). Every teardown path comes through here, so
+    /// callers do nothing more.
     ///
     /// `Server.stop()` can hang on a wedged transport, so the wait is bounded
     /// to 2 seconds by racing against `AsyncTimeout.sleep`. Never `Task.sleep`.
@@ -241,7 +248,7 @@ actor SessionManager {
             group.cancelAll()
         }
 
-        Task { await sessionTerminationHandler?(sessionId) }
+        await sessionTerminationHandler?(sessionId)
     }
 
     func activeSessionIds() -> [String] {
