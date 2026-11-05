@@ -54,7 +54,7 @@ The setup endpoint is outside MCP's thirteen tools. It rejects browser origins, 
 
 ## Design checks
 
-The panel face, app icon, and cached menu bar artwork share `Sources/MaxBrand`: `MessageMark.swift` holds the bubble and `MaxFace.swift` holds the poses, each one row of numbers on the same grid. The build script prepends those sources to the app-icon renderer, preventing drift between drawings. The companion uses its own round-stroke glyph family, switch, and buttons, and follows native appearance, contrast, and motion preferences.
+The panel face, app icon, and cached menu bar artwork share `Sources/MaxBrand`: `MessageMark.swift` holds the bubble outlines (the round one the panel and menu bar wear, and the original one inside the app icon) and `MaxFace.swift` holds the poses, each one row of numbers on the same grid. The build script prepends those sources to the app-icon renderer, preventing drift between drawings, and compiles it with optimisation because it shades the icon's satin-silver bubble pixel by pixel. The companion uses its own round-stroke glyph family, switch, and buttons, and follows native appearance, contrast, and motion preferences.
 
 Design checks run from a debug build without touching the installed companion or the service:
 

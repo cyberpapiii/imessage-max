@@ -3,9 +3,9 @@ import Foundation
 
 /// A face is one row of numbers on the bubble's 24-unit grid. Every pose has
 /// the same parts, so any face reaches any other without swapping drawings.
-/// At rest the bubble carries one sparkle. When it is busy the sparkle gives
-/// way to the product's own typing dots, which are parked at zero size until
-/// then.
+/// At rest the bubble is plain. When it is busy it shows the product's own
+/// typing dots, which are parked at zero size until then. The sparkle part is
+/// kept for poses that want one; none of the current poses do.
 public struct MaxPose: Equatable, Sendable {
   public enum Part: Int, CaseIterable, Sendable {
     case lean, lift, stretchX, stretchY
@@ -50,23 +50,23 @@ public struct MaxPose: Equatable, Sendable {
 
   private static let none: (x: CGFloat, y: CGFloat, width: CGFloat, height: CGFloat) = (12, 11, 0, 0)
 
-  /// The rest pose is the app icon: one sparkle in a bubble.
-  public static let rest = MaxPose(left: none, right: none, lean: -3, spark: 1)
-  /// A larger sparkle and a badge: a setup step is waiting for the person.
-  public static let needsYou = MaxPose(left: none, right: none, lean: -5, badge: 1, spark: 1.12)
-  /// The sparkle gives way to three dots: a typing indicator.
+  /// The rest pose: a plain bubble, leaning in a little.
+  public static let rest = MaxPose(left: none, right: none, lean: -3)
+  /// A badge: a setup step is waiting for the person.
+  public static let needsYou = MaxPose(left: none, right: none, lean: -5, badge: 1)
+  /// Three dots: a typing indicator.
   public static let working = MaxPose(
     left: (8.2, 11, 2.7, 2.7), right: (15.8, 11, 2.7, 2.7), middle: 2.7)
   /// A plain exclamation mark. No sad or angry face.
   public static let trouble = MaxPose(
     left: (12, 8.8, 2.7, 6.2), right: (12, 14.9, 2.7, 2.7))
-  /// The sparkle closes to a dash; the bubble droops and dims: turned off.
+  /// A dash; the bubble droops and dims: turned off.
   public static let asleep = MaxPose(
     left: (12, 11.8, 5.2, 1.0), right: (12, 11.8, 0, 0), lean: 4, lift: 0.4, dim: 1)
-  /// The sparkle swells and turns. Used only for rare good news.
-  public static let happy = MaxPose(left: none, right: none, lean: -3, spark: 1.28, spin: 90)
-  /// A quarter turn in answer to a click.
-  public static let wink = MaxPose(left: none, right: none, lean: -8, spark: 1, spin: 90)
+  /// Used only for rare good news; the panel adds its own burst around it.
+  public static let happy = MaxPose(left: none, right: none, lean: -3)
+  /// A deeper lean in answer to a click.
+  public static let wink = MaxPose(left: none, right: none, lean: -8)
 }
 
 public enum MaxFace {
@@ -86,12 +86,18 @@ public enum MaxFace {
       .concatenating(CGAffineTransform(translationX: rect.minX, y: rect.minY))
   }
 
-  /// The bubble, with room cut for the badge so it sits in front on any
-  /// background, including a monochrome menu bar.
+  /// The round bubble is built once: its corner rounding is too costly to
+  /// redo on every frame of an animation. CGPath is immutable.
+  nonisolated(unsafe) private static let roundBody = MessageMark.round(
+    in: CGRect(x: 0, y: 0, width: 24, height: 24))
+
+  /// The round bubble, with a soft-edged room cut for the badge so it sits in
+  /// front on any background, including a monochrome menu bar.
   public static func silhouette(_ pose: MaxPose, in rect: CGRect) -> CGPath {
-    var body = MessageMark.body(in: CGRect(x: 0, y: 0, width: 24, height: 24))
+    var body = roundBody
     if pose[.badge] > 0.02 {
-      body = body.subtracting(circle(badgeCentre, (badgeRadius + badgeGap) * pose[.badge]))
+      body = MessageMark.softened(
+        body.subtracting(circle(badgeCentre, (badgeRadius + badgeGap) * pose[.badge])), by: 0.6)
     }
     var matrix = transform(pose, in: rect)
     return body.copy(using: &matrix) ?? body

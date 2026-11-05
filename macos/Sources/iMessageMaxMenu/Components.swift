@@ -297,8 +297,8 @@ final class FaceEngine {
   }
 }
 
-/// The product's mark, alive: a speech bubble carrying one sparkle. Its
-/// expression is the service's state; it is decoration to assistive tech,
+/// The product's mark, alive: a round speech bubble. Its expression is the
+/// service's state; it is decoration to assistive tech,
 /// which reads the title beside it instead.
 struct MaxFaceView: View {
   let mood: CompanionMood

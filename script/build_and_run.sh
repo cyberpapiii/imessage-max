@@ -53,7 +53,9 @@ PLIST
 # One shared geometry source keeps panel, chrome, and app-tile identity aligned.
 ICON_RENDERER="$ROOT_DIR/dist/render_app_icon.swift"
 cat "$ROOT_DIR"/macos/Sources/MaxBrand/*.swift "$ROOT_DIR/script/render_app_icon.swift" > "$ICON_RENDERER"
-swift "$ICON_RENDERER" "$APP_BUNDLE/Contents/Resources"
+# The icon shades its metal pixel by pixel, so it is compiled with optimisation.
+swiftc -O "$ICON_RENDERER" -o "$ROOT_DIR/dist/render_app_icon"
+"$ROOT_DIR/dist/render_app_icon" "$APP_BUNDLE/Contents/Resources"
 codesign --force --sign "$SIGN_HASH" "$APP_BUNDLE/Contents/Resources/imessage-max"
 codesign --force --sign "$SIGN_HASH" "$APP_BUNDLE"
 codesign --verify --deep --strict "$APP_BUNDLE"

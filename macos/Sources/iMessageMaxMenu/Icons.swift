@@ -35,9 +35,9 @@ enum Glyph: CaseIterable {
     switch self {
     case .messages:
       // The product's own face, small.
-      solid(Path(MessageMark.body(in: CGRect(x: 0, y: 0, width: 16, height: 16))))
-      art.dots.addPath(circle(7.1, 6.9, 0.95))
-      art.dots.addPath(circle(10.2, 6.7, 0.85))
+      solid(Path(MessageMark.round(in: CGRect(x: 0, y: 0, width: 16, height: 16))))
+      art.dots.addPath(circle(6.6, 7.4, 0.9))
+      art.dots.addPath(circle(9.4, 7.4, 0.9))
     case .contacts:
       solid(circle(8, 5.3, 2.7))
       var shoulders = Path()
@@ -63,10 +63,18 @@ enum Glyph: CaseIterable {
       art.dots.addPath(circle(10.3, 5, 2))
       art.dots.addPath(circle(5.7, 11, 2))
     case .refresh:
-      art.lines.addArc(
-        center: CGPoint(x: 8, y: 8), radius: 5.4, startAngle: .degrees(-45),
-        endAngle: .degrees(270), clockwise: false)
-      line((11.3, 1.9), (12, 4.7), (14.8, 4))
+      // Most of a circle travelling clockwise, ending at the top in a solid
+      // arrowhead that straddles the line, the way a refresh arrow reads at 14
+      // points. Points rather than an arc, so the direction is exact.
+      art.lines.addLines(
+        (0...48).map { step in
+          let angle = (10 + 252 * Double(step) / 48) * .pi / 180
+          return CGPoint(x: 8 + 5.2 * cos(angle), y: 8 + 5.2 * sin(angle))
+        })
+      var head = Path()
+      head.addLines([CGPoint(x: 7.6, y: 0.3), CGPoint(x: 11.4, y: 2.8), CGPoint(x: 7.6, y: 5.3)])
+      head.closeSubpath()
+      art.dots.addPath(head)
     case .lock:
       solid(box(3.2, 7, 9.6, 7, 2.2))
       art.lines.move(to: CGPoint(x: 5.4, y: 7))
@@ -280,9 +288,9 @@ private struct RearPage: Shape {
   }
 }
 
-/// The same face as the panel, drawn once per mood as a template bitmap.
-/// Moods differ by silhouette, so they read without colour: solid, solid with
-/// a badge, or an outline.
+/// The panel's face, drawn once per mood as a template bitmap. Moods differ by
+/// silhouette, so they read without colour: solid, solid with a badge, or an
+/// outline.
 @MainActor
 enum MenuBarArtwork {
   private static var cache: [CompanionMood: NSImage] = [:]
@@ -324,23 +332,20 @@ enum MenuBarArtwork {
     }
     if mood == .trouble { pose[.badge] = 1 }
     let rect = CGRect(x: 0, y: 0, width: points, height: points)
+    let marks = MaxFace.eyes(pose, in: rect)
     context.setFillColor(NSColor.black.cgColor)
-    context.setStrokeColor(NSColor.black.cgColor)
     if mood == .working || mood == .resting {
-      context.addPath(MaxFace.silhouette(pose, in: rect.insetBy(dx: 0.7, dy: 0.7)))
-      context.setLineWidth(1.4)
-      context.setLineJoin(.round)
-      context.strokePath()
-      context.addPath(MaxFace.eyes(pose, in: rect))
-      context.addPath(MaxFace.sparkle(pose, in: rect))
-      context.fillPath()
+      context.addPath(
+        rounded(MaxFace.silhouette(pose, in: rect.insetBy(dx: 0.75, dy: 0.75)), width: 1.5))
+      context.addPath(marks)
     } else {
-      context.addPath(MaxFace.path(pose, in: rect))
-      context.fillPath(using: .evenOdd)
+      context.addPath(MaxFace.silhouette(pose, in: rect).subtracting(marks))
     }
-    if let badge = MaxFace.badge(pose, in: rect) {
-      context.addPath(badge)
-      context.fillPath()
-    }
+    if let badge = MaxFace.badge(pose, in: rect) { context.addPath(badge) }
+    context.fillPath()
+  }
+
+  private static func rounded(_ path: CGPath, width: CGFloat) -> CGPath {
+    path.copy(strokingWithWidth: width, lineCap: .round, lineJoin: .round, miterLimit: 1)
   }
 }

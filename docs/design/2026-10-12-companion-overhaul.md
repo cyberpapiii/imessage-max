@@ -11,7 +11,15 @@ another product's colours, marks, or characters.
   (`MaxPose`), so any face moves to any other: rest, needs you (wider eyes and
   a badge), working (the eyes part and a third dot hops between them), trouble
   (the eyes stack into an exclamation mark), asleep, happy, and a wink on
-  click. The same poses draw the app icon and the menu bar template image.
+  click. The bubble is a plain circle with a short round-tipped tail and no
+  sharp corners (`MessageMark.round`); it carries no sparkle. The same poses
+  draw the panel face and the menu bar template image.
+- **App icon.** A satin-silver bubble on a blue tile, lit by a lens flare at
+  its upper right. The metal's reflection is a soft dark horizon taken from a
+  ball fitted to the bubble's body, so the tail never bends it. It keeps the
+  original bubble outline (`MessageMark.body`). Iterations are in
+  `2026-10-12-companion-overhaul/`; `max-concepts-34-satin-blue.png` is the
+  chosen one and `concept-renderer.swift` the exploration renderer.
 - **One panel, pages inside it.** The home page shows the face, the title, a
   switch for the helper, the one setup step that is waiting, and three status
   lines. Connection, Details & help, and Preferences slide in as pages with a
@@ -34,7 +42,9 @@ three setup steps, problem, working, ready, and all three pages. Reduce Motion
 was checked for ready, setup, problem, and stopped. The celebration and the
 toast were captured mid-flight in slow motion. The menu bar artwork was
 checked enlarged on a light and a dark bar, and the app icon at 1024 pixels.
-The package's 19 tests pass.
+On 2026-11-05 the round face, the menu bar set, and the redrawn refresh arrow
+were checked in a fixture window and at 14 points. The package's 19 tests
+pass.
 
 ## Measured
 
@@ -51,4 +61,6 @@ drawing when the panel closes.
   Increase Contrast, and Reduce Transparency were not exercised after the
   overhaul.
 - The app icon was not checked at 16 and 32 pixels in Finder or the Dock.
+- The round menu bar artwork was not seen in the real menu bar: a menu bar
+  manager hid it during the check.
 - The toast can cover the last navigation row for the few seconds it shows.

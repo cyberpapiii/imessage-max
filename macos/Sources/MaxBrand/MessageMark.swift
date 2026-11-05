@@ -23,4 +23,38 @@ public enum MessageMark {
       a: rect.width / 24, b: 0, c: 0, d: rect.height / 24, tx: rect.minX, ty: rect.minY)
     return path.copy(using: &transform)!
   }
+
+  /// The softer bubble the companion wears in the panel and the menu bar: a
+  /// circle with a short wedge of a tail, its tip rounded and its joins filled
+  /// in, so it has no sharp corners at any size. Same 24-unit grid as `body`.
+  public static func round(in rect: CGRect) -> CGPath {
+    let wedge = CGMutablePath()
+    wedge.addLines(between: [
+      CGPoint(x: 3.6, y: 13.2), CGPoint(x: 11.4, y: 19.0), CGPoint(x: 3.0, y: 21.6),
+    ])
+    wedge.closeSubpath()
+    let path = filled(
+      CGPath(ellipseIn: CGRect(x: 2.5, y: 1.5, width: 19, height: 19), transform: nil)
+        .union(softened(wedge, by: 1.6)), by: 1.0)
+    var transform = CGAffineTransform(
+      a: rect.width / 24, b: 0, c: 0, d: rect.height / 24, tx: rect.minX, ty: rect.minY)
+    return path.copy(using: &transform)!
+  }
+
+  /// Rounds the outer corners of a shape by `radius`: shrink it, then grow it
+  /// back. Inner corners are rounded too.
+  public static func softened(_ path: CGPath, by radius: CGFloat) -> CGPath {
+    let shrunk = path.subtracting(rounded(path, width: 2 * radius))
+    return filled(shrunk.union(rounded(shrunk, width: 2 * radius)), by: radius)
+  }
+
+  /// Rounds the inner corners of a shape by `radius`: grow it, then shrink it back.
+  static func filled(_ path: CGPath, by radius: CGFloat) -> CGPath {
+    let grown = path.union(rounded(path, width: 2 * radius))
+    return grown.subtracting(rounded(grown, width: 2 * radius))
+  }
+
+  static func rounded(_ path: CGPath, width: CGFloat) -> CGPath {
+    path.copy(strokingWithWidth: width, lineCap: .round, lineJoin: .round, miterLimit: 1)
+  }
 }

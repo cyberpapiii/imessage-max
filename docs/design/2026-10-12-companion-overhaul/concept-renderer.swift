@@ -93,6 +93,7 @@ func halo(_ g: CGContext, _ col: CGColor, _ blur: CGFloat) {
 }
 
 
+var glowTint = (0.93, 1.0, 0.96), bounceTint = (0.55, 0.93, 0.66)
 let green: [CGColor] = [c(0.40, 0.97, 0.45), c(0.16, 0.86, 0.28), c(0.03, 0.72, 0.16)]
 let ink = c(0, 0.30, 0.06, 0.40)
 func shadowed(_ g: CGContext, _ body: () -> Void) {
@@ -286,7 +287,7 @@ func flare(_ g: CGContext, _ p: CGPoint) {
     g.restoreGState() }
   }
   g.saveGState(); g.addPath(tile); g.clip(); g.setBlendMode(.plusLighter)
-  g.drawRadialGradient(glow([(0, 0.62), (0.25, 0.30), (0.6, 0.09), (1, 0)], (0.92, 1, 0.94)), startCenter: p, startRadius: 0, endCenter: p, endRadius: 270, options: [])
+  g.drawRadialGradient(glow([(0, 0.62), (0.25, 0.30), (0.6, 0.09), (1, 0)], (glowTint.0 - 0.01, glowTint.1, glowTint.2 - 0.02)), startCenter: p, startRadius: 0, endCenter: p, endRadius: 270, options: [])
   g.drawRadialGradient(glow([(0, 0.9), (0.4, 0.35), (1, 0)]), startCenter: p, startRadius: 0, endCenter: p, endRadius: 92, options: [])
   streak(400, 44, -45, 0.16, inward: 0.45); streak(400, 24, -45, 0.34, inward: 0.45); streak(400, 8.5, -45, 1.0, inward: 0.45); streak(330, 3.2, -45, 0.8, inward: 0.45)
   streak(260, 36, 45, 0.14); streak(260, 19, 45, 0.30); streak(260, 7, 45, 1.0); streak(210, 2.8, 45, 0.8)
@@ -328,7 +329,7 @@ func dreamy(_ name: String, warm: Bool) {
   render(name) { g in
     drawTile(g, green, glow: 0.25)
     for (radius, alpha) in [(110.0, 0.55), (46.0, 0.60), (16.0, 0.50)] as [(CGFloat, CGFloat)] {
-      g.saveGState(); g.addPath(tile); g.clip(); g.setShadow(offset: .zero, blur: radius, color: c(0.93, 1, 0.96, alpha)); g.addPath(b); g.setFillColor(W1); g.fillPath(); g.restoreGState() }
+      g.saveGState(); g.addPath(tile); g.clip(); g.setShadow(offset: .zero, blur: radius, color: c(glowTint.0, glowTint.1, glowTint.2, alpha)); g.addPath(b); g.setFillColor(W1); g.fillPath(); g.restoreGState() }
     under(g, W1)
     var bright = [Double](repeating: 0, count: N * N)
     paint(g) { k, u, v in
@@ -365,7 +366,7 @@ func irid(_ name: String, ramp: [(Double, (Double, Double, Double))], warp: Doub
   render(name) { g in
     drawTile(g, green, glow: 0.25)
     if halo { for (radius, alpha) in [(90.0, 0.45), (30.0, 0.50)] as [(CGFloat, CGFloat)] {
-      g.saveGState(); g.addPath(tile); g.clip(); g.setShadow(offset: .zero, blur: radius, color: c(0.93, 1, 0.96, alpha)); g.addPath(b); g.setFillColor(W1); g.fillPath(); g.restoreGState() } }
+      g.saveGState(); g.addPath(tile); g.clip(); g.setShadow(offset: .zero, blur: radius, color: c(glowTint.0, glowTint.1, glowTint.2, alpha)); g.addPath(b); g.setFillColor(W1); g.fillPath(); g.restoreGState() } }
     under(g, W1)
     paint(g) { k, u, v in
       let x = metal.nx[k], y = metal.ny[k], z = metal.nz[k]
@@ -390,12 +391,12 @@ let oval: (cx: Double, cy: Double, rx: Double, ry: Double) = {
 func bump(_ c: Double, _ w: Double, _ x: Double) -> Double { let t = (x - c) / w; return exp(-t * t) }
 /// The chrome-silver reflection, with thin iridescent fringes where the dark band meets the light:
 /// orange on its upper edge, cyan and violet on its lower one.
-func fringe(_ name: String, dark: (Double, Double, Double), warp: Double, strength: Double, tilt: Double = 0, curve: Double = 0.60, soft: Double = 0.12, arc: Double = 0, real: Bool = false, cine: Bool = false, haze: (Double, Double, Double) = (0.76, 0.83, 0.93), top: (Double, Double, Double) = (1, 1, 1), pale: (Double, Double, Double) = (0.88, 0.95, 0.98), soften: Double = 0) {
+func fringe(_ name: String, dark: (Double, Double, Double), warp: Double, strength: Double, tilt: Double = 0, curve: Double = 0.60, soft: Double = 0.12, arc: Double = 0, real: Bool = false, cine: Bool = false, haze: (Double, Double, Double) = (0.76, 0.83, 0.93), top: (Double, Double, Double) = (1, 1, 1), pale: (Double, Double, Double) = (0.88, 0.95, 0.98), soften: Double = 0, tileCols: [CGColor] = green) {
   // One radius both ways: the band is what a ball would reflect, not what an oval would.
   let ball = (oval.rx + oval.ry) / 2
   let ca = cos(tilt * .pi / 180), sa = sin(tilt * .pi / 180)
   render(name) { g in
-    drawTile(g, green, glow: 0.25)
+    drawTile(g, tileCols, glow: 0.25)
     if cine {
       // A lens darkens toward its corners; the light side stays open.
       g.saveGState(); g.addPath(tile); g.clip()
@@ -404,7 +405,7 @@ func fringe(_ name: String, dark: (Double, Double, Double), warp: Double, streng
       g.restoreGState()
     }
     for (radius, alpha) in [(90.0, 0.40), (30.0, 0.45)] as [(CGFloat, CGFloat)] {
-      g.saveGState(); g.addPath(tile); g.clip(); g.setShadow(offset: .zero, blur: radius, color: c(0.93, 1, 0.96, alpha)); g.addPath(b); g.setFillColor(W1); g.fillPath(); g.restoreGState() }
+      g.saveGState(); g.addPath(tile); g.clip(); g.setShadow(offset: .zero, blur: radius, color: c(glowTint.0, glowTint.1, glowTint.2, alpha)); g.addPath(b); g.setFillColor(W1); g.fillPath(); g.restoreGState() }
     under(g, W1)
     paint(g) { k, u, v in
       let w = fbm(u * 1.8 + 1.5, v * 1.8) - 0.5, w2 = fbm(u * 1.8 + 9, v * 1.8 + 4) - 0.5
@@ -429,7 +430,7 @@ func fringe(_ name: String, dark: (Double, Double, Double), warp: Double, streng
         let ground = lerp3(dark, pale, pow(smooth(0.0, -1.15, up), 0.8))
         col = lerp3(ground, sky, horizon)
         col = lerp3(col, lerp3(haze, pale, 0.5), min(rimward * 0.7, 1) * (1 - horizon))
-        col = lerp3(col, (0.55, 0.93, 0.66), min(smooth(-0.7, -1.7, up) * 0.40 + rimward * 0.18, 1))
+        col = lerp3(col, bounceTint, min(smooth(-0.7, -1.7, up) * 0.40 + rimward * 0.18, 1))
         if cine {
           func grade(_ v: Double) -> Double { let x = min(max(v, 0), 1); return x + 0.45 * (x * x * (3 - 2 * x) - x) }
           col = (grade(col.0), grade(col.1), grade(col.2))
@@ -448,7 +449,6 @@ func fringe(_ name: String, dark: (Double, Double, Double), warp: Double, streng
     flare(g, CGPoint(x: 690, y: 320))
   }
 }
-fringe("N1", dark: (0.12, 0.16, 0.38), warp: 0, strength: 0.6, tilt: 10, arc: 1.0, real: true)
-// Silver: the same ball in neutral greys, with no blue in the band.
-fringe("S1", dark: (0.30, 0.32, 0.35), warp: 0, strength: 0.45, tilt: 10, arc: 1.0, real: true, haze: (0.74, 0.76, 0.79), top: (0.98, 0.99, 1.0), pale: (0.84, 0.87, 0.89))
-fringe("S2", dark: (0.44, 0.46, 0.49), warp: 0, strength: 0.25, tilt: 10, arc: 1.0, real: true, haze: (0.72, 0.74, 0.77), top: (0.95, 0.96, 0.97), pale: (0.80, 0.83, 0.85), soften: 0.16)
+glowTint = (0.90, 0.96, 1.0); bounceTint = (0.56, 0.76, 1.0)
+fringe("B1", dark: (0.44, 0.46, 0.49), warp: 0, strength: 0.25, tilt: 10, arc: 1.0, real: true, haze: (0.72, 0.74, 0.77), top: (0.95, 0.96, 0.97), pale: (0.80, 0.83, 0.85), soften: 0.16, tileCols: blueTile)
+fringe("B2", dark: (0.44, 0.46, 0.49), warp: 0, strength: 0.25, tilt: 10, arc: 1.0, real: true, haze: (0.72, 0.74, 0.77), top: (0.95, 0.96, 0.97), pale: (0.80, 0.83, 0.85), soften: 0.16, tileCols: blueGloss)
