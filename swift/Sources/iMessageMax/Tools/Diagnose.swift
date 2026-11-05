@@ -3,7 +3,7 @@ import IMessageMaxContract
 import MCP
 
 /// Probe type for database accessibility checks. Injectable so tests stay hermetic.
-typealias DatabaseProbe = @Sendable () -> (ok: Bool, status: String)
+typealias DatabaseProbe = @Sendable () -> (ok: Bool, status: DatabaseStatus)
 
 /// Whether this executable carries NSContactsUsageDescription in an embedded Info.plist.
 typealias UsageDescriptionProbe = @Sendable () -> Bool
@@ -96,8 +96,7 @@ enum DiagnoseTool {
         liveInboxProbe: LiveInboxProbe = { false },
         usageDescriptionProbe: UsageDescriptionProbe = { ContactResolver.usageDescriptionEmbedded }
     ) async throws -> DiagnoseResult {
-        let (dbOk, rawDBStatus) = dbProbe()
-        let dbStatus = DatabaseStatus(rawValue: rawDBStatus)
+        let (dbOk, dbStatus) = dbProbe()
         let features = dbOk ? schemaProbe()?.features : nil
 
         var databaseFix: String? = nil
@@ -112,7 +111,7 @@ enum DiagnoseTool {
 
         let contacts = await resolver.status()
         let contactsAuthorized = contacts.authorized
-        let authorizationStatus = PermissionStatus(rawValue: contacts.authorization)
+        let authorizationStatus = contacts.authorization
 
         var contactsStatus = authorizationStatus
         var contactsLoaded: Int? = nil

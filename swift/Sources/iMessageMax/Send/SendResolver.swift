@@ -18,7 +18,8 @@ enum SendResolution {
     case ambiguous([RecipientCandidate])
 }
 
-actor SendResolver {
+/// Stateless: every lookup goes to chat.db or the ContactResolver actor.
+struct SendResolver: Sendable {
     private let db: Database
     private let resolver: ContactResolver
 
@@ -40,45 +41,23 @@ actor SendResolver {
         }
 
         do {
-            let chats: [(guid: String?, displayName: String?)] = try db.query(
-                "SELECT guid, display_name FROM chat WHERE ROWID = ?",
-                params: [numericId]
-            ) { row in
-                (guid: row.string(0), displayName: row.string(1))
-            }
-
-            guard let chat = chats.first else {
+            guard let identity = try await chatIdentity(numericId) else {
                 return .failure(ClientErrorMessages.chatNotFound(chatId))
             }
 
-            guard let guid = chat.guid, !guid.isEmpty else {
+            guard let guid = identity.guid, !guid.isEmpty else {
                 return .failure("Chat has no guid and cannot be targeted exactly: \(chatId)")
             }
 
-            let rows = try await ChatSummaryQueries.participants(
-                db: db,
-                chatId: numericId,
-                resolver: resolver
-            )
-            guard !rows.isEmpty else {
+            guard !identity.participants.isEmpty else {
                 return .failure("No participants found for chat: \(chatId)")
             }
-
-            let identity = ChatIdentity.from(
-                chatId: numericId,
-                guid: guid,
-                explicitName: chat.displayName,
-                rows: rows
-            )
 
             return .success(
                 ResolvedSendTarget(
                     target: .chat(guid: guid, chatId: numericId),
                     deliveredTo: identity.participants.map(\.displayName),
-                    chat: ChatReference(
-                        id: identity.mcpId,
-                        name: identity.displayName
-                    )
+                    chat: ChatReference(id: identity.mcpId, name: identity.displayName)
                 )
             )
         } catch {
@@ -89,7 +68,8 @@ actor SendResolver {
     private func resolveRecipient(_ to: String) async -> SendResolution {
         // A leading "+" stays on the phone path even when isPhoneNumber says
         // no ("+55555"), so it fails as a number instead of a contact name.
-        if to.hasPrefix("+") || (PhoneUtils.isPhoneNumber(to) && PhoneUtils.normalizeToE164(to) != nil) {
+        // Short codes ("12345") are phone-shaped too; see resolvePhoneNumber.
+        if to.hasPrefix("+") || PhoneUtils.isPhoneNumber(to) {
             return await resolvePhoneNumber(to)
         }
 
@@ -101,32 +81,41 @@ actor SendResolver {
     }
 
     private func resolvePhoneNumber(_ phone: String) async -> SendResolution {
-        guard let normalized = PhoneUtils.normalizeToE164(phone) else {
+        let raw = phone.trimmingCharacters(in: .whitespaces)
+        // Short codes have no E.164 form and are stored as typed. A "+" that
+        // does not normalize is not a number at all.
+        let normalized = PhoneUtils.normalizeToE164(raw)
+        if normalized == nil && raw.hasPrefix("+") {
             return .failure("Invalid phone number format: \(phone)")
         }
 
         do {
             var handles: [String] = try db.query(
                 "SELECT id FROM handle WHERE id = ?",
-                params: [normalized]
+                params: [normalized ?? raw]
             ) { row in
                 row.string(0) ?? ""
             }
 
-            if handles.isEmpty {
+            if handles.isEmpty, normalized != nil {
                 handles = try db.query(
                     "SELECT id FROM handle WHERE id = ?",
-                    params: [phone]
+                    params: [raw]
                 ) { row in
                     row.string(0) ?? ""
                 }
             }
 
             guard let handle = handles.first else {
+                // A digit string with no conversation may still be a contact's
+                // name ("55555"); only a real number fails here.
+                if normalized == nil {
+                    return await resolveContactName(phone)
+                }
                 return .failure("No conversation found with \(phone)")
             }
             let name = await IdentityDisplayFormatter.displayName(handle: handle, resolver: resolver)
-            return .success(try participantTarget(handle: handle, displayName: name))
+            return .success(try await participantTarget(handle: handle, displayName: name))
         } catch {
             return .failure(ClientErrorMessages.sanitized(error))
         }
@@ -145,7 +134,7 @@ actor SendResolver {
                 return .failure("No conversation found with \(email)")
             }
             let name = await IdentityDisplayFormatter.displayName(handle: handle, resolver: resolver)
-            return .success(try participantTarget(handle: handle, displayName: name))
+            return .success(try await participantTarget(handle: handle, displayName: name))
         } catch {
             return .failure(ClientErrorMessages.sanitized(error))
         }
@@ -168,7 +157,7 @@ actor SendResolver {
         if matches.count == 1 {
             let match = matches[0]
             do {
-                return .success(try participantTarget(handle: match.handle, displayName: match.name))
+                return .success(try await participantTarget(handle: match.handle, displayName: match.name))
             } catch {
                 return .failure(ClientErrorMessages.sanitized(error))
             }
@@ -201,12 +190,16 @@ actor SendResolver {
         )
     }
 
-    private func participantTarget(handle: String, displayName: String) throws -> ResolvedSendTarget {
+    private func participantTarget(handle: String, displayName: String) async throws -> ResolvedSendTarget {
         let chatId = try findDirectChatForHandle(handle)
+        var chat: ChatReference? = nil
+        if let chatId, let identity = try await chatIdentity(chatId) {
+            chat = ChatReference(id: identity.mcpId, name: identity.displayName)
+        }
         return ResolvedSendTarget(
             target: .participant(handle: handle, chatId: chatId),
             deliveredTo: [displayName],
-            chat: try chatId.flatMap { id in try chatReference(chatId: id) }
+            chat: chat
         )
     }
 
@@ -260,21 +253,17 @@ actor SendResolver {
         return result
     }
 
-    private func chatReference(chatId: Int64) throws -> ChatReference? {
-        let rows: [(String?, String?)] = try db.query(
+    /// The chat's identity as every other tool names it (ChatPage), or nil
+    /// when the chat does not exist.
+    private func chatIdentity(_ chatId: Int64) async throws -> ChatIdentity? {
+        let rows: [(guid: String?, displayName: String?)] = try db.query(
             "SELECT guid, display_name FROM chat WHERE ROWID = ?",
             params: [chatId]
         ) { row in
-            (row.string(0), row.string(1))
+            (guid: row.string(0), displayName: row.string(1))
         }
         guard let row = rows.first else { return nil }
-        let displayName = row.1?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let name: String
-        if let displayName, !displayName.isEmpty {
-            name = displayName
-        } else {
-            name = ChatIdentifier.format(chatId)
-        }
-        return ChatReference(id: ChatIdentifier.format(chatId), name: name)
+        let chat = ChatPage.Chat(id: chatId, guid: row.guid, explicitName: row.displayName)
+        return try await ChatPage.identities([chat], db: db, resolver: resolver)[chatId]
     }
 }

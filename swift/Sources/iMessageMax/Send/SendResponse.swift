@@ -125,10 +125,7 @@ struct SendResponse: Encodable, Sendable {
     }
 
     static func uncertain(deliveredTo: [String], chat: ChatReference?) -> SendResponse {
-        let id = chat?.id
-        let name = chat?.name ?? id ?? "the intended chat"
-        let followUp = id.map { "Use get_messages on \($0) to confirm." }
-            ?? "Use get_messages on \(name) to confirm."
+        let followUp = "Use get_messages on \(chat?.id ?? "the intended chat") to confirm."
         return SendResponse(
             .uncertain, disposition: .completed, chat: chat, deliveredTo: deliveredTo,
             message: "Send accepted by Messages.app but could not be verified in chat.db within the polling window. The message was probably sent. \(followUp)"

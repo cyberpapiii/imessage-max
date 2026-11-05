@@ -24,7 +24,7 @@ actor SetupPermissionService {
             await resolver.requestAccessIfAllowed(policy: .requestIfNeeded)
             await resolver.invalidate()
             let contacts = await resolver.status()
-            let status = PermissionStatus(rawValue: contacts.authorization)
+            let status = contacts.authorization
             if contacts.authorized, contacts.loadFailed {
                 return (true, .loadFailed(status))
             }

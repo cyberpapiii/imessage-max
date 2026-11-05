@@ -17,7 +17,7 @@ enum ServerStartup {
         let (dbOk, dbStatus) = Database.checkAccess()
         if !dbOk {
             Log.info("Database: \(dbStatus)")
-            if dbStatus == DatabaseStatus.permissionDenied.rawValue {
+            if dbStatus == .permissionDenied {
                 Log.info(DiagnoseTool.fullDiskAccessFix())
             }
         }

@@ -28,7 +28,7 @@ enum TransferMonitor {
 
     private static let pollTimeout: TimeInterval = 15
     private static let pollInterval: TimeInterval = 0.5
-    private static let deferredRemovalDelay: Duration = .seconds(30)
+    static let deferredRemovalDelay: Duration = .seconds(30)
 
     static func outgoingStatuses(named trackingName: String) throws -> [String] {
         let execution = try Osascript.run(statusesForNameScript, arguments: [trackingName]).get()
@@ -71,19 +71,22 @@ enum TransferMonitor {
     }
 
     /// Polls until the transfer finishes or fails, or the poll window closes.
-    /// Removes the staged copy at terminal states, and on timeout after a
-    /// grace delay because Messages may still be reading it.
+    /// Removes the staged copy at terminal states, and on timeout or a failed
+    /// status query after a grace delay because Messages may still be reading it.
+    /// `statusQuery` and `removalDelay` are injectable for tests.
     static func waitForCompletion(
         of staged: OutgoingFileStager.StagedFile,
         baseline: Int,
-        stager: OutgoingFileStager
+        stager: OutgoingFileStager,
+        statusQuery: (String) throws -> [String] = outgoingStatuses(named:),
+        removalDelay: Duration = deferredRemovalDelay
     ) -> Result<Void, SendFailure> {
         let deadline = Date().addingTimeInterval(pollTimeout)
         var sawPending = false
 
         while Date() < deadline {
             do {
-                let newStatuses = Array(try outgoingStatuses(named: staged.trackingName).dropFirst(baseline))
+                let newStatuses = Array(try statusQuery(staged.trackingName).dropFirst(baseline))
                 switch interpret(newStatuses) {
                 case .finished:
                     stager.remove(staged)
@@ -97,15 +100,17 @@ enum TransferMonitor {
                     break
                 }
             } catch let error as SendError {
+                stager.scheduleRemoval(staged, after: removalDelay)
                 return .failure(SendFailure(error, disposition: .mayHaveCompleted))
             } catch {
+                stager.scheduleRemoval(staged, after: removalDelay)
                 return .failure(SendFailure(.failed(ClientErrorMessages.internalDetail(error, context: "Checking attachment transfer status")), disposition: .mayHaveCompleted))
             }
 
             Thread.sleep(forTimeInterval: pollInterval)
         }
 
-        stager.scheduleRemoval(staged, after: deferredRemovalDelay)
+        stager.scheduleRemoval(staged, after: removalDelay)
         let outcome: SendError = sawPending
             ? .transferPending(staged.trackingName)
             : .transferStatusUnknown(staged.trackingName)

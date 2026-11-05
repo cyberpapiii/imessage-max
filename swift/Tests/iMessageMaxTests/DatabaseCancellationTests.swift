@@ -21,14 +21,17 @@ final class DatabaseCancellationTests: XCTestCase {
         try fixture.execute(batch)
 
         let db = fixture.database()
+        let scope = Database.CallScope()
         let task = Task {
-            try db.query(
-                "SELECT m1.ROWID FROM message m1 CROSS JOIN message m2 CROSS JOIN message m3"
-            ) { $0.int(0) }
+            try Database.$currentCall.withValue(scope) {
+                try db.query(
+                    "SELECT m1.ROWID FROM message m1 CROSS JOIN message m2 CROSS JOIN message m3"
+                ) { $0.int(0) }
+            }
         }
         await AsyncTimeout.sleep(.milliseconds(15))
         task.cancel()
-        Database.interruptActiveQueries()  // no scope set: interrupt everything
+        Database.interruptActiveQueries(in: scope)
 
         do {
             _ = try await task.value
