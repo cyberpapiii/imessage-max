@@ -238,12 +238,4 @@ final class ProductOpenItemsTests: XCTestCase {
         return fixture
     }
 
-    private func typedstreamBlob(payload: [UInt8]) -> Data {
-        var bytes: [UInt8] = [0x04, 0x0B]
-        bytes += Array("NSString".utf8)
-        bytes += [0x01, 0x94, 0x84, 0x01, 0x2B]
-        bytes += [UInt8(payload.count)]
-        bytes += payload
-        return Data(bytes)
-    }
 }

@@ -152,9 +152,9 @@ extension GetMessagesTool {
             query.where(sender)
         }
 
-        if let contains = contains {
-            let escaped = QueryBuilder.escapeLike(contains)
-            query.where("m.text LIKE ? ESCAPE '\\'", "%\(escaped)%")
+        if let contains {
+            let match = SQLFragments.textMayContain(contains)
+            query.where(match.sql, params: match.bindings)
         }
 
         switch has {

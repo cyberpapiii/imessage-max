@@ -262,6 +262,13 @@ actor GetMessagesTool {
             has: has
         )
 
+        // The page ends where the query stopped, even when the text check
+        // below drops rows, so the cursor never skips unread rows.
+        let pageEnd = (last: messageRows.last, full: messageRows.count >= fetchLimit)
+        if let contains {
+            messageRows = messageRows.filter { $0.text?.localizedCaseInsensitiveContains(contains) == true }
+        }
+
         if unanswered {
             messageRows = try UnansweredHeuristics.filterUnanswered(
                 db: db,
@@ -360,7 +367,9 @@ actor GetMessagesTool {
         )
 
         let mediaTruncated = mediaTotal > maxMedia
-        let nextCursor = TimelineCursor.next(after: messageRows.last, pageFull: messageRows.count >= limit)
+        let nextCursor = contains == nil
+            ? TimelineCursor.next(after: messageRows.last, pageFull: messageRows.count >= limit)
+            : TimelineCursor.next(after: pageEnd.last, pageFull: pageEnd.full)
 
         return GetMessagesResponse(
             chat: ChatReference(id: identity.mcpId, name: identity.displayName),

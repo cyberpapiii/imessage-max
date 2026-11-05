@@ -332,3 +332,15 @@ extension ContactResolver {
         )
     }
 }
+
+/// An attributedBody blob in the typedstream shape MessageTextExtractor reads:
+/// junk, the class marker, five skipped bytes, a length field, the UTF-8 text.
+/// The length defaults to a single byte holding `payload.count`.
+func typedstreamBlob(marker: String = "NSString", lengthField: [UInt8]? = nil, payload: [UInt8]) -> Data {
+    var bytes: [UInt8] = [0x04, 0x0B]
+    bytes += Array(marker.utf8)
+    bytes += [0x01, 0x94, 0x84, 0x01, 0x2B]
+    bytes += lengthField ?? [UInt8(payload.count)]
+    bytes += payload
+    return Data(bytes)
+}

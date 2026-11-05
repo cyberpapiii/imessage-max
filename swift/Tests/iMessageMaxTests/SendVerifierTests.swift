@@ -192,14 +192,6 @@ final class SendVerifierTests: XCTestCase {
 
     /// Builds: <prefix junk> + marker + 5 filler bytes + length field + payload.
     /// Copied from MessageTextExtractorTests (private there).
-    private func typedstreamBlob(marker: String = "NSString", lengthField: [UInt8], payload: [UInt8]) -> Data {
-        var bytes: [UInt8] = [0x04, 0x0B]                 // arbitrary prefix junk
-        bytes += Array(marker.utf8)
-        bytes += [0x01, 0x94, 0x84, 0x01, 0x2B]           // 5 filler bytes (skipped)
-        bytes += lengthField
-        bytes += payload
-        return Data(bytes)
-    }
 
     // Multi-attempt polling: with a pre-inserted matching row the verifier
     // confirms within the first attempt and finishes well before maxAttempts

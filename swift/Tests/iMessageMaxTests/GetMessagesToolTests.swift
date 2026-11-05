@@ -84,6 +84,36 @@ final class GetMessagesToolTests: XCTestCase {
         XCTAssertEqual(linkMessages.first?["id"] as? String, "msg_201")
     }
 
+    /// Recent macOS leaves message.text NULL and keeps the words only in
+    /// attributedBody; `contains` must still find them, and must not match the
+    /// blob's own class names.
+    func testContainsMatchesTextStoredOnlyInAttributedBody() async throws {
+        let fixture = try ToolTestDatabase(name: "get-messages-contains-blob")
+        try fixture.insertHandle(rowId: 1, handle: "+15550000001")
+        try fixture.insertChat(rowId: 1, guid: "iMessage;-;+15550000001")
+        try fixture.joinChatHandle(chatId: 1, handleId: 1)
+        let base = Int64(Date().timeIntervalSinceReferenceDate * 1_000_000_000) - 3_600_000_000_000
+        for (rowId, words) in [(1, "Volcano trip on Friday"), (2, "nothing to see")] {
+            try fixture.insertMessage(
+                rowId: rowId, guid: "g\(rowId)", date: base + Int64(rowId), isFromMe: false, handleId: 1,
+                attributedBody: typedstreamBlob(payload: Array(words.utf8))
+            )
+            try fixture.joinChatMessage(chatId: 1, messageId: rowId)
+        }
+        let tool = GetMessagesTool(db: fixture.database(), resolver: makeSeededResolver())
+
+        func ids(containing term: String) async throws -> [String] {
+            let response = try await decodeGetMessagesResponse(
+                await tool.execute(args: ["chat_id": .string("chat1"), "contains": .string(term)])
+            )
+            return try decodeJSONArray(response["messages"]).compactMap { $0["id"] as? String }
+        }
+        let volcano = try await ids(containing: "volcano")
+        XCTAssertEqual(volcano, ["msg_1"])
+        let className = try await ids(containing: "string")
+        XCTAssertEqual(className, [], "NSString in the blob is not message text")
+    }
+
     func testUnresolvedFromPersonFiltersInsteadOfReturningEveryone() async throws {
         let fixture = try makeGetMessagesFixture()
         let tool = GetMessagesTool(db: fixture.database(), resolver: makeSeededResolver())

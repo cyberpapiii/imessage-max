@@ -54,4 +54,18 @@ enum SQLFragments {
             )
             """
     }
+
+    /// Rows whose text might contain `term`. Recent macOS stores most text
+    /// only in the attributedBody typedstream, so the blob is searched too:
+    /// instr is case-sensitive, hence lower, titled and upper forms. The blob
+    /// also holds class names, so callers must confirm on the decoded text.
+    static func textMayContain(_ term: String, _ alias: String = "m") -> (sql: String, bindings: [Any]) {
+        let lower = term.lowercased()
+        let titled = lower.prefix(1).uppercased() + lower.dropFirst()
+        let blob = "instr(\(alias).attributedBody, ?) > 0"
+        return (
+            "(\(alias).text LIKE ? ESCAPE '\\' OR \(blob) OR \(blob) OR \(blob))",
+            ["%\(QueryBuilder.escapeLike(term))%", Data(lower.utf8), Data(titled.utf8), Data(lower.uppercased().utf8)]
+        )
+    }
 }
