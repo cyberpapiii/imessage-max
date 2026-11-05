@@ -147,7 +147,7 @@ enum DiagnoseTool {
             + "2) If it is already listed, toggle it off and on: a grant bound to an older "
             + "code signature looks present but does not work. "
             + "3) The grant applies only to newly launched processes; relaunch this server: "
-            + "launchctl kickstart -k gui/$(id -u)/local.imessage-max (or `make restart` in swift/), "
+            + "`make restart` in swift/ (launchctl bootout, then bootstrap, of ~/Library/LaunchAgents/local.imessage-max.plist), "
             + "or reconnect the MCP client for stdio. "
             + "4) To bisect, run sqlite3 -readonly ~/Library/Messages/chat.db 'pragma quick_check;' "
             + "from a terminal: 'ok' means the terminal has access and this process does not; "
