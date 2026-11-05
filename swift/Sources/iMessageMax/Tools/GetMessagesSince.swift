@@ -10,7 +10,7 @@ struct GetMessagesSinceResponse: Encodable {
         let text: String?
         let ts: String
         let reactions: [String]?
-        let attachments: [GetMessagesResponse.AttachmentSummary]?
+        let attachments: [MessageAttachmentSummary]?
         let links: [String]?
         let replyTo: String?
         let replyCount: Int?
@@ -155,7 +155,7 @@ actor GetMessagesSinceTool {
                 }
                 if row.chatId == nil {
                     let age: TimeInterval
-                    if let date = AppleTime.toDate(row.date) {
+                    if let date = AppleTime.toDate(row.message.date) {
                         age = Date().timeIntervalSince(date)
                     } else {
                         age = .infinity
@@ -165,10 +165,10 @@ actor GetMessagesSinceTool {
                         hasMore = true
                         break
                     }
-                    consumed = row.id
+                    consumed = Int(row.message.id)
                     continue
                 }
-                consumed = row.id
+                consumed = Int(row.message.id)
                 if !includeFiltered && row.chatIsFiltered != 0 {
                     hidden += 1
                     continue
@@ -176,115 +176,50 @@ actor GetMessagesSinceTool {
                 kept.append(row)
             }
             if hasMore || stalled { break }
-            scanFrom = rows.last!.id
+            scanFrom = Int(rows.last!.message.id)
             if rows.count < batchLimit { break }
         }
 
         let nextRowid = hasMore ? consumed : currentRowid
 
-        let reactionsMap: [String: [MessageAnnotations.Reaction]]
-        if includeReactions && !kept.isEmpty {
-            reactionsMap = try MessageAnnotations.reactionsMap(db: db, messageGuids: kept.map(\.guid))
-        } else {
-            reactionsMap = [:]
-        }
+        let messages = kept.map(\.message)
+        let annotations = try MessageAnnotations.load(
+            for: messages,
+            include: includeReactions ? [.reactions, .replies, .attachments] : [.replies, .attachments],
+            db: db
+        )
 
-        let pageIdByGuid = Dictionary(uniqueKeysWithValues: kept.map { ($0.guid, $0.id) })
-        let replies = try MessageAnnotations.replyLookup(
+        let chatByID = try await ChatReferences(
+            ChatPage.Chat.distinct(kept, id: { $0.chatId ?? 0 }, explicitName: \.chatDisplayName),
             db: db,
-            pageGuids: kept.map(\.guid),
-            pageIdByGuid: pageIdByGuid,
-            originatorGuids: kept.compactMap(\.threadOriginatorGuid)
-        )
-        let attachmentsMap = try MessageQueryHelpers.attachmentsMap(db: db, messageIds: kept.map(\.id))
-
-        let chatIds = Array(Set(kept.compactMap { $0.chatId.map { Int64($0) } }))
-        let participantsByChat = try await ChatSummaryQueries.participantsByChat(
-            db: db, chatIds: chatIds, resolver: resolver
+            resolver: resolver
         )
 
-        var otherHandleNames: [String: String] = [:]
-        for handle in Set(kept.compactMap(\.otherHandle)) {
-            otherHandleNames[handle] = await IdentityDisplayFormatter.displayName(
-                handle: handle, resolver: resolver
+        let renderer = MessageRenderer(
+            annotations: annotations,
+            labels: await SenderLabels.displayNames(
+                me: "me", unknown: "unknown", for: messages, annotations: annotations, resolver: resolver
+            ),
+            eventNames: await MessageRenderer.eventNames(for: messages, resolver: resolver)
+        )
+
+        let items = kept.map { scanned in
+            let message = renderer.render(scanned.message)
+            return GetMessagesSinceResponse.Item(
+                id: message.id,
+                rowid: Int(message.rowid),
+                chat: chatByID[scanned.chatId ?? 0],
+                from: message.from,
+                text: message.text,
+                ts: message.ts ?? "",
+                reactions: message.reactions,
+                attachments: message.attachments,
+                links: message.links,
+                replyTo: message.replyTo,
+                replyCount: message.replyCount,
+                edited: message.edited,
+                event: message.event
             )
-        }
-
-        var items: [GetMessagesSinceResponse.Item] = []
-        for row in kept {
-            let chatId = row.chatId ?? 0
-            let identity = ChatIdentity.from(
-                chatId: Int64(chatId),
-                guid: nil,
-                explicitName: row.chatDisplayName,
-                rows: participantsByChat[Int64(chatId)] ?? []
-            )
-
-            let from: String
-            if row.isFromMe {
-                from = "me"
-            } else if let handle = row.senderHandle {
-                from = await IdentityDisplayFormatter.displayName(handle: handle, resolver: resolver)
-            } else {
-                from = "unknown"
-            }
-
-            var reactions: [String]?
-            if includeReactions, let rowReactions = reactionsMap[row.guid] {
-                var reactorNames: [String: String] = [:]
-                for reaction in rowReactions {
-                    guard let handle = reaction.fromHandle, reactorNames[handle] == nil else { continue }
-                    reactorNames[handle] = await IdentityDisplayFormatter.displayName(
-                        handle: handle, resolver: resolver
-                    )
-                }
-                reactions = MessageAnnotations.render(rowReactions) { handle in
-                    guard let handle else { return "me" }
-                    return reactorNames[handle] ?? handle
-                }
-            }
-
-            var attachments: [GetMessagesResponse.AttachmentSummary]?
-            if let rowAttachments = attachmentsMap[row.id] {
-                attachments = rowAttachments.map {
-                    GetMessagesResponse.AttachmentSummary(
-                        id: AttachmentIdentifier.format($0.id),
-                        type: AttachmentType.from(mimeType: $0.mimeType, uti: $0.uti).rawValue,
-                        filename: $0.filename?.components(separatedBy: "/").last,
-                        size: $0.totalBytes
-                    )
-                }
-                if attachments?.isEmpty == true { attachments = nil }
-            }
-
-            var links: [String]?
-            if let text = row.text {
-                let extracted = MessageQueryHelpers.extractLinks(from: text)
-                if !extracted.isEmpty { links = extracted }
-            }
-
-            let ts = row.date.flatMap { AppleTime.toDate($0) }.flatMap { TimeUtils.formatISO($0) } ?? ""
-
-            items.append(GetMessagesSinceResponse.Item(
-                id: MessageIdentifier.format(row.id),
-                rowid: row.id,
-                chat: ChatReference(id: identity.mcpId, name: identity.displayName),
-                from: from,
-                text: row.text,
-                ts: ts,
-                reactions: reactions,
-                attachments: attachments,
-                links: links,
-                replyTo: row.threadOriginatorGuid.flatMap { replies.originatorIdByGuid[$0] },
-                replyCount: replies.replyCountByGuid[row.guid],
-                edited: row.dateEdited != 0 ? true : nil,
-                event: GroupEvent.classify(
-                    itemType: row.itemType,
-                    groupActionType: row.groupActionType,
-                    groupTitle: row.groupTitle,
-                    otherHandleName: row.otherHandle.flatMap { otherHandleNames[$0] }
-                )
-            ))
         }
 
         return GetMessagesSinceResponse(
@@ -305,28 +240,15 @@ actor GetMessagesSinceTool {
         chatFilter: Int64?,
         limit: Int
     ) throws -> [SinceScanRow] {
-        var query = QueryBuilder()
-            .select(
-                "m.ROWID AS id",
-                "m.guid",
-                "m.text",
-                "m.attributedBody",
-                "m.date",
-                "m.is_from_me",
-                "h.id AS sender_handle",
-                "m.item_type",
-                "m.group_action_type",
-                "m.group_title",
-                "oh.id AS other_handle_id",
-                schema.threadOriginatorGuidSQL,
-                schema.dateEditedSQL,
+        let query = QueryBuilder()
+            .selectMessages(
+                schema,
                 "(SELECT MIN(cmj.chat_id) FROM chat_message_join cmj WHERE cmj.message_id = m.ROWID) AS chat_id",
                 "c.display_name AS chat_display_name",
                 "c.is_filtered AS chat_is_filtered"
             )
             .from("message m")
-            .leftJoin("handle h ON m.handle_id = h.ROWID")
-            .leftJoin("handle oh ON m.other_handle = oh.ROWID")
+            .joinMessageHandles()
             .leftJoin("chat c ON c.ROWID = (SELECT MIN(cmj2.chat_id) FROM chat_message_join cmj2 WHERE cmj2.message_id = m.ROWID)")
             .where("m.ROWID > ?", sinceRowid)
             .where("m.ROWID <= ?", currentRowid)
@@ -340,42 +262,21 @@ actor GetMessagesSinceTool {
         query.orderBy("m.ROWID ASC").limit(limit)
 
         let (sql, params) = query.build()
+        let extra = MessageRecord.columnCount
         return try db.query(sql, params: params) { row in
             SinceScanRow(
-                id: Int(row.int(0)),
-                guid: row.string(1) ?? "",
-                text: MessageTextExtractor.extract(text: row.string(2), attributedBody: row.blob(3)),
-                date: row.optionalInt(4),
-                isFromMe: row.int(5) == 1,
-                senderHandle: row.string(6),
-                itemType: Int(row.int(7)),
-                groupActionType: Int(row.int(8)),
-                groupTitle: row.string(9),
-                otherHandle: row.string(10),
-                threadOriginatorGuid: row.string(11),
-                dateEdited: row.optionalInt(12) ?? 0,
-                chatId: row.optionalInt(13).map { Int($0) },
-                chatDisplayName: row.string(14),
-                chatIsFiltered: Int(row.int(15))
+                message: MessageRecord(row),
+                chatId: row.optionalInt(extra),
+                chatDisplayName: row.string(extra + 1),
+                chatIsFiltered: Int(row.int(extra + 2))
             )
         }
     }
 }
 
 private struct SinceScanRow {
-    let id: Int
-    let guid: String
-    let text: String?
-    let date: Int64?
-    let isFromMe: Bool
-    let senderHandle: String?
-    let itemType: Int
-    let groupActionType: Int
-    let groupTitle: String?
-    let otherHandle: String?
-    let threadOriginatorGuid: String?
-    let dateEdited: Int64
-    let chatId: Int?
+    let message: MessageRecord
+    let chatId: Int64?
     let chatDisplayName: String?
     let chatIsFiltered: Int
 }

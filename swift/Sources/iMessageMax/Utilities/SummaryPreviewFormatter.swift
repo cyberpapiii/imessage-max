@@ -69,7 +69,7 @@ enum SummaryPreviewFormatter {
     private static func singularPlaceholder(for type: AttachmentType) -> String {
         switch type {
         case .image:
-            return "[Photo]"
+            return MessageTextExtractor.photoPlaceholder
         case .video:
             return "[Video]"
         case .audio:

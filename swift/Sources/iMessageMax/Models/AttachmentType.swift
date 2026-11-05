@@ -1,4 +1,3 @@
-// Sources/iMessageMax/Models/AttachmentType.swift
 import Foundation
 
 /// Attachment type derived from MIME type or UTI

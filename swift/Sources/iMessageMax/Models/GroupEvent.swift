@@ -17,8 +17,8 @@ struct GroupEvent: Encodable, Equatable {
         case itemType = "item_type"
     }
 
-    /// Classifies the raw columns. `otherHandleId` is the `handle.id` string
-    /// already joined from `message.other_handle`, or nil.
+    /// Classifies the raw columns. `otherHandleName` is the display name of
+    /// the handle behind `message.other_handle`, or nil.
     static func classify(
         itemType: Int,
         groupActionType: Int,

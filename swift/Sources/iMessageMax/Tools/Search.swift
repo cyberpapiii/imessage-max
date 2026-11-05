@@ -1,20 +1,16 @@
-// Sources/iMessageMax/Tools/Search.swift
 import Foundation
 import MCP
 
-/// Sort order for search results
 enum SearchSort: String {
     case recentFirst = "recent_first"
     case oldestFirst = "oldest_first"
 }
 
-/// Response format for search results
 enum SearchFormat: String {
     case flat = "flat"
     case groupedByChat = "grouped_by_chat"
 }
 
-/// Individual search result
 struct SearchResult: Codable {
     let id: String
     let chat: ChatReference
@@ -22,8 +18,8 @@ struct SearchResult: Codable {
     let excerpt: String
     let ago: String?
     let ts: String?
-    var contextBefore: [SearchContextMessage]?
-    var contextAfter: [SearchContextMessage]?
+    var contextBefore: [ContextMessage]?
+    var contextAfter: [ContextMessage]?
     let reactions: [String]?
     let replyTo: String?
     let replyCount: Int?
@@ -40,26 +36,6 @@ struct SearchResult: Codable {
     }
 }
 
-/// Context message for search results
-struct SearchContextMessage: Codable {
-    let id: String
-    let from: String
-    let text: String?
-    let ts: String?
-    let reactions: [String]?
-    let replyTo: String?
-    let replyCount: Int?
-    let edited: Bool?
-
-    enum CodingKeys: String, CodingKey {
-        case id, from, text, ts, reactions
-        case replyTo = "reply_to"
-        case replyCount = "reply_count"
-        case edited
-    }
-}
-
-/// Grouped chat for grouped search response
 struct SearchGroupedChat: Codable {
     let id: String
     let name: String
@@ -82,7 +58,6 @@ struct SearchGroupedChat: Codable {
     }
 }
 
-/// Sample message in grouped response
 struct SearchSampleMessage: Codable {
     let id: String
     let from: String
@@ -90,7 +65,6 @@ struct SearchSampleMessage: Codable {
     let ts: String?
 }
 
-/// Flat search response
 struct SearchFlatResponse: Codable {
     let results: [SearchResult]
     let total: Int
@@ -113,7 +87,6 @@ struct SearchFlatResponse: Codable {
     }
 }
 
-/// Grouped search response
 struct SearchGroupedResponse: Codable {
     let chats: [SearchGroupedChat]
     let total: Int
@@ -141,8 +114,6 @@ struct SearchGroupedResponse: Codable {
     }
 }
 
-/// Error response for search
-/// Implementation of the search tool
 enum SearchTool {
     // MARK: - Tool Registration
 
@@ -311,7 +282,6 @@ enum SearchTool {
         }
     }
 
-    /// Full-text search across messages with advanced filtering
     static func execute(
         query: String? = nil,
         fromPerson: String? = nil,
@@ -333,7 +303,6 @@ enum SearchTool {
         db: Database,
         resolver: ContactResolver
     ) async throws -> String {
-        // Validate inputs
         let hasFilter = fromPerson != nil || inChat != nil || isGroup != nil ||
                         has != nil || since != nil || before != nil || unanswered
         let hasQuery = query != nil &&
@@ -343,20 +312,18 @@ enum SearchTool {
             throw ToolFailure("invalid_query", "Query or at least one filter required")
         }
 
-        // Clamp limit
         let clampedLimit = max(1, min(limit, 100))
         let clampedUnansweredHours = max(1, min(unansweredHours, 24 * 365))
         let sortOrder = SearchSort(rawValue: sort) ?? .recentFirst
         let responseFormat = SearchFormat(rawValue: format) ?? .flat
 
-        // Build and execute query
         // Over-fetch when Swift still has to apply word/fuzzy/unanswered
         // filters. attributedBody is prefiltered in SQL via instr.
         let fetchLimit = (hasQuery || unanswered) ? max(500, clampedLimit * 10) : clampedLimit
 
-        let senderFilter = await resolveFromPersonFilter(fromPerson, resolver: resolver)
+        let senderFilter = await SenderFilter.resolve(fromPerson, resolver: resolver)
 
-        // Split query into words (minimum 2 chars each to avoid noise)
+        // Single characters match nearly everything, so they are dropped.
         let searchWords: [String]
         if hasQuery, let searchQuery = query?.trimmingCharacters(in: .whitespaces).lowercased(), !searchQuery.isEmpty {
             searchWords = searchQuery.split(separator: " ")
@@ -406,43 +373,21 @@ enum SearchTool {
             )
         }
 
-        var rows = try db.query(sql, params: params) { row in
-            SearchRow(
-                msgId: row.int(0),
-                text: row.string(1),
-                attributedBody: row.blob(2),
-                date: row.optionalInt(3),
-                isFromMe: row.int(4) != 0,
-                senderHandle: row.string(5),
-                chatId: row.int(6),
-                chatDisplayName: row.string(7),
-                guid: row.string(8) ?? "",
-                threadOriginatorGuid: row.string(9),
-                dateEdited: row.optionalInt(10) ?? 0,
-                hasReactions: false,
-                hasReplies: row.int(11) != 0
-            )
-        }
+        var rows = try db.query(sql, params: params, map: MessageInChat.init)
 
-        // Word/fuzzy filter on extracted text (SQL instr is a prefilter).
-        // Supports multi-word search: OR (any word) by default, AND (all words) with matchAll=true
-        // With fuzzy=true, also matches words within 1-2 edits (handles typos)
+        // The SQL LIKE/instr terms only prefilter; this word match decides.
         if hasQuery, !searchWords.isEmpty {
             rows = rows.filter { row in
-                let extractedText = MessageTextExtractor.extract(text: row.text, attributedBody: row.attributedBody)
-                guard let text = extractedText?.lowercased() else { return false }
+                guard let text = row.message.text?.lowercased() else { return false }
 
-                // Split message text into words for fuzzy matching
                 let textWords = text.split(whereSeparator: { !$0.isLetter && !$0.isNumber })
                     .map(String.init)
 
                 if matchAll {
-                    // AND logic: all search words must be present
                     return searchWords.allSatisfy { searchWord in
                         wordMatches(searchWord: searchWord, in: text, textWords: textWords, fuzzy: fuzzy)
                     }
                 } else {
-                    // OR logic: any word matches
                     return searchWords.contains { searchWord in
                         wordMatches(searchWord: searchWord, in: text, textWords: textWords, fuzzy: fuzzy)
                     }
@@ -450,25 +395,22 @@ enum SearchTool {
             }
         }
 
-        // Filter for unanswered if requested
         if unanswered {
             rows = try UnansweredHeuristics.filterUnanswered(
                 db: db,
                 rows: rows,
                 hours: clampedUnansweredHours,
                 limit: clampedLimit,
-                text: { MessageTextExtractor.extract(text: $0.text, attributedBody: $0.attributedBody) },
-                date: \.date,
+                text: \.message.text,
+                date: \.message.date,
                 chatId: \.chatId
             )
         }
 
-        // Trim to requested limit after filtering
         if rows.count > clampedLimit {
             rows = Array(rows.prefix(clampedLimit))
         }
 
-        // Build response
         let jsonString: String
         if responseFormat == .groupedByChat {
             jsonString = try await buildGroupedResponse(

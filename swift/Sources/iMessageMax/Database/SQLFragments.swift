@@ -18,4 +18,40 @@ enum SQLFragments {
 
     /// Tapbacks and other associated messages carry a nonzero type.
     static func notReaction(_ alias: String = "m") -> String { "\(alias).associated_message_type = 0" }
+
+    /// Tapback rows and their removals (see `ReactionType`), nothing else.
+    static func tapbackOrRemoval(_ alias: String = "m") -> String {
+        let types = ReactionType.types, removals = ReactionType.removalTypes
+        return "(\(alias).associated_message_type BETWEEN \(types.lowerBound) AND \(types.upperBound)"
+            + " OR \(alias).associated_message_type BETWEEN \(removals.lowerBound) AND \(removals.upperBound))"
+    }
+
+    /// The guid of the message an associated row points at. Messages.app
+    /// writes `p:<part>/<guid>` for a tapback on one part of a message and
+    /// `bp:<guid>` for one on a link-preview balloon; older rows hold the bare guid.
+    static func associatedTargetGuid(_ alias: String = "m") -> String {
+        let column = "\(alias).associated_message_guid"
+        return "(CASE WHEN \(column) LIKE 'bp:%' THEN substr(\(column), 4)"
+            + " ELSE substr(\(column), instr(\(column), '/') + 1) END)"
+    }
+
+    /// Text carrying an http(s) URL, or a message Messages.app shows as a link preview.
+    static func hasLink(_ alias: String = "m") -> String {
+        "(\(alias).text LIKE '%http://%' OR \(alias).text LIKE '%https://%'"
+            + " OR \(alias).balloon_bundle_id = '\(BalloonBundle.urlPreview)')"
+    }
+
+    /// At least one attachment Messages.app shows, optionally only of one
+    /// `AttachmentType.sqlPredicate` kind.
+    static func hasAttachment(ofType type: String? = nil, _ alias: String = "m") -> String {
+        let typeClause = AttachmentType.sqlPredicate(for: type, alias: "a").map { "\n  AND (\($0))" } ?? ""
+        return """
+            EXISTS (
+              SELECT 1 FROM attachment a
+              JOIN message_attachment_join maj ON a.ROWID = maj.attachment_id
+              WHERE maj.message_id = \(alias).ROWID
+                AND COALESCE(a.hide_attachment, 0) = 0\(typeClause)
+            )
+            """
+    }
 }
