@@ -568,10 +568,38 @@ final class SearchToolTests: XCTestCase {
             let before = try decodeJSONArray(result["context_before"]).compactMap { $0["text"] as? String }
             let after = try decodeJSONArray(result["context_after"]).compactMap { $0["text"] as? String }
             XCTAssertEqual(before, ["filler \(index - 2)", "filler \(index - 1)"])
-            XCTAssertEqual(after, ["filler \(index + 1)", "filler \(index + 2)"])
+            // The twin shares anchor 15's timestamp with a higher ROWID, so it comes right after it.
+            let expectedAfter = index == 15 ? ["twin 15", "filler 16"] : ["filler \(index + 1)", "filler \(index + 2)"]
+            XCTAssertEqual(after, expectedAfter)
             XCTAssertFalse(before.contains("loved") || after.contains("loved"))
-            XCTAssertFalse(before.contains("twin 15") || after.contains("twin 15"))
         }
+    }
+
+    func testIncludeContextGivesHitsSharingATimestampTheirOwnWindows() async throws {
+        let fixture = try ToolTestDatabase(name: "search-ctx-same-timestamp")
+        try fixture.insertHandle(rowId: 1, handle: "+15550000001")
+        try fixture.insertChat(rowId: 1, guid: "chat-twin-guid", displayName: "Twins")
+        try fixture.joinChatHandle(chatId: 1, handleId: 1)
+        let rows: [(id: Int, date: Int64, text: String)] = [
+            (1, 100, "filler 1"), (2, 200, "hit a"), (3, 200, "hit b"), (4, 300, "filler 4"),
+        ]
+        for row in rows {
+            try fixture.insertMessage(rowId: row.id, guid: "g\(row.id)", text: row.text, date: row.date, isFromMe: false, handleId: 1)
+            try fixture.joinChatMessage(chatId: 1, messageId: row.id)
+        }
+
+        let response = try await decodeSearchResponse(
+            SearchTool.execute(query: "hit", includeContext: true, db: fixture.database(), resolver: makeSeededResolver())
+        )
+        let results = try decodeJSONArray(try XCTUnwrap(response["results"]))
+        func window(_ id: String, _ side: String) throws -> [String] {
+            let result = try XCTUnwrap(results.first { $0["id"] as? String == id })
+            return try decodeJSONArray(result[side]).compactMap { $0["id"] as? String }
+        }
+        XCTAssertEqual(try window("msg_2", "context_before"), ["msg_1"])
+        XCTAssertEqual(try window("msg_2", "context_after"), ["msg_3", "msg_4"])
+        XCTAssertEqual(try window("msg_3", "context_before"), ["msg_1", "msg_2"])
+        XCTAssertEqual(try window("msg_3", "context_after"), ["msg_4"])
     }
 
     func testUnansweredSkipsReplyWindowQueriesForNonQuestions() async throws {

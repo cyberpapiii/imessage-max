@@ -307,9 +307,7 @@ extension SearchTool {
         let identityByChat = try await ChatPage.identities(chatsInFirstAppearanceOrder(rows), db: db, resolver: resolver)
         var windows: [MessageWindow.Anchor: MessageWindow.Context] = [:]
         if includeContext {
-            let anchors = rows.compactMap { row in
-                row.message.date.map { MessageWindow.Anchor(chatId: row.chatId, date: $0) }
-            }
+            let anchors = rows.map { MessageWindow.Anchor(chatId: $0.chatId, message: $0.message) }
             windows = try MessageWindow.around(anchors, before: 2, after: 2, db: db)
         }
 
@@ -349,8 +347,7 @@ extension SearchTool {
                 edited: message.edited
             )
 
-            if let date = searchRow.message.date,
-               let window = windows[MessageWindow.Anchor(chatId: searchRow.chatId, date: date)] {
+            if let window = windows[MessageWindow.Anchor(chatId: searchRow.chatId, message: searchRow.message)] {
                 result.contextBefore = contextMessages(window.before)
                 result.contextAfter = contextMessages(window.after)
             }

@@ -193,7 +193,7 @@ enum GetContext {
 
         let targetChatId = targetResult.chatId
         let window = try MessageWindow.around(
-            [MessageWindow.Anchor(chatId: targetChatId, date: targetResult.message.date ?? 0)],
+            [MessageWindow.Anchor(chatId: targetChatId, message: targetResult.message)],
             before: beforeCount,
             after: afterCount,
             db: database

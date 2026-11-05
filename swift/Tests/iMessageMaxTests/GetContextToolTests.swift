@@ -19,6 +19,26 @@ final class GetContextToolTests: XCTestCase {
         XCTAssertEqual(response.after.map(\.id), ["msg_203"])
     }
 
+    func testMessagesSharingTheAnchorTimestampStayInTheWindow() async throws {
+        let fixture = try ToolTestDatabase(name: "context-same-timestamp")
+        try fixture.insertHandle(rowId: 1, handle: "+15550000001")
+        try fixture.insertChat(rowId: 1, guid: "twin-chat", displayName: "Twins")
+        try fixture.joinChatHandle(chatId: 1, handleId: 1)
+        let rows: [(id: Int, date: Int64)] = [(1, 100), (2, 200), (3, 200), (4, 200), (5, 300)]
+        for row in rows {
+            try fixture.insertMessage(rowId: row.id, guid: "g\(row.id)", text: "m\(row.id)", date: row.date, isFromMe: false, handleId: 1)
+            try fixture.joinChatMessage(chatId: 1, messageId: row.id)
+        }
+
+        let response = try unwrapSuccess(await capture { try await GetContext.execute(
+            messageId: "msg_3",
+            database: fixture.database(),
+            resolver: makeSeededResolver()
+        ) })
+        XCTAssertEqual(response.before.map(\.id), ["msg_1", "msg_2"])
+        XCTAssertEqual(response.after.map(\.id), ["msg_4", "msg_5"])
+    }
+
     func testBeforeAndAfterDefaultsAreFiveAndTen() async throws {
         let fixture = try makeLongChatFixture(messageCount: 40)
         let result = await capture { try await GetContext.execute(
