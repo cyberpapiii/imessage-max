@@ -9,8 +9,12 @@
 // task: the read loop only parses, routes, yields, and spawns. A slow
 // `tools/call` (a `send` that polls for ~45 s) therefore never blocks legacy
 // session traffic or other modern requests. Legacy messages stay strictly
-// ordered; modern responses may interleave on stdout (JSON-RPC ids
+// ordered; modern responses may arrive out of order (JSON-RPC ids
 // correlate them).
+//
+// Every reply goes through one writer task. The SDK's StdioTransport is an
+// actor whose `send` suspends when stdout is full, and a second `send` would
+// otherwise run in that gap and splice its bytes into the first line.
 import Foundation
 import MCP
 
@@ -21,15 +25,21 @@ actor DualEraStdio {
     private let base: any Transport
     private let catalog: ToolCatalog
     private let continuation: AsyncThrowingStream<Data, Error>.Continuation
+    private let outgoing: AsyncStream<Data>
+    private let outgoingContinuation: AsyncStream<Data>.Continuation
     private var readLoop: Task<Void, Never>?
+    private var writer: Task<Void, Never>?
 
     init(base: any Transport, catalog: ToolCatalog) {
         let (inbound, continuation) = AsyncThrowingStream<Data, Error>.makeStream()
         self.base = base
         self.catalog = catalog
         self.continuation = continuation
+        let (outgoing, outgoingContinuation) = AsyncStream<Data>.makeStream()
+        self.outgoing = outgoing
+        self.outgoingContinuation = outgoingContinuation
         self.legacy = LegacyLaneTransport(inbound: inbound) { data in
-            try await base.send(data)
+            outgoingContinuation.yield(data)
         }
     }
 
@@ -40,6 +50,17 @@ actor DualEraStdio {
         let base = self.base
         let catalog = self.catalog
         let continuation = self.continuation
+        let outgoing = self.outgoing
+        let outgoingContinuation = self.outgoingContinuation
+        writer = Task {
+            for await data in outgoing {
+                do {
+                    try await base.send(data)
+                } catch {
+                    Log.error("stdio write failed; response dropped: \(error)")
+                }
+            }
+        }
         readLoop = Task {
             await withDiscardingTaskGroup { group in
                 do {
@@ -56,13 +77,8 @@ actor DualEraStdio {
                             continue
                         }
                         group.addTask {
-                            guard let response = await ModernDispatcher.handle(message, transport: "stdio", catalog: catalog).body else {
-                                return
-                            }
-                            do {
-                                try await base.send(response)
-                            } catch {
-                                Log.error("stdio write failed; response dropped: \(error)")
+                            if let response = await ModernDispatcher.handle(message, transport: "stdio", catalog: catalog).body {
+                                outgoingContinuation.yield(response)
                             }
                         }
                     }
@@ -76,6 +92,8 @@ actor DualEraStdio {
 
     func stop() async {
         readLoop?.cancel()
+        outgoingContinuation.finish()
+        await writer?.value
         await base.disconnect()
         continuation.finish()
     }

@@ -352,6 +352,32 @@ final class DualEraStdioTests: XCTestCase {
         await dual.stop()
     }
 
+    /// stdout can be full; the SDK's send then suspends mid-line. A reply
+    /// sent meanwhile must wait rather than splice into that line.
+    func testRepliesAreWrittenOneAtATime() async throws {
+        let base = FakeBaseTransport(suspendsMidWrite: true)
+        let dual = DualEraStdio(base: base, catalog: catalog)
+        try await dual.start()
+
+        async let first: Void = dual.legacy.send(Data(#"{"jsonrpc":"2.0","id":1,"result":{}}"#.utf8))
+        async let second: Void = dual.legacy.send(Data(#"{"jsonrpc":"2.0","id":2,"result":{}}"#.utf8))
+        await base.feed(Data(
+            #"{"jsonrpc":"2.0","id":3,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}"#.utf8
+        ))
+        _ = try await (first, second)
+        for _ in 0..<200 where await base.sentCount() < 3 {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        await dual.stop()
+
+        let events = await base.writeEvents()
+        XCTAssertEqual(events.count, 6)
+        for pair in stride(from: 0, to: events.count, by: 2) {
+            XCTAssertEqual(events[pair], "begin")
+            XCTAssertEqual(events[pair + 1], "end")
+        }
+    }
+
     // MARK: - Helpers
 
     private func registerFakeTool(
@@ -372,12 +398,15 @@ private actor FakeBaseTransport: Transport {
     nonisolated let logger: Logger
 
     private var sent: [Data] = []
+    private var events: [String] = []
+    private let suspendsMidWrite: Bool
     private var shouldFailNextSend = false
     private var sendAttempts = 0
     private let stream: AsyncThrowingStream<Data, Error>
     private let continuation: AsyncThrowingStream<Data, Error>.Continuation
 
-    init() {
+    init(suspendsMidWrite: Bool = false) {
+        self.suspendsMidWrite = suspendsMidWrite
         self.logger = Logger(
             label: "test.fake-transport",
             factory: { _ in SwiftLogNoOpLogHandler() }
@@ -402,7 +431,16 @@ private actor FakeBaseTransport: Transport {
                 userInfo: [NSLocalizedDescriptionKey: "simulated write failure"]
             )
         }
+        events.append("begin")
+        if suspendsMidWrite {
+            for _ in 0..<5 { await Task.yield() }
+        }
+        events.append("end")
         sent.append(data)
+    }
+
+    func writeEvents() -> [String] {
+        events
     }
 
     func receive() -> AsyncThrowingStream<Data, Error> {
