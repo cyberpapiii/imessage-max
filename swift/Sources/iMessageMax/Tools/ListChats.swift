@@ -128,7 +128,7 @@ enum ListChatsTool {
 
     /// List recent chats with previews
     /// - Parameters:
-    ///   - limit: Max chats to return (default 20, clamped to 1-100)
+    ///   - limit: Max chats to return, clamped by `ListChatsTool.limit`
     ///   - since: Only chats with activity since this time
     ///   - isGroup: True for groups only, False for DMs only
     ///   - minParticipants: Filter to chats with at least N participants
@@ -137,7 +137,7 @@ enum ListChatsTool {
     ///   - db: Database instance
     ///   - resolver: ContactResolver for name lookups
     static func execute(
-        limit: Int = 20,
+        limit: Int = ListChatsTool.limit.defaultValue,
         since: String? = nil,
         isGroup: Bool? = nil,
         minParticipants: Int? = nil,

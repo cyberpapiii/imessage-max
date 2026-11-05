@@ -94,8 +94,8 @@ enum GetContext {
         messageId: String? = nil,
         chatId: String? = nil,
         contains: String? = nil,
-        before: Int = 5,
-        after: Int = 10,
+        before: Int = GetContext.before.defaultValue,
+        after: Int = GetContext.after.defaultValue,
         database: Database,
         resolver: ContactResolver
     ) async throws -> GetContextResponse {

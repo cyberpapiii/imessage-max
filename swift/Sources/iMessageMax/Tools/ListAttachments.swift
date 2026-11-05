@@ -113,7 +113,7 @@ final class ListAttachments {
         type: String? = nil,
         since: String? = nil,
         before: String? = nil,
-        limit: Int = 50,
+        limit: Int = ListAttachments.limit.defaultValue,
         sort: String = "recent_first",
         cursor: String? = nil
     ) async throws -> ListAttachmentsResponse {

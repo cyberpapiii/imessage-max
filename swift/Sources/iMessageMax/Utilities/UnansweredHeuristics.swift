@@ -32,8 +32,8 @@ enum UnansweredHeuristics {
         messageDate: Int64,
         hours: Int
     ) throws -> Bool {
-        // Defensive clamp: one year of hours times 3.6e12 stays far inside Int64.
-        let boundedHours = Int64(max(1, min(hours, 24 * 365)))
+        // The argument's own bounds: a year of hours times 3.6e12 stays far inside Int64.
+        let boundedHours = Int64(IntArgument.unansweredHours.clamp(hours))
         let windowNs = boundedHours * 3_600_000_000_000
 
         let rows = try db.query("""

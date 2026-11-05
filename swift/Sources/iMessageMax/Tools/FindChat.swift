@@ -37,7 +37,7 @@ enum FindChatTool {
             "limit": .object([
                 "type": "integer",
                 "description": "Maximum results to return (default \(limit.defaultValue))",
-                "default": .int(5),
+                "default": .int(limit.defaultValue),
             ]),
         ]),
         "additionalProperties": false,

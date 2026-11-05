@@ -65,6 +65,8 @@ struct UnreadChatSummary: Encodable {
 
 final class GetUnread {
     static let limit = IntArgument(name: "limit", defaultValue: 50, range: 1...100)
+    /// Matches the window Messages.app treats as recent.
+    static let defaultSince = "7d"
 
     private let database: Database
     private let contactResolver: ContactResolver
@@ -86,7 +88,7 @@ final class GetUnread {
                 ]),
                 "since": .object([
                     "type": "string",
-                    "description": "Time window for unread-only results (default \"7d\", use \"all\" for all time)",
+                    "description": "Time window for unread-only results (default \"\(defaultSince)\", use \"all\" for all time)",
                 ]),
                 "format": .object([
                     "type": "string",
@@ -119,7 +121,7 @@ final class GetUnread {
             )
         ) { arguments in
             let chatId = arguments?["chat_id"]?.stringValue
-            let since = arguments?["since"]?.stringValue ?? "7d"
+            let since = arguments?["since"]?.stringValue ?? defaultSince
             let formatStr = arguments?["format"]?.stringValue ?? "summary"
             let limit = Self.limit.read(arguments)
             let includeFiltered = arguments?["include_filtered"]?.boolValue ?? false
@@ -148,9 +150,9 @@ final class GetUnread {
 
         init(
             chatId: String? = nil,
-            since: String = "7d",
+            since: String = GetUnread.defaultSince,
             format: UnreadFormat = .summary,
-            limit: Int = 50,
+            limit: Int = GetUnread.limit.defaultValue,
             includeFiltered: Bool = false
         ) {
             self.chatId = chatId
@@ -213,7 +215,6 @@ final class GetUnread {
         if let chats {
             query.where(chats)
         }
-        // Default 7 days, matching Messages.app.
         if let sinceApple {
             query.where("m.date >= ?", sinceApple)
         }

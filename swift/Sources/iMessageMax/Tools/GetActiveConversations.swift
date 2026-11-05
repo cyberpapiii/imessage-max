@@ -111,10 +111,10 @@ enum GetActiveConversations {
     }
 
     static func execute(
-        hours: Int = 24,
-        minExchanges: Int = 2,
+        hours: Int = GetActiveConversations.hours.defaultValue,
+        minExchanges: Int = GetActiveConversations.minExchanges.defaultValue,
         isGroup: Bool? = nil,
-        limit: Int = 10,
+        limit: Int = GetActiveConversations.limit.defaultValue,
         database: Database,
         resolver: ContactResolver
     ) async throws -> ActiveConversationsResult {

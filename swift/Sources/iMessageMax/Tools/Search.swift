@@ -173,7 +173,7 @@ enum SearchTool {
                 "limit": .object([
                     "type": "integer",
                     "description": "Max results (\(limit.defaultAndMax))",
-                    "default": .int(20)
+                    "default": .int(limit.defaultValue)
                 ]),
                 "sort": .object([
                     "type": "string",
@@ -200,7 +200,7 @@ enum SearchTool {
                 "unanswered_hours": .object([
                     "type": "integer",
                     "description": "Window in hours to check for replies (default \(IntArgument.unansweredHours.defaultValue))",
-                    "default": .int(24)
+                    "default": .int(IntArgument.unansweredHours.defaultValue)
                 ])
             ]),
             "additionalProperties": false
@@ -293,12 +293,12 @@ enum SearchTool {
         since: String? = nil,
         before: String? = nil,
         cursor: String? = nil,
-        limit: Int = 20,
+        limit: Int = SearchTool.limit.defaultValue,
         sort: String = "recent_first",
         format: String = "flat",
         includeContext: Bool = false,
         unanswered: Bool = false,
-        unansweredHours: Int = 24,
+        unansweredHours: Int = IntArgument.unansweredHours.defaultValue,
         matchAll: Bool = false,
         fuzzy: Bool = false,
         includeFiltered: Bool = false,
