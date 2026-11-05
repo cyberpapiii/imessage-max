@@ -88,7 +88,7 @@ final class DiagnoseToolTests: XCTestCase {
             resolver: ContactResolver(seedCache: [:]),
             dbProbe: DiagnoseToolTests.dbAccessible,
             automationProbe: DiagnoseToolTests.automationGranted,
-            schemaProbe: { SchemaCapabilities(base: .assumed, messageDateEdited: false) }
+            schemaProbe: { SchemaCapabilities.assumed.without(.messageDateEdited) }
         )
         XCTAssertEqual(result.database.features?["message.date_edited"], false)
         XCTAssertEqual(result.database.features?["message.thread_originator_guid"], true)

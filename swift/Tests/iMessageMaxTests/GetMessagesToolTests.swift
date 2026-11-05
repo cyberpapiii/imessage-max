@@ -483,11 +483,7 @@ final class GetMessagesToolTests: XCTestCase {
         let fixture = try makeGetMessagesFixture()
         let db = Database(
             path: fixture.path,
-            schemaOverride: SchemaCapabilities(
-                base: .assumed,
-                messageThreadOriginatorGuid: false,
-                messageDateEdited: false
-            )
+            schemaOverride: SchemaCapabilities.assumed.without(.messageThreadOriginatorGuid, .messageDateEdited)
         )
         let tool = GetMessagesTool(db: db, resolver: makeSeededResolver())
         let response = try await decodeGetMessagesResponse(
