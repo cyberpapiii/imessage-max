@@ -231,9 +231,8 @@ enum ListChatsTool {
             }
 
             if sinceApple != nil || candidateWidth != nil {
-                // `since` previously filtered the joined message rows in
-                // WHERE, which dropped chats with no activity in the window.
-                // An inner join keeps that behavior. A bounded scan also
+                // `since` drops chats with no activity in the window, so
+                // the aggregate joins inward. A bounded scan also
                 // joins inward: a chat outside the candidate set has no
                 // claim on this page, and the escalation below is what
                 // brings it back when the page cannot be filled without it.
@@ -256,41 +255,41 @@ enum ListChatsTool {
                     : SQLFragments.isDirect(count: "participant_count"))
             }
 
-            if let cursor, let decoded = ChatListCursor.decode(cursor) {
+            if let cursor {
                 switch sortOrder {
                 case .recent:
-                    qb.having(
-                        "(last_message_date < ? OR (last_message_date = ? AND c.ROWID < ?))",
-                        decoded.primary, decoded.primary, decoded.chatId
-                    )
+                    if let decoded = ChatListCursor.decode(cursor) {
+                        qb.having(
+                            "(last_message_date < ? OR (last_message_date = ? AND c.ROWID < ?))",
+                            decoded.primary, decoded.primary, decoded.chatId
+                        )
+                    }
                 case .mostActive:
                     // primary = message_count, secondary = last_message_date
-                    let lastDate = decoded.secondary ?? 0
-                    qb.having(
-                        """
-                        (message_count < ?
-                         OR (message_count = ? AND last_message_date < ?)
-                         OR (message_count = ? AND last_message_date = ? AND c.ROWID < ?))
-                        """,
-                        decoded.primary, decoded.primary, lastDate,
-                        decoded.primary, lastDate, decoded.chatId
-                    )
+                    if let decoded = ChatListCursor.decode(cursor) {
+                        let lastDate = decoded.secondary ?? 0
+                        qb.having(
+                            """
+                            (message_count < ?
+                             OR (message_count = ? AND last_message_date < ?)
+                             OR (message_count = ? AND last_message_date = ? AND c.ROWID < ?))
+                            """,
+                            decoded.primary, decoded.primary, lastDate,
+                            decoded.primary, lastDate, decoded.chatId
+                        )
+                    }
                 case .alphabetical:
-                    // primary unused; secondary unused — lexicographic via chat id only is unsafe.
-                    // Alphabetical cursor encodes name hash in primary as 0 and uses chatId with name HAVING.
-                    break
+                    // `n:name:chatId`, keyed on the same expression the sort uses.
+                    if let nameCursor = ChatListCursor.decodeName(cursor) {
+                        qb.having(
+                            """
+                            (COALESCE(c.display_name, '') > ?
+                             OR (COALESCE(c.display_name, '') = ? AND c.ROWID > ?))
+                            """,
+                            nameCursor.name, nameCursor.name, nameCursor.chatId
+                        )
+                    }
                 }
-            }
-
-            // Alphabetical keyset: "name\\0chatId" stored as opaque string via ChatListCursor.name form.
-            if sortOrder == .alphabetical, let cursor, let nameCursor = ChatListCursor.decodeName(cursor) {
-                qb.having(
-                    """
-                    (COALESCE(c.display_name, '') > ?
-                     OR (COALESCE(c.display_name, '') = ? AND c.ROWID > ?))
-                    """,
-                    nameCursor.name, nameCursor.name, nameCursor.chatId
-                )
             }
 
             switch sortOrder {
@@ -319,8 +318,8 @@ enum ListChatsTool {
         // unbounded entry directly.
         // Paging is excluded because the cursor cannot narrow the scan
         // (see buildPageQuery) while it does thin the page, so every deep
-        // page would climb the whole ladder before landing on the same
-        // unbounded query it starts from today.
+        // page would climb the whole ladder before landing on the
+        // unbounded query anyway.
         let candidateWidths: [Int?] = sortOrder == .recent && recentCursorDate == nil
             ? [2_000, 20_000, 200_000, nil]
             : [nil]

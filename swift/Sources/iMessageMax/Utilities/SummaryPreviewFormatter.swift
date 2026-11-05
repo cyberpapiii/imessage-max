@@ -27,40 +27,33 @@ enum SummaryPreviewFormatter {
         return truncate(collapsed, maxLength: maxLength)
     }
 
+    /// A text-less message's preview: "[Photo]", "[3 Photos]", or
+    /// "[2 Attachments]" for mixed kinds.
     static func attachmentPlaceholder(for attachmentTypes: [AttachmentType]) -> String {
-        guard !attachmentTypes.isEmpty else { return "[Attachment]" }
-
-        if attachmentTypes.count == 1 {
-            return singularPlaceholder(for: attachmentTypes[0])
-        }
-
-        let uniqueKinds = Set(attachmentTypes.map(\.rawValue))
-        if uniqueKinds.count == 1, let first = attachmentTypes.first {
-            return "[\(attachmentTypes.count) \(pluralLabel(for: first))]"
-        }
-
-        return "[\(attachmentTypes.count) Attachments]"
+        summary(of: attachmentTypes, namingTwoKinds: false)
     }
 
+    /// list_attachments' per-message summary: like `attachmentPlaceholder`,
+    /// but two kinds are named in kind order, "[Photo, PDF]".
     static func sharedSummary(for attachmentTypes: [AttachmentType]) -> String {
-        guard !attachmentTypes.isEmpty else { return "[Attachment]" }
+        summary(of: attachmentTypes, namingTwoKinds: true)
+    }
+
+    private static func summary(of attachmentTypes: [AttachmentType], namingTwoKinds: Bool) -> String {
+        guard let first = attachmentTypes.first else { return "[Attachment]" }
         if attachmentTypes.count == 1 {
-            return singularPlaceholder(for: attachmentTypes[0])
+            return singularPlaceholder(for: first)
         }
 
-        let uniqueKinds = Array(Set(attachmentTypes.map(\.rawValue))).sorted()
-        if uniqueKinds.count == 1, let first = attachmentTypes.first {
+        let kinds = Set(attachmentTypes.map(\.rawValue)).sorted()
+        if kinds.count == 1 {
             return "[\(attachmentTypes.count) \(pluralLabel(for: first))]"
         }
-
-        if uniqueKinds.count == 2 {
-            let labels = uniqueKinds.compactMap { raw -> String? in
-                guard let type = AttachmentType(rawValue: raw) else { return nil }
-                return singularPlaceholder(for: type).trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+        if namingTwoKinds, kinds.count == 2 {
+            let labels = kinds.compactMap(AttachmentType.init(rawValue:)).map {
+                singularPlaceholder(for: $0).trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
             }
-            if labels.count == 2 {
-                return "[\(labels.joined(separator: ", "))]"
-            }
+            return "[\(labels.joined(separator: ", "))]"
         }
 
         return "[\(attachmentTypes.count) Attachments]"

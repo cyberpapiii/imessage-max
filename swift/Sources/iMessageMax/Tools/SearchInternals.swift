@@ -1,17 +1,5 @@
 import Foundation
 
-struct GroupedChatData {
-    let id: String
-    var name: String
-    var group: Bool?
-    var participantCount: Int
-    var participantsPreview: [String]
-    var matchCount: Int
-    var firstMatchDate: Date?
-    var lastMatchDate: Date?
-    var results: [SearchSampleMessage]
-}
-
 extension SearchTool {
     static func applySearchFilters(
         to builder: QueryBuilder,
@@ -304,80 +292,39 @@ extension SearchTool {
         resolver: ContactResolver,
         filteredHidden: Int?
     ) async throws -> String {
-        var chatsData: [Int64: GroupedChatData] = [:]
         let page = try await ChatPage.build(
             rows.chats,
             lastMessages: nil,
             db: db,
             resolver: resolver
         )
-        let summaryByChat = page.mapValues(\.summary)
         let renderer = MessageRenderer(
             annotations: .none,
             labels: await SenderLabels.displayNames(me: "Me", unknown: "Unknown", for: rows.map(\.message), resolver: resolver)
         )
 
-        for searchRow in rows {
-            let row = searchRow.message
-            let message = renderer.render(row)
-            let chatId = searchRow.chatId
-            let msgDate = AppleTime.toDate(row.date)
-
-            guard let chatSummary = summaryByChat[chatId] else { continue }
-
-            if chatsData[chatId] == nil {
-                chatsData[chatId] = GroupedChatData(
-                    id: chatSummary.id,
-                    name: chatSummary.name,
-                    group: chatSummary.group,
-                    participantCount: chatSummary.participantCount,
-                    participantsPreview: chatSummary.participantsPreview,
-                    matchCount: 0,
-                    firstMatchDate: msgDate,
-                    lastMatchDate: msgDate,
-                    results: []
-                )
-            }
-
-            guard var chat = chatsData[chatId] else { continue }
-            chat.matchCount += 1
-
-            if let date = msgDate {
-                if let first = chat.firstMatchDate {
-                    if date < first { chat.firstMatchDate = date }
-                } else {
-                    chat.firstMatchDate = date
+        let rowsByChat = Dictionary(grouping: rows, by: \.chatId)
+        var chats = rowsByChat.compactMap { chatId, matches -> SearchGroupedChat? in
+            guard let summary = page[chatId]?.summary else { return nil }
+            let dates = matches.compactMap { AppleTime.toDate($0.message.date) }
+            return SearchGroupedChat(
+                id: summary.id,
+                name: summary.name,
+                group: summary.group,
+                participantCount: summary.participantCount,
+                participantsPreview: summary.participantsPreview,
+                matchCount: matches.count,
+                firstMatch: TimeUtils.formatISO(dates.min()),
+                lastMatch: TimeUtils.formatISO(dates.max()),
+                results: matches.prefix(3).map { match in
+                    let message = renderer.render(match.message)
+                    return SearchSampleMessage(
+                        id: message.id,
+                        from: message.from,
+                        excerpt: makeExcerpt(text: message.text, query: query),
+                        ts: message.ts
+                    )
                 }
-                if let last = chat.lastMatchDate {
-                    if date > last { chat.lastMatchDate = date }
-                } else {
-                    chat.lastMatchDate = date
-                }
-            }
-
-            if chat.results.count < 3 {
-                chat.results.append(SearchSampleMessage(
-                    id: message.id,
-                    from: message.from,
-                    excerpt: makeExcerpt(text: message.text, query: query),
-                    ts: message.ts
-                ))
-            }
-
-            chatsData[chatId] = chat
-        }
-
-        var chats = chatsData.values.map { data in
-            SearchGroupedChat(
-                id: data.id,
-                name: data.name,
-                group: data.group,
-                participantCount: data.participantCount,
-                participantsPreview: data.participantsPreview,
-                matchCount: data.matchCount,
-                firstMatch: TimeUtils.formatISO(data.firstMatchDate),
-                lastMatch: TimeUtils.formatISO(data.lastMatchDate),
-                results: data.results
             )
         }
         // Most matches first; ties go to the most recent match so the order is stable.
