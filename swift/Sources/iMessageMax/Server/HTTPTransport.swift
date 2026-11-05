@@ -283,7 +283,7 @@ actor HTTPTransport {
 
         switch message.kind {
         case .request:
-            return await forwardRequest(requestData, key: message.requestKey, sessionId: sessionId, headers: responseHeaders)
+            return await forwardRequest(requestData, message: message, sessionId: sessionId, headers: responseHeaders)
         case .notification, .response:
             // The SDK cancels the requests it holds; the calls answered here
             // it never saw, so cancel those directly.
@@ -298,20 +298,19 @@ actor HTTPTransport {
     }
 
     /// Routes a request to the session's Server and waits for its answer.
-    private func forwardRequest(_ requestData: Data, key: String?, sessionId: String, headers: HTTPFields) async -> Response {
+    /// A malformed or reused id is the client's error (400, with the id when
+    /// it has one); a timeout or a session that ends first is ours (500).
+    private func forwardRequest(_ requestData: Data, message: JSONRPCMessage, sessionId: String, headers: HTTPFields) async -> Response {
+        // An id that is not a JSON scalar can never be matched to the SDK's
+        // answer.
+        guard let key = message.requestKey else {
+            return errorResponse(.badRequest, "Invalid Request: id must be a string, a number, or null")
+        }
         do {
-            // An id that is not a JSON scalar can never be matched to the
-            // SDK's answer, so it fails the way an unanswered request does.
-            guard let key else { throw MCPError.serverError(code: JSONRPCErrorCode.serverError.rawValue, message: "Request timeout") }
             let responseData = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, Error>) in
                 Task {
                     guard await self.pendingRequests.store(sessionId: sessionId, id: key, continuation: continuation) else {
-                        continuation.resume(
-                            throwing: MCPError.serverError(
-                                code: JSONRPCErrorCode.invalidRequest.rawValue,
-                                message: "Duplicate in-flight JSON-RPC request id: \(key)"
-                            )
-                        )
+                        continuation.resume(throwing: DuplicateRequestId())
                         return
                     }
                     let routed = await self.sessionManager.routeMessage(sessionId: sessionId, data: requestData)
@@ -322,6 +321,12 @@ actor HTTPTransport {
                 }
             }
             return Response(status: .ok, headers: headers, body: .init(byteBuffer: ByteBuffer(data: responseData)))
+        } catch is DuplicateRequestId {
+            return errorResponse(
+                .badRequest,
+                "Invalid Request: id is already in use by a request in flight on this session",
+                id: JSONRPC.fallbackId(for: message.id)
+            )
         } catch {
             Log.error("Request handling failed: \(error)")
             return errorResponse(.internalServerError, ClientErrorMessages.internalError)
@@ -616,19 +621,23 @@ actor HTTPTransport {
     }
 
     /// A transport-level failure: the HTTP status carries the meaning, the
-    /// body is a JSON-RPC error with a null id.
+    /// body is a JSON-RPC error, with a null id unless the request's is known.
     private nonisolated func errorResponse(
         _ status: HTTPResponse.Status,
         _ message: String,
-        code: JSONRPCErrorCode = .invalidRequest
+        code: JSONRPCErrorCode = .invalidRequest,
+        id: Any? = nil
     ) -> Response {
         Response(
             status: status,
             headers: [.contentType: "application/json"],
-            body: .init(byteBuffer: ByteBuffer(data: JSONRPC.error(id: nil, code: code, message: message)))
+            body: .init(byteBuffer: ByteBuffer(data: JSONRPC.error(id: id, code: code, message: message)))
         )
     }
 }
+
+/// A request reused the id of one still waiting on the same session.
+private struct DuplicateRequestId: Error {}
 
 /// Waits for graceful shutdown, then closes the transport's SSE streams.
 private struct SSEShutdownService: Service {
