@@ -1,4 +1,5 @@
 import XCTest
+import IMessageMaxContract
 @testable import iMessageMax
 
 /// Tests for the 15-key capability contract (design §2.2 / §2.4 / §3.2).

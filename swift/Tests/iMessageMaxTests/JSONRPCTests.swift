@@ -1,4 +1,5 @@
 import XCTest
+import IMessageMaxContract
 @testable import iMessageMax
 
 /// The shared JSON-RPC layer: one parse, one era rule, one error envelope,

@@ -5,6 +5,7 @@
 // is implemented here, independent of transport. Era selection is
 // `JSONRPCMessage.era`; HTTP header validation stays in HTTPTransport.
 import Foundation
+import IMessageMaxContract
 import MCP
 
 /// Outcome of one modern-era message.

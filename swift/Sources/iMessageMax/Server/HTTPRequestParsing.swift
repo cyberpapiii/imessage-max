@@ -1,18 +1,17 @@
 import Foundation
 import HTTPTypes
 import Hummingbird
+import IMessageMaxContract
 import NIOCore
 
 extension HTTPField.Name {
-    static let mcpSessionId = HTTPField.Name("Mcp-Session-Id")!
-    static let mcpProtocolVersion = HTTPField.Name("MCP-Protocol-Version")!
-    /// 2026-07-28 request-metadata header.
-    static let mcpMethod = HTTPField.Name("Mcp-Method")!
-    /// 2026-07-28 request-metadata header.
-    static let mcpName = HTTPField.Name("Mcp-Name")!
+    static let mcpSessionId = HTTPField.Name(MCPHeader.sessionID)!
+    static let mcpProtocolVersion = HTTPField.Name(MCPHeader.protocolVersion)!
+    static let mcpMethod = HTTPField.Name(MCPHeader.method)!
+    static let mcpName = HTTPField.Name(MCPHeader.name)!
     static let origin = HTTPField.Name("Origin")!
     static let connection = HTTPField.Name("Connection")!
-    static let setupRequest = HTTPField.Name("X-iMessage-Max-Setup")!
+    static let setupRequest = HTTPField.Name(SetupPermissionRoute.header)!
 }
 
 enum HTTPRequestParsing {
