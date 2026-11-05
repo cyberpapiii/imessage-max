@@ -357,4 +357,38 @@ final class ToolsReviewRegressionTests: XCTestCase {
         XCTAssertEqual(page["filtered_hidden"] as? Int, 2)
         XCTAssertEqual(try decodeJSONArray(page["messages"]).count, 1)
     }
+
+    // MARK: - Deterministic picks
+
+    func testGuidSubstringResolvesToTheMostRecentlyActiveChat() async throws {
+        let db = try ToolTestDatabase(name: "guid-pick")
+        try db.insertHandle(rowId: 1, handle: "+15550000001")
+        let base = now() - 60 * minute
+        for chat in 1...3 {
+            try db.insertChat(rowId: chat, guid: "iMessage;+;shared-guid-\(chat)")
+            try db.joinChatHandle(chatId: chat, handleId: 1)
+            try db.insertMessage(rowId: chat, guid: "D\(chat)", text: "m\(chat)", date: base + Int64([3: 1, 1: 2, 2: 3][chat]!) * minute,
+                                 isFromMe: true)
+            try db.joinChatMessage(chatId: chat, messageId: chat)
+        }
+        let page = try await call("get_messages", ["chat_id": "shared-guid"], db: db)
+        XCTAssertEqual((page["chat"] as? [String: Any])?["id"] as? String, "chat2")
+    }
+
+    func testFindChatByNameListsTheMostRecentlyActiveFirst() async throws {
+        let db = try ToolTestDatabase(name: "name-order")
+        try db.insertHandle(rowId: 1, handle: "+15550000001")
+        try db.insertHandle(rowId: 2, handle: "+15550000002")
+        let base = now() - 60 * minute
+        for chat in 1...3 {
+            try db.insertChat(rowId: chat, guid: "iMessage;+;team\(chat)", displayName: "Team \(chat)")
+            try db.joinChatHandle(chatId: chat, handleId: 1)
+            try db.joinChatHandle(chatId: chat, handleId: 2)
+            try db.insertMessage(rowId: chat, guid: "T\(chat)", text: "m\(chat)", date: base + Int64([1: 2, 2: 3, 3: 1][chat]!) * minute,
+                                 isFromMe: true)
+            try db.joinChatMessage(chatId: chat, messageId: chat)
+        }
+        let found = try await call("find_chat", ["name": "Team", "limit": 2], db: db)
+        XCTAssertEqual(try decodeJSONArray(found["chats"]).compactMap { $0["id"] as? String }, ["chat2", "chat1"])
+    }
 }

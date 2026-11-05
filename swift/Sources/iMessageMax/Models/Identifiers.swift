@@ -13,6 +13,7 @@ enum ChatIdentifier {
     }
 
     /// parseRowId, then the GUID-substring fallback get_messages allows.
+    /// Several chats can share a GUID substring; the most recently active wins.
     static func resolve(_ raw: String, db: Database) throws -> Int64? {
         if let id = parseRowId(raw) { return id }
 
@@ -20,7 +21,11 @@ enum ChatIdentifier {
         guard !trimmed.isEmpty else { return nil }
 
         let rows: [Int64] = try db.query(
-            "SELECT ROWID FROM chat WHERE guid LIKE ? ESCAPE '\\'",
+            """
+            SELECT c.ROWID FROM chat c WHERE c.guid LIKE ? ESCAPE '\\'
+            ORDER BY \(SQLFragments.newestChatFirst())
+            LIMIT 1
+            """,
             params: ["%\(QueryBuilder.escapeLike(trimmed))%"]
         ) { row in
             row.int(0)

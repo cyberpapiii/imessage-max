@@ -284,6 +284,7 @@ enum FindChatTool {
             WHERE c.display_name LIKE ? ESCAPE '\\'
             \(groupSQL)
             \(filterSQL)
+            ORDER BY \(SQLFragments.newestChatFirst())
             LIMIT ?
             """
 
@@ -318,6 +319,8 @@ enum FindChatTool {
               AND h.id IN (\(placeholders))
               AND \(SQLFragments.isDirect())
               \(filterSQL)
+            GROUP BY c.ROWID
+            ORDER BY \(SQLFragments.newestChatFirst())
             LIMIT ?
             """
         var params: [Any] = handles.map { $0 as Any }

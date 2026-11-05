@@ -53,17 +53,13 @@ struct ParticipantChats {
     ) throws -> [Chat] {
         guard !matchesNothing else { return [] }
         let (filter, params) = whereClause(chatPredicate: chatPredicate, isGroup: isGroup)
-        let lastDate = """
-            (SELECT MAX(m.date) FROM chat_message_join cmj
-             JOIN message m ON m.ROWID = cmj.message_id WHERE cmj.chat_id = c.ROWID)
-            """
         let ordering: String
         var orderParams: [Any] = []
         switch order {
         case .recent:
-            ordering = "COALESCE(\(lastDate), 0) DESC, c.ROWID DESC"
+            ordering = SQLFragments.newestChatFirst()
         case .exactSizeFirst:
-            ordering = "(participant_count = ?) DESC, COALESCE(\(lastDate), 0) DESC, c.ROWID DESC"
+            ordering = "(participant_count = ?) DESC, \(SQLFragments.newestChatFirst())"
             orderParams.append(handleGroups.count)
         }
         let sql = """

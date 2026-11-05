@@ -32,6 +32,16 @@ enum SQLFragments {
     static func isGroup(count: String) -> String { "\(count) > 1" }
     static func isDirect(count: String) -> String { "\(count) <= 1" }
 
+    /// ORDER BY terms putting chat `alias` with the newest message first; a
+    /// chat with no messages sorts last, and ties go to the newest chat.
+    static func newestChatFirst(_ alias: String = "c") -> String {
+        """
+        COALESCE((SELECT MAX(lm.date) FROM chat_message_join lcmj \
+        JOIN message lm ON lm.ROWID = lcmj.message_id WHERE lcmj.chat_id = \(alias).ROWID), 0) DESC, \
+        \(alias).ROWID DESC
+        """
+    }
+
     /// Received messages not yet read. A tapback is never unread.
     static func unreadInbound(_ alias: String = "m") -> String {
         "(\(alias).is_read = 0 AND \(alias).is_from_me = 0 AND \(notReaction(alias)))"
