@@ -522,8 +522,9 @@ actor HTTPTransport {
     }
 
     /// Answers from a session's Server: the reply to a waiting POST, or else
-    /// a server-initiated message for the session's SSE streams.
-    private func handleServerResponse(sessionId: String, data: Data) async {
+    /// a server-initiated message for the session's SSE streams. Internal so
+    /// tests can inject a server-initiated message.
+    func handleServerResponse(sessionId: String, data: Data) async {
         guard isConnected else { return }
 
         guard case .message(let message) = JSONRPCMessage.parse(data) else {
