@@ -98,7 +98,7 @@ enum AppleTime {
 
         switch lower {
         case "yesterday":
-            return calendar.date(byAdding: .day, value: -1, to: now)
+            return calendar.date(byAdding: .day, value: -1, to: calendar.startOfDay(for: now))
         case "today":
             return calendar.startOfDay(for: now)
 
