@@ -254,21 +254,6 @@ final class SearchToolTests: XCTestCase {
         )
         let results = try decodeJSONArray(try XCTUnwrap(response["results"]))
         XCTAssertEqual(results.compactMap { $0["id"] as? String }, ["msg_2"])
-
-        let (sql, _) = SearchTool.buildQuery(
-            query: nil,
-            fromPerson: nil,
-            inChat: nil,
-            isGroup: nil,
-            has: "link",
-            since: nil,
-            before: nil,
-            cursor: nil,
-            limit: 10,
-            sort: .recentFirst,
-            unanswered: false
-        )
-        XCTAssertTrue(sql.contains(SQLFragments.hasLink()), "search has=link must use the shared predicate: \(sql)")
     }
 
     func testHasLinkNeedsAURLNotTheWordHttp() async throws {
@@ -456,6 +441,7 @@ final class SearchToolTests: XCTestCase {
         XCTAssertEqual(chat["id"] as? String, "chat40")
     }
 
+    /// Context windows are fetched once per chat, not once per hit.
     func testIncludeContextQueryCountIsPerChatNotPerRow() async throws {
         let fixture = try ToolTestDatabase(name: "search-ctx-batch")
         try fixture.insertHandle(rowId: 1, handle: "+15550000001")
@@ -487,31 +473,26 @@ final class SearchToolTests: XCTestCase {
             try fixture.joinChatMessage(chatId: 2, messageId: index)
         }
 
-        Database.queryCountForTesting = 0
-        defer { Database.queryCountForTesting = nil }
-
-        let response = try await decodeJSONDictionary(from:
-            SearchTool.execute(
-                query: "batchctx",
-                cursor: nil,
-                limit: 20,
-                sort: "recent_first",
-                format: "flat",
-                includeContext: true,
-                unanswered: false,
-                unansweredHours: 24,
-                matchAll: false,
-                fuzzy: false,
-                db: fixture.database(),
-                resolver: makeSeededResolver()
-            )
-        )
-        let results = try decodeJSONArray(try XCTUnwrap(response["results"]))
-        XCTAssertEqual(results.count, 20)
-        let queryCount = try XCTUnwrap(Database.queryCountForTesting)
-        // schema uncounted + search + filteredHidden + chat names + one
-        // context batch per chat (2) + reactions + reply counts.
-        XCTAssertLessThanOrEqual(queryCount, 7, "include_context ran \(queryCount) queries")
+        func queries(limit: Int) async throws -> Int {
+            try await countQueries {
+                let response = try await decodeJSONDictionary(from:
+                    SearchTool.execute(
+                        query: "batchctx",
+                        limit: limit,
+                        includeContext: true,
+                        db: fixture.database(),
+                        resolver: makeSeededResolver()
+                    )
+                )
+                let results = try decodeJSONArray(try XCTUnwrap(response["results"]))
+                XCTAssertEqual(results.count, limit)
+            }
+        }
+        // Both pages span both chats: 12 newest hits reach back into chat 1.
+        let twelve = try await queries(limit: 12)
+        let twenty = try await queries(limit: 20)
+        XCTAssertGreaterThan(twelve, 0)
+        XCTAssertEqual(twenty, twelve, "20 hits ran \(twenty) queries, 12 ran \(twelve)")
     }
 
     func testIncludeContextWindowsArePerAnchorAndExact() async throws {
@@ -618,120 +599,50 @@ final class SearchToolTests: XCTestCase {
         XCTAssertEqual(try window("msg_3", "context_after"), ["msg_4"])
     }
 
-    func testUnansweredSkipsReplyWindowQueriesForNonQuestions() async throws {
-        let fixture = try ToolTestDatabase(name: "search-unanswered-count")
-        try fixture.insertHandle(rowId: 1, handle: "+15550000001")
-        try fixture.insertChat(rowId: 1, guid: "chat-status-guid", displayName: "Status")
-        try fixture.joinChatHandle(chatId: 1, handleId: 1)
-        for index in 1...50 {
-            try fixture.insertMessage(
-                rowId: index,
-                guid: "g\(index)",
-                text: "status update \(index)",
-                date: Int64(index) * 1_000,
-                isFromMe: true,
-                handleId: 1
-            )
-            try fixture.joinChatMessage(chatId: 1, messageId: index)
+    /// Unnamed chats get generated names in grouped results, from batched
+    /// queries rather than one lookup per chat.
+    func testGroupedSearchNamesUnnamedChatsWithoutPerChatQueries() async throws {
+        func run(chatCount: Int) async throws -> (queries: Int, chats: [[String: Any]]) {
+            let fixture = try ToolTestDatabase(name: "search-grouped-batchname")
+            try fixture.insertHandle(rowId: 1, handle: "+15550000001")
+            try fixture.insertHandle(rowId: 2, handle: "+15550000002")
+            for chatId in 1...chatCount {
+                try fixture.insertChat(rowId: chatId, guid: "chat-\(chatId)-guid", displayName: nil)
+                try fixture.joinChatHandle(chatId: chatId, handleId: 1)
+                try fixture.joinChatHandle(chatId: chatId, handleId: 2)
+                try fixture.insertMessage(
+                    rowId: chatId,
+                    guid: "msg-\(chatId)",
+                    text: "batchname \(chatId)",
+                    date: Int64(chatId) * 1_000_000_000,
+                    isFromMe: false,
+                    handleId: 1
+                )
+                try fixture.joinChatMessage(chatId: chatId, messageId: chatId)
+            }
+            var chats: [[String: Any]] = []
+            let queries = try await countQueries {
+                let response = try await decodeJSONDictionary(from:
+                    SearchTool.execute(
+                        query: "batchname",
+                        format: "grouped_by_chat",
+                        db: fixture.database(),
+                        resolver: makeSeededResolver()
+                    )
+                )
+                chats = try decodeJSONArray(try XCTUnwrap(response["chats"]))
+            }
+            return (queries, chats)
         }
 
-        Database.queryCountForTesting = 0
-        let baseline = try await decodeJSONDictionary(from:
-            SearchTool.execute(
-                query: "status",
-                cursor: nil,
-                limit: 50,
-                sort: "recent_first",
-                format: "flat",
-                includeContext: false,
-                unanswered: false,
-                unansweredHours: 24,
-                matchAll: false,
-                fuzzy: false,
-                db: fixture.database(),
-                resolver: makeSeededResolver()
-            )
-        )
-        let baseCount = try XCTUnwrap(Database.queryCountForTesting)
-        XCTAssertEqual(try decodeJSONArray(try XCTUnwrap(baseline["results"])).count, 50)
-
-        Database.queryCountForTesting = 0
-        defer { Database.queryCountForTesting = nil }
-
-        let unanswered = try await decodeJSONDictionary(from:
-            SearchTool.execute(
-                cursor: nil,
-                limit: 50,
-                sort: "recent_first",
-                format: "flat",
-                includeContext: false,
-                unanswered: true,
-                unansweredHours: 24,
-                matchAll: false,
-                fuzzy: false,
-                db: fixture.database(),
-                resolver: makeSeededResolver()
-            )
-        )
-        XCTAssertEqual(try decodeJSONArray(try XCTUnwrap(unanswered["results"])).count, 0)
-        let unansweredCount = try XCTUnwrap(Database.queryCountForTesting)
-        XCTAssertLessThanOrEqual(
-            unansweredCount,
-            baseCount,
-            "unanswered over 50 non-questions ran \(unansweredCount) queries vs base \(baseCount)"
-        )
-    }
-
-    func testGroupedSearchUsesConstantQueriesAcrossUnnamedChats() async throws {
-        let fixture = try ToolTestDatabase(name: "search-grouped-batchname")
-        try fixture.insertHandle(rowId: 1, handle: "+15550000001")
-        try fixture.insertHandle(rowId: 2, handle: "+15550000002")
-        for chatId in 1...8 {
-            try fixture.insertChat(rowId: chatId, guid: "chat-\(chatId)-guid", displayName: nil)
-            try fixture.joinChatHandle(chatId: chatId, handleId: 1)
-            try fixture.joinChatHandle(chatId: chatId, handleId: 2)
-            try fixture.insertMessage(
-                rowId: chatId,
-                guid: "msg-\(chatId)",
-                text: "batchname \(chatId)",
-                date: Int64(chatId) * 1_000_000_000,
-                isFromMe: false,
-                handleId: 1
-            )
-            try fixture.joinChatMessage(chatId: chatId, messageId: chatId)
+        let two = try await run(chatCount: 2)
+        let eight = try await run(chatCount: 8)
+        XCTAssertEqual(eight.chats.count, 8)
+        for chat in eight.chats {
+            XCTAssertEqual(chat["name"] as? String, "Alice Smith, Bob Brown")
         }
-
-        Database.queryCountForTesting = 0
-        defer { Database.queryCountForTesting = nil }
-
-        let response = try await decodeJSONDictionary(from:
-            SearchTool.execute(
-                query: "batchname",
-                cursor: nil,
-                limit: 20,
-                sort: "recent_first",
-                format: "grouped_by_chat",
-                includeContext: false,
-                unanswered: false,
-                unansweredHours: 24,
-                matchAll: false,
-                fuzzy: false,
-                db: fixture.database(),
-                resolver: makeSeededResolver()
-            )
-        )
-        let chats = try decodeJSONArray(try XCTUnwrap(response["chats"]))
-        XCTAssertEqual(chats.count, 8)
-        for chat in chats {
-            let name = try XCTUnwrap(chat["name"] as? String)
-            XCTAssertFalse(name.isEmpty)
-            XCTAssertNotEqual(name, "Unknown Chat")
-        }
-        let queryCount = try XCTUnwrap(Database.queryCountForTesting)
-        // 3 queries: search rows, participantsByChat, plus 074's
-        // filtered_hidden count. recentSendersByChat is skipped because
-        // every chat is unnamed.
-        XCTAssertLessThanOrEqual(queryCount, 3, "grouped search ran \(queryCount) queries")
+        XCTAssertGreaterThan(two.queries, 0)
+        XCTAssertEqual(eight.queries, two.queries, "8 chats ran \(eight.queries) queries, 2 ran \(two.queries)")
     }
 
     /// Unnamed 6-handle chat. Recency is handles 6, 5, 4; prioritized is

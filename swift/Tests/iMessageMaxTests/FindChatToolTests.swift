@@ -19,7 +19,8 @@ final class FindChatToolTests: XCTestCase {
         XCTAssertEqual(chats.first?["id"] as? String, "chat1")
     }
 
-    func testEnrichmentUsesBoundedQueryCount() async throws {
+    /// Every result's summary comes from batched queries, not one per chat.
+    func testEnrichmentQueryCountDoesNotGrowWithResults() async throws {
         let fixture = try ToolTestDatabase(name: "find-chat-batch")
         try fixture.insertHandle(rowId: 1, handle: "+15550000001")
         for chatId in 1...30 {
@@ -36,23 +37,24 @@ final class FindChatToolTests: XCTestCase {
             try fixture.joinChatMessage(chatId: chatId, messageId: chatId)
         }
 
-        Database.queryCountForTesting = 0
-        defer { Database.queryCountForTesting = nil }
-
-        let contents = try await FindChatTool.execute(
-            arguments: [
-                "participants": .array([.string("+15550000001")]),
-                "limit": .int(5),
-            ],
-            database: fixture.database(),
-            resolver: makeSeededResolver()
-        )
-        let payload = try decodeJSONDictionary(from: contents)
-        let chats = try decodeJSONArray(try XCTUnwrap(payload["chats"]))
-        XCTAssertEqual(chats.count, 5)
-        let queryCount = try XCTUnwrap(Database.queryCountForTesting)
-        // 7: the 068 bound of 6 plus 074's filtered_hidden count.
-        XCTAssertLessThanOrEqual(queryCount, 7, "find_chat ran \(queryCount) queries")
+        func queries(limit: Int) async throws -> Int {
+            try await countQueries {
+                let contents = try await FindChatTool.execute(
+                    arguments: [
+                        "participants": .array([.string("+15550000001")]),
+                        "limit": .int(limit),
+                    ],
+                    database: fixture.database(),
+                    resolver: makeSeededResolver()
+                )
+                let chats = try decodeJSONArray(try decodeJSONDictionary(from: contents)["chats"])
+                XCTAssertEqual(chats.count, limit)
+            }
+        }
+        let two = try await queries(limit: 2)
+        let ten = try await queries(limit: 10)
+        XCTAssertGreaterThan(two, 0)
+        XCTAssertEqual(ten, two, "10 results ran \(ten) queries, 2 ran \(two)")
     }
 
     func testNameMatchesUnnamedDMByResolvedParticipantContact() async throws {

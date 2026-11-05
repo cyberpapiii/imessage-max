@@ -264,12 +264,17 @@ final class JsonRpcIdCanonicalizationTests: XCTestCase {
         // Reaching this assertion at all is the regression test: the old
         // implementation trapped and aborted the process on this input.
         let key = requestKey(["id": 1e300])
-        XCTAssertTrue(key?.hasPrefix("d:") == true, "Expected d: namespace, got \(key ?? "nil")")
+        XCTAssertNotNil(key)
+        XCTAssertNotEqual(key, requestKey(["id": "1e300"]))
     }
 
-    func testFractionalDoubleIdDoesNotTrap() {
+    func testFractionalDoubleIdIsItsOwnKey() {
         let key = requestKey(["id": 1.5])
-        XCTAssertEqual(key, "d:1.5")
+        XCTAssertNotNil(key)
+        XCTAssertEqual(key, requestKey(["id": 1.5]))
+        XCTAssertNotEqual(key, requestKey(["id": 1]))
+        XCTAssertNotEqual(key, requestKey(["id": 2]))
+        XCTAssertNotEqual(key, requestKey(["id": "1.5"]))
     }
 
     func testIntegralDoubleMatchesIntId() {
@@ -282,7 +287,9 @@ final class JsonRpcIdCanonicalizationTests: XCTestCase {
     }
 
     func testNullIdIsStable() {
-        XCTAssertEqual(requestKey(["id": NSNull()]), "n:null")
+        XCTAssertNotNil(requestKey(["id": NSNull()]))
+        XCTAssertEqual(requestKey(["id": NSNull()]), requestKey(["id": NSNull()]))
+        XCTAssertNotEqual(requestKey(["id": NSNull()]), requestKey(["id": "null"]))
     }
 
     /// No id, or one that is not a JSON scalar, can never match a response.
