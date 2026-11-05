@@ -39,6 +39,26 @@ final class DatabaseContactsReviewRegressionTests: XCTestCase {
         XCTAssertEqual(PermissionStatus.unknown.rawValue, "unknown")
     }
 
+    // MARK: - 7. Query counting
+
+    /// The counter was a nonisolated(unsafe) read-modify-write and lost
+    /// increments under concurrent queries.
+    func testQueryCountIsExactUnderConcurrency() async throws {
+        let fixture = try ToolTestDatabase(name: "review-count")
+        let db = fixture.database()
+        Database.queryCountForTesting = 0
+        defer { Database.queryCountForTesting = nil }
+
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            for _ in 0..<200 {
+                group.addTask { _ = try db.query("SELECT 1") { $0.int(0) } }
+            }
+            try await group.waitForAll()
+        }
+
+        XCTAssertEqual(Database.queryCountForTesting, 200)
+    }
+
     func testSetupReplyCarriesTheResolverWord() async throws {
         let service = SetupPermissionService(
             resolver: ContactResolver(seedCache: [:], authorization: (false, .denied))

@@ -59,8 +59,13 @@ final class Database: @unchecked Sendable {
 
     // MARK: - Query Execution
 
-    /// Opt-in query counter for tests. Incremented at the start of `query` when non-nil.
-    nonisolated(unsafe) static var queryCountForTesting: Int?
+    /// Opt-in query counter for tests: nil (off), or the number of `query`
+    /// calls since it was set. Locked, so concurrent queries count exactly.
+    static var queryCountForTesting: Int? {
+        get { queryCounter.withLock { $0 } }
+        set { queryCounter.withLock { $0 = newValue } }
+    }
+    private static let queryCounter = Mutex<Int?>(nil)
 
     /// In-flight read connections so a cancelled `tools/call` can
     /// `sqlite3_interrupt` them instead of leaving a full-scan running.
@@ -91,21 +96,13 @@ final class Database: @unchecked Sendable {
         }
     }
 
-    /// Test-only: interrupts every open query in the process.
-    static func interruptActiveQueries() {
-        let queries = activeQueries.withLock { Array($0.values) }
-        for query in queries {
-            query.interrupt()
-        }
-    }
-
     func query<T>(
         _ sql: String,
         params: [Any] = [],
         map: (SQLiteRow) throws -> T
     ) throws -> [T] {
-        if Database.queryCountForTesting != nil {
-            Database.queryCountForTesting! += 1
+        Self.queryCounter.withLock { count in
+            if let current = count { count = current + 1 }
         }
 
         if Task.isCancelled {
