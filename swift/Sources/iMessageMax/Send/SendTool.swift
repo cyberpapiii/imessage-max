@@ -1,252 +1,6 @@
 import Foundation
 import MCP
 
-// MARK: - Response Types
-
-/// Candidate for disambiguation when multiple contacts match
-struct RecipientCandidate: Encodable {
-    let name: String
-    let handle: String
-    let lastContact: String
-
-    enum CodingKeys: String, CodingKey {
-        case name, handle
-        case lastContact = "last_contact"
-    }
-}
-
-/// Response from the send tool
-struct SendResponse: Encodable {
-    let status: String
-    let timestamp: String?
-    let chat: ChatReference?
-    let deliveredTo: [String]?
-    let chatId: String?
-    let message: String?
-    let error: String?
-    let candidates: [RecipientCandidate]?
-    // Verification fields (non-nil for "confirmed" and "failed_delivery")
-    let verifiedMessageGuid: String?
-    let verifiedAt: String?
-    // Mismatch fields (non-nil only for "mismatch")
-    let intendedChat: ChatReference?
-    let actualChatId: String?
-    /// Transport progress: completed / not_started / may_have_completed.
-    let disposition: String
-    /// True only when a retry cannot duplicate a message.
-    let retrySafe: Bool
-
-    enum CodingKeys: String, CodingKey {
-        case status
-        case timestamp
-        case chat
-        case deliveredTo = "delivered_to"
-        case chatId = "chat_id"
-        case message
-        case error
-        case candidates
-        case verifiedMessageGuid = "verified_message_guid"
-        case verifiedAt = "verified_at"
-        case intendedChat = "intended_chat"
-        case actualChatId = "actual_chat_id"
-        case disposition
-        case retrySafe = "retry_safe"
-    }
-
-    // MARK: - Transport-only fallback ("sent")
-    // Returned only when verification cannot run (DB unreadable). Option D §4.3.
-    static func sent(deliveredTo: [String], chat: ChatReference?) -> SendResponse {
-        SendResponse(
-            status: "sent",
-            timestamp: TimeUtils.formatISO(Date()),
-            chat: chat,
-            deliveredTo: deliveredTo,
-            chatId: chat?.id,
-            message: nil,
-            error: nil,
-            candidates: nil,
-            verifiedMessageGuid: nil,
-            verifiedAt: nil,
-            intendedChat: nil,
-            actualChatId: nil,
-            disposition: DeliveryDisposition.completed.rawValue,
-            retrySafe: false
-        )
-    }
-
-    // MARK: - Verified-send proof states (design §4.1)
-
-    /// DB re-read found the outbound row in the intended chat with error = 0.
-    static func confirmed(guid: String, deliveredTo: [String], chat: ChatReference?) -> SendResponse {
-        SendResponse(
-            status: "confirmed",
-            timestamp: TimeUtils.formatISO(Date()),
-            chat: chat,
-            deliveredTo: deliveredTo,
-            chatId: chat?.id,
-            message: nil,
-            error: nil,
-            candidates: nil,
-            verifiedMessageGuid: guid,
-            verifiedAt: TimeUtils.formatISO(Date()),
-            intendedChat: nil,
-            actualChatId: nil,
-            disposition: DeliveryDisposition.completed.rawValue,
-            retrySafe: false
-        )
-    }
-
-    /// Transport succeeded but row not found in DB within the polling window.
-    static func uncertain(deliveredTo: [String], chat: ChatReference?) -> SendResponse {
-        let id = chat?.id
-        let name = chat?.name ?? id ?? "the intended chat"
-        let followUp = id.map { "Use get_messages on \($0) to confirm." }
-            ?? "Use get_messages on \(name) to confirm."
-        return SendResponse(
-            status: "uncertain",
-            timestamp: TimeUtils.formatISO(Date()),
-            chat: chat,
-            deliveredTo: deliveredTo,
-            chatId: id,
-            message: "Send accepted by Messages.app but could not be verified in chat.db within the polling window. The message was probably sent. \(followUp)",
-            error: nil,
-            candidates: nil,
-            verifiedMessageGuid: nil,
-            verifiedAt: nil,
-            intendedChat: nil,
-            actualChatId: nil,
-            disposition: DeliveryDisposition.completed.rawValue,
-            retrySafe: false
-        )
-    }
-
-    /// Row found in a different chat than intended. Routing mismatch (R5).
-    static func mismatch(intendedChat: ChatReference?, actualChatId: Int64, deliveredTo: [String]) -> SendResponse {
-        SendResponse(
-            status: "mismatch",
-            timestamp: TimeUtils.formatISO(Date()),
-            chat: nil,
-            deliveredTo: deliveredTo,
-            chatId: nil,
-            message: "Message was found in a different chat than intended. This is a routing mismatch. Do not treat as confirmed.",
-            error: nil,
-            candidates: nil,
-            verifiedMessageGuid: nil,
-            verifiedAt: nil,
-            intendedChat: intendedChat,
-            actualChatId: "chat\(actualChatId)",
-            disposition: DeliveryDisposition.completed.rawValue,
-            retrySafe: false
-        )
-    }
-
-    /// Row found in the intended chat with error ≠ 0. Delivery failed (verified).
-    static func failedDelivery(guid: String, errorCode: Int, deliveredTo: [String], chat: ChatReference?) -> SendResponse {
-        SendResponse(
-            status: "failed_delivery",
-            timestamp: TimeUtils.formatISO(Date()),
-            chat: chat,
-            deliveredTo: deliveredTo,
-            chatId: chat?.id,
-            message: "Messages.app accepted the send but chat.db recorded a delivery failure (error \(errorCode)). The message was NOT delivered. Do not tell the user it was sent; check the destination can receive iMessages and consider resending.",
-            error: nil,
-            candidates: nil,
-            verifiedMessageGuid: guid,
-            verifiedAt: TimeUtils.formatISO(Date()),
-            intendedChat: nil,
-            actualChatId: nil,
-            disposition: DeliveryDisposition.completed.rawValue,
-            retrySafe: true
-        )
-    }
-
-    // MARK: - Existing statuses (unchanged)
-
-    static func pending(_ message: String, deliveredTo: [String], chat: ChatReference?) -> SendResponse {
-        SendResponse(
-            status: "pending_confirmation",
-            timestamp: TimeUtils.formatISO(Date()),
-            chat: chat,
-            deliveredTo: deliveredTo,
-            chatId: chat?.id,
-            message: message,
-            error: nil,
-            candidates: nil,
-            verifiedMessageGuid: nil,
-            verifiedAt: nil,
-            intendedChat: nil,
-            actualChatId: nil,
-            disposition: DeliveryDisposition.mayHaveCompleted.rawValue,
-            retrySafe: false
-        )
-    }
-
-    /// Some payloads were dispatched to Messages.app before a later payload failed.
-    static func partialFailure(
-        sentDescriptions: [String], failedDescription: String, error: String,
-        deliveredTo: [String], chat: ChatReference?,
-        disposition: DeliveryDisposition
-    ) -> SendResponse {
-        SendResponse(
-            status: "partial_failure",
-            timestamp: TimeUtils.formatISO(Date()),
-            chat: chat,
-            deliveredTo: deliveredTo,
-            chatId: chat?.id,
-            message: "PARTIAL SEND: \(sentDescriptions.joined(separator: ", ")) already dispatched to Messages.app (not verified) before \(failedDescription) failed. Do NOT resend the already-dispatched payload(s); retry only the failed one.",
-            error: error,
-            candidates: nil,
-            verifiedMessageGuid: nil,
-            verifiedAt: nil,
-            intendedChat: nil,
-            actualChatId: nil,
-            disposition: disposition.rawValue,
-            retrySafe: false
-        )
-    }
-
-    static func error(_ message: String, disposition: DeliveryDisposition = .notStarted) -> SendResponse {
-        SendResponse(
-            status: "failed",
-            timestamp: nil,
-            chat: nil,
-            deliveredTo: nil,
-            chatId: nil,
-            message: nil,
-            error: message,
-            candidates: nil,
-            verifiedMessageGuid: nil,
-            verifiedAt: nil,
-            intendedChat: nil,
-            actualChatId: nil,
-            disposition: disposition.rawValue,
-            retrySafe: disposition.retrySafe
-        )
-    }
-
-    static func ambiguous(candidates: [RecipientCandidate]) -> SendResponse {
-        SendResponse(
-            status: "ambiguous",
-            timestamp: nil,
-            chat: nil,
-            deliveredTo: nil,
-            chatId: nil,
-            message: "Multiple contacts match. Please specify using a phone number, email, or chat_id.",
-            error: nil,
-            candidates: candidates,
-            verifiedMessageGuid: nil,
-            verifiedAt: nil,
-            intendedChat: nil,
-            actualChatId: nil,
-            disposition: DeliveryDisposition.notStarted.rawValue,
-            retrySafe: true
-        )
-    }
-}
-
-// MARK: - Send Tool
-
-/// Send tool implementation
 actor SendTool {
     private let db: Database
     private let resolver: ContactResolver
@@ -265,8 +19,6 @@ actor SendTool {
         self.runner = runner
         self.verifier = verifier ?? SendVerifier(db: db)
     }
-
-    // MARK: - Tool Registration
 
     static func definition(db: Database, resolver: ContactResolver) -> ToolDefinition {
         let tool = SendTool(db: db, resolver: resolver)
@@ -317,40 +69,32 @@ actor SendTool {
         }
     }
 
-    // MARK: - Execution
-
     func execute(args: [String: Value]?) async throws -> [Tool.Content] {
-        let to = args?["to"]?.stringValue
-        let chatId = args?["chat_id"]?.stringValue
-        let text = args?["text"]?.stringValue
-        let filePaths = args?["file_paths"]?.arrayValue?.compactMap { $0.stringValue }
-
         let response = await send(
-            to: to,
-            chatId: chatId,
-            text: text,
-            filePaths: filePaths
+            to: args?["to"]?.stringValue,
+            chatId: args?["chat_id"]?.stringValue,
+            text: args?["text"]?.stringValue,
+            filePaths: args?["file_paths"]?.arrayValue?.compactMap { $0.stringValue }
         )
         let content: [Tool.Content] = [.plainText(try FormatUtils.encodeJSON(response))]
-        if response.status == "failed" || response.status == "ambiguous"
-            || response.status == "failed_delivery" || response.status == "partial_failure"
-            || response.status == "mismatch" {
+        if response.status.isError {
             throw ToolError(content: content)
         }
         return content
     }
 
-    // MARK: - Send Implementation
-
-    /// Send a message to a person or group chat
     private func send(
         to: String?,
         chatId: String?,
         text: String?,
         filePaths: [String]?
     ) async -> SendResponse {
-        // Validation
-        guard to != nil || chatId != nil else {
+        let destination: SendDestination
+        if let chatId {
+            destination = .chatId(chatId)
+        } else if let to {
+            destination = .recipient(to)
+        } else {
             return .error("Either 'to' or 'chat_id' must be provided")
         }
 
@@ -362,12 +106,10 @@ actor SendTool {
             return .error(message)
         }
 
-        // Initialize contacts resolver
         try? await resolver.initialize()
 
-        let resolution = await sendResolver.resolve(chatId: chatId, to: to)
-        let resolved: SendResolution.ResolvedTarget
-        switch resolution {
+        let resolved: ResolvedSendTarget
+        switch await sendResolver.resolve(destination) {
         case .success(let target):
             resolved = target
         case .failure(let errorMsg):
@@ -393,57 +135,26 @@ actor SendTool {
         // Stops at the first hard failure: firing later payloads after one has
         // failed produces out-of-order conversations and compounds the partial
         // reporting below. Soft transfer outcomes keep sending.
-        var sendResults: [Result<Void, SendFailure>] = []
-        payloadLoop: for payload in payloads {
-            let result = await sendOne(target: resolved.target, payload: payload, runner: runner)
-            sendResults.append(result)
-            if case .failure(let failure) = result {
-                switch failure.error {
-                case .transferPending, .transferStatusUnknown:
-                    break  // soft outcome; keep sending
-                default:
-                    break payloadLoop
-                }
-            }
-        }
-
-        /// Client-facing description of a payload, for the partial-failure breakdown.
-        /// Files are named by filename only, never the full path (plan 023).
-        func describePayload(_ payload: SendPayload) -> String {
-            switch payload {
-            case .text: return "text message"
-            case .file(let path): return "file '\((path as NSString).lastPathComponent)'"
-            }
-        }
-
         var pendingMessages: [String] = []
-        var hardFailure: (index: Int, failure: SendFailure)? = nil
-        for (index, result) in sendResults.enumerated() {
-            if case .failure(let failure) = result {
-                switch failure.error {
-                case .transferPending, .transferStatusUnknown:
-                    pendingMessages.append(ClientErrorMessages.sanitized(failure.error))
-                default:
-                    hardFailure = (index, failure)
-                }
+        for (index, payload) in payloads.enumerated() {
+            guard case .failure(let failure) = await runner.send(payload, to: resolved.target) else {
+                continue
             }
-        }
-
-        if let hard = hardFailure {
-            // Every result before the failing one is a payload that was
-            // dispatched without hard-failing (the loop stops at the first).
-            let sentCount = hard.index
-            if sentCount == 0 {
-                // Nothing reached Messages.app: a plain "failed", as before.
-                return .error(ClientErrorMessages.sanitized(hard.failure.error), disposition: hard.failure.disposition)
+            let errorText = ClientErrorMessages.sanitized(failure.error)
+            if failure.error.isSoftTransferOutcome {
+                pendingMessages.append(errorText)
+                continue
+            }
+            if index == 0 {
+                return .error(errorText, disposition: failure.disposition)
             }
             return .partialFailure(
-                sentDescriptions: payloads.prefix(sentCount).map { describePayload($0) },
-                failedDescription: describePayload(payloads[hard.index]),
-                error: ClientErrorMessages.sanitized(hard.failure.error),
+                sentDescriptions: payloads.prefix(index).map(\.clientDescription),
+                failedDescription: payload.clientDescription,
+                error: errorText,
                 deliveredTo: resolved.deliveredTo,
                 chat: resolved.chat,
-                disposition: hard.failure.disposition
+                disposition: failure.disposition
             )
         }
 
@@ -455,36 +166,18 @@ actor SendTool {
             )
         }
 
-        // All payloads succeeded. For text payloads, run post-send DB verification.
-        // File payloads keep the unchanged transfer-observation status.
-        let textBodies: [String] = payloads.compactMap {
-            if case .text(let body) = $0 { return body }
-            return nil
-        }
-
-        guard let lastText = textBodies.last else {
-            // File-only send. Verification does not apply, so status is unchanged.
+        // Only text is verified against chat.db. A file-only send keeps the
+        // transfer-observation status.
+        guard case .text(let expectedText)? = payloads.last(where: { if case .text = $0 { return true }; return false }) else {
             return .sent(deliveredTo: resolved.deliveredTo, chat: resolved.chat)
-        }
-
-        // Extract chatId and handle from the resolved target for the verifier.
-        let intendedChatId: Int64?
-        let participantHandle: String?
-        switch resolved.target {
-        case .participant(let handle, let cid):
-            participantHandle = handle
-            intendedChatId = cid.map(Int64.init)
-        case .chat(_, let cid):
-            participantHandle = nil
-            intendedChatId = Int64(cid)
         }
 
         do {
             let verification = try await verifier.verify(
-                intendedChatId: intendedChatId,
-                handle: participantHandle,
+                intendedChatId: resolved.target.chatId,
+                handle: resolved.target.participantHandle,
                 sendTime: sendTime,
-                expectedText: lastText
+                expectedText: expectedText
             )
             switch verification {
             case .confirmed(let guid, _):
@@ -508,29 +201,4 @@ actor SendTool {
             return .sent(deliveredTo: resolved.deliveredTo, chat: resolved.chat)
         }
     }
-
-    /// Dispatch one payload to a resolved target via the script runner.
-    private func sendOne(
-        target: SendResolution.Target,
-        payload: SendPayload,
-        runner: any ScriptRunning
-    ) async -> Result<Void, SendFailure> {
-        switch target {
-        case .participant(let handle, _):
-            switch payload {
-            case .text(let body):
-                return await runner.sendTextToParticipant(handle: handle, message: body)
-            case .file(let path):
-                return await runner.sendFileToParticipant(handle: handle, filePath: path)
-            }
-        case .chat(let guid, _):
-            switch payload {
-            case .text(let body):
-                return await runner.sendTextToChat(guid: guid, message: body)
-            case .file(let path):
-                return await runner.sendFileToChat(guid: guid, filePath: path)
-            }
-        }
-    }
-
 }

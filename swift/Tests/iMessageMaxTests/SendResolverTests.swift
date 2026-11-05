@@ -8,7 +8,7 @@ final class SendResolverTests: XCTestCase {
         defer { try? FileManager.default.removeItem(atPath: dbPath) }
 
         let resolver = SendResolver(db: Database(path: dbPath), resolver: ContactResolver(seedCache: [:]))
-        let result = await resolver.resolve(chatId: "chat10", to: nil)
+        let result = await resolver.resolve(.chatId("chat10"))
 
         switch result {
         case .failure(let message):
@@ -30,7 +30,7 @@ final class SendResolverTests: XCTestCase {
         defer { try? FileManager.default.removeItem(atPath: dbPath) }
 
         let resolver = SendResolver(db: Database(path: dbPath), resolver: ContactResolver(seedCache: [:]))
-        let result = await resolver.resolve(chatId: nil, to: "+15555550123")
+        let result = await resolver.resolve(.recipient("+15555550123"))
 
         switch result {
         case .failure(let message):
@@ -53,7 +53,7 @@ final class SendResolverTests: XCTestCase {
 
         let contacts = ContactResolver(seedCache: ["+15555550123": "Nick Jones"])
         let resolver = SendResolver(db: Database(path: dbPath), resolver: contacts)
-        let result = await resolver.resolve(chatId: nil, to: "Nick")
+        let result = await resolver.resolve(.recipient("Nick"))
 
         switch result {
         case .failure(let message):
@@ -79,7 +79,7 @@ final class SendResolverTests: XCTestCase {
             "+15555550124": "Andrew Jones",
         ])
         let resolver = SendResolver(db: Database(path: dbPath), resolver: contacts)
-        let result = await resolver.resolve(chatId: nil, to: "Jones")
+        let result = await resolver.resolve(.recipient("Jones"))
 
         switch result {
         case .failure(let message):
@@ -104,7 +104,7 @@ final class SendResolverTests: XCTestCase {
 
         let contacts = ContactResolver(seedCache: ["+15555550123": "Nick Jones"])
         let resolver = SendResolver(db: Database(path: dbPath), resolver: contacts)
-        let result = await resolver.resolve(chatId: nil, to: "55555")
+        let result = await resolver.resolve(.recipient("55555"))
 
         guard case .failure(let message) = result else {
             return XCTFail("Expected failure for unmatched short code")
@@ -125,7 +125,7 @@ final class SendResolverTests: XCTestCase {
         defer { try? FileManager.default.removeItem(atPath: dbPath) }
 
         let resolver = SendResolver(db: Database(path: dbPath), resolver: ContactResolver(seedCache: [:]))
-        let result = await resolver.resolve(chatId: nil, to: "+55555")
+        let result = await resolver.resolve(.recipient("+55555"))
 
         guard case .failure(let message) = result else {
             return XCTFail("Expected failure for + prefixed short code")
@@ -143,7 +143,7 @@ final class SendResolverTests: XCTestCase {
 
         let contacts = ContactResolver(seedCache: ["+15555550123": "55555"])
         let resolver = SendResolver(db: Database(path: dbPath), resolver: contacts)
-        let result = await resolver.resolve(chatId: nil, to: "55555")
+        let result = await resolver.resolve(.recipient("55555"))
 
         switch result {
         case .failure(let message):
@@ -166,7 +166,7 @@ final class SendResolverTests: XCTestCase {
 
         let contacts = ContactResolver(seedCache: ["+15555550123": "Nick Jones"])
         let resolver = SendResolver(db: Database(path: dbPath), resolver: contacts)
-        let result = await resolver.resolve(chatId: nil, to: "Zelda")
+        let result = await resolver.resolve(.recipient("Zelda"))
 
         guard case .failure(let message) = result else {
             return XCTFail("Expected failure for unmatched name")
@@ -208,7 +208,7 @@ final class SendResolverTests: XCTestCase {
         Database.queryCountForTesting = 0
         defer { Database.queryCountForTesting = nil }
 
-        let result = await resolver.resolve(chatId: nil, to: "Jo")
+        let result = await resolver.resolve(.recipient("Jo"))
         guard case .ambiguous(let candidates) = result else {
             return XCTFail("Expected ambiguous name resolution")
         }

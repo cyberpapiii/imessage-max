@@ -19,7 +19,7 @@ enum VerificationResult: Equatable {
 /// Verifies that a sent text message appeared in chat.db within a polling window.
 ///
 /// Design: §2.2 primary query (chatId-scoped) + §2.2 fallback handle-scan when primary
-/// finds nothing and a handle is available. §3 finding 3: rows with error ≠ 0 must not
+/// finds no clean row and a handle is available. §3 finding 3: rows with error ≠ 0 must not
 /// confirm. They classify as `.failedDelivery` when they match in the intended chat
 /// (failed iMessage sends write error=22 rows immediately). Text comparison uses
 /// MessageTextExtractor to handle attributedBody-only rows (§3 finding 2). Multiple
@@ -74,37 +74,23 @@ struct SendVerifier: Sendable {
                 await AsyncTimeout.sleep(pollInterval)
             }
 
-            // 1. Primary: look in the intended chat (if we have a chatId).
-            if let chatId = intendedChatId {
-                if let result = try primaryScan(
-                    chatId: chatId,
-                    lowerBound: lowerBound,
-                    upperBound: upperBound,
-                    expectedText: normalizedExpected
-                ) {
-                    if case .failedDelivery = result {
-                        pendingFailure = result
-                    } else {
-                        return result
-                    }
-                }
+            // 1. Primary: the intended chat. Its failure overrides any earlier one.
+            if let chatId = intendedChatId,
+               let result = try scan(.chat(chatId), intendedChatId: intendedChatId,
+                                     lowerBound: lowerBound, upperBound: upperBound,
+                                     expectedText: normalizedExpected) {
+                guard case .failedDelivery = result else { return result }
+                pendingFailure = result
             }
 
-            // 2. Fallback: scan by handle (when primary found nothing and handle available).
-            if let handle {
-                if let result = try fallbackScan(
-                    handle: handle,
-                    intendedChatId: intendedChatId,
-                    lowerBound: lowerBound,
-                    upperBound: upperBound,
-                    expectedText: normalizedExpected
-                ) {
-                    if case .failedDelivery = result {
-                        if pendingFailure == nil { pendingFailure = result }
-                    } else {
-                        return result
-                    }
-                }
+            // 2. Fallback: every chat with the handle. Its failure only fills an
+            //    empty slot, so a primary-scan failure wins.
+            if let handle,
+               let result = try scan(.handle(handle), intendedChatId: intendedChatId,
+                                     lowerBound: lowerBound, upperBound: upperBound,
+                                     expectedText: normalizedExpected) {
+                guard case .failedDelivery = result else { return result }
+                pendingFailure = pendingFailure ?? result
             }
         }
 
@@ -113,26 +99,46 @@ struct SendVerifier: Sendable {
 
     // MARK: - Private
 
+    private enum Scope {
+        case chat(Int64)
+        case handle(String)
+    }
+
     private struct MessageRow {
         let guid: String
         let dateNs: Int64
         let text: String?
         let attributedBody: Data?
         let error: Int64
+        let chatId: Int64
     }
 
-    private func primaryScan(
-        chatId: Int64,
-        lowerBound: Int64,
-        upperBound: Int64,
-        expectedText: String
-    ) throws -> VerificationResult? {
-        let rows: [MessageRow] = try db.query(
+    /// Outbound, non-reaction rows in the time window, earliest first.
+    private func candidateRows(_ scope: Scope, lowerBound: Int64, upperBound: Int64) throws -> [MessageRow] {
+        let joins: String
+        let filter: String
+        let scopeParam: Any
+        switch scope {
+        case .chat(let chatId):
+            joins = ""
+            filter = "cmj.chat_id = ?"
+            scopeParam = chatId
+        case .handle(let handle):
+            joins = """
+                JOIN chat c ON cmj.chat_id = c.ROWID
+                JOIN chat_handle_join chj ON c.ROWID = chj.chat_id
+                JOIN handle h ON chj.handle_id = h.ROWID
+                """
+            filter = "h.id = ?"
+            scopeParam = handle
+        }
+        return try db.query(
             """
-            SELECT m.guid, m.date, m.text, m.attributedBody, m.error
+            SELECT m.guid, m.date, m.text, m.attributedBody, m.error, cmj.chat_id
             FROM message m
             JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
-            WHERE cmj.chat_id = ?
+            \(joins)
+            WHERE \(filter)
               AND m.is_from_me = 1
               AND m.associated_message_type = 0
               AND m.date >= ?
@@ -140,90 +146,37 @@ struct SendVerifier: Sendable {
             ORDER BY m.date ASC
             LIMIT 200
             """,
-            params: [chatId, lowerBound, upperBound]
+            params: [scopeParam, lowerBound, upperBound]
         ) { row in
             MessageRow(
                 guid: row.string(0) ?? "",
                 dateNs: row.int(1),
                 text: row.string(2),
                 attributedBody: row.blob(3),
-                error: row.int(4)
+                error: row.int(4),
+                chatId: row.int(5)
             )
         }
-
-        var failedMatch: MessageRow? = nil
-        for row in rows {
-            guard textMatches(row: row, expected: expectedText) else { continue }
-            if row.error == 0 {
-                return .confirmed(guid: row.guid, dateNs: row.dateNs)
-            }
-            if failedMatch == nil { failedMatch = row }
-        }
-        if let failed = failedMatch {
-            return .failedDelivery(guid: failed.guid, errorCode: Int(failed.error))
-        }
-        return nil
     }
 
-    private struct FallbackRow {
-        let guid: String
-        let dateNs: Int64
-        let text: String?
-        let attributedBody: Data?
-        let chatId: Int64
-        let error: Int64
-    }
-
-    private func fallbackScan(
-        handle: String,
+    /// The earliest clean text match wins. A clean match in another chat is a
+    /// mismatch; a failed match there is ignored. Failing that, the earliest
+    /// failed match in the intended chat is a delivery failure.
+    private func scan(
+        _ scope: Scope,
         intendedChatId: Int64?,
         lowerBound: Int64,
         upperBound: Int64,
         expectedText: String
     ) throws -> VerificationResult? {
-        let rows: [FallbackRow] = try db.query(
-            """
-            SELECT m.guid, m.date, m.text, m.attributedBody, c.ROWID, m.error
-            FROM message m
-            JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
-            JOIN chat c ON cmj.chat_id = c.ROWID
-            JOIN chat_handle_join chj ON c.ROWID = chj.chat_id
-            JOIN handle h ON chj.handle_id = h.ROWID
-            WHERE h.id = ?
-              AND m.is_from_me = 1
-              AND m.associated_message_type = 0
-              AND m.date >= ?
-              AND m.date <= ?
-            ORDER BY m.date ASC
-            LIMIT 200
-            """,
-            params: [handle, lowerBound, upperBound]
-        ) { row in
-            FallbackRow(
-                guid: row.string(0) ?? "",
-                dateNs: row.int(1),
-                text: row.string(2),
-                attributedBody: row.blob(3),
-                chatId: row.int(4),
-                error: row.int(5)
-            )
-        }
-
-        var failedMatch: FallbackRow? = nil
-        for row in rows {
-            guard textMatches(row: MessageRow(
-                guid: row.guid,
-                dateNs: row.dateNs,
-                text: row.text,
-                attributedBody: row.attributedBody,
-                error: row.error
-            ), expected: expectedText) else { continue }
-
+        var failedMatch: MessageRow? = nil
+        for row in try candidateRows(scope, lowerBound: lowerBound, upperBound: upperBound) {
+            guard textMatches(row: row, expected: expectedText) else { continue }
             if let intended = intendedChatId, row.chatId != intended {
                 if row.error == 0 {
                     return .mismatch(actualChatId: row.chatId, guid: row.guid)
                 }
-                continue  // failed row in a different chat: invisible, as before
+                continue
             }
             if row.error == 0 {
                 return .confirmed(guid: row.guid, dateNs: row.dateNs)
@@ -246,7 +199,6 @@ struct SendVerifier: Sendable {
 
         let normalized = extracted.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        // Exact match first.
         if normalized == expected { return true }
 
         // Case-insensitive + diacritic-insensitive fallback (§2.3).

@@ -29,26 +29,17 @@ final class StubScriptRunner: ScriptRunning, @unchecked Sendable {
         queuedResults.isEmpty ? nextResult : queuedResults.removeFirst()
     }
 
-    func sendTextToParticipant(handle: String, message: String) async -> Result<Void, SendFailure> {
-        invocations.append(.textToParticipant(handle: handle, message: message))
-        onSend?()
-        return takeResult()
-    }
-
-    func sendFileToParticipant(handle: String, filePath: String) async -> Result<Void, SendFailure> {
-        invocations.append(.fileToParticipant(handle: handle, filePath: filePath))
-        onSend?()
-        return takeResult()
-    }
-
-    func sendTextToChat(guid: String, message: String) async -> Result<Void, SendFailure> {
-        invocations.append(.textToChat(guid: guid, message: message))
-        onSend?()
-        return takeResult()
-    }
-
-    func sendFileToChat(guid: String, filePath: String) async -> Result<Void, SendFailure> {
-        invocations.append(.fileToChat(guid: guid, filePath: filePath))
+    func send(_ payload: SendPayload, to target: SendTarget) async -> Result<Void, SendFailure> {
+        switch (target, payload) {
+        case (.participant(let handle, _), .text(let message)):
+            invocations.append(.textToParticipant(handle: handle, message: message))
+        case (.participant(let handle, _), .file(let path)):
+            invocations.append(.fileToParticipant(handle: handle, filePath: path))
+        case (.chat(let guid, _), .text(let message)):
+            invocations.append(.textToChat(guid: guid, message: message))
+        case (.chat(let guid, _), .file(let path)):
+            invocations.append(.fileToChat(guid: guid, filePath: path))
+        }
         onSend?()
         return takeResult()
     }
@@ -183,7 +174,7 @@ final class SendToolExecuteTests: XCTestCase {
         let fixture = try makeSendFixture()  // DM chat 1 (Alice) + group chat 2 (Alice+Bob)
 
         let resolver = SendResolver(db: fixture.database(), resolver: makeSeededResolver())
-        let result = await resolver.resolve(chatId: nil, to: "+15550000001")
+        let result = await resolver.resolve(.recipient("+15550000001"))
 
         switch result {
         case .failure(let message):

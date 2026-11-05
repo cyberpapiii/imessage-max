@@ -5,8 +5,8 @@ final class AppleScriptSendResultTests: XCTestCase {
     private let missing = SendError.chatNotFound("iMessage;-;x")
 
     private func interpret(_ stdout: String, stderr: String = "", status: Int32 = 0) -> Result<Void, SendFailure> {
-        AppleScriptRunner.interpretSendResult(
-            stdout: stdout, stderr: stderr, terminationStatus: status, missingTargetError: missing
+        SendScript.interpretResult(
+            stdout: stdout, stderr: stderr, terminationStatus: status, sentFileName: "", missingTargetError: missing
         )
     }
 
@@ -62,6 +62,58 @@ final class AppleScriptSendResultTests: XCTestCase {
         guard case .failure(let failure) = result else { return XCTFail("expected failure") }
         XCTAssertEqual(failure.disposition, .mayHaveCompleted)
         XCTAssertEqual(failure.error.localizedDescription, "Send failed: Messages returned no structured send result")
+    }
+
+    // MARK: - Script text
+
+    // Pinned byte-for-byte to the hand-written scripts the builder replaced.
+    // Together these two cover every target and payload fragment.
+    func testParticipantTextScriptIsStable() {
+        XCTAssertEqual(SendScript.source(.participant, .text), """
+            on run argv
+                set recipientId to item 1 of argv
+                set messageText to item 2 of argv
+                set dispatchPhase to "pre_dispatch"
+                try
+                    tell application "Messages"
+                        set targetService to 1st account whose service type = iMessage
+                        set targetBuddy to participant recipientId of targetService
+                        set dispatchPhase to "dispatch_started"
+                        send messageText to targetBuddy
+                    end tell
+                    return "IMESSAGE_MAX_RESULT" & tab & "ok" & tab & "completed" & tab & "0" & tab & ""
+                on error errorMessage number errorNumber
+                    if dispatchPhase is "pre_dispatch" then
+                        return "IMESSAGE_MAX_RESULT" & tab & "failure" & tab & "not_started" & tab & errorNumber & tab & errorMessage
+                    end if
+                    return "IMESSAGE_MAX_RESULT" & tab & "failure" & tab & "may_have_completed" & tab & errorNumber & tab & errorMessage
+                end try
+            end run
+            """)
+    }
+
+    func testChatFileScriptIsStable() {
+        XCTAssertEqual(SendScript.source(.chat, .file), """
+            on run argv
+                set chatGuid to item 1 of argv
+                set filePath to item 2 of argv
+                set attachmentFile to POSIX file filePath
+                set dispatchPhase to "pre_dispatch"
+                try
+                    tell application "Messages"
+                        set targetChat to chat id chatGuid
+                        set dispatchPhase to "dispatch_started"
+                        send attachmentFile to targetChat
+                    end tell
+                    return "IMESSAGE_MAX_RESULT" & tab & "ok" & tab & "completed" & tab & "0" & tab & ""
+                on error errorMessage number errorNumber
+                    if dispatchPhase is "pre_dispatch" then
+                        return "IMESSAGE_MAX_RESULT" & tab & "failure" & tab & "not_started" & tab & errorNumber & tab & errorMessage
+                    end if
+                    return "IMESSAGE_MAX_RESULT" & tab & "failure" & tab & "may_have_completed" & tab & errorNumber & tab & errorMessage
+                end try
+            end run
+            """)
     }
 
     func testUnknownPhaseIsMayHaveCompleted() {
