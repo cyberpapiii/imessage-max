@@ -3,9 +3,10 @@ import MCP
 @testable import iMessageMax
 
 final class GetMessagesToolTests: XCTestCase {
-    func testExactChatIdReturnsMessagesAndGeneratedChatName() async throws {
+    func testExactChatIdReturnsMessagesAndTheSameNameListChatsGives() async throws {
         let fixture = try makeGetMessagesFixture()
-        let tool = GetMessagesTool(db: fixture.database(), resolver: makeSeededResolver())
+        let resolver = makeSeededResolver()
+        let tool = GetMessagesTool(db: fixture.database(), resolver: resolver)
 
         let response = try await decodeGetMessagesResponse(
             await tool.execute(args: ["chat_id": .string("chat20")])
@@ -13,11 +14,9 @@ final class GetMessagesToolTests: XCTestCase {
 
         let chat = try XCTUnwrap(response["chat"] as? [String: Any])
         XCTAssertEqual(chat["id"] as? String, "chat20")
-        let generatedName = try XCTUnwrap(chat["name"] as? String)
-        XCTAssertEqual(
-            Set(generatedName.components(separatedBy: ", ").filter { !$0.isEmpty }),
-            ["Alice Smith", "Bob Brown"]
-        )
+        let listed = try await ListChatsTool.execute(db: fixture.database(), resolver: resolver)
+        let listedName = try XCTUnwrap(listed.chats.first { $0.id == "chat20" }?.name)
+        XCTAssertEqual(chat["name"] as? String, listedName)
 
         let messages = try decodeJSONArray(try XCTUnwrap(response["messages"]))
         XCTAssertEqual(messages.count, 4)
@@ -50,6 +49,9 @@ final class GetMessagesToolTests: XCTestCase {
         } catch let error as ToolFailure {
             let payload = try decodeJSONDictionary(from: error.content)
             XCTAssertEqual(payload["error"] as? String, "ambiguous_participants")
+            let names = try decodeJSONArray(payload["candidates"]).compactMap { $0["name"] as? String }
+            XCTAssertFalse(names.isEmpty)
+            XCTAssertFalse(names.contains("(Unnamed)"), "unnamed chats get the generated name: \(names)")
         }
     }
 

@@ -434,21 +434,18 @@ actor GetMessagesTool {
             mediaTotal += mediaCountsByMessageId[message.id]?.total ?? 0
         }
 
-        let rawDisplayName = chatInfo?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let displayName: String
-        if let rawDisplayName, !rawDisplayName.isEmpty {
-            displayName = rawDisplayName
-        } else {
-            displayName = DisplayNameGenerator.fromNames(
-                people.filter { $0.key != "me" }.map { $0.value }
-            )
-        }
+        let identity = ChatIdentity.from(
+            chatId: Int64(numericChatId),
+            guid: nil,
+            explicitName: chatInfo,
+            rows: try await ChatSummaryQueries.participants(db: db, chatId: Int64(numericChatId), resolver: resolver)
+        )
 
         let mediaTruncated = mediaTotal > maxMedia
         let nextCursor = Self.nextCursor(from: messageRows, limit: limit)
 
         return GetMessagesResponse(
-            chat: .init(id: ChatIdentifier.format(numericChatId), name: displayName),
+            chat: .init(id: identity.mcpId, name: identity.displayName),
             people: people,
             messages: finalMessages,
             sessions: finalSessions,

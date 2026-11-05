@@ -285,19 +285,27 @@ extension GetMessagesTool {
             return handleGroups.allSatisfy { !chatHandles.intersection($0).isEmpty }
         }
 
+        func candidate(_ row: (id: Int, displayName: String?, participantCount: Int)) -> GetMessagesErrorResponse.Candidate {
+            let identity = ChatIdentity.from(
+                chatId: Int64(row.id),
+                guid: nil,
+                explicitName: row.displayName,
+                rows: participantsByChat[Int64(row.id)] ?? []
+            )
+            return GetMessagesErrorResponse.Candidate(
+                chatId: identity.mcpId,
+                name: identity.displayName,
+                participantCount: row.participantCount
+            )
+        }
+
         if exactMatches.count == 1 {
             return ChatIdentifier.format(exactMatches[0].id)
         } else if !exactMatches.isEmpty {
             throw ToolFailure(code: "ambiguous_participants", body: GetMessagesErrorResponse(
                 error: "ambiguous_participants",
                 message: "Multiple chats found with participants: \(participants)",
-                candidates: exactMatches.prefix(5).map { row in
-                    GetMessagesErrorResponse.Candidate(
-                        chatId: ChatIdentifier.format(row.id),
-                        name: row.displayName ?? "(Unnamed)",
-                        participantCount: row.participantCount
-                    )
-                },
+                candidates: exactMatches.prefix(5).map(candidate),
                 suggestion: "Please specify chat_id to target the exact conversation."
             ))
         } else if rows.count == 1 {
@@ -306,13 +314,7 @@ extension GetMessagesTool {
             throw ToolFailure(code: "ambiguous_participants", body: GetMessagesErrorResponse(
                 error: "ambiguous_participants",
                 message: "Multiple chats found with participants: \(participants)",
-                candidates: rows.prefix(5).map { row in
-                    GetMessagesErrorResponse.Candidate(
-                        chatId: ChatIdentifier.format(row.id),
-                        name: row.displayName ?? "(Unnamed)",
-                        participantCount: row.participantCount
-                    )
-                },
+                candidates: rows.prefix(5).map(candidate),
                 suggestion: "Did you mean the \(rows[0].participantCount)-person chat or a different one?"
             ))
         } else {

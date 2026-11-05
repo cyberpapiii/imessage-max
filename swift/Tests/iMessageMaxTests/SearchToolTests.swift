@@ -305,6 +305,31 @@ final class SearchToolTests: XCTestCase {
         XCTAssertEqual(firstSample["from"] as? String, "Bob Brown")
     }
 
+    func testGroupedChatsWithEqualMatchCountsListTheMostRecentFirst() async throws {
+        let fixture = try ToolTestDatabase(name: "search-grouped-ties")
+        let base = Int64(Date().timeIntervalSinceReferenceDate * 1_000_000_000) - 3_600_000_000_000
+        for chat in 1...3 {
+            try fixture.insertHandle(rowId: chat, handle: "+1555000000\(chat)")
+            try fixture.insertChat(rowId: chat, guid: "iMessage;-;\(chat)")
+            try fixture.joinChatHandle(chatId: chat, handleId: chat)
+            try fixture.insertMessage(rowId: chat, guid: "m\(chat)", text: "hello \(chat)",
+                                      date: base + Int64([2, 3, 1][chat - 1]) * 60_000_000_000,
+                                      isFromMe: false, handleId: chat)
+            try fixture.joinChatMessage(chatId: chat, messageId: chat)
+        }
+
+        let response = try await decodeSearchResponse(
+            SearchTool.execute(
+                query: "hello", cursor: nil, limit: 10, sort: "recent_first", format: "grouped_by_chat",
+                includeContext: false, unanswered: false, unansweredHours: 24, matchAll: false, fuzzy: false,
+                db: fixture.database(), resolver: makeSeededResolver()
+            )
+        )
+
+        let ids = try decodeJSONArray(response["chats"]).compactMap { $0["id"] as? String }
+        XCTAssertEqual(ids, ["chat2", "chat1", "chat3"])
+    }
+
     func testUnansweredSearchReturnsOnlyMessagesWithoutReplies() async throws {
         let fixture = try makeSearchFixture()
         let resolver = makeSeededResolver()

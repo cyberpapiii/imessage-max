@@ -538,7 +538,10 @@ extension SearchTool {
                 results: data.results
             )
         }
-        chats.sort { $0.matchCount > $1.matchCount }
+        // Most matches first; ties go to the most recent match so the order is stable.
+        chats.sort {
+            ($0.matchCount, $0.lastMatch ?? "", $0.id) > ($1.matchCount, $1.lastMatch ?? "", $1.id)
+        }
 
         let nextCursor = Self.nextCursor(from: rows, limit: limit)
         let response = SearchGroupedResponse(
