@@ -162,10 +162,10 @@ extension SearchTool {
         return builder.build()
     }
 
-    /// Counts filtered chats with a match. Runs on every search that hides
-    /// them, so it starts from the few filtered chats rather than scanning
-    /// every message a second time.
-    static func countFilteredHidden(
+    /// Filtered chats with a row that passes the SQL prefilter. Runs on
+    /// every search that hides them, so it starts from the few filtered
+    /// chats rather than scanning every message a second time.
+    static func filteredHiddenChats(
         db: Database,
         query: String?,
         fromPerson: SenderFilter?,
@@ -178,7 +178,7 @@ extension SearchTool {
         terms: [String],
         matchAll: Bool,
         fuzzy: Bool
-    ) throws -> Int {
+    ) throws -> [Int64] {
         let (sql, params) = filteredHiddenQuery(
             query: query,
             fromPerson: fromPerson,
@@ -192,10 +192,7 @@ extension SearchTool {
             matchAll: matchAll,
             fuzzy: fuzzy
         )
-        let rows: [Int] = try db.query(sql, params: params) { row in
-            Int(row.int(0))
-        }
-        return rows.first ?? 0
+        return try db.query(sql, params: params) { $0.int(0) }
     }
 
     static func filteredHiddenQuery(
@@ -212,7 +209,7 @@ extension SearchTool {
         fuzzy: Bool
     ) -> (String, [Any]) {
         let builder = QueryBuilder()
-            .select("COUNT(DISTINCT c.ROWID)")
+            .select("DISTINCT c.ROWID")
         applySearchFilters(
             to: builder,
             query: query,

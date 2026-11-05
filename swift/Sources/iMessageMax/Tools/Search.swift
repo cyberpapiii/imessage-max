@@ -336,30 +336,71 @@ enum SearchTool {
         }
 
         let schema = try db.schema()
-        let (sql, params) = buildQuery(
-            query: query,
-            fromPerson: senderFilter,
-            inChat: inChat,
-            isGroup: isGroup,
-            has: has,
-            since: since,
-            before: before,
-            cursor: cursor.flatMap(TimelineCursor.decode),
-            limit: fetchLimit,
-            sort: sortOrder,
-            unanswered: unanswered,
-            terms: searchWords,
-            matchAll: matchAll,
-            fuzzy: fuzzy,
-            includeFiltered: includeFiltered,
-            schema: schema
-        )
+        func fetch(inChat: String?, includeFiltered: Bool, cursor: TimelineCursor?) throws -> [MessageInChat] {
+            let (sql, params) = buildQuery(
+                query: query,
+                fromPerson: senderFilter,
+                inChat: inChat,
+                isGroup: isGroup,
+                has: has,
+                since: since,
+                before: before,
+                cursor: cursor,
+                limit: fetchLimit,
+                sort: sortOrder,
+                unanswered: unanswered,
+                terms: searchWords,
+                matchAll: matchAll,
+                fuzzy: fuzzy,
+                includeFiltered: includeFiltered,
+                schema: schema
+            )
+            return try db.query(sql, params: params, map: MessageInChat.init)
+        }
 
-        let filteredHidden: Int?
-        if includeFiltered {
-            filteredHidden = nil
-        } else {
-            filteredHidden = try countFilteredHidden(
+        // The SQL terms only prefilter; the word match and the unanswered
+        // check decide. Keeps at most `limit` rows.
+        let confirmsInSwift = (hasQuery && !searchWords.isEmpty) || unanswered
+        func confirmed(_ candidates: [MessageInChat], limit: Int) throws -> [MessageInChat] {
+            var rows = candidates
+            if hasQuery, !searchWords.isEmpty {
+                rows = rows.filter { row in
+                    guard let text = row.message.text?.lowercased() else { return false }
+
+                    let textWords = text.split(whereSeparator: { !$0.isLetter && !$0.isNumber })
+                        .map(String.init)
+
+                    if matchAll {
+                        return searchWords.allSatisfy { searchWord in
+                            wordMatches(searchWord: searchWord, in: text, textWords: textWords, fuzzy: fuzzy)
+                        }
+                    } else {
+                        return searchWords.contains { searchWord in
+                            wordMatches(searchWord: searchWord, in: text, textWords: textWords, fuzzy: fuzzy)
+                        }
+                    }
+                }
+            }
+
+            if unanswered {
+                rows = try UnansweredHeuristics.filterUnanswered(
+                    db: db,
+                    rows: rows,
+                    hours: clampedUnansweredHours,
+                    limit: limit,
+                    text: \.message.text,
+                    date: \.message.date,
+                    chatId: \.chatId
+                )
+            }
+            return Array(rows.prefix(limit))
+        }
+
+        /// Hidden chats with a real match. The SQL prefilter names the
+        /// candidates; when Swift decides, each candidate is walked until
+        /// one of its rows is confirmed.
+        func hiddenChatsWithMatch() throws -> Int {
+            let candidates = try filteredHiddenChats(
                 db: db,
                 query: query,
                 fromPerson: senderFilter,
@@ -373,46 +414,31 @@ enum SearchTool {
                 matchAll: matchAll,
                 fuzzy: fuzzy
             )
-        }
-
-        let fetched = try db.query(sql, params: params, map: MessageInChat.init)
-        var rows = fetched
-
-        // The SQL LIKE/instr terms only prefilter; this word match decides.
-        if hasQuery, !searchWords.isEmpty {
-            rows = rows.filter { row in
-                guard let text = row.message.text?.lowercased() else { return false }
-
-                let textWords = text.split(whereSeparator: { !$0.isLetter && !$0.isNumber })
-                    .map(String.init)
-
-                if matchAll {
-                    return searchWords.allSatisfy { searchWord in
-                        wordMatches(searchWord: searchWord, in: text, textWords: textWords, fuzzy: fuzzy)
+            guard confirmsInSwift else { return candidates.count }
+            var count = 0
+            for chatId in candidates {
+                var resumeAfter: TimelineCursor?
+                while true {
+                    let page = try fetch(
+                        inChat: ChatIdentifier.format(chatId), includeFiltered: true, cursor: resumeAfter
+                    )
+                    if try !confirmed(page, limit: 1).isEmpty {
+                        count += 1
+                        break
                     }
-                } else {
-                    return searchWords.contains { searchWord in
-                        wordMatches(searchWord: searchWord, in: text, textWords: textWords, fuzzy: fuzzy)
-                    }
+                    guard page.count >= fetchLimit, let last = page.last?.message, let date = last.date else { break }
+                    resumeAfter = TimelineCursor(date: date, messageId: last.id)
                 }
             }
+            return count
         }
 
-        if unanswered {
-            rows = try UnansweredHeuristics.filterUnanswered(
-                db: db,
-                rows: rows,
-                hours: clampedUnansweredHours,
-                limit: clampedLimit,
-                text: \.message.text,
-                date: \.message.date,
-                chatId: \.chatId
-            )
-        }
+        let filteredHidden = includeFiltered ? nil : try hiddenChatsWithMatch()
 
-        if rows.count > clampedLimit {
-            rows = Array(rows.prefix(clampedLimit))
-        }
+        let fetched = try fetch(
+            inChat: inChat, includeFiltered: includeFiltered, cursor: cursor.flatMap(TimelineCursor.decode)
+        )
+        let rows = try confirmed(fetched, limit: clampedLimit)
         let nextCursor = TimelineCursor.next(
             kept: rows.map(\.message), limit: clampedLimit,
             fetched: fetched.map(\.message), fetchLimit: fetchLimit

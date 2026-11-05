@@ -315,4 +315,46 @@ final class ToolsReviewRegressionTests: XCTestCase {
             XCTAssertEqual(page["more"] as? Bool, true)
         }
     }
+
+    // MARK: - filtered_hidden counts chats with a real match
+
+    /// Chat 1 shown, chat 2 hidden with a match, chat 3 hidden without one.
+    private func hiddenFixture() throws -> ToolTestDatabase {
+        let db = try ToolTestDatabase(name: "hidden")
+        let base = now() - 60 * minute
+        let texts = [1: ["volcano trip"], 2: ["volcano photos", "volcano again?"], 3: ["nothing here", "still nothing"]]
+        var id = 0
+        for chat in 1...3 {
+            try db.insertHandle(rowId: chat, handle: "+1555000000\(chat)")
+            try db.insertChat(rowId: chat, guid: "iMessage;-;\(chat)", isFiltered: chat == 1 ? 0 : 1)
+            try db.joinChatHandle(chatId: chat, handleId: chat)
+            for text in texts[chat] ?? [] {
+                id += 1
+                try db.insertMessage(rowId: id, guid: "H\(id)", text: text, date: base + Int64(id) * minute,
+                                     isFromMe: true)
+                try db.joinChatMessage(chatId: chat, messageId: id)
+            }
+        }
+        return db
+    }
+
+    func testSearchFilteredHiddenCountsOnlyHiddenChatsWithARealMatch() async throws {
+        let db = try hiddenFixture()
+        for args: [String: Value] in [
+            ["query": "volcano"],
+            ["query": "volcno", "fuzzy": true],
+            ["query": "volcano", "format": "grouped_by_chat"],
+            ["unanswered": true],
+        ] {
+            let page = try await call("search", args, db: db)
+            XCTAssertEqual(page["filtered_hidden"] as? Int, 1, "\(args)")
+        }
+    }
+
+    func testGetMessagesSinceFilteredHiddenCountsChats() async throws {
+        let db = try hiddenFixture()
+        let page = try await call("get_messages_since", ["since_rowid": 0], db: db)
+        XCTAssertEqual(page["filtered_hidden"] as? Int, 2)
+        XCTAssertEqual(try decodeJSONArray(page["messages"]).count, 1)
+    }
 }

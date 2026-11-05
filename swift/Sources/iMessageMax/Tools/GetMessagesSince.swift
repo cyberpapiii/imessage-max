@@ -128,7 +128,8 @@ actor GetMessagesSinceTool {
         var consumed = sinceRowid
         var kept: [SinceScanRow] = []
         var stalled = false
-        var hidden = 0
+        // Chats, as filtered_hidden counts in every other tool.
+        var hiddenChats: Set<Int64> = []
         var hasMore = false
         var scanFrom = sinceRowid
 
@@ -165,7 +166,7 @@ actor GetMessagesSinceTool {
                 }
                 consumed = Int(row.message.id)
                 if !includeFiltered && row.chatIsFiltered != 0 {
-                    hidden += 1
+                    hiddenChats.insert(row.chatId ?? 0)
                     continue
                 }
                 kept.append(row)
@@ -224,7 +225,7 @@ actor GetMessagesSinceTool {
             hasMore: hasMore,
             currentRowid: currentRowid,
             stalled: stalled,
-            filteredHidden: hidden
+            filteredHidden: hiddenChats.count
         )
     }
 
