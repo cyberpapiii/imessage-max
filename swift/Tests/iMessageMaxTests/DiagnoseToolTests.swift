@@ -156,7 +156,8 @@ final class DiagnoseToolTests: XCTestCase {
             resolver: resolver,
             dbProbe: DiagnoseToolTests.dbAccessible,
             contactsProbe: { (false, "not_determined") },
-            automationProbe: DiagnoseToolTests.automationGranted
+            automationProbe: DiagnoseToolTests.automationGranted,
+            usageDescriptionProbe: { true }
         )
 
         XCTAssertEqual(result.contacts.status, "not_requested_headless")
@@ -174,9 +175,39 @@ final class DiagnoseToolTests: XCTestCase {
             resolver: ContactResolver(seedCache: [:]),
             dbProbe: DiagnoseToolTests.dbAccessible,
             contactsProbe: { (false, "not_determined") },
-            automationProbe: DiagnoseToolTests.automationGranted
+            automationProbe: DiagnoseToolTests.automationGranted,
+            usageDescriptionProbe: { true }
         )
         XCTAssertEqual(result.contacts.status, "not_determined")
         XCTAssertEqual(result.capabilities["perm_contacts"]?.state, "unverified")
+    }
+
+    /// A binary linked without the embedded Info.plist has no
+    /// NSContactsUsageDescription, so macOS can neither prompt for it nor
+    /// record a grant against it. Running the request command cannot fix
+    /// that, so diagnose must name the build as the problem.
+    func testMissingUsageDescriptionIsReportedBeforeHeadlessSkip() async throws {
+        let resolver = ContactResolver(
+            source: ContactResolver.Source(
+                authorization: { (false, "not_determined") },
+                load: { [:] },
+                requestAccess: { XCTFail("must not prompt"); return false }
+            ),
+            refreshInterval: 30,
+            now: { 0 }
+        )
+        await resolver.requestAccessIfAllowed(policy: .skipIfNotDetermined)
+
+        let result = try await DiagnoseTool.execute(
+            resolver: resolver,
+            dbProbe: DiagnoseToolTests.dbAccessible,
+            contactsProbe: { (false, "not_determined") },
+            automationProbe: DiagnoseToolTests.automationGranted,
+            usageDescriptionProbe: { false }
+        )
+
+        XCTAssertEqual(result.contacts.status, "missing_usage_description")
+        XCTAssertTrue(result.contacts.fix?.contains("make build") == true)
+        XCTAssertEqual(result.capabilities["perm_contacts"]?.state, "permission-gated")
     }
 }

@@ -45,6 +45,26 @@ struct iMessageMax: AsyncParsableCommand {
         }
 
         if requestContactsAccess {
+            guard ContactResolver.usageDescriptionEmbedded else {
+                throw ValidationError("This executable has no embedded Info.plist, so macOS cannot grant it Contacts access. Rebuild with `make build` (not a bare `swift build`).")
+            }
+            // Re-run ourselves disclaimed so the prompt and the grant belong to
+            // imessage-max rather than the terminal (see ResponsibilityDisclaim).
+            let disclaimedKey = "IMESSAGE_MAX_CONTACTS_REQUEST_DISCLAIMED"
+            if ProcessInfo.processInfo.environment[disclaimedKey] == nil {
+                guard let executable = Bundle.main.executablePath else {
+                    throw ValidationError("Cannot locate this executable to re-launch it.")
+                }
+                let child = try ResponsibilityDisclaim.spawn(
+                    path: executable,
+                    arguments: Array(CommandLine.arguments.dropFirst()),
+                    disclaim: true,
+                    extraEnvironment: [disclaimedKey: "1"]
+                )
+                let status = ResponsibilityDisclaim.wait(child)
+                if status != 0 { throw ExitCode(status) }
+                return
+            }
             let resolver = ContactResolver()
             await resolver.requestAccessIfAllowed(policy: .requestIfNeeded)
             let (_, status) = ContactResolver.authorizationStatus()

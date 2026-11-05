@@ -25,6 +25,9 @@ typealias DatabaseProbe = @Sendable () -> (ok: Bool, status: String)
 /// Probe type for contacts authorization checks. Injectable so tests stay hermetic.
 typealias ContactsProbe = @Sendable () -> (authorized: Bool, status: String)
 
+/// Whether this executable carries NSContactsUsageDescription in an embedded Info.plist.
+typealias UsageDescriptionProbe = @Sendable () -> Bool
+
 /// Probe type for optional chat.db column flags. Injectable so tests stay hermetic.
 typealias SchemaProbe = @Sendable () -> SchemaCapabilities?
 
@@ -160,7 +163,8 @@ enum DiagnoseTool {
         contactsProbe: ContactsProbe = { ContactResolver.authorizationStatus() },
         automationProbe: AutomationProbe = { AutomationPermission.checkAutomationPermission() },
         schemaProbe: SchemaProbe = { nil },
-        liveInboxProbe: LiveInboxProbe = { LiveInboxState.isRunning }
+        liveInboxProbe: LiveInboxProbe = { LiveInboxState.isRunning },
+        usageDescriptionProbe: UsageDescriptionProbe = { ContactResolver.usageDescriptionEmbedded }
     ) async throws -> DiagnoseResult {
         let processId = ProcessInfo.processInfo.processIdentifier
         let databasePath = Database.defaultPath
@@ -204,12 +208,19 @@ enum DiagnoseTool {
             }
         } else {
             let stats = await resolver.getStats()
-            if authorizationStatus == "not_determined", stats.accessRequestSkippedHeadless {
+            if authorizationStatus == "not_determined", !usageDescriptionProbe() {
+                contactsStatus = "missing_usage_description"
+                contactsFix = "This executable was built without its embedded Info.plist, so macOS "
+                    + "cannot prompt for or record a Contacts grant for it. Rebuild with `make build` "
+                    + "(or `make sign`), not a bare `swift build`, then run "
+                    + "`imessage-max --request-contacts-access` once."
+            } else if authorizationStatus == "not_determined", stats.accessRequestSkippedHeadless {
                 contactsStatus = "not_requested_headless"
-                contactsFix = "This process has no terminal, so it did not ask for Contacts access "
-                    + "(macOS lists an app under Privacy & Security -> Contacts only after it asks). "
-                    + "Run `imessage-max --request-contacts-access` from a terminal once, approve the "
-                    + "prompt, then restart the service (`make install`)."
+                contactsFix = "This process has no terminal, so it did not ask for Contacts access. "
+                    + "Run `imessage-max --request-contacts-access` once (from a terminal or any "
+                    + "shell) and approve the \"iMessage Max\" prompt; the grant is recorded for this "
+                    + "executable, not for the terminal. Then restart the MCP client or service. "
+                    + "A Contacts switch for Terminal or Claude does not apply to this process."
             } else {
                 contactsFix = "Grant Contacts access: System Settings -> Privacy & Security -> " +
                     "Contacts -> Add your terminal app or the imessage-max executable"
@@ -309,7 +320,7 @@ enum DiagnoseTool {
             // loading; that is a contacts.fix concern, not a permission gate.
             permContactsState = "supported"
             permContactsFix = nil
-        case "denied", "restricted", "not_requested_headless":
+        case "denied", "restricted", "not_requested_headless", "missing_usage_description":
             permContactsState = "permission-gated"
             permContactsFix = contactsFix
         default:

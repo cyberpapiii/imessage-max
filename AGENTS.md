@@ -50,7 +50,8 @@ swift build -c release
 # HTTP mode (for plug, Inspector, etc.)
 ./.build/release/imessage-max --http --port 8080
 
-# one-shot Contacts prompt, run from a terminal
+# one-shot Contacts prompt; re-launches itself disclaimed so the grant is
+# recorded for this executable, not the terminal (needs a `make build` binary)
 ./.build/release/imessage-max --request-contacts-access
 ```
 
@@ -327,7 +328,7 @@ Attachments can be offloaded to iCloud. `list_attachments` includes nested attac
 ## Required macOS permissions
 
 - Full Disk Access, for ~/Library/Messages/chat.db
-- Contacts, for AddressBook resolution (granted via `--request-contacts-access`; headless starts never prompt)
+- Contacts, for AddressBook resolution (granted via `--request-contacts-access`; headless starts never prompt). MCP clients such as Claude desktop launch the server disclaimed, so only a grant held by the imessage-max executable itself counts; a Contacts switch for Terminal or the client app does not. A bare `swift build` omits the embedded Info.plist and macOS then cannot grant Contacts at all; diagnose reports `missing_usage_description`
 - Automation, for Messages.app (sending only)
 
 ## Maintainer notes

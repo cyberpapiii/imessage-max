@@ -106,6 +106,13 @@ actor ContactResolver {
         }
     }
 
+    /// macOS will neither prompt nor record a Contacts grant for an
+    /// executable without NSContactsUsageDescription. A bare `swift build`
+    /// links without the embedded Info.plist; `make build` adds it.
+    static var usageDescriptionEmbedded: Bool {
+        Bundle.main.object(forInfoDictionaryKey: "NSContactsUsageDescription") != nil
+    }
+
     func requestAccessIfAllowed(policy: ContactsAccessPolicy) async {
         let (_, status) = source.authorization()
         guard status == "not_determined" else { return }
