@@ -66,11 +66,13 @@ struct OutgoingFileStager: Sendable {
     func stage(_ source: Source) throws -> StagedFile {
         let trackingName = source.trackingName
         let ownerOnly: [FileAttributeKey: Any] = [.posixPermissions: 0o700]
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true, attributes: ownerOnly)
-        try FileManager.default.setAttributes(ownerOnly, ofItemAtPath: root.path)   // pre-existing 0755 roots
+        // Checked before anything is created or chmodded: both follow links,
+        // so a symlinked root would otherwise re-permission its target.
         guard !SecurePath.hasSymlinkComponent(root.path) else {
             throw SendError.invalidParams("Attachment staging directory is behind a symbolic link.")
         }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true, attributes: ownerOnly)
+        try FileManager.default.setAttributes(ownerOnly, ofItemAtPath: root.path)   // pre-existing 0755 roots
 
         let stagedDirectory = root.appendingPathComponent(UUID().uuidString, isDirectory: true)
         let stagedURL = stagedDirectory.appendingPathComponent(trackingName, isDirectory: false)
