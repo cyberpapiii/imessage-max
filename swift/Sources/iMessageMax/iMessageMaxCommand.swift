@@ -81,27 +81,7 @@ struct iMessageMax: AsyncParsableCommand {
             Log.warning("Binding to '\(host)' exposes iMessage data to the network. Use 127.0.0.1 for local-only access.")
         }
 
-        let resolver = ContactResolver()
-        let (newRows, newRowsSink) = AsyncStream<Int64>.makeStream()
-        let watcher = MessageWatcher(databasePath: Database.defaultPath) { newRowsSink.yield($0) }
-        let transport = HTTPTransport(
-            host: host,
-            port: port,
-            catalog: ToolCatalog(database: Database(), resolver: resolver, liveInbox: { watcher.isLive }),
-            setupPermissions: SetupPermissionService(resolver: resolver)
-        )
-
-        try await transport.connect()
-        ServerStartup.announce(transport: "http addr=\(host):\(port)", resolver: resolver, contactsPolicy: contactsPolicy)
-
-        Task {
-            for await rowid in newRows {
-                await transport.notifyNewMessages(maxRowid: rowid)
-            }
-        }
-        watcher.start()
-        defer { watcher.stop() }
-        try await transport.waitForTermination()
+        try await ServerStartup.runHTTP(host: host, port: port, contactsPolicy: contactsPolicy)
     }
 }
 

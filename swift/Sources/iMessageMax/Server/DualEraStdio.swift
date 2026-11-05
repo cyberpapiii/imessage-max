@@ -88,6 +88,16 @@ actor DualEraStdio {
         }
     }
 
+    /// After input has ended: waits for the read loop, whose task group
+    /// holds every modern request still running, then for the writer to
+    /// flush their replies, then closes `base`.
+    func drain() async {
+        await readLoop?.value
+        outgoingContinuation.finish()
+        await writer?.value
+        await base.disconnect()
+    }
+
     func stop() async {
         readLoop?.cancel()
         outgoingContinuation.finish()
