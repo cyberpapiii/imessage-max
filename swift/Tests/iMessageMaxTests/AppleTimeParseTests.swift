@@ -70,6 +70,13 @@ final class AppleTimeParseTests: XCTestCase {
             today.timeIntervalSince1970, startOfDay.timeIntervalSince1970, accuracy: tolerance,
             "today should be the start of the current day"
         )
+
+        let (startOfToday, yesterday) = try onOneDay { _ in try parsedDate("yesterday") }
+        let startOfYesterday = try XCTUnwrap(Calendar.current.date(byAdding: .day, value: -1, to: startOfToday))
+        XCTAssertEqual(
+            yesterday.timeIntervalSince1970, startOfYesterday.timeIntervalSince1970, accuracy: tolerance,
+            "yesterday should be the start of the previous day"
+        )
     }
 
     func testNDaysAgo() throws {
@@ -116,7 +123,7 @@ final class AppleTimeParseTests: XCTestCase {
     }
 
     func testHugeRelativeValueDoesNotTrap() {
-        // Reaching the end is the point: these used to trap the service.
+        // Reaching the end is the point: none of these may trap.
         for input in ["999999999h", "99999999999d", "9999-01-01T00:00:00Z", "0001-01-01T00:00:00Z", "999999999 days ago"] {
             _ = AppleTime.parse(input)
         }

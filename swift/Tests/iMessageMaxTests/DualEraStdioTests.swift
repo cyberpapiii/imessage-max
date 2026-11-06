@@ -19,10 +19,7 @@ final class DualEraStdioTests: XCTestCase {
         let downstream = await dual.legacy.receive()
         var iterator = downstream.makeAsyncIterator()
 
-        let discover = Data(
-            #"{"jsonrpc":"2.0","id":1,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}"#
-                .utf8
-        )
+        let discover = Data(modernBody(method: "server/discover").utf8)
         await base.feed(discover)
 
         let responseData = try await base.waitForFirstSend()
@@ -34,10 +31,7 @@ final class DualEraStdioTests: XCTestCase {
 
         // Legacy initialize must reach the downstream (SDK) stream, not the
         // dispatcher, and the discover message must never have been forwarded.
-        let legacy = Data(
-            #"{"jsonrpc":"2.0","id":2,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"tests","version":"1.0"}}}"#
-                .utf8
-        )
+        let legacy = Data(initializeBody(id: 2, protocolVersion: "2025-11-25").utf8)
         await base.feed(legacy)
 
         let forwarded = try await iterator.next()
@@ -83,7 +77,7 @@ final class DualEraStdioTests: XCTestCase {
         await dual.stop()
     }
 
-    // MARK: - Matrix row 1: modern tools/list
+    // MARK: - modern tools/list
 
     func testModernToolsListIsAnsweredDirectly() async throws {
         let base = FakeBaseTransport()
@@ -93,10 +87,7 @@ final class DualEraStdioTests: XCTestCase {
         let downstream = await dual.legacy.receive()
         var iterator = downstream.makeAsyncIterator()
 
-        let toolsList = Data(
-            #"{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}"#
-                .utf8
-        )
+        let toolsList = Data(modernBody(method: "tools/list").utf8)
         await base.feed(toolsList)
 
         let responseData = try await base.waitForFirstSend()
@@ -108,10 +99,7 @@ final class DualEraStdioTests: XCTestCase {
 
         // Prove tools/list was never forwarded downstream: the next thing on
         // the downstream stream must be the legacy message fed after it.
-        let legacy = Data(
-            #"{"jsonrpc":"2.0","id":2,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"tests","version":"1.0"}}}"#
-                .utf8
-        )
+        let legacy = Data(initializeBody(id: 2, protocolVersion: "2025-11-25").utf8)
         await base.feed(legacy)
         let forwarded = try await iterator.next()
         XCTAssertEqual(forwarded, legacy)
@@ -122,7 +110,7 @@ final class DualEraStdioTests: XCTestCase {
         await dual.stop()
     }
 
-    // MARK: - Matrix row 2: modern tools/call
+    // MARK: - modern tools/call
 
     func testModernToolCallIsAnsweredDirectly() async throws {
         registerFakeTool(named: "stdio_echo")
@@ -134,10 +122,7 @@ final class DualEraStdioTests: XCTestCase {
         let downstream = await dual.legacy.receive()
         var iterator = downstream.makeAsyncIterator()
 
-        let toolCall = Data(
-            #"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"stdio_echo","arguments":{},"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}"#
-                .utf8
-        )
+        let toolCall = Data(modernBody(method: "tools/call", params: #""name":"stdio_echo","arguments":{}"#).utf8)
         await base.feed(toolCall)
 
         let responseData = try await base.waitForFirstSend()
@@ -147,10 +132,7 @@ final class DualEraStdioTests: XCTestCase {
         let result = try XCTUnwrap(response["result"] as? [String: Any])
         XCTAssertEqual(result["resultType"] as? String, "complete")
 
-        let legacy = Data(
-            #"{"jsonrpc":"2.0","id":2,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"tests","version":"1.0"}}}"#
-                .utf8
-        )
+        let legacy = Data(initializeBody(id: 2, protocolVersion: "2025-11-25").utf8)
         await base.feed(legacy)
         let forwarded = try await iterator.next()
         XCTAssertEqual(forwarded, legacy, "tools/call must never reach the legacy downstream stream")
@@ -161,7 +143,7 @@ final class DualEraStdioTests: XCTestCase {
         await dual.stop()
     }
 
-    // MARK: - Matrix row 3: modern notification
+    // MARK: - modern notification
 
     func testModernNotificationIsConsumedSilently() async throws {
         let base = FakeBaseTransport()
@@ -174,16 +156,10 @@ final class DualEraStdioTests: XCTestCase {
         // Modern-shaped message with no `id`: a notification. The dispatcher
         // must accept and drop it (no response), and it must never reach the
         // legacy downstream stream.
-        let notification = Data(
-            #"{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":9,"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}"#
-                .utf8
-        )
+        let notification = Data(modernBody(id: nil, method: "notifications/cancelled", params: #""requestId":9"#).utf8)
         await base.feed(notification)
 
-        let legacy = Data(
-            #"{"jsonrpc":"2.0","id":2,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"tests","version":"1.0"}}}"#
-                .utf8
-        )
+        let legacy = Data(initializeBody(id: 2, protocolVersion: "2025-11-25").utf8)
         await base.feed(legacy)
 
         // Awaiting this guarantees the pump has already finished processing
@@ -198,7 +174,7 @@ final class DualEraStdioTests: XCTestCase {
         await dual.stop()
     }
 
-    // MARK: - Matrix row 4: initialize carrying modern _meta
+    // MARK: - initialize carrying modern _meta
 
     func testInitializeWithModernMetaStaysLegacy() async throws {
         let base = FakeBaseTransport()
@@ -211,10 +187,7 @@ final class DualEraStdioTests: XCTestCase {
         // An `initialize` request whose params carry the modern protocol
         // version _meta key must still be treated as legacy: era selection
         // always keeps `initialize` on the legacy lane, matching HTTP.
-        let initializeWithModernMeta = Data(
-            #"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"tests","version":"1.0"},"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}"#
-                .utf8
-        )
+        let initializeWithModernMeta = Data(modernBody(method: "initialize", params: #""protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"tests","version":"1.0"}"#).utf8)
         await base.feed(initializeWithModernMeta)
 
         let forwarded = try await iterator.next()
@@ -229,7 +202,7 @@ final class DualEraStdioTests: XCTestCase {
         await dual.stop()
     }
 
-    // MARK: - Matrix row 6: unparseable line
+    // MARK: - unparseable line
 
     func testUnparseableLinePassesThroughToLegacyLane() async throws {
         let base = FakeBaseTransport()
@@ -271,16 +244,10 @@ final class DualEraStdioTests: XCTestCase {
         let downstream = await dual.legacy.receive()
         var iterator = downstream.makeAsyncIterator()
 
-        let slowCall = Data(
-            #"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"slow_tool","arguments":{},"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}"#
-                .utf8
-        )
+        let slowCall = Data(modernBody(method: "tools/call", params: #""name":"slow_tool","arguments":{}"#).utf8)
         await base.feed(slowCall)
 
-        let legacy = Data(
-            #"{"jsonrpc":"2.0","id":2,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"tests","version":"1.0"}}}"#
-                .utf8
-        )
+        let legacy = Data(initializeBody(id: 2, protocolVersion: "2025-11-25").utf8)
         await base.feed(legacy)
 
         // The legacy message must reach the downstream stream without
@@ -318,10 +285,7 @@ final class DualEraStdioTests: XCTestCase {
 
         await base.failNextSend()
 
-        let discover1 = Data(
-            #"{"jsonrpc":"2.0","id":1,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}"#
-                .utf8
-        )
+        let discover1 = Data(modernBody(method: "server/discover").utf8)
         await base.feed(discover1)
 
         // Wait for the (failing) write attempt before feeding the next
@@ -333,10 +297,7 @@ final class DualEraStdioTests: XCTestCase {
         let sentSoFar = await base.sentCount()
         XCTAssertEqual(sentSoFar, 0, "a failed write must not be recorded as sent")
 
-        let discover2 = Data(
-            #"{"jsonrpc":"2.0","id":2,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}"#
-                .utf8
-        )
+        let discover2 = Data(modernBody(id: 2, method: "server/discover").utf8)
         await base.feed(discover2)
 
         // The pump must have survived the failed write: this second modern
@@ -364,9 +325,7 @@ final class DualEraStdioTests: XCTestCase {
 
         async let first: Void = dual.legacy.send(Data(#"{"jsonrpc":"2.0","id":1,"result":{}}"#.utf8))
         async let second: Void = dual.legacy.send(Data(#"{"jsonrpc":"2.0","id":2,"result":{}}"#.utf8))
-        await base.feed(Data(
-            #"{"jsonrpc":"2.0","id":3,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}"#.utf8
-        ))
+        await base.feed(Data(modernBody(id: 3, method: "server/discover").utf8))
         _ = try await (first, second)
         await base.waitForSent(3)
         await dual.stop()
@@ -379,17 +338,65 @@ final class DualEraStdioTests: XCTestCase {
         }
     }
 
+    // MARK: - Cancellation
+
+    /// A `notifications/cancelled` stops a modern `tools/call`, whether the
+    /// notification is legacy-shaped or carries the modern `_meta`.
+    func testCancelledNotificationStopsModernToolCall() async throws {
+        let cancels = [
+            #"{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":5}}"#,
+            modernBody(id: nil, method: "notifications/cancelled", params: #""requestId":5"#),
+        ]
+        for cancel in cancels {
+            let (started, startedSink) = AsyncStream<Void>.makeStream()
+            let base = FakeBaseTransport()
+            let dual = DualEraStdio(base: base, catalog: ToolCatalog([waitForCancelTool(started: startedSink)]))
+            try await dual.start()
+            let clock = ContinuousClock()
+            let begin = clock.now
+
+            await base.feed(Data(modernBody(id: 5, method: "tools/call", params: #""name":"wait_for_cancel","arguments":{}"#).utf8))
+            var iterator = started.makeAsyncIterator()
+            _ = await iterator.next()
+            await base.feed(Data(cancel.utf8))
+
+            let sent = try await base.waitForFirstSend()
+            let reply = try XCTUnwrap(JSONSerialization.jsonObject(with: sent) as? [String: Any])
+            XCTAssertLessThan(clock.now - begin, .seconds(5), "the call ran on after \(cancel)")
+            XCTAssertEqual(reply["id"] as? Int, 5)
+            XCTAssertEqual((reply["result"] as? [String: Any])?["isError"] as? Bool, true, "\(reply)")
+            await dual.stop()
+        }
+    }
+
+    // MARK: - End of input
+
+    /// A modern request followed by end of input is answered before the
+    /// stdio server returns.
+    func testModernReplyIsWrittenBeforeServeStdioReturnsAtEndOfInput() async throws {
+        let slow = fakeTool(named: "slow") { _ in
+            await AsyncTimeout.sleep(.milliseconds(300))
+            return [.plainText(#"{"done":true}"#)]
+        }
+        let base = FakeBaseTransport()
+        await base.feed(Data(modernBody(id: 9, method: "tools/call", params: #""name":"slow","arguments":{}"#).utf8))
+        await base.endInput()
+
+        try await ServerStartup.serveStdio(base: base, catalog: ToolCatalog([slow]))
+
+        let replies = await base.sentMessages().compactMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+        let reply = try XCTUnwrap(replies.first { $0["id"] as? Int == 9 }, "no reply written: \(replies)")
+        let result = try XCTUnwrap(reply["result"] as? [String: Any])
+        XCTAssertEqual((result["structuredContent"] as? [String: Any])?["done"] as? Bool, true)
+    }
+
     // MARK: - Helpers
 
     private func registerFakeTool(
         named name: String,
-        handler: @escaping @Sendable ([String: Value]?) async throws -> [Tool.Content] = { _ in
-            [.plainText("ok")]
-        }
+        handler: @escaping @Sendable ([String: Value]?) async throws -> [Tool.Content] = { _ in [.plainText("ok")] }
     ) {
-        definitions.append(
-            ToolDefinition(name: name, description: "test tool", inputSchema: InputSchema.object(properties: [:]), handler: handler)
-        )
+        definitions.append(fakeTool(named: name, handler: handler))
     }
 }
 
@@ -454,8 +461,17 @@ private actor FakeBaseTransport: Transport {
         continuation.yield(data)
     }
 
+    /// Ends the inbound stream, as stdin reaching end of file does.
+    func endInput() {
+        continuation.finish()
+    }
+
     func sentCount() -> Int {
         sent.count
+    }
+
+    func sentMessages() -> [Data] {
+        sent
     }
 
     /// Makes the next `send(_:)` call throw instead of recording, simulating

@@ -234,19 +234,11 @@ final class HTTPTransportLiveSocketTests: XCTestCase {
         body: (HTTPTransport, Int) async throws -> Void
     ) async throws {
         let port = try freeLoopbackPort()
-        let transport = HTTPTransport(
-            host: "127.0.0.1",
-            port: port,
-            catalog: makeTestCatalog(),
-            setupPermissions: makeTestSetupPermissions(),
-            configuration: .init(
-                requestTimeout: .seconds(5),
-                channelIdleTimeout: channelIdleTimeout,
-                cleanupInterval: .milliseconds(20),
-                sessionTimeout: sessionTimeout,
-                sseKeepAliveInterval: sseKeepAliveInterval
-            )
-        )
+        var configuration = HTTPTransport.Configuration.test
+        configuration.channelIdleTimeout = channelIdleTimeout
+        configuration.sessionTimeout = sessionTimeout
+        configuration.sseKeepAliveInterval = sseKeepAliveInterval
+        let transport = makeTestTransport(port: port, configuration: configuration)
         try await transport.connect(gracefulShutdownSignals: [])
         do {
             try await waitUntilListening(port: port)
@@ -297,9 +289,7 @@ private func initializeSession(port: Int) throws -> String {
     let fd = try connectLoopback(port: port)
     defer { close(fd) }
     setRecvTimeout(fd, seconds: 2)
-    let body = """
-        {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"tests","version":"1.0"}}}
-        """
+    let body = initializeBody()
     let post = """
         POST / HTTP/1.1\r\n\
         Host: 127.0.0.1\r\n\

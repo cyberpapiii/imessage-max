@@ -90,6 +90,23 @@ final class SSEConnectionManagerTests: XCTestCase {
         count = await manager.connectionCount
         XCTAssertEqual(count, 0)
     }
+
+    /// `closeAll` ends open streams and every stream registered after it, so
+    /// a GET that registers during shutdown cannot hold the process open.
+    func testCloseAllEndsOpenStreamsAndLaterOnes() async {
+        let manager = SSEConnectionManager(keepAliveInterval: .seconds(60))
+        let open = await manager.register(info: SSEConnectionInfo(sessionId: "a"))
+        await manager.closeAll()
+        let late = await manager.register(info: SSEConnectionInfo(sessionId: "b"))
+
+        for channel in [open, late] {
+            var received = 0
+            for await _ in channel.stream { received += 1 }
+            XCTAssertEqual(received, 0)
+        }
+        let count = await manager.connectionCount
+        XCTAssertEqual(count, 0)
+    }
 }
 
 // MARK: - SSE Channel Tests

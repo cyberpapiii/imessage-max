@@ -6,10 +6,9 @@ import NIOCore
 @testable import iMessageMax
 
 /// Oversized POST bodies must return 413 and leave the request body fully
-/// consumed. The old `collect(upTo:)` path threw with megabytes unread; for
-/// `Connection: close` clients (Python urllib default) Hummingbird's HTTP1
-/// loop then blocked on channel close with reads back-pressured off, leaking
-/// one server FD per oversized request.
+/// consumed. A body left with megabytes unread blocks Hummingbird's HTTP1
+/// loop on channel close for `Connection: close` clients (Python urllib's
+/// default), leaking one server FD per oversized request.
 final class OversizedBodyTests: XCTestCase {
     private let maxBytes = HTTPRequestParsing.maxRequestBodyBytes
     private let drainLimit = HTTPRequestParsing.overLimitDrainBytes
@@ -91,29 +90,13 @@ final class OversizedBodyTests: XCTestCase {
         }
     }
 
-    /// Observable contract unchanged: oversized POST returns HTTP 413 with an
-    /// empty body, exactly like the old Hummingbird-converted throw.
+    /// An oversized POST answers HTTP 413 with an empty body.
     func testOversizedPostReturns413WithEmptyBody() async throws {
-        let transport = HTTPTransport(
-            host: "127.0.0.1",
-            port: 0,
-            catalog: makeTestCatalog(),
-            setupPermissions: makeTestSetupPermissions(),
-            configuration: .init(requestTimeout: .seconds(5), cleanupInterval: .milliseconds(20))
-        )
-        let app = await transport.application()
+        let app = await makeTestTransport().application()
 
         try await app.test(TestingSetup.router) { client in
             let oversized = ByteBuffer(repeating: 0x7A, count: HTTPRequestParsing.maxRequestBodyBytes + 1)
-            let response = try await client.executeRequest(
-                uri: "/",
-                method: HTTPRequest.Method.post,
-                headers: [
-                    .contentType: "application/json",
-                    .accept: "application/json, text/event-stream",
-                ],
-                body: oversized
-            )
+            let response = try await client.executeRequest(uri: "/", method: .post, headers: jsonHeaders(), body: oversized)
 
             XCTAssertEqual(response.head.status, .contentTooLarge)
             XCTAssertEqual(response.body.readableBytes, 0)
