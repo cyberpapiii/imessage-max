@@ -109,14 +109,11 @@ enum SharedMessages {
         let ranksBySize = sort == .largestFirst
         let query = QueryBuilder()
         // One row per message, under the chat the scope lists it in.
-        let scope = ChatScope(named: chatId, includeFiltered: false)
-        let chat = scope.listedChat()
+        ChatScope(named: chatId, includeFiltered: false).read(query)
 
         if ranksBySize {
             query
                 .selectMessages(schema, MessageInChat.chatColumns, "MAX(COALESCE(a.total_bytes, 0)) as max_attachment_size")
-                .from("message m")
-                .join("chat c ON c.ROWID = \(chat)")
                 .joinMessageHandles()
                 .join("message_attachment_join maj ON m.ROWID = maj.message_id")
                 .join("attachment a ON maj.attachment_id = a.ROWID")
@@ -135,13 +132,10 @@ enum SharedMessages {
                 """
             query
                 .selectMessages(schema, MessageInChat.chatColumns, sizeSelect)
-                .from("message m")
-                .join("chat c ON c.ROWID = \(chat)")
                 .joinMessageHandles()
                 .where(SQLFragments.notReaction())
                 .where(SQLFragments.hasAttachment(ofType: typeFilter))
         }
-        scope.narrow(query)
 
         if let sender {
             query.where(sender)

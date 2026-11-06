@@ -241,11 +241,10 @@ final class GetUnread {
         // (date, ROWID) cursor never meets the same message twice.
         let query = QueryBuilder()
             .selectMessages(try database.schema(), MessageInChat.chatColumns)
-            .from("message m")
-            .join("chat c ON c.ROWID = \(scope.listedChat())")
+        scope.read(query)
+        query
             .joinMessageHandles()
             .where(SQLFragments.unreadInbound())
-        scope.narrow(query)
         if let sinceApple {
             query.where("m.date >= ?", sinceApple)
         }

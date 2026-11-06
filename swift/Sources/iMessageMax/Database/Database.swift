@@ -61,6 +61,14 @@ final class Database: @unchecked Sendable {
     }
     private static let queryCounter = Mutex<Int?>(nil)
 
+    /// Opt-in plan recorder for tests: nil (off), or the EXPLAIN QUERY PLAN
+    /// detail lines of each `query` since it was set, in call order.
+    static var queryPlansForTesting: [[String]]? {
+        get { queryPlans.withLock { $0 } }
+        set { queryPlans.withLock { $0 = newValue } }
+    }
+    private static let queryPlans = Mutex<[[String]]?>(nil)
+
     /// In-flight read connections so a cancelled `tools/call` can
     /// `sqlite3_interrupt` them instead of leaving a full-scan running.
     private static let activeQueries = Mutex([ObjectIdentifier: ActiveQuery]())
@@ -110,6 +118,11 @@ final class Database: @unchecked Sendable {
         defer {
             Self.activeQueries.withLock { _ = $0.removeValue(forKey: id) }
             sqlite3_close(conn)
+        }
+
+        if Self.queryPlansForTesting != nil {
+            let plan = try explain(conn, sql: sql, params: params)
+            Self.queryPlans.withLock { $0?.append(plan) }
         }
 
         let stmt = try prepare(conn, sql: sql, params: params)
@@ -169,6 +182,16 @@ final class Database: @unchecked Sendable {
         }
 
         return db
+    }
+
+    private func explain(_ conn: OpaquePointer, sql: String, params: [Any]) throws -> [String] {
+        let stmt = try prepare(conn, sql: "EXPLAIN QUERY PLAN " + sql, params: params)
+        defer { sqlite3_finalize(stmt) }
+        var lines: [String] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            lines.append(SQLiteRow(stmt).string(3) ?? "")
+        }
+        return lines
     }
 
     private func prepare(

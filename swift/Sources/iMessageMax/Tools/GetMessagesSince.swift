@@ -241,25 +241,24 @@ actor GetMessagesSinceTool {
         scope: ChatScope,
         limit: Int
     ) throws -> [SinceScanRow] {
-        // Hidden chats are dropped below, after the row is consumed.
-        let chat = scope.listedChat()
+        // Hidden chats and messages not joined to a chat yet are sorted
+        // below, after the row is consumed.
         let query = QueryBuilder()
             .selectMessages(
                 schema,
-                "\(chat) AS chat_id",
+                "\(scope.listedChat()) AS chat_id",
                 "c.display_name AS chat_display_name",
                 "c.is_filtered AS chat_is_filtered"
             )
-            .from("message m")
+        scope.read(query, screened: false)
+        let rowid = scope.messageRowid
+        query
             .joinMessageHandles()
-            .leftJoin("chat c ON c.ROWID = \(chat)")
-            .where("m.ROWID > ?", sinceRowid)
-            .where("m.ROWID <= ?", currentRowid)
+            .where("\(rowid) > ?", sinceRowid)
+            .where("\(rowid) <= ?", currentRowid)
             .where(SQLFragments.notReaction())
-        if let named = scope.named {
-            query.where(SQLFragments.messageInChat(), named)
-        }
-        query.orderBy("m.ROWID ASC").limit(limit)
+            .orderBy("\(rowid) ASC")
+            .limit(limit)
 
         let (sql, params) = query.build()
         let extra = MessageRecord.columnCount
