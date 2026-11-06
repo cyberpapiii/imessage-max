@@ -129,4 +129,43 @@ final class ReviewFourRegressionTests: XCTestCase {
         // The one message walk is the unnamed page itself.
         XCTAssertEqual(recorded.filter(walksMessages).count, 1, "plans: \(recorded)")
     }
+
+    // MARK: - get_unread counts each message under the chat it lists it in
+
+    /// Messages 1-3 are in shown chat 1; message 2 is also in shown chat 2.
+    private func messageInTwoShownChats() throws -> ToolTestDatabase {
+        let f = try ToolTestDatabase(name: "two-shown-\(UUID().uuidString)")
+        try f.insertHandle(rowId: 1, handle: "+15550000001")
+        try f.insertChat(rowId: 1, guid: "iMessage;-;+15550000001")
+        try f.insertChat(rowId: 2, guid: "SMS;-;+15550000001", serviceName: "SMS")
+        for row in 1...3 {
+            try f.insertMessage(rowId: row, guid: "g\(row)", text: "hello \(row)", date: recent + Int64(row), isFromMe: false, handleId: 1)
+            try f.joinChatMessage(chatId: 1, messageId: row)
+        }
+        try f.joinChatMessage(chatId: 2, messageId: 2)
+        return f
+    }
+
+    func testUnreadSummaryCountsAMessageInTwoChatsOnce() async throws {
+        let f = try messageInTwoShownChats()
+        let db = f.database()
+
+        let summary = try await callTool("get_unread", [:], database: db)
+        let chats = try decodeJSONArray(summary["chats"])
+        XCTAssertEqual(chats.map { ($0["chat"] as? [String: Any])?["id"] as? String }, ["chat1"])
+        XCTAssertEqual(chats.first?["unread_count"] as? Int, 3)
+        XCTAssertEqual(summary["total_unread"] as? Int, 3)
+        XCTAssertEqual(summary["chats_with_unread"] as? Int, 1)
+
+        let messages = try await callTool("get_unread", ["format": "messages"], database: db)
+        XCTAssertEqual(try chatIds(messages), ["chat1", "chat1", "chat1"])
+        XCTAssertEqual(messages["total_unread"] as? Int, 3)
+        XCTAssertEqual(messages["chats_with_unread"] as? Int, 1)
+
+        // Named, chat 2 holds its one message.
+        let second = try await callTool("get_unread", ["chat_id": "chat2"], database: db)
+        XCTAssertEqual(try decodeJSONArray(second["chats"]).first?["unread_count"] as? Int, 1)
+        XCTAssertEqual(second["total_unread"] as? Int, 1)
+        XCTAssertEqual(second["chats_with_unread"] as? Int, 1)
+    }
 }
