@@ -32,7 +32,8 @@ enum DiagnoseTool {
                 "unverified" means diagnose could not determine the state. The feature may \
                 work, so try it, but do not promise the user it will. "unavailable" means the \
                 current backend has no implementation. Do not attempt it and do not tell the \
-                user it is coming. The database.accessible field tells you whether \
+                user it is coming. "degraded" means the feature works only in part. Show the \
+                fix field to the user when it has one. The database.accessible field tells you whether \
                 all read tools (get_messages, list_chats, search, and the rest) will work. \
                 A top-level status of "needs_setup" means at least one required permission \
                 is missing. Resolve it before you continue. Use chat.name in user-facing \
@@ -129,7 +130,8 @@ enum DiagnoseTool {
                     + "A Contacts switch for Terminal or Claude does not apply to this process."
             } else {
                 contactsFix = "Grant Contacts access: System Settings -> Privacy & Security -> " +
-                    "Contacts -> Add your terminal app or the imessage-max executable"
+                    "Contacts -> turn on imessage-max. If it is not listed, run " +
+                    "`imessage-max --request-contacts-access` once from a terminal."
             }
         }
 

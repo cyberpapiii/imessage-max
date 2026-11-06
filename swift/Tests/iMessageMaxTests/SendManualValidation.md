@@ -25,7 +25,7 @@ Call:
 
 Expected:
 
-- Result status is `sent`
+- Result status is `confirmed` (`uncertain` if no row appears within the verification window)
 - Message appears in the expected 1:1 conversation
 - `delivered_to` names the intended person
 
@@ -42,7 +42,7 @@ Call:
 
 Expected:
 
-- Result status is `sent`
+- Result status is `confirmed` (`uncertain` if no row appears within the verification window)
 - Message appears in the exact existing group thread
 - No fallback to a different conversation
 
@@ -99,7 +99,17 @@ Expected:
 - The error says the file could not be read
 - No send attempt is made in Messages
 
-<!-- Section 6 removed with plan 075; reply_to is no longer a send parameter. -->
+### 6. Unknown chat id returns `failed`, `not_started`, `retry_safe: true`
+
+Call send with a well-formed `chat_id` that does not exist (`chat999999999`).
+
+Expected:
+
+- `status` is `failed`
+- `disposition` is `not_started`
+- `retry_safe` is `true`
+- `error` contains `Chat not found` and the unknown id
+- Nothing appears in Messages.app
 
 ## Verified-send proof vocabulary
 
@@ -205,21 +215,9 @@ Expected:
 - `message` begins `PARTIAL SEND:` and names which payload was dispatched and
   which failed
 - `message` says explicitly not to resend the already-dispatched payload
-- The text is visible in the conversation, and the attachment is not
-- Re-running the same call blind would duplicate the text. Confirm the
+- The first file is visible in the conversation, and the second is not
+- Re-running the same call blind would send the first file again. Confirm the
   response makes that obvious
-
-### 12. Bogus chat guid returns `failed`, `not_started`, `retry_safe: true`
-
-Call send with `chat_id` set to a guid that does not exist (`iMessage;-;does-not-exist`).
-
-Expected:
-
-- `status` is `failed`
-- `disposition` is `not_started`
-- `retry_safe` is `true`
-- `error` contains `Chat not found` / the bogus guid
-- Nothing appears in Messages.app
 
 ## Attachment spot checks
 

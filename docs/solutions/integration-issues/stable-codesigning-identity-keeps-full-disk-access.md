@@ -89,8 +89,10 @@ security add-trusted-cert -r trustRoot -p codeSign cert.pem
 
 ## Why this works
 
-A TCC grant, like a Keychain ACL, is keyed to the requesting executable's code
-signature, specifically its designated requirement (DR).
+A Full Disk Access grant names the executable's path, and TCC stores the
+code signature's designated requirement (DR) with it. The binary must match
+both. `make build` keeps the path fixed, as AGENTS.md describes, so the DR is
+the part a rebuild can break.
 
 - An ad-hoc signature's DR is in effect the CDHash, a hash of the exact bytes.
   Every rebuild changes the bytes, which changes the DR, so the grant no longer

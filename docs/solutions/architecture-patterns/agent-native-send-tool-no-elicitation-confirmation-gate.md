@@ -100,9 +100,11 @@ The agent-native send contract (plan 017, net 71 lines removed):
 
 A related rule covers the runtime. Never use `Task.sleep` anywhere in the launchd
 service runtime. Sleeping unstructured Swift tasks abort in `swift_task_dealloc` at wakeup in
-this runtime. Use Dispatch timers instead. `AsyncTimeout.sleep` is a
-`CheckedContinuation` resumed by `DispatchQueue.asyncAfter`, and
-`PendingRequestRegistry.store` shows the `DispatchWorkItem` pattern.
+this runtime. Use Dispatch timers instead. `AsyncTimeout.sleep` resumes a
+`CheckedContinuation` from a cancellable `DispatchSourceTimer`, and
+`PendingRequestRegistry.store` uses the same kind of timer. Avoid `asyncAfter`,
+because a cancelled `asyncAfter` work item stays queued, with everything it
+captured, until its deadline.
 
 ## Why this matters
 
@@ -181,7 +183,9 @@ group.addTask {
 }
 ```
 
-The launchd-safe replacement (plan 015, current `AsyncTimeout.sleep`):
+The first launchd-safe replacement (plan 015). The current `AsyncTimeout.sleep`
+in `Utilities/AsyncTimeout.swift` replaced its `asyncAfter` with a cancellable
+`DispatchSourceTimer`:
 
 ```swift
 static func sleep(_ duration: Duration) async {
