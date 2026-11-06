@@ -32,18 +32,4 @@ enum DatabaseError: LocalizedError {
         case .cancelled: "cancelled"
         }
     }
-
-    /// Fixed guidance for the client. The description, which carries
-    /// filesystem paths, goes to the log under `context`.
-    func clientMessage(context: String) -> String {
-        let message: String
-        switch self {
-        case .cancelled: return ClientErrorMessages.cancelled
-        case .notFound: message = ClientErrorMessages.databaseNotFound
-        case .permissionDenied: message = ClientErrorMessages.permissionDenied
-        case .queryFailed, .invalidData: message = ClientErrorMessages.internalError
-        }
-        Log.error("\(context): \(localizedDescription)")
-        return message
-    }
 }

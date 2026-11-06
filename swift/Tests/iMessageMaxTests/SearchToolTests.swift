@@ -893,3 +893,19 @@ func makeSearchFixture() throws -> ToolTestDatabase {
 
     return fixture
 }
+
+extension SearchToolTests {
+    /// Any-word search past the 8-word SQL prefilter cap still finds a
+    /// message whose only matching word is the ninth, and counts it in
+    /// filtered_hidden.
+    func testAnyWordSearchMatchesAWordPastThePrefilterCap() async throws {
+        let fixture = try hiddenMatchesFixture()
+        let page = try await callTool(
+            "search",
+            ["query": "aa bb cc dd ee ff gg hh volcano"],
+            database: fixture.database()
+        )
+        XCTAssertEqual(try itemIds(page, "results"), ["msg_1"])
+        XCTAssertEqual(page["filtered_hidden"] as? Int, 1)
+    }
+}

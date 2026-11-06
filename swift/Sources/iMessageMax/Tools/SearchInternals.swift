@@ -50,14 +50,18 @@ extension SearchTool {
         }
 
         if let query, !query.isEmpty {
-            if fuzzy || terms.isEmpty {
+            // At most 8 terms reach SQL. Under match_all any 8 still only
+            // narrow (the Swift word filter checks every term), but an
+            // any-word query OR'ing its first 8 would drop rows matching only
+            // a later word, so a longer any-word query skips the prefilter.
+            let prefilterCap = 8
+            if fuzzy || terms.isEmpty || (!matchAll && terms.count > prefilterCap) {
                 builder.where("(m.text IS NOT NULL OR m.attributedBody IS NOT NULL)")
             } else {
                 // Each term's textMayContain, joined as match_all asks, so
                 // attributedBody-only rows without the words never fill the
-                // fetch window. Capped at 8 terms; the Swift word filter
-                // still checks every term.
-                let matches = terms.prefix(8).map { SQLFragments.textMayContain($0) }
+                // fetch window.
+                let matches = terms.prefix(prefilterCap).map { SQLFragments.textMayContain($0) }
                 let joiner = matchAll ? " AND " : " OR "
                 builder.where(
                     "(\(matches.map(\.sql).joined(separator: joiner)))",
@@ -87,13 +91,8 @@ extension SearchTool {
             builder.where(isGroup ? SQLFragments.isGroup() : SQLFragments.isDirect())
         }
 
-        // get_messages' plural spellings are accepted too.
-        switch has {
-        case "link", "links": builder.where(SQLFragments.hasLink())
-        case "attachment", "attachments": builder.where(SQLFragments.hasAttachment())
-        case "image", "images": builder.where(SQLFragments.hasAttachment(ofType: "image"))
-        case "video", "videos": builder.where(SQLFragments.hasAttachment(ofType: "video"))
-        default: break
+        if let has = SQLFragments.has(has) {
+            builder.where(has)
         }
     }
 
