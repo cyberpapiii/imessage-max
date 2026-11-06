@@ -32,7 +32,7 @@ final class ToolErrorMappingTests: XCTestCase {
 
     private func callFailing(throwing error: any Error) async throws -> [String: Any] {
         let catalog = ToolCatalog([
-            ToolDefinition(name: "failing", description: "test", inputSchema: .object([:])) { _ in throw error }
+            fakeTool(named: "failing") { _ in throw error }
         ])
         guard case .completed(let content, isError: true) = await ToolCallDispatch.execute(
             name: "failing", arguments: nil, lane: .legacyStdio, catalog: catalog

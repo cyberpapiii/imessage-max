@@ -64,6 +64,6 @@ final class CallLogTests: XCTestCase {
         _ name: String,
         handler: @escaping @Sendable ([String: Value]?) async throws -> [Tool.Content]
     ) {
-        definitions.append(ToolDefinition(name: name, description: "test", inputSchema: InputSchema.object(properties: [:]), handler: handler))
+        definitions.append(fakeTool(named: name, handler: handler))
     }
 }
