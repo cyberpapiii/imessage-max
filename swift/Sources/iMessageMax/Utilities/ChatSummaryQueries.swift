@@ -162,7 +162,7 @@ enum ChatSummaryQueries {
         }
         // A conversational last message answers awaiting_reply itself; only
         // a group event sends the lookup back for the newest one before it.
-        let awaiting = "CASE WHEN m.item_type = 0 THEN m.is_from_me = 0 ELSE "
+        let awaiting = "CASE WHEN \(SQLFragments.conversational("m")) THEN m.is_from_me = 0 ELSE "
             + SQLFragments.awaitingReply(chat: "i.chat_id", sinceBound: options.sinceApple != nil) + " END"
         if let since = options.sinceApple {
             params.append(since)
