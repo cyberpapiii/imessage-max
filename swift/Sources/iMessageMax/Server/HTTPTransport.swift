@@ -264,23 +264,26 @@ actor HTTPTransport {
             )
         }
 
-        // A `tools/call` needs nothing that the session's own Server holds:
-        // handlers live in the catalog and the result fields are identical in
-        // both eras. Answering it here skips routing the request into the SDK,
-        // which re-encodes the whole response through Codable `Value` on the
-        // way out. That round-trip cost about 9 ms of the 26 ms a 12 kB
-        // list_chats reply took on this lane. A call without a string name or
-        // with non-object arguments falls through to the SDK, which owns the
-        // error wording for malformed params.
-        if message.kind == .request, message.method == "tools/call", let toolName = message.toolName,
-            !message.hasMalformedToolArguments
-        {
-            return await legacyToolCallResponse(message: message, name: toolName, sessionId: sessionId, headers: responseHeaders)
-        }
-
         switch message.kind {
         case .request:
-            return await forwardRequest(requestData, message: message, sessionId: sessionId, headers: responseHeaders)
+            // An id that is not a JSON scalar can never be matched to its
+            // answer: the client's error (400), on either route below.
+            guard let requestId = message.requestKey else {
+                return errorResponse(.badRequest, "Invalid Request: id must be a string, a number, or null")
+            }
+            let key = PendingRequestRegistry.Key(sessionId: sessionId, requestId: requestId)
+            // A `tools/call` needs nothing that the session's own Server holds:
+            // handlers live in the catalog and the result fields are identical in
+            // both eras. Answering it here skips routing the request into the SDK,
+            // which re-encodes the whole response through Codable `Value` on the
+            // way out. That round-trip cost about 9 ms of the 26 ms a 12 kB
+            // list_chats reply took on this lane. A call without a string name or
+            // with non-object arguments falls through to the SDK, which owns the
+            // error wording for malformed params.
+            if message.method == "tools/call", let toolName = message.toolName, !message.hasMalformedToolArguments {
+                return await legacyToolCallResponse(message: message, name: toolName, key: key, headers: responseHeaders)
+            }
+            return await forwardRequest(requestData, message: message, key: key, headers: responseHeaders)
         case .notification, .response:
             // The SDK cancels the requests it holds; the calls answered here
             // it never saw, so cancel those directly.
@@ -294,24 +297,33 @@ actor HTTPTransport {
         }
     }
 
+    /// A request reusing the id of one still in flight on its session, on
+    /// either route, is the client's error: 400 with the id.
+    private func idInUseResponse(_ message: JSONRPCMessage) -> Response {
+        errorResponse(
+            .badRequest,
+            "Invalid Request: id is already in use by a request in flight on this session",
+            id: JSONRPC.fallbackId(for: message.id)
+        )
+    }
+
     /// Routes a request to the session's Server and waits for its answer.
-    /// A malformed or reused id is the client's error (400, with the id when
-    /// it has one); a timeout or a session that ends first is ours (500).
-    private func forwardRequest(_ requestData: Data, message: JSONRPCMessage, sessionId: String, headers: HTTPFields) async -> Response {
-        // An id that is not a JSON scalar can never be matched to the SDK's
-        // answer.
-        guard let key = message.requestKey else {
-            return errorResponse(.badRequest, "Invalid Request: id must be a string, a number, or null")
-        }
+    /// A reused id is the client's error (400); a timeout or a session that
+    /// ends first is ours (500).
+    private func forwardRequest(
+        _ requestData: Data, message: JSONRPCMessage, key: PendingRequestRegistry.Key, headers: HTTPFields
+    ) async -> Response {
+        guard !inFlightToolCalls.isInFlight(key) else { return idInUseResponse(message) }
+        let sessionId = key.sessionId, id = key.requestId
         do {
             let responseData = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, Error>) in
                 Task {
-                    guard await self.pendingRequests.store(sessionId: sessionId, id: key, continuation: continuation) else {
+                    guard await self.pendingRequests.store(sessionId: sessionId, id: id, continuation: continuation) else {
                         continuation.resume(throwing: DuplicateRequestId())
                         return
                     }
                     let routed = await self.sessionManager.routeMessage(sessionId: sessionId, data: requestData)
-                    if !routed, let pending = await self.pendingRequests.remove(sessionId: sessionId, id: key)
+                    if !routed, let pending = await self.pendingRequests.remove(sessionId: sessionId, id: id)
                     {
                         pending.resume(throwing: MCPError.connectionClosed)
                     }
@@ -319,11 +331,7 @@ actor HTTPTransport {
             }
             return Response(status: .ok, headers: headers, body: .init(byteBuffer: ByteBuffer(data: responseData)))
         } catch is DuplicateRequestId {
-            return errorResponse(
-                .badRequest,
-                "Invalid Request: id is already in use by a request in flight on this session",
-                id: JSONRPC.fallbackId(for: message.id)
-            )
+            return idInUseResponse(message)
         } catch {
             Log.error("Request handling failed: \(error)")
             return errorResponse(.internalServerError, ClientErrorMessages.internalError)
@@ -340,14 +348,19 @@ actor HTTPTransport {
     /// The call runs in its own task, listed in `inFlightToolCalls`, so a
     /// `notifications/cancelled` for its id cancels it the way the SDK cancels
     /// a stdio call: the tool stops and the reply is its cancelled result.
-    private func legacyToolCallResponse(message: JSONRPCMessage, name: String, sessionId: String, headers: HTTPFields) async -> Response {
+    private func legacyToolCallResponse(
+        message: JSONRPCMessage, name: String, key: PendingRequestRegistry.Key, headers: HTTPFields
+    ) async -> Response {
         let id = message.id ?? NSNull()
         let arguments = message.toolArguments
         let catalog = self.catalog
-        let call = inFlightToolCalls.start(
-            message.requestKey.map { PendingRequestRegistry.Key(sessionId: sessionId, requestId: $0) }
-        ) {
-            await ToolCallDispatch.execute(name: name, arguments: arguments, lane: .legacyHTTP(session: sessionId), catalog: catalog)
+        let sessionId = key.sessionId
+        guard await !pendingRequests.isPending(sessionId: sessionId, id: key.requestId),
+            let call = inFlightToolCalls.startUnlessInFlight(key, {
+                await ToolCallDispatch.execute(name: name, arguments: arguments, lane: .legacyHTTP(session: sessionId), catalog: catalog)
+            })
+        else {
+            return idInUseResponse(message)
         }
         let execution = await inFlightToolCalls.finish(call)
 

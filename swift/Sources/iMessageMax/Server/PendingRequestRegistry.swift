@@ -52,6 +52,10 @@ actor PendingRequestRegistry {
         return true
     }
 
+    func isPending(sessionId: String, id: String) -> Bool {
+        entries[Key(sessionId: sessionId, requestId: id)] != nil
+    }
+
     func remove(sessionId: String, id: String) -> CheckedContinuation<Data, Error>? {
         let key = Key(sessionId: sessionId, requestId: id)
         let entry = entries.removeValue(forKey: key)
@@ -116,6 +120,24 @@ final class InFlightRequests<Key: Hashable & Sendable>: Sendable {
             return true
         }
         return Call(task: task, trackedKey: tracked ? key : nil)
+    }
+
+    /// `start` for a call whose id must be unique: nil, with nothing run,
+    /// when `key` is already in flight.
+    func startUnlessInFlight<Value: Sendable>(
+        _ key: Key,
+        _ operation: @escaping @Sendable () async -> Value
+    ) -> Call<Value>? {
+        cancellers.withLock { entries in
+            guard entries[key] == nil else { return nil }
+            let task = Task { await operation() }
+            entries[key] = { task.cancel() }
+            return Call(task: task, trackedKey: key)
+        }
+    }
+
+    func isInFlight(_ key: Key) -> Bool {
+        cancellers.withLock { $0[key] != nil }
     }
 
     /// Waits for the call and stops tracking it. Cancelling the waiting task
