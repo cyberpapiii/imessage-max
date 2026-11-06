@@ -108,9 +108,9 @@ enum SharedMessages {
         // subqueries that keep the result one row per message on their own.
         let ranksBySize = sort == .largestFirst
         let query = QueryBuilder()
-        // One row per message: a message in the filtered chat is listed
-        // under that chat, any other under its home chat.
-        let chat = chatId.map(String.init) ?? SQLFragments.homeChat()
+        // One row per message, under the chat the scope lists it in.
+        let scope = ChatScope(named: chatId, includeFiltered: false)
+        let chat = scope.listedChat()
 
         if ranksBySize {
             query
@@ -141,12 +141,7 @@ enum SharedMessages {
                 .where(SQLFragments.notReaction())
                 .where(SQLFragments.hasAttachment(ofType: typeFilter))
         }
-        if let chatId {
-            query.where(SQLFragments.messageInChat(), chatId)
-        } else {
-            // A chat named outright is shown even when Messages.app hides it.
-            query.where(SQLFragments.shownChat())
-        }
+        scope.narrow(query)
 
         if let sender {
             query.where(sender)

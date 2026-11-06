@@ -43,10 +43,19 @@ enum SQLFragments {
     }
 
     /// The one chat a message is listed under where a tool shows one chat
-    /// per message: the lowest chat id it is joined to. `messageId` is the
-    /// SQL expression for the message's ROWID.
-    static func homeChat(of messageId: String = "m.ROWID") -> String {
-        "(SELECT MIN(hcmj.chat_id) FROM chat_message_join hcmj WHERE hcmj.message_id = \(messageId))"
+    /// per message: the lowest chat id it is joined to. With `preferShown`
+    /// (the tool leaves hidden chats out) it is the lowest shown chat, so a
+    /// message also in a shown chat does not vanish with a hidden one; a
+    /// message only in hidden chats keeps the lowest, which the shown-chat
+    /// filter then drops. `messageId` is the SQL expression for the message's ROWID.
+    static func homeChat(of messageId: String = "m.ROWID", preferShown: Bool = false) -> String {
+        let lowest = "(SELECT MIN(hcmj.chat_id) FROM chat_message_join hcmj WHERE hcmj.message_id = \(messageId))"
+        guard preferShown else { return lowest }
+        return """
+            COALESCE((SELECT MIN(scmj.chat_id) FROM chat_message_join scmj \
+            JOIN chat sc ON sc.ROWID = scmj.chat_id \
+            WHERE scmj.message_id = \(messageId) AND \(shownChat("sc"))), \(lowest))
+            """
     }
 
     /// The message is joined to the chat bound as `?`, home chat or not.

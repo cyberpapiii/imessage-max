@@ -1,11 +1,20 @@
 import Foundation
 
 extension SearchTool {
+    /// The chats a search reads, and how its rows relate to them.
+    enum Chats {
+        /// One row per message, under the chat `scope` lists it in.
+        case listed(ChatScope)
+        /// One row per hidden chat a message is in, only `inChat` when set:
+        /// the filtered_hidden candidates.
+        case hiddenMembership(inChat: Int64?)
+    }
+
     static func applySearchFilters(
         to builder: QueryBuilder,
         query: String?,
         fromPerson: SenderFilter?,
-        inChat: Int64?,
+        chats: Chats,
         isGroup: Bool?,
         has: String?,
         since: String?,
@@ -15,11 +24,17 @@ extension SearchTool {
         unanswered: Bool,
         terms: [String],
         matchAll: Bool,
-        fuzzy: Bool,
-        chatFilterPredicate: String?,
-        drivenFromChats: Bool = false
+        fuzzy: Bool
     ) {
-        if drivenFromChats {
+        switch chats {
+        case .listed(let scope):
+            builder
+                .from("message m")
+                .join("chat c ON c.ROWID = \(scope.listedChat())")
+                .leftJoin(MessageRecord.senderJoin)
+                .where(SQLFragments.notReaction())
+            scope.narrow(builder)
+        case .hiddenMembership(let inChat):
             // CROSS JOIN pins SQLite's loop order: visit the chats the
             // predicate selects, then only their messages by rowid.
             builder
@@ -28,18 +43,12 @@ extension SearchTool {
                     CROSS JOIN chat_message_join cmj ON cmj.chat_id = c.ROWID
                     CROSS JOIN message m ON m.ROWID = cmj.message_id
                     """)
-        } else {
-            builder
-                .from("message m")
-                .join("chat_message_join cmj ON m.ROWID = cmj.message_id")
-                .join("chat c ON cmj.chat_id = c.ROWID")
-        }
-        builder
-            .leftJoin(MessageRecord.senderJoin)
-            .where(SQLFragments.notReaction())
-
-        if let chatFilterPredicate {
-            builder.where(chatFilterPredicate)
+                .leftJoin(MessageRecord.senderJoin)
+                .where(SQLFragments.notReaction())
+                .where(SQLFragments.hiddenChat())
+            if let inChat {
+                builder.where("c.ROWID = ?", inChat)
+            }
         }
 
         if let query, !query.isEmpty {
@@ -70,10 +79,6 @@ extension SearchTool {
         if let cursor {
             let after = cursor.predicate(descending: sort == .recentFirst)
             builder.where(after.sql, params: after.params)
-        }
-
-        if let inChat {
-            builder.where("c.ROWID = ?", inChat)
         }
 
         if let sender = unanswered ? .me : fromPerson {
@@ -118,7 +123,7 @@ extension SearchTool {
             to: builder,
             query: query,
             fromPerson: fromPerson,
-            inChat: inChat,
+            chats: .listed(ChatScope(named: inChat, includeFiltered: includeFiltered)),
             isGroup: isGroup,
             has: has,
             since: since,
@@ -128,8 +133,7 @@ extension SearchTool {
             unanswered: unanswered,
             terms: terms,
             matchAll: matchAll,
-            fuzzy: fuzzy,
-            chatFilterPredicate: includeFiltered ? nil : SQLFragments.shownChat()
+            fuzzy: fuzzy
         )
         builder.leftJoin(MessageRecord.otherHandleJoin)
 
@@ -196,7 +200,7 @@ extension SearchTool {
             to: builder,
             query: query,
             fromPerson: fromPerson,
-            inChat: inChat,
+            chats: .hiddenMembership(inChat: inChat),
             isGroup: isGroup,
             has: has,
             since: since,
@@ -206,9 +210,7 @@ extension SearchTool {
             unanswered: unanswered,
             terms: terms,
             matchAll: matchAll,
-            fuzzy: fuzzy,
-            chatFilterPredicate: SQLFragments.hiddenChat(),
-            drivenFromChats: true
+            fuzzy: fuzzy
         )
         return builder.build()
     }

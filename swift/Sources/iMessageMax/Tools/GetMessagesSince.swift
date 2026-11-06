@@ -112,7 +112,7 @@ actor GetMessagesSinceTool {
 
         let sinceRowid = rawSince ?? currentRowid
         let limit = Self.limit.read(args)
-        let includeFiltered = args["include_filtered"]?.boolValue ?? false
+        let scope = ChatScope(named: chatFilter, includeFiltered: args["include_filtered"]?.boolValue ?? false)
         let includeReactions = args["include_reactions"]?.boolValue ?? true
         let schema = try db.schema()
 
@@ -134,7 +134,7 @@ actor GetMessagesSinceTool {
                 schema: schema,
                 sinceRowid: scanFrom,
                 currentRowid: currentRowid,
-                chatFilter: chatFilter,
+                scope: scope,
                 limit: batchLimit
             )
             if rows.isEmpty {
@@ -163,7 +163,7 @@ actor GetMessagesSinceTool {
                     continue
                 }
                 consumed = Int(row.message.id)
-                if !includeFiltered && row.chatIsFiltered != 0 {
+                if scope.hidesChats && row.chatIsFiltered != 0 {
                     hiddenChats.insert(row.chatId ?? 0)
                     continue
                 }
@@ -238,11 +238,11 @@ actor GetMessagesSinceTool {
         schema: SchemaCapabilities,
         sinceRowid: Int,
         currentRowid: Int,
-        chatFilter: Int64?,
+        scope: ChatScope,
         limit: Int
     ) throws -> [SinceScanRow] {
-        // A message in the filtered chat is listed under that chat.
-        let chat = chatFilter.map(String.init) ?? SQLFragments.homeChat()
+        // Hidden chats are dropped below, after the row is consumed.
+        let chat = scope.listedChat()
         let query = QueryBuilder()
             .selectMessages(
                 schema,
@@ -256,8 +256,8 @@ actor GetMessagesSinceTool {
             .where("m.ROWID > ?", sinceRowid)
             .where("m.ROWID <= ?", currentRowid)
             .where(SQLFragments.notReaction())
-        if let chatFilter {
-            query.where(SQLFragments.messageInChat(), chatFilter)
+        if let named = scope.named {
+            query.where(SQLFragments.messageInChat(), named)
         }
         query.orderBy("m.ROWID ASC").limit(limit)
 
