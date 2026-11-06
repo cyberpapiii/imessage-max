@@ -114,9 +114,11 @@ actor ContactResolver {
     // MARK: - Loading
 
     /// Reloads names when the cache expired, Contacts changed, or
-    /// authorization changed. Throws only when names have never loaded, so a
-    /// transient AddressBook failure does not blank names that were good.
-    func refresh() throws {
+    /// authorization changed. A failed load keeps names that were good; a
+    /// failure before any good load is reported through `status().loadFailed`.
+    /// The expiry is a backstop: CNContactStoreDidChange delivery to a
+    /// headless launchd agent has not been confirmed.
+    private func refresh() {
         checkedAt = now()
         let (authorized, _) = source.authorization()
         let expired = now() - loadedAt >= refreshInterval
@@ -142,7 +144,6 @@ actor ContactResolver {
             Log.warning("Contacts: refresh failed, keeping \(cache.count) cached names: \(error.localizedDescription)")
             if !hasLastGoodCache {
                 lastLoadFailed = true
-                throw error
             }
         }
     }
@@ -151,7 +152,7 @@ actor ContactResolver {
     /// handles asks macOS for the authorization status once.
     private func refreshIfStale() {
         guard invalidated || now() - checkedAt >= 1 else { return }
-        try? refresh()
+        refresh()
     }
 
     private static func loadNames(from store: CNContactStore) throws -> [String: String] {
@@ -227,7 +228,7 @@ actor ContactResolver {
     }
 
     func status() -> Status {
-        try? refresh()
+        refresh()
         let (authorized, authorization) = source.authorization()
         return Status(
             authorized: authorized,
