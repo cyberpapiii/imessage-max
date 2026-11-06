@@ -38,21 +38,6 @@ extension GetMessagesTool {
         ))
     }
 
-    func getChatInfo(chatId: Int) throws -> String? {
-        let rows = try db.query(
-            "SELECT display_name FROM chat WHERE ROWID = ?",
-            params: [chatId]
-        ) { row in
-            row.string(0)
-        }
-
-        guard let info = rows.first else {
-            throw ToolFailure("chat_not_found", ClientErrorMessages.chatNotFound(ChatIdentifier.format(chatId)))
-        }
-
-        return info
-    }
-
     func queryMessages(
         chatId: Int,
         sinceApple: Int64?,

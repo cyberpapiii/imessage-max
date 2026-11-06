@@ -63,12 +63,10 @@ enum GetChatDetailsTool {
         }
         let includeShared = arguments?["include_shared_summary"]?.boolValue ?? true
 
-        let numericChatId = try ChatIdentifier.resolve(chatId, db: database)
-        guard let chatRow = try loadChatRow(chatId: numericChatId, database: database) else {
-            throw ToolFailure.chatNotFound(chatId)
-        }
+        let chat = try ChatIdentifier.resolveChat(chatId, db: database)
+        let numericChatId = chat.id
         let page = try await ChatPage.build(
-            [ChatPage.Chat(id: numericChatId, guid: chatRow.guid, explicitName: chatRow.displayName)],
+            [ChatPage.Chat(id: numericChatId, guid: chat.guid, explicitName: chat.displayName)],
             lastMessages: ChatPage.LastMessageOptions(previewMaxLength: 80, unknownSenderLabel: "Unknown", agoFallback: nil),
             db: database,
             resolver: resolver
@@ -115,21 +113,6 @@ enum GetChatDetailsTool {
         )
 
         return [.plainText(try FormatUtils.encodeJSON(response))]
-    }
-
-    private struct ChatRow {
-        let guid: String?
-        let displayName: String?
-    }
-
-    private static func loadChatRow(chatId: Int64, database: Database) throws -> ChatRow? {
-        let rows: [ChatRow] = try database.query(
-            "SELECT guid, display_name FROM chat WHERE ROWID = ?",
-            params: [chatId]
-        ) { row in
-            ChatRow(guid: row.string(0), displayName: row.string(1))
-        }
-        return rows.first
     }
 
     private static func loadState(

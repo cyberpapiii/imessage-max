@@ -17,29 +17,38 @@ enum ChatIdentifier {
     /// contains the text. Every tool that takes a chat id resolves it here,
     /// and one that names no chat is `chat_not_found`.
     static func resolve(_ raw: String, db: Database) throws -> Int64 {
-        if let id = parseRowId(raw) {
-            let exists = try db.query("SELECT 1 FROM chat WHERE ROWID = ?", params: [id]) { _ in true }
-            guard !exists.isEmpty else { throw ToolFailure.chatNotFound(raw) }
-            return id
-        }
-
-        let trimmed = raw.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else { throw ToolFailure.chatNotFound(raw) }
-
-        let rows: [Int64] = try db.query(
-            """
-            SELECT c.ROWID FROM chat c WHERE c.guid LIKE ? ESCAPE '\\'
-            ORDER BY \(SQLFragments.newestChatFirst())
-            LIMIT 1
-            """,
-            params: ["%\(QueryBuilder.escapeLike(trimmed))%"]
-        ) { row in
-            row.int(0)
-        }
-
-        guard let id = rows.first else { throw ToolFailure.chatNotFound(raw) }
-        return id
+        try resolveChat(raw, db: db).id
     }
+
+    /// `resolve`, with the chat row it found.
+    static func resolveChat(_ raw: String, db: Database) throws -> ResolvedChat {
+        let select = "SELECT c.ROWID, c.guid, c.display_name FROM chat c"
+        let map = { (row: SQLiteRow) in ResolvedChat(id: row.int(0), guid: row.string(1), displayName: row.string(2)) }
+        let rows: [ResolvedChat]
+        if let id = parseRowId(raw) {
+            rows = try db.query("\(select) WHERE c.ROWID = ?", params: [id], map: map)
+        } else {
+            let trimmed = raw.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty else { throw ToolFailure.chatNotFound(raw) }
+            rows = try db.query(
+                """
+                \(select) WHERE c.guid LIKE ? ESCAPE '\\'
+                ORDER BY \(SQLFragments.newestChatFirst())
+                LIMIT 1
+                """,
+                params: ["%\(QueryBuilder.escapeLike(trimmed))%"],
+                map: map
+            )
+        }
+        guard let chat = rows.first else { throw ToolFailure.chatNotFound(raw) }
+        return chat
+    }
+}
+
+struct ResolvedChat {
+    let id: Int64
+    let guid: String?
+    let displayName: String?
 }
 
 enum MessageIdentifier {

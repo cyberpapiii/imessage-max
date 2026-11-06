@@ -205,7 +205,7 @@ actor GetMessagesTool {
     private func executeImpl(args: [String: Value]?) async throws -> GetMessagesResponse {
         let args = args ?? [:]
 
-        var chatId = args["chat_id"]?.stringValue
+        let chatId = args["chat_id"]?.stringValue
         let participants = args["participants"]?.arrayValue?.compactMap { $0.stringValue }
         let since = args["since"]?.stringValue
         let before = args["before"]?.stringValue
@@ -219,26 +219,17 @@ actor GetMessagesTool {
         let unansweredHours = IntArgument.unansweredHours.read(args)
         let sessionFilter = args["session"]?.stringValue
 
-        let hasParticipants: Bool
-        if let participants {
-            hasParticipants = !participants.isEmpty
+        let chatRef: String
+        if let chatId {
+            chatRef = chatId
+        } else if let participants, !participants.isEmpty {
+            chatRef = try await resolveParticipantsToChat(participants: participants)
         } else {
-            hasParticipants = false
-        }
-        guard chatId != nil || hasParticipants else {
             throw ToolFailure("validation_error", "Either chat_id or participants must be provided")
         }
+        let chat = try ChatIdentifier.resolveChat(chatRef, db: db)
+        let numericChatId = Int(chat.id)
 
-        if chatId == nil, let participants = participants {
-            chatId = try await resolveParticipantsToChat(participants: participants)
-        }
-
-        guard let chatId else {
-            throw ToolFailure.chatNotFound("nil")
-        }
-        let numericChatId = Int(try ChatIdentifier.resolve(chatId, db: db))
-
-        let chatInfo = try getChatInfo(chatId: numericChatId)
         let chatParticipants = try await ChatSummaryQueries.participants(db: db, chatId: Int64(numericChatId), resolver: resolver)
         var people = PeopleMap(rules: .participants)
         people.addMe()
@@ -360,7 +351,7 @@ actor GetMessagesTool {
         let identity = ChatIdentity.from(
             chatId: Int64(numericChatId),
             guid: nil,
-            explicitName: chatInfo,
+            explicitName: chat.displayName,
             rows: chatParticipants
         )
 
