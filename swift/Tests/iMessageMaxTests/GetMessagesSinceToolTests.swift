@@ -282,4 +282,22 @@ final class GetMessagesSinceToolTests: XCTestCase {
         let home = try decodeJSONArray(unfiltered["messages"]).first?["chat"] as? [String: Any]
         XCTAssertEqual(home?["id"] as? String, "chat1")
     }
+
+    func testMissingReplyAndEditColumnsDegradeToPlainMessages() async throws {
+        let fixture = try makeSinceFixture()
+        try fixture.execute("ALTER TABLE message DROP COLUMN thread_originator_guid")
+        try fixture.execute("ALTER TABLE message DROP COLUMN date_edited")
+        try fixture.execute("ALTER TABLE message DROP COLUMN associated_message_emoji")
+
+        let json = try await callTool("get_messages_since", ["since_rowid": 99, "limit": 50], database: fixture.database())
+        let messages = try decodeJSONArray(json["messages"])
+        XCTAssertEqual(messages.compactMap { $0["id"] as? String }, ["msg_100", "msg_101", "msg_103", "msg_106", "msg_107"])
+        for message in messages {
+            XCTAssertNil(message["reply_to"])
+            XCTAssertNil(message["reply_count"])
+            XCTAssertNil(message["edited"])
+        }
+        let reacted = try XCTUnwrap(messages.first)
+        XCTAssertNotNil(reacted["reactions"], "the tapback still attaches without associated_message_emoji: \(reacted)")
+    }
 }

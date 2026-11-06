@@ -406,7 +406,7 @@ func collectPages(
 
 // MARK: - Shared tool fixtures
 
-/// Apple-epoch nanoseconds `offset` whole days after 2020-01-05T10:40:00Z,
+/// Apple-epoch nanoseconds `offset` whole days after 2020-01-06T10:40:00Z,
 /// which is 600,000,000 seconds after the Apple epoch.
 func fixtureDay(_ offset: Int) -> Int64 {
     (600_000_000 + Int64(offset) * 86_400) * 1_000_000_000

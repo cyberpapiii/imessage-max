@@ -580,6 +580,29 @@ final class GetMessagesToolTests: XCTestCase {
         let page = try await callTool("get_messages", ["participants": ["Pat@Example.com"]], database: fixture.database())
         XCTAssertEqual((page["chat"] as? [String: Any])?["id"] as? String, "chat30")
     }
+
+    /// unanswered counts a message as a question when it ends with an asking
+    /// phrase, in any case and with trailing spaces, even without "?".
+    func testUnansweredTreatsAskingPhraseEndingsAsQuestions() async throws {
+        let fixture = try directChatFixture(name: "unanswered-phrases")
+        let texts = [
+            "send me the address, lmk",
+            "pick it up on the way, can you",
+            "Let Me Know  ",
+            "here's the draft, thoughts",
+            "grab milk please",
+            "sounds good",
+            "see you at six",
+        ]
+        let base = AppleTime.fromDate(Date()) - 600 * appleMinute
+        for (index, text) in texts.enumerated() {
+            try fixture.insertMessage(rowId: index + 1, guid: "q\(index)", text: text, date: base + Int64(index) * 60 * appleMinute, isFromMe: true)
+            try fixture.joinChatMessage(chatId: 1, messageId: index + 1)
+        }
+
+        let json = try await callTool("get_messages", ["chat_id": "chat1", "unanswered": true], database: fixture.database())
+        XCTAssertEqual(Set(try itemIds(json, "messages")), ["msg_1", "msg_2", "msg_3", "msg_4", "msg_5"])
+    }
 }
 
 private func assertGroupEvent(
