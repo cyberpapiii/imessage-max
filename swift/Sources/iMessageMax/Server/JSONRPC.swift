@@ -109,9 +109,9 @@ struct JSONRPCMessage: @unchecked Sendable {
     var requestKey: String? { Self.requestKey(for: id) }
 
     /// Type-tagged so `1` and `"1"` (both legal, distinct ids) never collide.
-    /// Total: never traps, whatever the client sends. Forcing a Double id
-    /// through a non-failable Int conversion once let `{"id": 1e300}` on an
-    /// unauthenticated POST abort the whole launchd service.
+    /// Total: never traps, whatever the client sends. An id is unauthenticated
+    /// input, so a number no Int can hold (`1e300`) must not crash the process;
+    /// only a failable conversion is used.
     ///
     /// Branch order matters: `["id": 1]` bridges to NSNumber, and on Apple
     /// platforms both `as? Int` and `as? Double` succeed for integral
