@@ -194,7 +194,7 @@ enum ListChatsTool {
                 // both sides of it, and that chat would then re-appear on a
                 // later page it had already been returned on.
                 messageAggregate = """
-                    (SELECT chat_id, 0 AS message_count, MAX(dt) AS last_message_date
+                    (SELECT chat_id, 0 AS n, MAX(dt) AS last_date
                      FROM (SELECT cmj.chat_id AS chat_id, m.date AS dt
                            FROM chat_message_join cmj
                            JOIN message m ON m.ROWID = cmj.message_id
@@ -206,8 +206,8 @@ enum ListChatsTool {
             } else {
                 messageAggregate = """
                     (SELECT cmj.chat_id AS chat_id,
-                            COUNT(*) AS message_count,
-                            MAX(m.date) AS last_message_date
+                            COUNT(*) AS n,
+                            MAX(m.date) AS last_date
                      FROM chat_message_join cmj
                      JOIN message m ON m.ROWID = cmj.message_id
                      WHERE \(innerFilter)
@@ -221,8 +221,12 @@ enum ListChatsTool {
                 "c.guid",
                 "c.display_name",
                 "\(SQLFragments.participantCount()) as participant_count",
-                needsMessageAggregate ? "COALESCE(msg.message_count, 0) as message_count" : "0 as message_count",
-                needsMessageAggregate ? "msg.last_message_date as last_message_date" : "NULL as last_message_date"
+                needsMessageAggregate ? "COALESCE(msg.n, 0) as message_count" : "0 as message_count",
+                // A chat with no messages sorts and pages as count 0 and
+                // date 0, so a cursor can always address the page after it.
+                // msg's columns are named apart from these aliases: HAVING
+                // would otherwise bind the uncoalesced column.
+                needsMessageAggregate ? "COALESCE(msg.last_date, 0) as last_message_date" : "NULL as last_message_date"
             )
             .from("chat c")
 
@@ -294,9 +298,9 @@ enum ListChatsTool {
 
             switch sortOrder {
             case .recent:
-                qb.orderBy("last_message_date DESC NULLS LAST", "c.ROWID DESC")
+                qb.orderBy("last_message_date DESC", "c.ROWID DESC")
             case .mostActive:
-                qb.orderBy("message_count DESC", "last_message_date DESC NULLS LAST", "c.ROWID DESC")
+                qb.orderBy("message_count DESC", "last_message_date DESC", "c.ROWID DESC")
             case .alphabetical:
                 qb.orderBy("COALESCE(c.display_name, '') ASC", "c.ROWID ASC")
             }
@@ -401,7 +405,6 @@ enum ListChatsTool {
             totalChats: totals?.total,
             totalGroups: totals?.groups,
             totalDms: totals?.dms,
-            // more and cursor must agree; a NULL keyset value yields no cursor and therefore no next page.
             more: nextCursor != nil,
             cursor: nextCursor,
             filteredHidden: filteredHidden

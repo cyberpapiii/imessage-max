@@ -141,6 +141,38 @@ final class ToolsReview2RegressionTests: XCTestCase {
         XCTAssertEqual(seen, (1...5).map { "msg_\($0)" })
     }
 
+    // MARK: - list_chats pages to chats with no messages
+
+    func testListChatsPagesReachChatsWithNoMessages() async throws {
+        let f = try ToolTestDatabase(name: "list-empty-chats")
+        try f.insertHandle(rowId: 1, handle: "+15550000001")
+        for chat in 1...5 {
+            try f.insertChat(rowId: chat, guid: "iMessage;+;c\(chat)", displayName: "Chat \(chat)")
+            try f.joinChatHandle(chatId: chat, handleId: 1)
+        }
+        // Chats 1 and 2 have messages; 3, 4 and 5 have none.
+        for chat in 1...2 {
+            try f.insertMessage(rowId: chat, guid: "g\(chat)", text: "hi", date: base + Int64(chat), isFromMe: false, handleId: 1)
+            try f.joinChatMessage(chatId: chat, messageId: chat)
+        }
+        for sort in ["recent", "most_active"] {
+            var seen: [String] = []
+            var cursor: String?
+            for _ in 0..<6 {
+                var args: [String: Value] = ["sort": .string(sort), "limit": 2]
+                if let cursor { args["cursor"] = .string(cursor) }
+                let json = try await callTool("list_chats", args, database: f.database())
+                let page = try decodeJSONArray(json["chats"]).compactMap { $0["id"] as? String }
+                XCTAssertFalse(page.isEmpty, "\(sort): an empty page after more:true")
+                seen += page
+                cursor = json["cursor"] as? String
+                XCTAssertEqual(json["more"] as? Bool, cursor != nil)
+                if cursor == nil { break }
+            }
+            XCTAssertEqual(seen, ["chat2", "chat1", "chat5", "chat4", "chat3"], sort)
+        }
+    }
+
     // MARK: - search and unanswered costs
 
     func testSearchCountsHiddenChatsOnTheFirstPageOnly() async throws {
