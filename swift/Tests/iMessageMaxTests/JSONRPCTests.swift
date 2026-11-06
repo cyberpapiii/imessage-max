@@ -36,8 +36,8 @@ final class JSONRPCTests: XCTestCase {
         XCTAssertEqual(JSONRPCMessage(["method": "tools/list", "id": 1]).era, .legacy)
     }
 
-    /// The Origin/Host rejections were hand-written strings in this exact
-    /// order; the shared builder keeps their bytes.
+    /// The Origin/Host rejections depend on these exact bytes, keys in this
+    /// order.
     func testErrorEnvelopeHasFixedLayout() {
         XCTAssertEqual(
             String(decoding: JSONRPC.error(id: nil, code: .invalidRequest, message: "Origin not allowed"), as: UTF8.self),

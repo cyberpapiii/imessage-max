@@ -2,7 +2,7 @@ import XCTest
 import IMessageMaxContract
 @testable import iMessageMax
 
-/// Tests for the 15-key capability contract (design §2.2 / §2.4 / §3.2).
+/// Tests for the 15-key capability contract.
 ///
 /// All three probes (DB, contacts, automation) are injected so tests are hermetic.
 /// The real automation probe reads live macOS TCC; CI runners return "not_determined".
@@ -45,7 +45,7 @@ final class CapabilityContractTests: XCTestCase {
         XCTAssertEqual(caps["send_text_group"]?.state, "supported")
         XCTAssertEqual(caps["send_file_dm"]?.state, "supported")
 
-        // send_file_group: supported with a routing caveat when automation granted (plan 017)
+        // send_file_group: supported with a routing caveat when automation is granted
         XCTAssertEqual(caps["send_file_group"]?.state, "supported")
         XCTAssertNotNil(caps["send_file_group"]?.note)
 
@@ -146,7 +146,7 @@ final class CapabilityContractTests: XCTestCase {
             "perm_full_disk", "perm_contacts", "perm_automation",
             "rich_backend",
         ]
-        XCTAssertEqual(Set(caps.keys), expectedKeys, "capabilities must contain exactly the 15 §2.2 keys")
+        XCTAssertEqual(Set(caps.keys), expectedKeys, "capabilities must contain exactly the 15 contract keys")
 
         for key in ["send_text_dm", "verified_send", "perm_automation", "rich_backend"] {
             let entry = try XCTUnwrap(caps[key] as? [String: Any], "\(key) must be a JSON object")
@@ -163,7 +163,7 @@ final class CapabilityContractTests: XCTestCase {
         XCTAssertNil(decoded["database_accessible"])
         XCTAssertNil(decoded["contacts_authorized"])
 
-        // verified_send detail key name (§3.2)
+        // verified_send detail key name
         let verifiedSend = try XCTUnwrap(caps["verified_send"] as? [String: Any])
         XCTAssertEqual(verifiedSend["state"] as? String, "supported")
         XCTAssertEqual(verifiedSend["detail"] as? String, "db_reread")

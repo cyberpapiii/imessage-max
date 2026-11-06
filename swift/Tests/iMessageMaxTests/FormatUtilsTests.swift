@@ -3,8 +3,7 @@ import XCTest
 
 /// Pins the byte-for-byte output of `FormatUtils.encodeJSON`: important keys
 /// first (in `orderedKeys` order), the rest alphabetically, minimal escaping
-/// (`/`, U+2028 and non-ASCII pass through raw). Captured at commit 61e75d9.
-/// Any change to this literal is a change to every tool response's shape and
+/// (`/`, U+2028 and non-ASCII pass through raw). Any change to this literal is a change to every tool response's shape and
 /// must be deliberate.
 final class FormatUtilsTests: XCTestCase {
     private struct GoldenAttachment: Encodable {

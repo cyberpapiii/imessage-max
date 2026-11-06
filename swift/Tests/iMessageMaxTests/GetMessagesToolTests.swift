@@ -381,7 +381,7 @@ final class GetMessagesToolTests: XCTestCase {
         XCTAssertNotNil(attachments.first?["id"] as? String)
     }
 
-    // Plan 049: the GUID-substring fallback binds the caller's text into a
+    // The GUID-substring fallback binds the caller's text into a
     // LIKE pattern. Without escaping, "%" (or "_", or "") matches every chat
     // and hands back the first row's messages.
     func testChatIdWildcardDoesNotMatchEveryChat() async throws {

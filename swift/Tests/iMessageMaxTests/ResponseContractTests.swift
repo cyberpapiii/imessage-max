@@ -4,49 +4,6 @@ import IMessageMaxContract
 @testable import iMessageMax
 
 final class ResponseContractTests: XCTestCase {
-    func testListChatsUsesLeanOverviewShape() async throws {
-        let fixture = try makeOverviewFixture()
-        let resolver = makeOverviewResolver()
-
-        let result = try await ListChatsTool.execute(
-            limit: 5,
-            db: fixture.database(),
-            resolver: resolver
-        )
-
-        let response = result
-
-        guard let first = response.chats.first else {
-            return XCTFail("Expected chat")
-        }
-        let chatJSON = try FormatUtils.encodeJSON(first)
-        XCTAssertFalse(chatJSON.contains("\"identity\""))
-        XCTAssertFalse(chatJSON.contains("\"participants\""))
-        XCTAssertTrue(chatJSON.contains("\"last_message\""))
-    }
-
-    func testGetActiveConversationsUsesLeanOverviewShape() async throws {
-        let fixture = try makeOverviewFixture()
-        let resolver = makeOverviewResolver()
-
-        let result = try await GetActiveConversations.execute(
-            hours: 48,
-            minExchanges: 1,
-            limit: 5,
-            database: fixture.database(),
-            resolver: resolver
-        )
-
-        guard let conversation = result.conversations.first else {
-            return XCTFail("Expected conversation")
-        }
-        let encoded = try FormatUtils.encodeJSON(conversation)
-        XCTAssertFalse(encoded.contains("\"participants\""))
-        XCTAssertTrue(encoded.contains("\"participants_preview\""))
-        XCTAssertTrue(encoded.contains("\"last_message\""))
-        XCTAssertTrue(encoded.contains("\"activity\""))
-    }
-
     func testGetUnreadDefaultsToChatSummariesAndSupportsMessagesMode() async throws {
         let fixture = try makeOverviewFixture()
         let tool = GetUnread(database: fixture.database(), contactResolver: makeOverviewResolver())

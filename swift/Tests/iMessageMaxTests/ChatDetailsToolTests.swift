@@ -30,8 +30,7 @@ final class ChatDetailsToolTests: XCTestCase {
     }
 
     /// A well-formed id with no chat row is the caller's mistake, not an
-    /// internal error. At 2cd5734 it came back as query_failed with
-    /// "Internal error. Check the server log for details." and logged ERROR.
+    /// internal error: chat_not_found with a next step, not query_failed.
     func testMissingChatIsChatNotFoundWithANextStep() async throws {
         let fixture = try makeChatDetailsFixture()
 

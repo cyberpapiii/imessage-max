@@ -13,13 +13,13 @@ final class OversizedBodyTests: XCTestCase {
     private let maxBytes = HTTPRequestParsing.maxRequestBodyBytes
     private let drainLimit = HTTPRequestParsing.overLimitDrainBytes
 
-    /// The core regression: on overflow the helper keeps consuming the body
-    /// stream to the end. If it stops early, the producer below suspends on
-    /// back-pressure and this test hangs rather than passes.
+    /// On overflow the helper keeps consuming the body stream to the end. If
+    /// it stops early, the producer below suspends on back-pressure and this
+    /// test hangs rather than passes.
     func testOverflowDrainsRemainingBody() async throws {
         let (body, source) = RequestBody.makeStream()
         let chunk = ByteBuffer(repeating: 0x78, count: 64 * 1024)
-        let chunkCount = 24  // 1.5 MB total, the confirmed reproducing size
+        let chunkCount = 24  // 1.5 MB total, enough to stall an undrained body
 
         let producer = Task {
             for _ in 0..<chunkCount {

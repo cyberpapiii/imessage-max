@@ -225,7 +225,7 @@ final class SendVerifierTests: XCTestCase {
     }
 
     // A failed row in a chat OTHER than the intended one stays invisible → notFound.
-    // Mismatch fires only on clean rows, exactly as before this change.
+    // Mismatch fires only on clean rows.
     func testFailedRowInDifferentChatIsInvisible() async throws {
         let fixture = try makeFixture()
         let date = nowNs()

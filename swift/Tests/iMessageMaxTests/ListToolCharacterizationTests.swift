@@ -210,8 +210,8 @@ final class ListToolCharacterizationTests: XCTestCase {
         )
         try fixture.joinChatMessage(chatId: 10, messageId: 200)
 
-        // NOTE: last-from-them (msg 201) is newer than last-from-me (msg 102, date = now-8*sec)
-        // So awaiting_reply should be true for chat 10
+        // Their last message (201) is newer than my last (102, now - 8 s), so
+        // chat 10 is awaiting my reply.
         try fixture.insertMessage(
             rowId: 201,
             guid: "active-them-201",
@@ -270,12 +270,12 @@ final class ListToolCharacterizationTests: XCTestCase {
         )
     }
 
-    // MARK: - Participant fan-out regression
+    // MARK: - Participant fan-out
 
-    // Both list tools used to join chat_handle_join alongside the message
-    // tables, which multiplied every chat's message rows by its participant
-    // count. Group chats reported inflated totals; DM fixtures hid it because
-    // one participant multiplies by one. These two fixtures use group chats.
+    // Joining chat_handle_join alongside the message tables multiplies every
+    // chat's message rows by its participant count. DM fixtures cannot show
+    // that, since one participant multiplies by one, so these two fixtures
+    // use group chats.
 
     private func makeFanOutFixture() throws -> ToolTestDatabase {
         let fixture = try ToolTestDatabase(name: "participant-fan-out")
@@ -288,8 +288,9 @@ final class ListToolCharacterizationTests: XCTestCase {
         try fixture.insertChat(rowId: 1, guid: "iMessage;-;fanout-dm")
         try fixture.joinChatHandle(chatId: 1, handleId: 1)
 
-        // Chat 2: group of 3, only 2 messages. Fewer messages than chat 1, but
-        // the old query counted 2 x 3 = 6 and ranked it first for most_active.
+        // Chat 2: group of 3, only 2 messages. Fewer messages than chat 1;
+        // counted per participant it would be 2 x 3 = 6 and rank first for
+        // most_active.
         try fixture.insertChat(rowId: 2, guid: "iMessage;+;fanout-group", displayName: "Fan Out")
         try fixture.joinChatHandle(chatId: 2, handleId: 1)
         try fixture.joinChatHandle(chatId: 2, handleId: 2)

@@ -45,9 +45,8 @@ final class DatabaseCancellationTests: XCTestCase {
         }
     }
 
-    /// Cancelling one tool call must not abort another client's query. At
-    /// 33e20cb the cancel handler interrupted every open connection in the
-    /// process, so the bystander failed with `DatabaseError.cancelled`.
+    /// Cancelling one tool call must not abort another client's query: the
+    /// bystander finishes instead of failing with `DatabaseError.cancelled`.
     func testCancellingOneToolCallLeavesAConcurrentCallRunning() async throws {
         let fixture = try ToolTestDatabase(name: "db-cancel-dispatch")
         try fixture.insertChat(rowId: 1, guid: "dispatch-chat")

@@ -374,7 +374,7 @@ final class SendToolExecuteTests: XCTestCase {
         } catch let error as ToolFailure {
             let json = try decodeJSONDictionary(from: error.content)
             XCTAssertEqual(json["status"] as? String, "failed_delivery",
-                "A row with error=22 is a verified delivery failure, not 'uncertain' (§3 finding 3)")
+                "A row with error=22 is a verified delivery failure, not 'uncertain'")
             XCTAssertEqual(json["verified_message_guid"] as? String, "msg-guid-error-row",
                 "The failed row's GUID is the evidence for the failure")
             // Delivery verifiably failed, so resending cannot duplicate it.

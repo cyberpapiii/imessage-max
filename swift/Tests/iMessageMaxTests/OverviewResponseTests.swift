@@ -6,19 +6,13 @@ final class OverviewResponseTests: XCTestCase {
         let fixture = try makeOverviewFixture()
         let resolver = makeOverviewResolver()
 
-        let result = try await ListChatsTool.execute(
-            limit: 10,
-            since: nil,
-            isGroup: nil,
-            minParticipants: nil,
-            maxParticipants: nil,
-            sort: "recent",
-            db: fixture.database(),
-            resolver: resolver
-        )
+        let response = try await ListChatsTool.execute(limit: 10, db: fixture.database(), resolver: resolver)
 
-        let response = result
         let namedChat = try XCTUnwrap(response.chats.first(where: { $0.id == "chat100" }))
+        let chatJSON = try FormatUtils.encodeJSON(namedChat)
+        XCTAssertFalse(chatJSON.contains("\"identity\""))
+        XCTAssertFalse(chatJSON.contains("\"participants\""))
+        XCTAssertTrue(chatJSON.contains("\"last_message\""))
         XCTAssertEqual(namedChat.name, "Weekend Plans")
         XCTAssertEqual(namedChat.participantCount, 6)
         XCTAssertEqual(namedChat.participantsPreview, ["Dana Lee", "Alice Smith", "Evan Stone", "+3 more"])
@@ -39,13 +33,17 @@ final class OverviewResponseTests: XCTestCase {
         let result = try await GetActiveConversations.execute(
             hours: 48,
             minExchanges: 1,
-            isGroup: nil,
             limit: 10,
             database: fixture.database(),
             resolver: resolver
         )
 
         let attachmentConversation = try XCTUnwrap(result.conversations.first(where: { $0.id == "chat600" }))
+        let encoded = try FormatUtils.encodeJSON(attachmentConversation)
+        XCTAssertFalse(encoded.contains("\"participants\""))
+        XCTAssertTrue(encoded.contains("\"participants_preview\""))
+        XCTAssertTrue(encoded.contains("\"last_message\""))
+        XCTAssertTrue(encoded.contains("\"activity\""))
         let attachmentPreview = try XCTUnwrap(attachmentConversation.lastMessage)
         XCTAssertEqual(attachmentPreview.from, "Jules Hart")
         XCTAssertEqual(attachmentPreview.text, "[2 Photos]")

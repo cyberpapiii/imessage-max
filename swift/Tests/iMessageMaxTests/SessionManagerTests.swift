@@ -168,12 +168,4 @@ final class SessionManagerTests: XCTestCase {
         await manager.terminateSession(sessionId: first.id)
         await manager.terminateSession(sessionId: second.id)
     }
-
-    /// A detached `terminateSession` plus an immediate `activeSessionIds()`
-    /// hop does not pin in-flight removal. The test task's actor hop wins
-    /// the mailbox before terminate starts, so the id is still present even
-    /// after `removeValue` moved above the first `await`. Yield-count races
-    /// were already rejected as flaky. The three tests above pin the
-    /// postcondition: after `terminateSession` returns, the id is gone and
-    /// `routeMessage` refuses it.
 }

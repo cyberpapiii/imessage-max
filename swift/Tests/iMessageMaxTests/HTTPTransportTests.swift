@@ -145,12 +145,8 @@ final class SSEChannelTests: XCTestCase {
     }
 
     func testStreamIsStoredAndNotRespawnedPerAccess() async {
-        // Contract documentation, not a discriminating regression test: the
-        // old computed property would also report nothing on a second pass
-        // here, because it rebuilt its merger over an already-finished base
-        // stream. What this pins is the consume-exactly-once semantics that
-        // callers may now rely on. Once exhausted, `stream` stays exhausted
-        // and never replays or restarts a keep-alive loop.
+        // `stream` is consumed exactly once: once exhausted it stays
+        // exhausted and never replays or restarts a keep-alive loop.
         let channel = SSEChannel(keepAliveInterval: .milliseconds(50))
 
         channel.send("only-event")
@@ -192,7 +188,7 @@ final class SessionManagerLifecycleTests: XCTestCase {
             return XCTFail("First session should be created, got \(first)")
         }
 
-        // The cap is now full: the refusal must be distinguishable from a
+        // The cap is full: the refusal must be distinguishable from a
         // startup failure so the caller can answer 503 rather than 500.
         let second = await manager.createSession()
         guard case .atCapacity = second else {
@@ -204,10 +200,9 @@ final class SessionManagerLifecycleTests: XCTestCase {
     }
 
     func testAbandonedSessionIsReclaimedToAdmitANewClient() async {
-        // Session capacity used to be a one-way door: a client that went away
-        // without sending DELETE held its slot for the full one-hour TTL, and
-        // the sweep that reclaims it only runs every five minutes. A hundred
-        // such sessions refused every new client until the service restarted.
+        // A client that went away without sending DELETE must not hold its
+        // slot for the full one-hour TTL: at capacity, an idle session is
+        // reclaimed to admit the new client rather than refusing it.
         let manager = SessionManager(
             catalog: makeTestCatalog(),
             configuration: .init(
@@ -284,8 +279,7 @@ final class JsonRpcIdCanonicalizationTests: XCTestCase {
     }
 
     func testHugeDoubleIdDoesNotTrap() {
-        // Reaching this assertion at all is the regression test: the old
-        // implementation trapped and aborted the process on this input.
+        // Reaching this assertion at all means the conversion did not trap.
         let key = requestKey(["id": 1e300])
         XCTAssertNotNil(key)
         XCTAssertNotEqual(key, requestKey(["id": "1e300"]))

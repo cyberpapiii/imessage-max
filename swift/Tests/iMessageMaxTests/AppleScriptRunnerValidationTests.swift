@@ -65,10 +65,10 @@ final class AppleScriptRunnerValidationTests: XCTestCase {
 
     // MARK: - osascript stderr classification
 
-    /// Verbatim stderr from a real failed send on 2026-08-07: a chat-route send
-    /// to an `any;-;` service chat. AppleScript spells "can’t" with the
-    /// typographic apostrophe, which the straight-form-only match missed, so
-    /// this whole string reached the client instead of `.chatNotFound`.
+    /// Verbatim stderr from a real failed send: a chat-route send to an
+    /// `any;-;` service chat. AppleScript spells "can’t" with the typographic
+    /// apostrophe; it must still classify as `.chatNotFound` rather than
+    /// reach the client whole.
     func testCurlyApostropheStderrClassifiesAsMissingTarget() {
         let stderr = "186:202: execution error: messages got an error: "
             + "can\u{2019}t get chat id \"any;-;+15555550123\". (-1728)"
@@ -136,9 +136,8 @@ final class AppleScriptRunnerValidationTests: XCTestCase {
         XCTAssertFalse(error.localizedDescription.contains("second line"))
     }
 
-    // Plan 049: the classifier lowercases stderr before matching, so the scrub
-    // literal must be lowercase too. A mixed-case "/Users/" literal never
-    // matched and the operator's home directory reached the client verbatim.
+    // The classifier lowercases stderr before matching, so a home-directory
+    // path in any case is caught and never reaches the client verbatim.
     func testHomeDirectoryPathInStderrClassifiesAsPathRejected() {
         let stderr = "execution error: Messages got an error: Can\u{2019}t get file "
             + "\"/Users/alice/Desktop/x.jpg\". (-1728)"
@@ -179,7 +178,7 @@ final class AppleScriptRunnerValidationTests: XCTestCase {
         XCTAssertTrue(prepared.fileURL.path.hasPrefix(stager.root.path + "/"))
     }
 
-    // Plan 024: staged copies are deleted at terminal transfer states, so a
+    // Staged copies are deleted at terminal transfer states, so a
     // duplicate of the user's file does not linger in ~/Pictures for 48h.
     func testRemoveStagedDirectoryDeletesOnlyItsOwnDirectory() throws {
         let tempDir = FileManager.default.temporaryDirectory
