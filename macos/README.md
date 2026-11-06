@@ -34,7 +34,7 @@ make -C swift install
 swift test --package-path macos
 ```
 
-The build script also supports `--build-only`, `--verify`, `--debug`, `--logs`, and `--telemetry`. It requires the persistent **iMessage Max Dev** signing identity that the server also uses. If you do not have that identity, follow the repository's `make setup-signing` instructions.
+The build script also supports `--build-only`, `--verify`, `--debug`, `--logs`, and `--telemetry`. `script/assemble_app.sh <app path> <configuration>` does the bundle assembly and signing on its own. Both binaries get hardened runtime. The server helper also gets `swift/iMessageMax.entitlements`. The signing identity is the Developer ID Application identity in your keychain that expires last, or the certificate SHA-1 in `SIGN_IDENTITY`. Without a Developer ID the build signs ad hoc and prints a warning, and Full Disk Access must be granted again after each build.
 
 The build produces `dist/iMessage Max.app`, which contains the signed server helper and the canonical launchd template. The build targets the host architecture, and the current local build is for Apple silicon. The app is signed locally and is not a notarized public release.
 

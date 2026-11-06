@@ -34,13 +34,21 @@ final class ServiceFilesContractTests: XCTestCase {
         }
     }
 
-    func testCompanionBuildScriptMatchesContract() throws {
-        let script = try String(contentsOf: root.appendingPathComponent("script/build_and_run.sh"), encoding: .utf8)
+    func testCompanionAssemblyScriptMatchesContract() throws {
+        let script = try String(contentsOf: root.appendingPathComponent("script/assemble_app.sh"), encoding: .utf8)
         let plist = "\(ServiceDefaults.launchdLabel).plist"
-        XCTAssertTrue(script.contains("swift/launchd/\(plist)"), "script/build_and_run.sh template source")
-        XCTAssertTrue(script.contains("Contents/Resources/\(plist)"), "script/build_and_run.sh bundled template")
+        XCTAssertTrue(script.contains("swift/launchd/\(plist)"), "script/assemble_app.sh template source")
+        XCTAssertTrue(script.contains("Contents/Resources/\(plist)"), "script/assemble_app.sh bundled template")
         XCTAssertTrue(script.contains("Contents/Resources/\(ServiceDefaults.executableName)"), "bundled helper name")
         XCTAssertTrue(script.contains("BUNDLE_ID=\"\(ServiceDefaults.companionBundleID)\"\n"), "companion bundle id")
+    }
+
+    func testHelperEntitlementsGrantContactsAndAutomation() throws {
+        let url = try root.appendingPathComponent("swift/iMessageMax.entitlements")
+        let entitlements = try XCTUnwrap(
+            PropertyListSerialization.propertyList(from: Data(contentsOf: url), format: nil) as? [String: Any])
+        XCTAssertEqual(entitlements["com.apple.security.automation.apple-events"] as? Bool, true)
+        XCTAssertEqual(entitlements["com.apple.security.personal-information.addressbook"] as? Bool, true)
     }
 
     func testServerParsesEveryCompanionOption() throws {

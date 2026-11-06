@@ -505,8 +505,10 @@ stdio clients, it is the app that spawns the binary. Run `diagnose`. Its
 1. System Settings → Privacy & Security → Full Disk Access → add that
    executable (or its launching app).
 2. If it is already listed, toggle it off and on. A grant bound to an
-   earlier code signature looks present but does not work. `make
-   setup-signing` gives the binary a stable identity so rebuilds keep it.
+   earlier code signature looks present but does not work. `make sign`
+   uses the Developer ID in your keychain when one exists, which gives the
+   binary a stable identity so rebuilds keep the grant. An ad-hoc build
+   does not.
 3. The grant applies only to newly launched processes. Relaunch with
    `cd swift && make restart`, which runs launchctl bootout and then bootstrap.
    `kickstart -k` can hit the launchd crash throttle.
