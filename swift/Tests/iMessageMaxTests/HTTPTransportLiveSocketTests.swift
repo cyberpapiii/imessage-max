@@ -33,8 +33,6 @@ final class HTTPTransportLiveSocketTests: XCTestCase {
         }
     }
 
-    /// SSE keep-alive interval is not injectable through HTTPTransport, so
-    /// this only asserts the GET stays open across three 300 ms idle periods.
     func testSSEGetSurvivesChannelIdleTimeout() async throws {
         try await withLiveTransport(channelIdleTimeout: .milliseconds(300)) { _, port in
             let initFd = try connectLoopback(port: port)
@@ -120,8 +118,6 @@ final class HTTPTransportLiveSocketTests: XCTestCase {
         }
     }
 
-    /// Ending a session must end its SSE response, not just stop writing to
-    /// it: the client sees the last chunk and the stream closes.
     func testDeletingSessionEndsItsSSEResponse() async throws {
         try await withLiveTransport(channelIdleTimeout: .seconds(5)) { _, port in
             let session = try initializeSession(port: port)
@@ -162,9 +158,6 @@ final class HTTPTransportLiveSocketTests: XCTestCase {
         }
     }
 
-    /// SIGTERM must finish promptly while a client holds an SSE stream open.
-    /// An SSE GET never ends on its own, so a shutdown that waits for every
-    /// open request never exits, and launchd ends it with SIGKILL.
     func testGracefulShutdownClosesOpenSSEStreams() async throws {
         try await withLiveTransport(channelIdleTimeout: .seconds(5)) { transport, port in
             let session = try initializeSession(port: port)
@@ -186,9 +179,6 @@ final class HTTPTransportLiveSocketTests: XCTestCase {
         }
     }
 
-    /// An open SSE GET is a live client even when it sends no requests: a
-    /// client that only listens for new-message notifications keeps its
-    /// session, and its stream, past the session timeout.
     func testOpenSSEStreamKeepsItsSessionAlive() async throws {
         try await withLiveTransport(
             channelIdleTimeout: .seconds(5),
@@ -247,7 +237,6 @@ final class HTTPTransportLiveSocketTests: XCTestCase {
     }
 }
 
-/// A loopback port nothing is listening on: bind port 0 and read it back.
 private func freeLoopbackPort() throws -> Int {
     let fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)
     guard fd >= 0 else { throw POSIXError(errno) }
@@ -267,8 +256,6 @@ private func freeLoopbackPort() throws -> Int {
     return Int(in_port_t(bigEndian: addr.sin_port))
 }
 
-/// `connect` starts the server without waiting for the bind; the first
-/// accepted connection is the only signal that it is up.
 private func waitUntilListening(port: Int) async throws {
     let deadline = ContinuousClock.now + .seconds(5)
     while true {

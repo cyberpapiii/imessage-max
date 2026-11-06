@@ -1,6 +1,5 @@
 import Foundation
 
-/// Keyset cursor for message timelines ordered by `(date, messageId)`.
 struct TimelineCursor: Equatable {
     let date: Int64
     let messageId: Int64
@@ -10,18 +9,11 @@ struct TimelineCursor: Equatable {
         return "\(date):\(messageId)"
     }
 
-    /// The cursor for the page after `last`; nil when the page was not full.
     static func next(after last: MessageRecord?, pageFull: Bool) -> String? {
         guard pageFull, let last else { return nil }
         return encode(date: last.date, messageId: last.id)
     }
 
-    /// The cursor for a page Swift filtered after the query: `fetched` is
-    /// what a query limited to `fetchLimit` returned, `kept` what survived,
-    /// in the same order. A full page resumes after its last kept row, since
-    /// the rows behind it may not have been checked. A short page from a
-    /// full fetch resumes after the last row fetched, since every row up to
-    /// there was checked and dropped; only a short fetch ends the timeline.
     static func next(
         kept: [MessageRecord],
         limit: Int,
@@ -44,8 +36,6 @@ struct TimelineCursor: Equatable {
         return TimelineCursor(date: date, messageId: messageId)
     }
 
-    /// Rows past this cursor in a timeline ordered by `(date, ROWID)` of
-    /// message alias `alias`: older rows when `descending`, newer otherwise.
     func predicate(descending: Bool, _ alias: String = "m") -> (sql: String, params: [Any]) {
         let op = descending ? "<" : ">"
         return (
@@ -55,11 +45,6 @@ struct TimelineCursor: Equatable {
     }
 }
 
-/// Keyset cursor for chat lists.
-///
-/// - recent: `primary:chatId` where primary is last_message_date
-/// - most_active: `primary:secondary:chatId` (message_count, last_message_date)
-/// - alphabetical: `n:name:chatId` (name may contain colons; split from the ends)
 struct ChatListCursor: Equatable {
     let primary: Int64
     let secondary: Int64?

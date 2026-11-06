@@ -92,17 +92,12 @@ final class MessageWatcherTests: XCTestCase {
         // Leaving WAL mode needs the watcher's reads out of the way.
         try fixture.execute("PRAGMA busy_timeout=2000;")
 
-        // Leaving WAL mode checkpoints and deletes -wal; the next write in WAL
-        // mode creates a new one. Messages.app rotates it the same way when
-        // its last connection closes. (Renaming -wal under an open
-        // connection is a disk I/O error in SQLite, which made this skip.)
         try fixture.execute("PRAGMA journal_mode=DELETE;")
         XCTAssertNil(walInode(), "-wal should be gone outside WAL mode")
         try fixture.execute("PRAGMA journal_mode=WAL;")
         try fixture.insertMessage(rowId: 7, guid: "w-7", text: "after", date: 2, isFromMe: false, handleId: 1)
         XCTAssertNotEqual(try XCTUnwrap(walInode()), before, "-wal should be a new file")
 
-        // The fallback poll is 30 s out, so only file events can report these.
         let reported = await waitUntil { collected.withLock { $0.contains(7) } }
         XCTAssertTrue(reported, "insert after rotation was not reported")
 
@@ -113,9 +108,6 @@ final class MessageWatcherTests: XCTestCase {
         XCTAssertTrue(followed, "watcher did not follow the rotated -wal")
     }
 
-    /// chat.db unreadable at startup must not switch live notifications off
-    /// for the life of the process: the watcher keeps trying until it can
-    /// read the database.
     func testStartsWatchingOnceTheDatabaseBecomesReadable() async throws {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("watcher-late-\(UUID().uuidString)")
@@ -151,9 +143,6 @@ final class MessageWatcherTests: XCTestCase {
         XCTAssertEqual(collected.withLock { $0 }, [4])
     }
 
-    /// A replaced chat.db (restore, reset, re-sync) restarts ROWIDs low. The
-    /// watcher resets its maximum rather than staying silent until new rows
-    /// pass the old one.
     func testResetsWhenTheDatabaseIsReplaced() async throws {
         let fixture = try makeWalFixture()
         try fixture.insertMessage(rowId: 20, guid: "old-20", text: "old", date: 1, isFromMe: false, handleId: 1)

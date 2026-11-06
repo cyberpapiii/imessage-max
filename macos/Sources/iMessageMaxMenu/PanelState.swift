@@ -2,7 +2,6 @@ import IMessageMaxContract
 import MaxBrand
 import MaxCore
 
-/// What a start, stop, restart, or permission request is doing while it runs.
 enum Busy: Equatable {
   case starting, stopping, askingPermission, checkingSending
 
@@ -18,8 +17,6 @@ enum Busy: Equatable {
   var isPermissionRequest: Bool { self == .askingPermission || self == .checkingSending }
 }
 
-/// A short acknowledgement shown as a toast. Its tone, not its wording,
-/// decides whether it wears a check.
 struct Notice: Equatable {
   enum Tone { case good, neutral }
 
@@ -37,17 +34,11 @@ struct Notice: Equatable {
   }
 }
 
-/// The home page's one reading of the service. The headline, the primary
-/// button, and the face are all derived from it.
 struct PanelState: Equatable {
   enum Phase: Equatable {
-    /// The first check has not answered yet.
     case checking
-    /// The service answered; `opensMessages` means the sending check needs
-    /// Messages running first.
     case connected(Readiness, opensMessages: Bool)
     case stopped(installed: Bool)
-    /// No answer, and no stopped service to start.
     case disconnected
   }
 
@@ -103,7 +94,6 @@ struct PanelState: Equatable {
     }
   }
 
-  /// The home page's blue button; nil while a setup step offers its own.
   var primary: Primary? {
     switch phase {
     case .connected(.ready, _): .connect

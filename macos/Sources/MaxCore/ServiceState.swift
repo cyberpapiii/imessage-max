@@ -1,8 +1,6 @@
 import Foundation
 import IMessageMaxContract
 
-/// The companion's reading of the server's `diagnose` reply. Its "ready"
-/// includes sending, which the server's top-level status does not.
 extension DiagnoseResult {
   public var readiness: Readiness {
     if !database.accessible { return .messages }
@@ -17,7 +15,6 @@ extension DiagnoseResult {
     contacts.authorized && PermissionStatus.namesAvailable.contains(contacts.status)
   }
 
-  /// Whether the service already holds `permission`, so asking again is moot.
   public func grants(_ permission: SetupPermission) -> Bool {
     switch permission {
     case .automation: self[.permAutomation]?.isSupported == true

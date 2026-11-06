@@ -67,9 +67,6 @@ private func makeRecallFixture() throws -> ToolTestDatabase {
     return fixture
 }
 
-/// Builds: <prefix junk> + marker + 5 filler bytes + length field + payload.
-/// Copied from SendVerifierTests (private there).
-
 private func makeAttributedBodyRecallFixture() throws -> ToolTestDatabase {
     let fixture = try ToolTestDatabase(name: "search-recall-attr")
     try fixture.insertHandle(rowId: 1, handle: "+15550000001")

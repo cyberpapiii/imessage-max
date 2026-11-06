@@ -36,8 +36,6 @@ final class PeopleMapTests: XCTestCase {
         XCTAssertEqual(labels.reactor("+9"), "unknown")
     }
 
-    // MARK: - Keys never collide
-
     func testUnnamedKeySkipsAKeyAContactAlreadyHolds() {
         var people = PeopleMap(rules: .participants)
         people.addMe()
@@ -60,8 +58,6 @@ final class PeopleMapTests: XCTestCase {
         XCTAssertEqual(people.add(handle: "+2", name: nil), "p2")
     }
 
-    /// Contacts named like the unnamed keys ("Unknown A", "P1 Pilot") still
-    /// leave every person with their own key in get_messages and get_context.
     func testToolsKeepOneKeyPerPersonWhenContactsAreNamedLikeUnnamedKeys() async throws {
         let base = AppleTime.fromDate(Date()) - 60 * appleMinute
         let group = try ToolTestDatabase(name: "people-collide")
@@ -72,7 +68,6 @@ final class PeopleMapTests: XCTestCase {
             try group.joinChatMessage(chatId: 1, messageId: handle)
         }
         try group.insertChat(rowId: 1, guid: "iMessage;+;chat-collide")
-        // +15550000003 has no contact, so it takes the unnamed key.
         let messages = try await callTool(
             "get_messages", ["chat_id": "chat1"], database: group.database(),
             resolver: ContactResolver(seedCache: ["+15550000001": "Unknown A", "+15550000002": "Unknown B"])

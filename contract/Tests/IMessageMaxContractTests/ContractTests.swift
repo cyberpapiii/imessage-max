@@ -2,11 +2,6 @@ import Foundation
 import IMessageMaxContract
 import Testing
 
-// The server and the companion each have their own tests against these types;
-// these pin the bytes both sides depend on.
-
-// The server writes this reply with a plain JSONEncoder, whose key order
-// varies from process to process, so this pins keys and values, not bytes.
 @Test func setupReplyWireShape() throws {
   let reply = SetupPermissionReply(
     permission: .automation, authorized: true, status: .authorized, processID: 42)

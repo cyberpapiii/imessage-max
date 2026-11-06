@@ -5,9 +5,6 @@ import SwiftUI
 
 enum PanelSection: String { case connection, details, preferences }
 
-/// One fixed-width panel. The home page shows the service's state and the one
-/// thing that needs the person; everything else is a page that slides in
-/// inside the same panel.
 struct PanelView: View {
   let model: AppModel
   @State private var contentHeight: CGFloat = 260
@@ -66,8 +63,6 @@ struct PanelView: View {
         ])
     }
   }
-
-  // MARK: Home
 
   private var home: some View {
     let state = model.state
@@ -164,8 +159,6 @@ struct PanelView: View {
       .padding(.vertical, -Space.rowGap)
     }
   }
-
-  // MARK: Pages
 
   @ViewBuilder
   private func page(_ section: PanelSection) -> some View {

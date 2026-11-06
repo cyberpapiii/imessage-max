@@ -9,7 +9,6 @@ enum MessagePreviewResolver {
         return SummaryPreviewFormatter.attachmentPlaceholder(for: attachmentTypes)
     }
 
-    /// Kinds of the attachments Messages.app shows, per message.
     static func attachmentTypesByMessage(
         db: Database,
         messageIds: [Int64]
@@ -21,8 +20,6 @@ enum MessagePreviewResolver {
 }
 
 enum ChatSummaryBuilder {
-    /// Named groups of more than four show who spoke last, so they need the
-    /// chat's recent senders; every other chat previews from participants alone.
     static func needsRecentSenders(_ identity: ChatIdentity) -> Bool {
         identity.isNamed && identity.participantCount > 4
     }
@@ -66,7 +63,6 @@ enum ChatSummaryBuilder {
         handles: [String],
         participants: [ChatIdentity.Participant]
     ) -> [ChatIdentity.Participant] {
-        // Duplicate handles reach here from chat_handle_join; keep the first.
         let handleToParticipant = Dictionary(
             participants.map { ($0.handle, $0) },
             uniquingKeysWith: { first, _ in first }

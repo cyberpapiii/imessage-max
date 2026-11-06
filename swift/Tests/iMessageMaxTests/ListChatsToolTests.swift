@@ -45,8 +45,6 @@ final class ListChatsToolTests: XCTestCase {
     func testChatsWithNoMessagesPageWithACursor() async throws {
         let fixture = try ToolTestDatabase(name: "list-chats-null-tail")
         try fixture.insertHandle(rowId: 1, handle: "+15550000001")
-        // Three chats, no messages: every last_message_date is NULL, which
-        // pages as date 0.
         for chatId in 1...3 {
             try fixture.insertChat(rowId: chatId, guid: "null-tail-\(chatId)", displayName: "Chat \(chatId)")
             try fixture.joinChatHandle(chatId: chatId, handleId: 1)
@@ -60,7 +58,6 @@ final class ListChatsToolTests: XCTestCase {
         )
         let page = result
         XCTAssertEqual(page.chats.count, 1)
-        // The contract: more and cursor agree.
         XCTAssertEqual(page.more, page.cursor != nil,
                        "more=\(page.more) cursor=\(String(describing: page.cursor))")
         XCTAssertTrue(page.more)
@@ -171,7 +168,6 @@ final class ListChatsToolTests: XCTestCase {
             try fixture.insertChat(rowId: chat, guid: "iMessage;+;c\(chat)", displayName: "Chat \(chat)")
             try fixture.joinChatHandle(chatId: chat, handleId: 1)
         }
-        // Chats 1 and 2 have messages; 3, 4 and 5 have none.
         for chat in 1...2 {
             try fixture.insertMessage(rowId: chat, guid: "g\(chat)", text: "hi", date: 700_000_000_000_000_000 + Int64(chat), isFromMe: false, handleId: 1)
             try fixture.joinChatMessage(chatId: chat, messageId: chat)

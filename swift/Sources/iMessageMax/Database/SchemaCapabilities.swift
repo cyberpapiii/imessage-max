@@ -1,22 +1,8 @@
 import Foundation
 import SQLite3
 
-/// Which optional chat.db columns exist on this machine. Probed once per
-/// `Database` instance from SQLite table_info.
-///
-/// Only three columns are protected: message.thread_originator_guid,
-/// message.date_edited and message.associated_message_emoji, whose SQL
-/// fragments below substitute a constant when the column is missing. Every
-/// other column is probed for `diagnose`'s `database.features` only, and
-/// several of them (item_type, group_action_type, group_title, other_handle,
-/// balloon_bundle_id, is_filtered, hide_attachment) are read unconditionally,
-/// so a schema without them fails those queries. To protect one, add a
-/// fragment here and use it.
 struct SchemaCapabilities: Sendable, Equatable {
-    /// Every optional column, as `<table>.<column>`.
     enum Column: String, CaseIterable, Sendable {
-        // Only thread_originator_guid, date_edited and associated_message_emoji
-        // are guarded in SQL; the rest are reported only.
         case messageThreadOriginatorGuid = "message.thread_originator_guid"
         case messageThreadOriginatorPart = "message.thread_originator_part"
         case messageDateEdited = "message.date_edited"
@@ -43,7 +29,6 @@ struct SchemaCapabilities: Sendable, Equatable {
 
     private let present: Set<Column>
 
-    /// The macOS 15 floor the code was written against: everything present.
     static let assumed = SchemaCapabilities(present: Set(Column.allCases))
 
     private init(present: Set<Column>) {
@@ -63,20 +48,15 @@ struct SchemaCapabilities: Sendable, Equatable {
 
     func has(_ column: Column) -> Bool { present.contains(column) }
 
-    /// A copy without `columns`, for tests that simulate an older schema.
     func without(_ columns: Column...) -> SchemaCapabilities {
         SchemaCapabilities(present: present.subtracting(columns))
     }
 
     var messageThreadOriginatorGuid: Bool { has(.messageThreadOriginatorGuid) }
 
-    /// `"<table>.<column>": present`, for `diagnose`'s `database.features`.
     var features: [String: Bool] {
         Dictionary(uniqueKeysWithValues: Column.allCases.map { ($0.rawValue, has($0)) })
     }
-
-    // MARK: SQL fragments for the guarded columns. Same alias in the
-    // same position, so the index-based row mappers do not move.
 
     var threadOriginatorGuidSQL: String {
         has(.messageThreadOriginatorGuid) ? "m.thread_originator_guid" : "NULL AS thread_originator_guid"

@@ -42,7 +42,6 @@ enum IconMetadata {
         compactToolIcons.map(\.icon)
     }
 
-    /// `icons` as JSON, the one encoding both eras send. Constant, so built once.
     nonisolated(unsafe) static let serverIconsJSON: [[String: Any]] =
         JSONRPC.jsonValue(encoding: icons) as? [[String: Any]] ?? []
 

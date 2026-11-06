@@ -1,19 +1,12 @@
 import Foundation
 import MCP
 
-/// Outcome of createSession: capacity refusal and startup failure need
-/// different HTTP answers (503 retry-later vs 500 internal).
 enum SessionCreationResult {
     case created(SessionManager.MCPSessionState)
     case atCapacity
-    /// The SDK Server would not start; the error is logged here.
     case startFailed
 }
 
-/// Manages MCP sessions for the HTTP transport.
-///
-/// Each session has its own Server instance, enabling clean reconnection.
-/// When a client reconnects, they get a new session with a fresh Server.
 actor SessionManager {
     final class MCPSessionState: @unchecked Sendable {
         let id: String
@@ -39,34 +32,24 @@ actor SessionManager {
 
     private var sessions: [String: MCPSessionState] = [:]
 
-    /// Slots claimed by in-flight `createSession` calls. The cap is checked
-    /// against `reservedSlots + sessions.count` so two concurrent creates
-    /// cannot both pass the count check, await registration, and both insert.
     private var reservedSlots = 0
 
-    /// Idle TTL before a session is reaped.
     private let sessionTimeout: TimeInterval
 
     private let maxSessions: Int
 
-    /// Idle span after which a session is reclaimed to admit a new client
-    /// when the table is full.
     private let reclaimableIdle: TimeInterval
 
-    /// How often the expired-session sweep runs.
     private let cleanupInterval: Duration
 
     private var cleanupTask: Task<Void, Never>?
 
-    /// Builds each session's SDK Server.
     private let makeServer: @Sendable () async -> Server
 
     private var responseHandler: ((String, Data) async -> Void)?
 
     private var sessionTerminationHandler: ((String) async -> Void)?
 
-    /// Every limit comes from `configuration`, where the production values
-    /// and their reasons live.
     init(catalog: ToolCatalog, configuration: HTTPTransport.Configuration) {
         let makeServer = configuration.makeServer
         self.makeServer = { await makeServer(catalog) }
@@ -96,7 +79,7 @@ actor SessionManager {
         }
 
         guard reservedSlots + sessions.count < maxSessions else {
-            return .atCapacity  // Caller returns 503 Service Unavailable
+            return .atCapacity
         }
         reservedSlots += 1
         defer { reservedSlots -= 1 }
@@ -151,8 +134,6 @@ actor SessionManager {
         await responseHandler?(sessionId, data)
     }
 
-    /// True when the id names a live session, which is marked active; false
-    /// when it is unknown or expired (an expired one is terminated here).
     func validate(sessionId: String) async -> Bool {
         guard let session = sessions[sessionId] else {
             return false
@@ -173,8 +154,6 @@ actor SessionManager {
         session.lastActivity = Date()
     }
 
-    /// Sends `notification` to every live session. Errors are per-session
-    /// and swallowed: a session whose Server has stopped just drops it.
     func notifyAllSessions<N: MCP.Notification>(_ notification: Message<N>) async -> Int {
         var delivered = 0
         for session in sessions.values {
@@ -192,16 +171,7 @@ actor SessionManager {
         sessions[sessionId]?.protocolVersion
     }
 
-    /// Terminates a session: stops its SDK Server, then runs the termination
-    /// handler (the transport closes the session's SSE streams and fails its
-    /// waiting requests there). Every teardown path comes through here, so
-    /// callers do nothing more.
-    ///
-    /// `Server.stop()` can hang on a wedged transport, so the wait is bounded
-    /// to 2 seconds by racing against `AsyncTimeout.sleep`. Never `Task.sleep`.
     func terminateSession(sessionId: String) async {
-        // Remove first: once termination starts, routeMessage and validate
-        // must refuse this id even while server.stop() is still running.
         guard let session = sessions.removeValue(forKey: sessionId) else { return }
 
         session.serverTask?.cancel()
@@ -235,17 +205,6 @@ actor SessionManager {
         }
     }
 
-    /// Removes sessions idle long enough to be presumed abandoned.
-    ///
-    /// A client that disappears without sending DELETE leaves its session
-    /// behind for the full `sessionTimeout`, and the sweep that removes it
-    /// only runs every `cleanupInterval`. Without this, a table full of
-    /// abandoned sessions refuses every new client until they expire (up to
-    /// `sessionTimeout`), and the only faster recovery is restarting the
-    /// service. A live client touches its session
-    /// far more often than the reclaim window, so anything staler is a client
-    /// that went away. This runs only under capacity pressure, so a quiet but
-    /// live session is left alone while there is room.
     private func reclaimIdleSessions() async {
         let now = Date()
         let idleIds = sessions.filter { _, session in
@@ -257,10 +216,6 @@ actor SessionManager {
         }
     }
 
-    /// Removes expired sessions.
-    ///
-    /// Driven by the `cleanupInterval` loop above; also callable directly by
-    /// tests, which inject a short `sessionTimeout` rather than waiting.
     func cleanupExpiredSessions() async {
         let now = Date()
         let expiredIds = sessions.filter { _, session in

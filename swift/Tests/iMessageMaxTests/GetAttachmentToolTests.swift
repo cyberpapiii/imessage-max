@@ -24,11 +24,6 @@ final class GetAttachmentToolTests: XCTestCase {
     }
 
     func testDeclaredOversizeTripsTheFullVariantPixelCap() throws {
-        // Header-only oversize. process(.full) on a file that *declares*
-        // 50MP still hung macos-26 CI: ImageIO's vision thumbnail path
-        // allocates from SOF, not from the real 200x100 payload. The
-        // production short-circuit is `exceedsFullVariantPixels`; assert
-        // that and leave process() to the cheap vision/thumb cases.
         let declaredWidth = 8000
         let declaredHeight = ImageProcessor.maxFullVariantPixels / declaredWidth + 1
         XCTAssertGreaterThan(declaredWidth * declaredHeight, ImageProcessor.maxFullVariantPixels)
@@ -162,8 +157,6 @@ final class GetAttachmentToolTests: XCTestCase {
     }
 }
 
-/// Tiny JPEG whose SOF width/height are patched so ImageIO reports an
-/// oversize pixel count without encoding that many pixels.
 private func makeJPEGDeclaringDimensions(
     pixelWidth: Int,
     pixelHeight: Int,

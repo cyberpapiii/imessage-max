@@ -117,8 +117,6 @@ struct SearchGroupedResponse: Codable {
 enum SearchTool {
     static let limit = IntArgument(name: "limit", defaultValue: 20, range: 1...100)
 
-    // MARK: - Tool Registration
-
     static func definition(db: Database, resolver: ContactResolver) -> ToolDefinition {
         let inputSchema: Value = .object([
             "type": "object",
@@ -319,16 +317,11 @@ enum SearchTool {
         let sortOrder = SearchSort(rawValue: sort) ?? .recentFirst
         let responseFormat = SearchFormat(rawValue: format) ?? .flat
 
-        // Over-fetch when Swift still has to apply word/fuzzy/unanswered
-        // filters. attributedBody is prefiltered in SQL via instr.
         let fetchLimit = (hasQuery || unanswered) ? max(500, clampedLimit * 10) : clampedLimit
 
         let senderFilter = await SenderFilter.resolve(fromPerson, resolver: resolver)
         let chatFilter = try inChat.map { try ChatIdentifier.resolve($0, db: db) }
 
-        // Single characters match nearly everything, so they are dropped
-        // from a query with longer words; a query of only single characters
-        // (or one CJK character) is matched whole, as a substring.
         let searchWords: [String]
         if hasQuery, let searchQuery = query?.trimmingCharacters(in: .whitespaces).lowercased(), !searchQuery.isEmpty {
             let words = searchQuery.split(separator: " ")
@@ -362,8 +355,6 @@ enum SearchTool {
             return try db.query(sql, params: params, map: MessageInChat.init)
         }
 
-        // The SQL terms only prefilter; the word match and the unanswered
-        // check decide. Keeps at most `limit` rows.
         let confirmsInSwift = (hasQuery && !searchWords.isEmpty) || unanswered
         func matchesWords(_ text: String?) -> Bool {
             guard let text = text?.lowercased() else { return false }
@@ -402,9 +393,6 @@ enum SearchTool {
             return Array(rows.prefix(limit))
         }
 
-        /// Hidden chats with a real match. The SQL prefilter names the
-        /// candidates; when Swift decides, a candidate counts once one of
-        /// its rows is confirmed.
         func hiddenChatsWithMatch() throws -> Int {
             func hiddenQuery(columns: String = "DISTINCT c.ROWID") -> (String, [Any]) {
                 filteredHiddenQuery(
@@ -423,9 +411,6 @@ enum SearchTool {
                 )
             }
             if confirmsInSwift, !unanswered {
-                // The word match reads nothing more, so one query brings
-                // every candidate's text, and a chat's rows after its first
-                // match are not decoded.
                 let (sql, params) = hiddenQuery(columns: "c.ROWID, m.text, m.attributedBody")
                 var matched = Set<Int64>()
                 _ = try db.query(sql, params: params) { row in
@@ -439,8 +424,6 @@ enum SearchTool {
             let (sql, params) = hiddenQuery()
             let candidates = try db.query(sql, params: params) { $0.int(0) }
             guard confirmsInSwift else { return candidates.count }
-            // The unanswered check reads each row's replies, so each chat
-            // is walked a page at a time until one row is confirmed.
             var count = 0
             for chatId in candidates {
                 var resumeAfter: TimelineCursor?
@@ -459,7 +442,6 @@ enum SearchTool {
             return count
         }
 
-        // Counted on the first page only, as list_chats does.
         let filteredHidden = try ChatScope(named: chatFilter, includeFiltered: includeFiltered)
             .filteredHidden(firstPage: cursor == nil, count: hiddenChatsWithMatch)
 

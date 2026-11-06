@@ -2,10 +2,6 @@ import XCTest
 import IMessageMaxContract
 @testable import iMessageMax
 
-/// Tests for the 15-key capability contract.
-///
-/// All three probes (DB, contacts, automation) are injected so tests are hermetic.
-/// The real automation probe reads live macOS TCC; CI runners return "not_determined".
 final class CapabilityContractTests: XCTestCase {
 
     private static func dbProbe(ok: Bool) -> DatabaseProbe {
@@ -45,11 +41,9 @@ final class CapabilityContractTests: XCTestCase {
         XCTAssertEqual(caps["send_text_group"]?.state, "supported")
         XCTAssertEqual(caps["send_file_dm"]?.state, "supported")
 
-        // send_file_group: supported with a routing caveat when automation is granted
         XCTAssertEqual(caps["send_file_group"]?.state, "supported")
         XCTAssertNotNil(caps["send_file_group"]?.note)
 
-        // verified_send: db ok + automation ok → supported with db_reread detail
         XCTAssertEqual(caps["verified_send"]?.state, "supported")
         XCTAssertEqual(caps["verified_send"]?.detail, "db_reread")
 
@@ -91,14 +85,12 @@ final class CapabilityContractTests: XCTestCase {
             XCTAssertNotNil(caps[key]?.fix, "\(key) must include fix text")
         }
 
-        // verified_send: db ok, automation denied → degraded
         XCTAssertEqual(caps["verified_send"]?.state, "degraded")
 
         XCTAssertEqual(caps["perm_automation"]?.state, "permission-gated")
         XCTAssertNotNil(caps["perm_automation"]?.fix)
     }
 
-    // Automation not_determined → unverified (honest default)
     func testAutomationNotDeterminedCapabilities() async throws {
         let caps = try await run(automation: CapabilityContractTests.probeAutomationNotDetermined).capabilities
 
@@ -108,25 +100,20 @@ final class CapabilityContractTests: XCTestCase {
         XCTAssertEqual(caps["send_file_group"]?.state, "unverified")
         XCTAssertEqual(caps["perm_automation"]?.state, "unverified")
 
-        // verified_send: db ok, automation not_determined → degraded
         XCTAssertEqual(caps["verified_send"]?.state, "degraded")
     }
 
     func testDBInaccessibleCapabilities() async throws {
         let caps = try await run(dbOk: false).capabilities
 
-        // verified_send: no DB → permission-gated
         XCTAssertEqual(caps["verified_send"]?.state, "permission-gated")
         XCTAssertNotNil(caps["verified_send"]?.fix)
 
-        // attachments_read: no DB → permission-gated
         XCTAssertEqual(caps["attachments_read"]?.state, "permission-gated")
         XCTAssertNotNil(caps["attachments_read"]?.fix)
 
-        // perm_full_disk: permission_denied status → permission-gated
         XCTAssertEqual(caps["perm_full_disk"]?.state, "permission-gated")
 
-        // Send modes are driven only by automation, not DB
         XCTAssertEqual(caps["send_text_dm"]?.state, "supported")
         XCTAssertEqual(caps["send_file_group"]?.state, "supported")
     }
@@ -153,17 +140,14 @@ final class CapabilityContractTests: XCTestCase {
             XCTAssertNotNil(entry["state"], "\(key).state must be present")
         }
 
-        // Backward-compat health fields still present
         XCTAssertNotNil(decoded["database"])
         XCTAssertNotNil(decoded["contacts"])
         XCTAssertNotNil(decoded["version"])
         XCTAssertNotNil(decoded["process_id"])
         XCTAssertNotNil(decoded["status"])
-        // Grouped sections replaced these flat keys.
         XCTAssertNil(decoded["database_accessible"])
         XCTAssertNil(decoded["contacts_authorized"])
 
-        // verified_send detail key name
         let verifiedSend = try XCTUnwrap(caps["verified_send"] as? [String: Any])
         XCTAssertEqual(verifiedSend["state"] as? String, "supported")
         XCTAssertEqual(verifiedSend["detail"] as? String, "db_reread")

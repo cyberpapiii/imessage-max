@@ -4,8 +4,6 @@ import XCTest
 
 final class MessageTextExtractorTests: XCTestCase {
 
-    /// Builds: <prefix junk> + marker + 5 filler bytes + length field + payload
-
     func testSingleByteLength() {
         let blob = typedstreamBlob(lengthField: [5], payload: Array("hello".utf8))
         XCTAssertEqual(MessageTextExtractor.extractFromTypedstream(blob), "hello")
@@ -31,7 +29,7 @@ final class MessageTextExtractorTests: XCTestCase {
     func testTruncatedAfterMarkerReturnsNil() {
         var bytes: [UInt8] = [0x04, 0x0B]
         bytes += Array("NSString".utf8)
-        bytes += [0x01, 0x2B]   // only 2 bytes after the marker, not the full 5 filler + length
+        bytes += [0x01, 0x2B]
         let blob = Data(bytes)
         XCTAssertNil(MessageTextExtractor.extractFromTypedstream(blob))
     }
@@ -59,10 +57,6 @@ final class MessageTextExtractorTests: XCTestCase {
     }
 
     func testMutableStringMarkerAlsoParses() {
-        // "NSString" is not a substring of "NSMutableString"
-        // (N-S-M-u-t-a-b-l-e-S-t-r-i-n-g never contains N-S-S-t-r-i-n-g
-        // contiguously), so this exercises the `??` fallback in the marker
-        // search rather than accidentally matching the first branch.
         let blob = typedstreamBlob(marker: "NSMutableString", lengthField: [5], payload: Array("hello".utf8))
         XCTAssertEqual(MessageTextExtractor.extractFromTypedstream(blob), "hello")
     }
@@ -71,9 +65,9 @@ final class MessageTextExtractorTests: XCTestCase {
         let validBlob = typedstreamBlob(lengthField: [5], payload: Array("hello".utf8))
         let rebasedResult = MessageTextExtractor.extractFromTypedstream(Data(validBlob))
 
-        var fullData = Data([0xAA, 0xBB, 0xCC, 0xDD])   // 4 junk bytes prepended
+        var fullData = Data([0xAA, 0xBB, 0xCC, 0xDD])
         fullData.append(validBlob)
-        let slice = fullData[4...]   // startIndex == 4, count relative to the slice
+        let slice = fullData[4...]
         XCTAssertEqual(slice.startIndex, 4)
 
         let sliceResult = MessageTextExtractor.extractFromTypedstream(slice)
@@ -90,7 +84,6 @@ final class MessageTextExtractorTests: XCTestCase {
     }
 
     func testHighLiteralByteReturnsNil() {
-        // Documents that >= 0x80 is always treated as marker space, never a literal length.
         let blob = typedstreamBlob(lengthField: [0x9C], payload: Array(repeating: UInt8(0x41), count: 156))
         XCTAssertNil(MessageTextExtractor.extractFromTypedstream(blob))
     }

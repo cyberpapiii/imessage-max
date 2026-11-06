@@ -58,7 +58,6 @@ final class AttachmentPathContainmentTests: XCTestCase {
         try Data("outside".utf8).write(to: outside)
         defer { try? FileManager.default.removeItem(at: base) }
 
-        // Path that traverses up via ../
         let escapePath = root.path + "/sub/../../outside.txt"
         let result = AttachmentPathPolicy.validatedPath(escapePath, allowedRoots: [root.path])
         XCTAssertNil(result, "Path using ../ to escape root should be rejected after standardization")
@@ -92,8 +91,6 @@ final class AttachmentPathContainmentTests: XCTestCase {
         let outsideFile = outsideDir.appendingPathComponent("secret.jpg")
         try Data("secret".utf8).write(to: outsideFile)
 
-        // Build a fixture DB whose attachment row points to the outside file.
-        // ToolTestDatabase cleans up on deinit.
         let fixtureDB = try ToolTestDatabase(name: "containment-e2e")
         try fixtureDB.insertAttachment(
             rowId: 99,
@@ -122,9 +119,6 @@ final class AttachmentPathContainmentTests: XCTestCase {
         try FileManager.default.createDirectory(at: outsideDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: base) }
 
-        // A real file outside the allowed root. Junk bytes are enough: if getMetadata
-        // were ever reached it would fail to decode anyway, so the assertion below is on
-        // the response shape (never probed), not on whether decoding succeeds.
         let outsideFile = outsideDir.appendingPathComponent("secret.jpg")
         try Data("not a real image".utf8).write(to: outsideFile)
 
@@ -158,7 +152,6 @@ final class AttachmentPathContainmentTests: XCTestCase {
         let media = target["media"] as? [[String: Any]]
         XCTAssertTrue(media == nil || media!.isEmpty, "Out-of-root attachment must not appear under media")
 
-        // Falls through to the plain summary, which only carries the last path component.
         let attachments = try decodeJSONArray(try XCTUnwrap(target["attachments"]))
         XCTAssertEqual(attachments.count, 1)
         XCTAssertEqual(attachments.first?["filename"] as? String, "secret.jpg")

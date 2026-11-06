@@ -3,14 +3,9 @@ import XCTest
 import MCP
 @testable import iMessageMax
 
-/// Unit tests for the MCP 2026-07-28 modern-era dispatcher: per-request
-/// `_meta` validation, version negotiation, discovery, catalog cache hints,
-/// deterministic ordering, and protocol/tool error separation.
 final class ModernDispatcherTests: XCTestCase {
     private var definitions: [ToolDefinition] = []
     private var catalog: ToolCatalog { ToolCatalog(definitions) }
-
-    // MARK: - Era detection
 
     func testModernMessageDetection() throws {
         XCTAssertTrue(isModern(try json(discoverPayload())))
@@ -27,8 +22,6 @@ final class ModernDispatcherTests: XCTestCase {
             isModern(try json(Data(#"{"jsonrpc":"2.0","id":1,"result":{}}"#.utf8)))
         )
     }
-
-    // MARK: - server/discover
 
     func testDiscoverReturnsSupportedVersionsCapabilitiesAndCacheHints() async throws {
         let outcome = await dispatch(discoverPayload())
@@ -54,8 +47,6 @@ final class ModernDispatcherTests: XCTestCase {
         XCTAssertEqual(serverInfo["title"] as? String, Version.title)
         XCTAssertNotNil(serverInfo["icons"])
     }
-
-    // MARK: - _meta validation
 
     func testMissingProtocolVersionIsInvalidParams() async throws {
         let payload = try payloadData([
@@ -117,8 +108,6 @@ final class ModernDispatcherTests: XCTestCase {
         XCTAssertNil(outcome.body)
     }
 
-    // MARK: - tools/list
-
     func testToolsListHasResultTypeCacheHintsAndDeterministicOrder() async throws {
         registerFakeTool(named: "zeta_tool")
         registerFakeTool(named: "alpha_tool")
@@ -132,15 +121,11 @@ final class ModernDispatcherTests: XCTestCase {
         XCTAssertNotNil(result["ttlMs"] as? Int)
 
         let tools = try XCTUnwrap(result["tools"] as? [[String: Any]])
-        // Registration order, not dictionary order, so clients can cache
-        // the catalog.
         XCTAssertEqual(
             tools.map { $0["name"] as? String },
             ["zeta_tool", "alpha_tool", "mid_tool"]
         )
     }
-
-    // MARK: - tools/call
 
     func testToolCallReturnsCompleteResultWithContentAndStructuredContent() async throws {
         registerFakeTool(named: "modern_echo") { _ in
@@ -172,7 +157,6 @@ final class ModernDispatcherTests: XCTestCase {
                 method: "tools/call",
                 extraParams: ["name": "modern_fail", "arguments": [:]]
             ))
-        // Tool execution failures are results with isError, not JSON-RPC errors.
         XCTAssertEqual(HTTPTransport.status(for: outcome).code, 200)
         let result = try result(from: outcome)
         XCTAssertEqual(result["isError"] as? Bool, true)
@@ -189,8 +173,6 @@ final class ModernDispatcherTests: XCTestCase {
         XCTAssertEqual(error["code"] as? Int, -32602)
     }
 
-    // MARK: - Base64 sentinel
-
     func testBase64SentinelDecoding() {
         XCTAssertEqual(HTTPRequestParsing.decodeBase64Sentinel("plain"), "plain")
         let encoded = "=?base64?" + Data("héllo".utf8).base64EncodedString() + "?="
@@ -198,14 +180,10 @@ final class ModernDispatcherTests: XCTestCase {
         XCTAssertEqual(HTTPRequestParsing.decodeBase64Sentinel("=?base64?!!?="), "=?base64?!!?=")
     }
 
-    // MARK: - Log sanitization
-
     func testLogFieldSanitization() {
-        // A newline would let a client forge whole log lines.
         XCTAssertEqual(Log.sanitizedField("evil\nname"), "evilname")
         XCTAssertEqual(Log.sanitizedField("tab\there\r\n"), "tabhere")
 
-        // Unbounded input is clamped so a client cannot flood the service log.
         let long = String(repeating: "a", count: 300)
         XCTAssertEqual(Log.sanitizedField(long).count, 64)
 
@@ -213,16 +191,11 @@ final class ModernDispatcherTests: XCTestCase {
     }
 
     func testSerializeFallbackPreservesScalarId() {
-        // The correlation rule behind the id-preserving fallback: a client
-        // waiting on id 7 must not receive an id:null envelope.
         XCTAssertEqual(JSONRPC.fallbackId(for: 7) as? Int, 7)
         XCTAssertEqual(JSONRPC.fallbackId(for: "req-7") as? String, "req-7")
         XCTAssertTrue(JSONRPC.fallbackId(for: nil) is NSNull)
-        // Non-scalar ids have no safe echo, so they degrade to null.
         XCTAssertTrue(JSONRPC.fallbackId(for: ["a": 1]) is NSNull)
     }
-
-    // MARK: - Helpers
 
     private func registerFakeTool(
         named name: String,

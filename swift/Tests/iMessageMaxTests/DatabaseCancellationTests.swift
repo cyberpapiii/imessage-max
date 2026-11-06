@@ -41,12 +41,9 @@ final class DatabaseCancellationTests: XCTestCase {
                 return XCTFail("expected DatabaseError.cancelled, got \(error)")
             }
         } catch is CancellationError {
-            // Task.value can surface cancellation if the work observed it first.
         }
     }
 
-    /// Cancelling one tool call must not abort another client's query: the
-    /// bystander finishes instead of failing with `DatabaseError.cancelled`.
     func testCancellingOneToolCallLeavesAConcurrentCallRunning() async throws {
         let fixture = try ToolTestDatabase(name: "db-cancel-dispatch")
         try fixture.insertChat(rowId: 1, guid: "dispatch-chat")

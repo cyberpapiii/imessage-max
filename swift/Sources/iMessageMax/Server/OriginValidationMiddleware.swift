@@ -9,7 +9,6 @@ import IMessageMaxContract
 /// expected origins when using HTTP transport to prevent malicious websites
 /// from making requests to the local MCP server.
 struct OriginValidationMiddleware<Context: RequestContext>: RouterMiddleware {
-    /// The address the server listens on. Requests may name it, or loopback.
     let boundHost: String
 
     init(boundHost: String = ServiceDefaults.host) {
@@ -21,7 +20,6 @@ struct OriginValidationMiddleware<Context: RequestContext>: RouterMiddleware {
         context: Context,
         next: (Request, Context) async throws -> Response
     ) async throws -> Response {
-        // Non-browser clients send no Origin; that is allowed.
         if let origin = request.headers[.origin] {
             guard let host = URL(string: origin)?.host,
                 HostBindingPolicy.isAllowedRequestHost(host, boundHost: boundHost)
@@ -42,8 +40,6 @@ struct OriginValidationMiddleware<Context: RequestContext>: RouterMiddleware {
         return try await next(request, context)
     }
 
-    /// `[::1]:8080` -> `[::1]`, `localhost:8080` -> `localhost`. A bare IPv6
-    /// address (several colons) and a non-numeric suffix are left whole.
     static func hostWithoutPort(_ authority: String) -> String {
         if authority.hasPrefix("[") {
             guard let closeBracket = authority.firstIndex(of: "]") else { return authority }

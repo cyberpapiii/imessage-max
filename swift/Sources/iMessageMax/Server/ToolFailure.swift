@@ -1,8 +1,6 @@
 import Foundation
 import MCP
 
-/// A tool's error answer: sent with `isError: true` and a JSON body that
-/// carries at least `error` (a stable code) and `message`.
 struct ToolFailure: Error {
     let code: String
     let body: any Encodable & Sendable
@@ -12,7 +10,6 @@ struct ToolFailure: Error {
         self.body = Body(error: code, message: message)
     }
 
-    /// For error shapes with fields beyond `error` and `message`.
     init(code: String, body: some Encodable & Sendable) {
         self.code = code
         self.body = body
@@ -22,9 +19,6 @@ struct ToolFailure: Error {
         ToolFailure("chat_not_found", ClientErrorMessages.chatNotFound(chatId))
     }
 
-    /// The answer for an error a tool let escape. Database errors keep their
-    /// codes; anything else is logged and reported without its description,
-    /// which can embed filesystem paths.
     init(_ error: any Error, tool: String) {
         switch error {
         case let failure as ToolFailure:

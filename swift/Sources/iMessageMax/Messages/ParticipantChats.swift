@@ -1,31 +1,21 @@
 import Foundation
 
-/// The chats a `participants` argument names: every chat that holds at
-/// least one handle of every entry. find_chat and get_messages both match
-/// participants this way.
 struct ParticipantChats {
     struct Chat {
         let id: Int64
         let guid: String?
         let displayName: String?
-        /// Other participants, by `SQLFragments.participantCount`.
         let participantCount: Int
     }
 
     enum Order {
-        /// Newest activity first.
         case recent
-        /// Chats with exactly the named people (plus me) first, then newest.
         case exactSizeFirst
     }
 
-    /// One entry per resolved participant: the handles that entry may be.
     let handleGroups: [[String]]
-    /// Entries that name nobody. A chat can't hold someone nobody resolves
-    /// to, so any unresolved entry means no chat matches.
     let unresolved: [String]
 
-    /// Resolves each entry by `SenderFilter`'s handle rules.
     static func resolve(_ participants: [String], resolver: ContactResolver) async -> ParticipantChats {
         var groups: [[String]] = []
         var unresolved: [String] = []
@@ -42,8 +32,6 @@ struct ParticipantChats {
 
     private var matchesNothing: Bool { handleGroups.isEmpty || !unresolved.isEmpty }
 
-    /// Matching chats in `order`, ties broken by newest ROWID.
-    /// `chatPredicate` and `isGroup` narrow the chats over alias `c`.
     func chats(
         db: Database,
         chatPredicate: String? = nil,

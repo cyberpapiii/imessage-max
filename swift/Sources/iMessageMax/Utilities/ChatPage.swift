@@ -1,28 +1,18 @@
 import Foundation
 
-/// The identity, summary and last message every chat-listing tool shows,
-/// fetched for a whole page of chats in a fixed number of queries.
 enum ChatPage {
     struct Chat {
         let id: Int64
         var guid: String? = nil
         let explicitName: String?
-        /// The chat's newest message date under the same filters as
-        /// `LastMessageOptions`, when the caller's own query already has it.
         var newestDate: Int64? = nil
     }
 
-    /// Which message a chat's `last_message` shows and how. The defaults
-    /// are list_chats'; other tools override what their style differs in.
     struct LastMessageOptions {
-        /// Only messages at or after this Apple-epoch time; nil for all.
         var sinceApple: Int64? = nil
         var previewMaxLength = 50
-        /// Sender of a received message with no handle.
         var unknownSenderLabel = "unknown"
-        /// `ago` when the date can't be formatted; nil leaves it out.
         var agoFallback: String? = "unknown"
-        /// Only unread received messages, as get_unread shows.
         var onlyUnreadInbound = false
     }
 
@@ -32,7 +22,6 @@ enum ChatPage {
         let lastMessage: ChatSummaryQueries.LastMessage?
     }
 
-    /// Names and participants only, for tools that show no summary.
     static func identities(
         _ chats: [Chat],
         db: Database,
@@ -53,7 +42,6 @@ enum ChatPage {
         return identities
     }
 
-    /// Pass `lastMessages: nil` when the tool shows no last message.
     static func build(
         _ chats: [Chat],
         lastMessages: LastMessageOptions?,
@@ -98,7 +86,6 @@ enum ChatPage {
     }
 }
 
-/// A chat's summary fields and a tool's own fields, encoded as one JSON object.
 @dynamicMemberLookup
 struct ChatListing<Details: Encodable>: Encodable {
     let chat: ChatSummary

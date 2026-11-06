@@ -116,13 +116,9 @@ actor GetMessagesSinceTool {
         let includeReactions = args["include_reactions"]?.boolValue ?? true
         let schema = try db.schema()
 
-        // SQL LIMIT limit+1 starves the page when filtered/orphan rows are
-        // consumed but not kept. Fetch batches until the walk fills `limit`
-        // kept rows, stalls, or exhausts the closed range.
         var consumed = sinceRowid
         var kept: [SinceScanRow] = []
         var stalled = false
-        // Chats, as filtered_hidden counts in every other tool.
         var hiddenChats: Set<Int64> = []
         var hasMore = false
         var exhausted = false
@@ -176,7 +172,6 @@ actor GetMessagesSinceTool {
                 break
             }
         }
-        // A page that filled on a batch's last row never looked past it.
         if kept.count == limit && !exhausted && consumed < currentRowid {
             hasMore = true
         }
@@ -230,7 +225,6 @@ actor GetMessagesSinceTool {
             hasMore: hasMore,
             currentRowid: currentRowid,
             stalled: stalled,
-            // The field is always present: 0 where ChatScope would omit it.
             filteredHidden: scope.filteredHidden { hiddenChats.count } ?? 0
         )
     }
@@ -242,8 +236,6 @@ actor GetMessagesSinceTool {
         scope: ChatScope,
         limit: Int
     ) throws -> [SinceScanRow] {
-        // Hidden chats and messages not joined to a chat yet are sorted
-        // below, after the row is consumed.
         let query = QueryBuilder()
             .selectMessages(
                 schema,

@@ -7,7 +7,6 @@ struct iMessageMaxMenuApp {
   @MainActor static func main() {
     let app = NSApplication.shared
     let design = DesignOptions()
-    // Process-only design checks never change the Mac's appearance settings.
     if let appearance = design.appearance { app.appearance = NSAppearance(named: appearance) }
     if let sheet = design.artworkSheet {
       writeArtworkSheet(to: sheet)
@@ -70,8 +69,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
       model.startMonitoring()
     }
     popover.contentViewController = hosting
-    // The first launch and reopening the app reveal where it lives. Login
-    // launches stay quiet after that first introduction.
     if !milestones.reached(.introducedMenuBar) {
       milestones.mark(.introducedMenuBar)
       showPanel()
@@ -85,7 +82,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
   }
 
   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-    // Design fixtures can hold an action open forever; there is nothing to finish.
     guard model.busy != nil, design.fixture == nil else { return .terminateNow }
     Task {
       await model.prepareToQuit()

@@ -2,8 +2,6 @@ import AppKit
 import MaxBrand
 import SwiftUI
 
-/// One 16-unit grid, one round pen, and up to three layers per glyph: a faint
-/// fill, the strokes, and solid dots.
 enum Glyph {
   case messages, contacts, sending, connection, details, preferences
   case refresh, lock, document, warning, check
@@ -27,14 +25,12 @@ enum Glyph {
       art.lines.move(to: CGPoint(x: points[0].0, y: points[0].1))
       for point in points.dropFirst() { art.lines.addLine(to: CGPoint(x: point.0, y: point.1)) }
     }
-    /// A closed outline that also carries the faint fill.
     func solid(_ path: Path) {
       art.wash.addPath(path)
       art.lines.addPath(path)
     }
     switch self {
     case .messages:
-      // The product's own face, small.
       solid(Path(MessageMark.round(in: CGRect(x: 0, y: 0, width: 16, height: 16))))
       art.dots.addPath(circle(6.6, 7.4, 0.9))
       art.dots.addPath(circle(9.4, 7.4, 0.9))
@@ -63,9 +59,6 @@ enum Glyph {
       art.dots.addPath(circle(10.3, 5, 2))
       art.dots.addPath(circle(5.7, 11, 2))
     case .refresh:
-      // Most of a circle travelling clockwise, ending at the top in a solid
-      // arrowhead that straddles the line, the way a refresh arrow reads at 14
-      // points. Points rather than an arc, so the direction is exact.
       art.lines.addLines(
         (0...48).map { step in
           let angle = (10 + 252 * Double(step) / 48) * .pi / 180
@@ -105,7 +98,6 @@ enum Glyph {
 }
 
 enum Pen {
-  /// One stroke weight that grows with the glyph, never thinner than 1.2.
   static func width(_ size: CGFloat) -> CGFloat { max(1.2, size * 0.1) }
 }
 
@@ -146,7 +138,6 @@ struct IconLabel: View {
   }
 }
 
-/// Fixed stroke slots morph coordinates instead of swapping glyph views.
 enum ActionMark {
   case arrow, check, play, pause, more, chevron
   var lines: [(CGPoint, CGPoint, Double)] {
@@ -225,8 +216,6 @@ struct ActionGlyph: View {
   }
 }
 
-/// The same seven outline vertices become a check; the rear page contracts
-/// toward the centre. The two parts stay mounted through interrupted taps.
 struct CopyGlyph: View {
   let completed: Bool
   var body: some View {
@@ -285,8 +274,6 @@ private struct RearPage: Shape {
   }
 }
 
-/// The panel's face, drawn once per mood as a template bitmap. Moods differ by
-/// silhouette (see `CompanionMood.menuBarPose`), so they read without colour.
 @MainActor
 enum MenuBarArtwork {
   private static var cache: [CompanionMood: NSImage] = [:]

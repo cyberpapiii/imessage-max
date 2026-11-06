@@ -2,16 +2,10 @@ import Foundation
 import XCTest
 @testable import iMessageMax
 
-/// Characterization tests for `AppleTime.parse`, the `since`/`before` parser
-/// shared by get_messages, search, get_unread, list_attachments, and list_chats.
-/// Every caller drops the filter silently when this returns nil, so the exact
-/// set of accepted inputs is behaviour an agent can observe.
 final class AppleTimeParseTests: XCTestCase {
 
     private let tolerance: TimeInterval = 2
 
-    /// Runs `body` with the start of today, again if midnight passed while it
-    /// ran, so a parse and the day it is checked against always agree.
     private func onOneDay<T>(_ body: (Date) throws -> T) rethrows -> (today: Date, value: T) {
         while true {
             let today = Calendar.current.startOfDay(for: Date())
@@ -20,7 +14,6 @@ final class AppleTimeParseTests: XCTestCase {
         }
     }
 
-    /// Round-trips the Apple-epoch nanoseconds back into a Date.
     private func parsedDate(_ input: String, file: StaticString = #filePath, line: UInt = #line) throws -> Date {
         let ns = try XCTUnwrap(AppleTime.parse(input), "\(input) should parse", file: file, line: line)
         return try XCTUnwrap(AppleTime.toDate(ns), file: file, line: line)
@@ -123,11 +116,9 @@ final class AppleTimeParseTests: XCTestCase {
     }
 
     func testHugeRelativeValueDoesNotTrap() {
-        // Reaching the end is the point: none of these may trap.
         for input in ["999999999h", "99999999999d", "9999-01-01T00:00:00Z", "0001-01-01T00:00:00Z", "999999999 days ago"] {
             _ = AppleTime.parse(input)
         }
-        // A relative bound is capped at 100 years, not dropped.
         XCTAssertNotNil(AppleTime.parse("999999999h"))
     }
 }

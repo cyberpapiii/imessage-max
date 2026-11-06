@@ -8,14 +8,10 @@ enum PhoneUtils {
 
         guard !digits.isEmpty, digits.count <= 15 else { return nil }
 
-        // An explicit country code wins. "+45 12 34 56 78" is Danish, not a
-        // US number missing its +1, even though it has 10 digits.
         if hasPlus {
             return "+\(digits)"
         }
 
-        // No "+": assume the North American numbering plan for 10 digits, or
-        // 11 digits starting with 1.
         if digits.count == 10 {
             return "+1\(digits)"
         }
@@ -23,7 +19,6 @@ enum PhoneUtils {
             return "+\(digits)"
         }
         if digits.count > 11 {
-            // Long bare digit strings are international numbers typed without "+".
             return "+\(digits)"
         }
 
@@ -46,8 +41,6 @@ enum PhoneUtils {
         return normalized
     }
 
-    /// True for anything that could be a messaging handle made of digits:
-    /// full numbers (10–15 digits) and carrier short codes (5–8 digits, no "+").
     static func isPhoneNumber(_ input: String) -> Bool {
         let trimmed = input.trimmingCharacters(in: .whitespaces)
         let digits = trimmed.filter { $0.isNumber }

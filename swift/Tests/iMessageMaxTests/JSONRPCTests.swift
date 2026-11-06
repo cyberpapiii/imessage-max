@@ -3,8 +3,6 @@ import IMessageMaxContract
 import MCP
 @testable import iMessageMax
 
-/// The shared JSON-RPC layer: one parse, one era rule, one error envelope,
-/// one era log line for both transports.
 final class JSONRPCTests: XCTestCase {
 
     func testParseSeparatesBatchesAndNonObjects() {
@@ -36,8 +34,6 @@ final class JSONRPCTests: XCTestCase {
         XCTAssertEqual(JSONRPCMessage(["method": "tools/list", "id": 1]).era, .legacy)
     }
 
-    /// The Origin/Host rejections depend on these exact bytes, keys in this
-    /// order.
     func testErrorEnvelopeHasFixedLayout() {
         XCTAssertEqual(
             String(decoding: JSONRPC.error(id: nil, code: .invalidRequest, message: "Origin not allowed"), as: UTF8.self),

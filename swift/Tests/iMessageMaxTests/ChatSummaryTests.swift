@@ -2,26 +2,17 @@ import MCP
 import XCTest
 @testable import iMessageMax
 
-/// The participant preview and last-message summary every chat-listing tool
-/// shows, read from the tools' JSON.
 final class ChatSummaryTests: XCTestCase {
 
-    // MARK: - Duplicate chat_handle_join rows
-
-    /// chat_handle_join has no unique constraint, and iCloud sync merges do
-    /// leave the same handle joined twice. One participant per handle must
-    /// come back: no double count, no "(0001)" suffix, no trap.
     func testDuplicateJoinRowsCountAsOneParticipant() async throws {
         let fixture = try ToolTestDatabase(name: "summary-duplicate-join")
         for rowId in 1...5 {
             try fixture.insertHandle(rowId: rowId, handle: "+1555000000\(rowId)")
         }
-        // chat10: unnamed, Alice joined twice, plus Bob.
         try fixture.insertChat(rowId: 10, guid: "chat-10-guid")
         for handleId in [1, 1, 2] {
             try fixture.joinChatHandle(chatId: 10, handleId: handleId)
         }
-        // chat20: named, five people, Alice joined twice. Chris spoke last.
         try fixture.insertChat(rowId: 20, guid: "chat-20-guid", displayName: "Weekend Plans")
         for handleId in [1, 1, 2, 3, 4, 5] {
             try fixture.joinChatHandle(chatId: 20, handleId: handleId)
@@ -45,12 +36,6 @@ final class ChatSummaryTests: XCTestCase {
         XCTAssertFalse(preview.contains { $0.contains("(0001)") }, "\(preview)")
     }
 
-    // MARK: - Participant preview
-
-    /// Six handles. Newest inbound non-reactions come from handles 3, 3, 5, 1;
-    /// a newer outbound row and a reaction from handle 6 must not count.
-    /// Named: the first three distinct recent senders, then "+3 more".
-    /// Unnamed: contact names first, alphabetical, recency ignored.
     func testNamedChatPreviewLeadsWithRecentSendersAndUnnamedIsAlphabetical() async throws {
         let fixture = try ToolTestDatabase(name: "summary-preview")
         for rowId in 1...6 {
@@ -91,13 +76,6 @@ final class ChatSummaryTests: XCTestCase {
         )
     }
 
-    // MARK: - Last message
-
-    /// The page's newest date is pinned per chat; a tie on that date goes to
-    /// the higher ROWID, the same row an unpinned search would pick. A chat
-    /// with no messages has no pinned date, and must neither lose the other
-    /// chats' previews nor gain one of its own. An attachment-only message
-    /// previews as its attachment.
     func testLastMessagePicksTheTiedHigherRowIdAndSkipsEmptyChats() async throws {
         let fixture = try ToolTestDatabase(name: "summary-last-message")
         let newest: Int64 = 700_000_000_000_000_000
@@ -129,8 +107,6 @@ final class ChatSummaryTests: XCTestCase {
         XCTAssertNil(empty["last_message"])
     }
 
-    /// get_unread pins the newest *unread inbound* date. A read reply at the
-    /// same instant with a higher ROWID must not take over the preview.
     func testUnreadPreviewIgnoresAReadMessageTiedWithTheNewestUnread() async throws {
         let fixture = try ToolTestDatabase(name: "summary-unread-tie")
         let unreadDate = AppleTime.fromDate(Date().addingTimeInterval(-3600))
@@ -154,9 +130,6 @@ final class ChatSummaryTests: XCTestCase {
         XCTAssertEqual(last["from"] as? String, "Alice Smith")
     }
 
-    /// An inbound row with no handle and a long text. list_chats previews
-    /// 50 characters from "unknown"; get_active_conversations and
-    /// get_chat_details preview 80 from "Unknown".
     func testPreviewLengthAndUnknownSenderPerTool() async throws {
         let fixture = try ToolTestDatabase(name: "summary-preview-format")
         let now = Date()
@@ -178,7 +151,6 @@ final class ChatSummaryTests: XCTestCase {
         XCTAssertEqual((activeLast["text"] as? String)?.count, 80)
     }
 
-    /// list_chats JSON keyed by chat id.
     private func listChats(_ fixture: ToolTestDatabase) async throws -> [String: [String: Any]] {
         let json = try await callTool("list_chats", ["limit": .int(50)], database: fixture.database())
         let chats = try decodeJSONArray(json["chats"])
@@ -187,11 +159,6 @@ final class ChatSummaryTests: XCTestCase {
         })
     }
 
-    // MARK: - awaiting_reply and group events
-
-    /// A group event after my reply is neither their message nor an
-    /// exchange: the chat is not awaiting my reply in list_chats,
-    /// get_chat_details or get_active_conversations.
     func testGroupEventIsNotAwaitingReplyOrAnExchange() async throws {
         let fixture = try groupFixture(name: "awaiting-events")
         let recent = AppleTime.fromDate(Date().addingTimeInterval(-3600))
@@ -214,8 +181,6 @@ final class ChatSummaryTests: XCTestCase {
         XCTAssertEqual(activity["their_msgs"] as? Int, 1)
     }
 
-    /// A group event of mine after their question does not count as my
-    /// reply: the chat is still awaiting it.
     func testAwaitingReplyLooksPastAGroupEventToTheirMessage() async throws {
         let fixture = try groupFixture(name: "awaiting-past-event")
         let recent = AppleTime.fromDate(Date().addingTimeInterval(-3600))
@@ -230,7 +195,6 @@ final class ChatSummaryTests: XCTestCase {
         XCTAssertEqual(try decodeJSONArray(active["conversations"]).first?["awaiting_reply"] as? Bool, true)
     }
 
-    /// Chat 1, "Group", with +15550000001 and +15550000002 and no messages.
     private func groupFixture(name: String) throws -> ToolTestDatabase {
         let fixture = try ToolTestDatabase(name: name)
         try fixture.insertHandle(rowId: 1, handle: "+15550000001")

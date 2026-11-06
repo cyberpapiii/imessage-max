@@ -2,8 +2,6 @@ import XCTest
 import MCP
 @testable import iMessageMax
 
-/// Every `tools/call` leaves one stderr line with the tool, lane, outcome and
-/// duration, and never its arguments.
 final class CallLogTests: XCTestCase {
     private var definitions: [ToolDefinition] = []
 
@@ -44,7 +42,6 @@ final class CallLogTests: XCTestCase {
         XCTAssertTrue(line.contains(" lane=legacy-stdio outcome=unknown_tool "), line)
     }
 
-    /// Runs one call and returns the single line it logged.
     private func callLine(
         name: String,
         arguments: [String: Value]? = nil,

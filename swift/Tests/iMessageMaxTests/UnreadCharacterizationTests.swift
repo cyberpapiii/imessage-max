@@ -2,32 +2,13 @@ import XCTest
 import MCP
 @testable import iMessageMax
 
-// Characterization tests for get_unread summary mode.
-// These lock in the current behavior so that the batched-query migration
-// (ChatSummaryQueries) cannot silently change participant resolution,
-// latest-unread-message selection, or per-chat/total unread counts.
-
 final class UnreadCharacterizationTests: XCTestCase {
-
-    // MARK: - Shared fixture
-
-    // Chat 1 (DM): Alice only
-    //   msg 10 from me (oldest)
-    //   msg 11 from Alice, READ (must not count or be selected)
-    //   msg 12 from Alice, unread "first unread from alice"
-    //   msg 13 from Alice, unread "second unread from alice" ← newest unread message
-    //   msg 14 from Alice, unread reaction (associated_message_type = 2000),
-    //          NEWER than msg 13, must be ignored everywhere
-    // Chat 2 (DM): Bob only
-    //   msg 20 from Bob, unread "bob unread"
-    // Chat 3 (DM): Alice only
-    //   msg 30 from Alice, READ, so the chat must be excluded entirely
 
     private func makeUnreadFixture() throws -> ToolTestDatabase {
         let fixture = try ToolTestDatabase(name: "unread-characterization")
 
-        try fixture.insertHandle(rowId: 1, handle: "+15550000001")  // Alice
-        try fixture.insertHandle(rowId: 2, handle: "+15550000002")  // Bob
+        try fixture.insertHandle(rowId: 1, handle: "+15550000001")
+        try fixture.insertHandle(rowId: 2, handle: "+15550000002")
 
         try fixture.insertChat(rowId: 1, guid: "iMessage;-;unread-alice-guid")
         try fixture.joinChatHandle(chatId: 1, handleId: 1)
@@ -38,12 +19,9 @@ final class UnreadCharacterizationTests: XCTestCase {
         try fixture.insertChat(rowId: 3, guid: "iMessage;-;read-only-guid")
         try fixture.joinChatHandle(chatId: 3, handleId: 1)
 
-        // Apple epoch: nanoseconds since 2001-01-01; ~1 hour ago so the
-        // default "7d" window includes everything and ago is non-nil.
         let base = AppleTime.fromDate(Date().addingTimeInterval(-3600))
         let sec: Int64 = 1_000_000_000
 
-        // Chat 1 messages
         try fixture.insertMessage(
             rowId: 10,
             guid: "msg10",
@@ -86,8 +64,6 @@ final class UnreadCharacterizationTests: XCTestCase {
         )
         try fixture.joinChatMessage(chatId: 1, messageId: 13)
 
-        // Unread reaction from Alice. Newer than every unread message, but it
-        // must never be selected or counted (associated_message_type != 0).
         try fixture.insertMessage(
             rowId: 14,
             guid: "msg14",
@@ -101,7 +77,6 @@ final class UnreadCharacterizationTests: XCTestCase {
         )
         try fixture.joinChatMessage(chatId: 1, messageId: 14)
 
-        // Chat 2 messages
         try fixture.insertMessage(
             rowId: 20,
             guid: "msg20",
@@ -113,7 +88,6 @@ final class UnreadCharacterizationTests: XCTestCase {
         )
         try fixture.joinChatMessage(chatId: 2, messageId: 20)
 
-        // Chat 3: only a read message, so the chat is excluded from the summary
         try fixture.insertMessage(
             rowId: 30,
             guid: "msg30",
@@ -133,8 +107,6 @@ final class UnreadCharacterizationTests: XCTestCase {
         let responseAny = try await tool.execute(params: GetUnread.Parameters(format: .summary))
         return try XCTUnwrap(responseAny as? UnreadSummaryResponse, "Expected unread summary response")
     }
-
-    // MARK: - Tests
 
     func testUnreadSummaryResolvesParticipants() async throws {
         let fixture = try makeUnreadFixture()
@@ -161,8 +133,6 @@ final class UnreadCharacterizationTests: XCTestCase {
 
         let aliceChat = try XCTUnwrap(response.chats.first(where: { $0.chat.id == "chat1" }))
         let lastMessage = try XCTUnwrap(aliceChat.lastMessage, "Expected last_message on chat1")
-        // msg13 wins: newest unread inbound non-reaction. The read msg11 and
-        // the even-newer unread reaction msg14 must both be skipped.
         XCTAssertEqual(lastMessage.text, "second unread from alice")
         XCTAssertEqual(lastMessage.from, "Alice Smith", "from should be the resolved sender name")
 

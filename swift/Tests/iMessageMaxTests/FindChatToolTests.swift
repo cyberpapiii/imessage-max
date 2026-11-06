@@ -19,7 +19,6 @@ final class FindChatToolTests: XCTestCase {
         XCTAssertEqual(chats.first?["id"] as? String, "chat1")
     }
 
-    /// Every result's summary comes from batched queries, not one per chat.
     func testEnrichmentQueryCountDoesNotGrowWithResults() async throws {
         let fixture = try ToolTestDatabase(name: "find-chat-batch")
         try fixture.insertHandle(rowId: 1, handle: "+15550000001")
@@ -154,8 +153,6 @@ final class FindChatToolTests: XCTestCase {
         XCTAssertNil(shown["filtered_hidden"])
     }
 
-    // MARK: - Participants, content and ordering
-
     func testContainsRecentSeesPastTwoHundredBlobRows() async throws {
         let fixture = try blobTextFixture(fillerCount: 300)
         let found = try await callTool("find_chat", ["contains_recent": "Lisbon"], database: fixture.database())
@@ -202,8 +199,6 @@ final class FindChatToolTests: XCTestCase {
         XCTAssertEqual(try itemIds(found, "chats"), ["chat2", "chat1"])
     }
 
-    /// filtered_hidden counts every hidden chat that would have matched, by
-    /// name or by content, not just the ones past the limit.
     func testFilteredHiddenCountsEveryHiddenChatThatWouldHaveMatched() async throws {
         let fixture = try ToolTestDatabase(name: "find-hidden")
         for handle in 1...4 { try fixture.insertHandle(rowId: handle, handle: "+1555000000\(handle)") }
@@ -227,8 +222,6 @@ final class FindChatToolTests: XCTestCase {
         XCTAssertEqual(byContent["filtered_hidden"] as? Int, 3)
     }
 
-    /// When one path finds only hidden chats and another path answers, the
-    /// hidden count of the first is kept.
     func testKeepsTheHiddenCountOfAPathThatFoundOnlyHiddenChats() async throws {
         let fixture = try ToolTestDatabase(name: "find-hidden-handover")
         try fixture.insertHandle(rowId: 1, handle: "+15550000001")
@@ -237,12 +230,10 @@ final class FindChatToolTests: XCTestCase {
         try fixture.joinChatHandle(chatId: 1, handleId: 1)
         try fixture.insertChat(rowId: 5, guid: "iMessage;-;+15550000002", isFiltered: 1)
         try fixture.joinChatHandle(chatId: 5, handleId: 2)
-        // Bob's only chat is hidden, so the name path answers.
         let json = try await callTool("find_chat", ["participants": ["Bob"], "name": "Trip"], database: fixture.database())
         XCTAssertEqual(try decodeJSONArray(json["chats"]).count, 1)
         XCTAssertEqual(json["filtered_hidden"] as? Int, 1)
 
-        // A hidden chat both paths match counts once.
         try fixture.execute("UPDATE chat SET display_name = 'Trip spam' WHERE ROWID = 5")
         let both = try await callTool("find_chat", ["participants": ["Bob"], "name": "Trip"], database: fixture.database())
         XCTAssertEqual(both["filtered_hidden"] as? Int, 1)
@@ -265,10 +256,6 @@ private func makeContainsRecentRichFixture() throws -> ToolTestDatabase {
     )
     try fixture.joinChatMessage(chatId: 1, messageId: 1)
 
-    // Newer rich rows: text present (not "zebra") plus a non-NULL attributedBody.
-    // Today's `OR m.attributedBody IS NOT NULL` matches all of them and the
-    // 200-row fetch window never reaches the zebra row. After the predicate
-    // fix they drop out because text is populated and does not LIKE zebra.
     let dummyBlob = Data([0x00, 0x01, 0x02])
     for n in 2...251 {
         try fixture.insertMessage(

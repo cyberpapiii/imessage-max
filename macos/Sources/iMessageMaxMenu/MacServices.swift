@@ -1,8 +1,6 @@
 import AppKit
 import MaxCore
 
-/// First-time moments the companion remembers between launches. Design
-/// fixtures keep theirs in memory so a check never changes the app's own.
 @MainActor
 final class Milestones {
   enum Key: String {
@@ -14,7 +12,6 @@ final class Milestones {
   private let defaults: UserDefaults?
   private var reachedInMemory: Set<Key> = []
 
-  /// `defaults` nil keeps every milestone in memory for this process only.
   init(defaults: UserDefaults?) {
     self.defaults = defaults
   }
@@ -32,7 +29,6 @@ final class Milestones {
   }
 }
 
-/// Messages.app, found by bundle identifier wherever it is installed.
 @MainActor
 enum MessagesApp {
   static let bundleIdentifier = "com.apple.MobileSMS"

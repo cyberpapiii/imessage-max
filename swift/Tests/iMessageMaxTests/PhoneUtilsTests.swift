@@ -1,9 +1,6 @@
 import XCTest
 @testable import iMessageMax
 
-/// Characterization tests for `PhoneUtils`, which normalizes the `to` argument
-/// on the send path. A wrong normalization here sends a message to the wrong
-/// person, so every branch is pinned.
 final class PhoneUtilsTests: XCTestCase {
 
     func testTenDigitUSNumberGetsCountryCode() {
@@ -22,8 +19,6 @@ final class PhoneUtilsTests: XCTestCase {
         XCTAssertEqual(PhoneUtils.normalizeToE164("+447911123456"), "+447911123456")
     }
 
-    // A 10-digit number after an explicit "+" is a foreign subscriber, not a
-    // US number missing its +1. Rewriting it to +1 would send to a stranger.
     func testShortInternationalWithPlusIsNotRewrittenToUS() {
         XCTAssertEqual(PhoneUtils.normalizeToE164("+4512345678"), "+4512345678", "Denmark")
         XCTAssertEqual(PhoneUtils.normalizeToE164("+6591234567"), "+6591234567", "Singapore")

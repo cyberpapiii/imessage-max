@@ -1,7 +1,6 @@
 import Foundation
 
 enum MessageTextExtractor {
-    /// Shown where Messages.app put an inline attachment.
     static let photoPlaceholder = "[Photo]"
 
     /// Replaces \u{FFFC} (object replacement character, one per inline
@@ -25,7 +24,6 @@ enum MessageTextExtractor {
             return nil
         }
 
-        // typedstream: marker + 5 bytes + length + data
         let idx = nsStringRange.upperBound + 5
 
         guard idx < data.count else { return nil }
@@ -35,22 +33,16 @@ enum MessageTextExtractor {
         let dataStart: Int
 
         if lengthByte == 0x81 {
-            // 2-byte length (little endian)
             guard idx + 3 <= data.count else { return nil }
             length = Int(data[idx + 1]) | (Int(data[idx + 2]) << 8)
             dataStart = idx + 3
         } else if lengthByte == 0x82 {
-            // 3-byte length (little endian)
             guard idx + 4 <= data.count else { return nil }
             length = Int(data[idx + 1]) | (Int(data[idx + 2]) << 8) | (Int(data[idx + 3]) << 16)
             dataStart = idx + 4
         } else if lengthByte >= 0x80 {
-            // Unknown typedstream length marker (e.g. 0x83+). Misreading it
-            // as a literal length extracts garbage, and garbage is worse
-            // than nil here because SendVerifier matches on this text. Refuse.
             return nil
         } else {
-            // Single byte literal length (< 0x80)
             length = Int(lengthByte)
             dataStart = idx + 1
         }

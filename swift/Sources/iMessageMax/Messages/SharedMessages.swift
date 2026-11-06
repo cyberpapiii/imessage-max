@@ -1,14 +1,11 @@
 import Foundation
 
-/// The order a shared-attachments page lists messages in.
 enum AttachmentSort: String {
     case recentFirst = "recent_first"
     case oldestFirst = "oldest_first"
     case largestFirst = "largest_first"
 }
 
-/// Messages that shared attachments, one item per message with its shown
-/// attachments: list_attachments' page and get_chat_details' shared summary.
 enum SharedMessages {
     static func page(
         db: Database,
@@ -115,7 +112,6 @@ enum SharedMessages {
         // subqueries that keep the result one row per message on their own.
         let ranksBySize = sort == .largestFirst
         let query = QueryBuilder()
-        // One row per message, under the chat the scope lists it in.
         ChatScope(named: chatId, includeFiltered: false).read(query)
 
         if ranksBySize {
@@ -187,8 +183,6 @@ enum SharedMessages {
         try MessageAnnotations.attachmentsByMessage(db: db, messageIds: messageIds, ofType: typeFilter)
             .mapValues { attachments in
                 attachments.map { attachment in
-                    // Route through policy: paths outside allowed roots are treated as unavailable,
-                    // identical to a missing file. List output stays total (no error thrown).
                     let path = attachment.filename
                     let validatedPath = path.flatMap { AttachmentPathPolicy.validatedPath($0, allowedRoots: allowedRoots) }
                     return (

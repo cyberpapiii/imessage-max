@@ -211,8 +211,6 @@ final class GetMessagesSinceToolTests: XCTestCase {
         XCTAssertEqual(ceiling, ["msg_100", "msg_101", "msg_103", "msg_106", "msg_107"])
     }
 
-    /// Reactions, reply counts, attachments and participants are fetched per
-    /// page, not per message.
     func testQueryCountDoesNotGrowWithPageSize() async throws {
         let fixture = try makeSinceFixture()
         let tool = GetMessagesSinceTool(db: fixture.database(), resolver: makeSeededResolver())
@@ -226,8 +224,6 @@ final class GetMessagesSinceToolTests: XCTestCase {
         XCTAssertEqual(five, one, "a page of 5 ran \(five) queries, a page of 1 ran \(one)")
     }
 
-    // MARK: - Paging, hidden chats and chat filter
-
     func testFilteredHiddenCountsHiddenChatsNotMessages() async throws {
         let fixture = try hiddenMatchesFixture()
         let page = try await callTool("get_messages_since", ["since_rowid": 0], database: fixture.database())
@@ -235,16 +231,12 @@ final class GetMessagesSinceToolTests: XCTestCase {
         XCTAssertEqual(try itemIds(page, "messages"), ["msg_1"])
     }
 
-    /// A full page whose last kept row is the last row of the batch read
-    /// still reports more, and the next page starts right after it.
     func testFullPageEndingOnABatchsLastRowStillReportsMore() async throws {
         let fixture = try ToolTestDatabase(name: "since-full-batch")
         try fixture.insertHandle(rowId: 1, handle: "+15550000001")
         try fixture.insertChat(rowId: 1, guid: "iMessage;-;+15550000001")
         try fixture.insertChat(rowId: 2, guid: "SMS;-;spam", isFiltered: 1)
         let base: Int64 = 700_000_000_000_000_000
-        // limit 31 reads a first batch of 32 rows; one of them is hidden, so
-        // the 31st kept row is the batch's last.
         try fixture.insertMessage(rowId: 1, guid: "h", text: "spam", date: base, isFromMe: false, handleId: 1)
         try fixture.joinChatMessage(chatId: 2, messageId: 1)
         for row in 2...40 {
@@ -262,8 +254,6 @@ final class GetMessagesSinceToolTests: XCTestCase {
         XCTAssertEqual(second["has_more"] as? Bool, false)
     }
 
-    /// `chat_id` matches a message joined to that chat even when its home
-    /// chat is another; unfiltered, the message is listed under its home chat.
     func testChatFilterMatchesAMessageWhoseHomeChatIsAnother() async throws {
         let fixture = try ToolTestDatabase(name: "since-second-chat")
         try fixture.insertHandle(rowId: 1, handle: "+15550000001")

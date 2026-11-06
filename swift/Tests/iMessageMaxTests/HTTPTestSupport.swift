@@ -7,15 +7,10 @@ import NIOCore
 import XCTest
 @testable import iMessageMax
 
-// MARK: - Request bodies
-
-/// A legacy `initialize` request body.
 func initializeBody(id: Int = 1, protocolVersion: String = "2025-03-26") -> String {
     #"{"jsonrpc":"2.0","id":\#(id),"method":"initialize","params":{"protocolVersion":"\#(protocolVersion)","capabilities":{},"clientInfo":{"name":"tests","version":"1.0"}}}"#
 }
 
-/// A modern (2026-07-28) message body: `params` members followed by the
-/// per-request `_meta`. A nil `id` makes it a notification.
 func modernBody(
     id: Int? = 1,
     method: String,
@@ -27,9 +22,6 @@ func modernBody(
     return #"{"jsonrpc":"2.0",\#(idMember)"method":"\#(method)","params":{\#(extra)"_meta":{"io.modelcontextprotocol/protocolVersion":"\#(version)","io.modelcontextprotocol/clientCapabilities":{},"io.modelcontextprotocol/clientInfo":{"name":"tests","version":"1.0"}}}}"#
 }
 
-// MARK: - Tools
-
-/// A tool with an empty input schema that runs `handler`.
 func fakeTool(
     named name: String,
     handler: @escaping @Sendable ([String: Value]?) async throws -> [Tool.Content] = { _ in [.plainText("ok")] }
@@ -37,8 +29,6 @@ func fakeTool(
     ToolDefinition(name: name, description: "test tool", inputSchema: InputSchema.object(properties: [:]), handler: handler)
 }
 
-/// `wait_for_cancel`: signals `started`, then runs for up to ten seconds
-/// unless its task is cancelled.
 func waitForCancelTool(started: AsyncStream<Void>.Continuation) -> ToolDefinition {
     fakeTool(named: "wait_for_cancel") { _ in
         started.yield()
@@ -49,8 +39,6 @@ func waitForCancelTool(started: AsyncStream<Void>.Continuation) -> ToolDefinitio
         return [.plainText(#"{"finished":true}"#)]
     }
 }
-
-// MARK: - HTTP
 
 func makeTestTransport(
     catalog: ToolCatalog = makeTestCatalog(),
@@ -67,11 +55,9 @@ func makeTestTransport(
 }
 
 extension HTTPTransport.Configuration {
-    /// A five-second request timeout and a fast session sweep.
     static var test: Self { .init(requestTimeout: .seconds(5), cleanupInterval: .milliseconds(20)) }
 }
 
-/// The headers a legacy client sends on a POST.
 func jsonHeaders(sessionId: String? = nil, protocolVersion: String? = nil) -> HTTPFields {
     var headers: HTTPFields = [
         .contentType: "application/json",
@@ -82,7 +68,6 @@ func jsonHeaders(sessionId: String? = nil, protocolVersion: String? = nil) -> HT
     return headers
 }
 
-/// The headers a modern client sends on a POST.
 func modernHeaders(method: String, name: String? = nil, version: String = "2026-07-28") -> HTTPFields {
     var headers = jsonHeaders(protocolVersion: version)
     headers[.mcpMethod] = method
@@ -95,7 +80,6 @@ extension TestClientProtocol {
         try await executeRequest(uri: "/", method: .post, headers: headers, body: ByteBuffer(string: body))
     }
 
-    /// Opens a legacy session and returns its id.
     func initializeSession(
         protocolVersion: String = "2025-03-26",
         file: StaticString = #filePath, line: UInt = #line

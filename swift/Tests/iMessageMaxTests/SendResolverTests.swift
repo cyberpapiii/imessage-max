@@ -83,13 +83,9 @@ final class SendResolverTests: XCTestCase {
             XCTFail("Unexpected success")
         case .ambiguous(let candidates):
             XCTAssertEqual(candidates.count, 2)
-            // Handle 1 has a message row (date 1000); handle 2 has none.
-            // nil-lastContact sorts last per SendResolution.swift's comparator.
             XCTAssertEqual(candidates[0].handle, "+15555550123")
             XCTAssertEqual(candidates[1].handle, "+15555550124")
             XCTAssertEqual(candidates[1].lastContact, "never")
-            // Deliberately not asserting candidates[0].lastContact's exact
-            // string. It's a relative-time format that drifts with the clock.
         }
     }
 
@@ -156,7 +152,6 @@ final class SendResolverTests: XCTestCase {
         }
         XCTAssertEqual(message, "No contact found matching 'Zelda'")
 
-        // Without Contacts access the miss says why, not "no such contact".
         let denied = SendResolver(
             db: fixture.database(),
             resolver: ContactResolver(seedCache: [:], authorization: (false, "denied"))
@@ -167,8 +162,6 @@ final class SendResolverTests: XCTestCase {
         XCTAssertEqual(deniedMessage, "Cannot search by name without contacts access")
     }
 
-    /// Last-contact times for an ambiguous name come from one query, not one
-    /// per candidate.
     func testNameResolutionQueryCountDoesNotGrowWithCandidates() async throws {
         func queries(candidates: Int) async throws -> Int {
             let fixture = try ToolTestDatabase(name: "send-jo")
@@ -200,7 +193,6 @@ final class SendResolverTests: XCTestCase {
         XCTAssertEqual(many, few, "send-by-name ran \(many) queries for 8 candidates, \(few) for 2")
     }
 
-    /// A carrier short code with a conversation resolves to its handle.
     func testShortCodeResolvesToItsHandle() async throws {
         let fixture = try ToolTestDatabase(name: "send-short-code")
         try fixture.insertHandle(rowId: 9, handle: "12345", service: "SMS")
@@ -214,8 +206,6 @@ final class SendResolverTests: XCTestCase {
         XCTAssertEqual(resolved.target, .participant(handle: "12345", chatId: 9))
     }
 
-    /// `to` and `chat_id` name the same unnamed 1:1 the way every other tool
-    /// does: by the contact's name.
     func testChatNameMatchesAcrossEntryPoints() async throws {
         let fixture = try ToolTestDatabase(name: "send-chat-name")
         try fixture.insertHandle(rowId: 1, handle: "+15550000001")
@@ -233,7 +223,6 @@ final class SendResolverTests: XCTestCase {
         }
     }
 
-    /// A named chat keeps its explicit name, trimmed, when reached by `to`.
     func testNamedChatKeepsItsNameViaRecipient() async throws {
         let fixture = try ToolTestDatabase(name: "send-named-chat")
         try fixture.insertHandle(rowId: 1, handle: "+15550000001")
@@ -248,8 +237,6 @@ final class SendResolverTests: XCTestCase {
     }
 }
 
-/// A two-person group (chat 10) and a DM with the first person (chat 11),
-/// who has one message at date 1000.
 private func makeResolverFixture() throws -> ToolTestDatabase {
     let fixture = try ToolTestDatabase(name: "send-resolver")
     try fixture.insertHandle(rowId: 1, handle: "+15555550123")

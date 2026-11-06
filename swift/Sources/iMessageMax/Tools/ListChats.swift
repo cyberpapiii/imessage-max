@@ -1,7 +1,6 @@
 import Foundation
 import MCP
 
-/// Sort order for list_chats
 enum ListChatsSort: String {
     case recent = "recent"
     case alphabetical = "alphabetical"
@@ -40,11 +39,8 @@ struct ChatInfoDetails: Encodable {
     }
 }
 
-/// Implementation of the list_chats tool
 enum ListChatsTool {
     static let limit = IntArgument(name: "limit", defaultValue: 20, range: 1...100)
-
-    // MARK: - Tool Registration
 
     static func definition(db: Database, resolver: ContactResolver) -> ToolDefinition {
         let inputSchema: Value = .object([
@@ -126,16 +122,6 @@ enum ListChatsTool {
         }
     }
 
-    /// List recent chats with previews
-    /// - Parameters:
-    ///   - limit: Max chats to return, clamped by `ListChatsTool.limit`
-    ///   - since: Only chats with activity since this time
-    ///   - isGroup: True for groups only, False for DMs only
-    ///   - minParticipants: Filter to chats with at least N participants
-    ///   - maxParticipants: Filter to chats with at most N participants
-    ///   - sort: "recent" (default), "alphabetical", or "most_active"
-    ///   - db: Database instance
-    ///   - resolver: ContactResolver for name lookups
     static func execute(
         limit: Int = ListChatsTool.limit.defaultValue,
         since: String? = nil,
@@ -155,25 +141,12 @@ enum ListChatsTool {
         let sinceApple = since.flatMap(AppleTime.parse)
         let scope = ChatScope(named: nil, includeFiltered: includeFiltered)
 
-        // Message totals come from a per-chat aggregate subquery, not from
-        // joining chat_handle_join and message in one FROM, which would
-        // multiply each chat's messages by its participants.
-        //
-        // The aggregate walks every non-reaction message in the database,
-        // so it is only worth paying for when the answer depends on it.
-        // Neither message_count nor last_message_date reaches the response:
-        // the last-message preview comes from ChatSummaryQueries. They are
-        // ordering and cursor keys, and the alphabetical sort orders and
-        // pages by name, so it needs neither. `since` still does, because
-        // it decides which chats appear at all.
         let needsMessageAggregate = sinceApple != nil || sortOrder != .alphabetical
 
         let recentCursorDate: Int64? = sortOrder == .recent
             ? cursor.flatMap(ChatListCursor.decode)?.primary
             : nil
 
-        /// Builds the page query, optionally bounding the aggregate to the
-        /// newest `candidateWidth` messages.
         func buildPageQuery(candidateWidth: Int?) -> (String, [Any]) {
             var innerFilter = SQLFragments.notReaction()
             var innerParams: [Any] = []
@@ -184,14 +157,6 @@ enum ListChatsTool {
 
             let messageAggregate: String
             if let candidateWidth {
-                // The inner scan takes a date-ordered prefix, so every chat
-                // it surfaces has its own newest message inside that prefix
-                // and MAX(dt) is that chat's true last-message date. The
-                // recent cursor deliberately does NOT push down into the
-                // scan: narrowing it to messages at or before the cursor
-                // would truncate the maximum for any chat with messages on
-                // both sides of it, and that chat would then re-appear on a
-                // later page it had already been returned on.
                 messageAggregate = """
                     (SELECT chat_id, 0 AS n, MAX(dt) AS last_date
                      FROM (SELECT cmj.chat_id AS chat_id, m.date AS dt
@@ -221,8 +186,6 @@ enum ListChatsTool {
                 "c.display_name",
                 "\(SQLFragments.participantCount()) as participant_count",
                 needsMessageAggregate ? "COALESCE(msg.n, 0) as message_count" : "0 as message_count",
-                // A chat with no messages sorts and pages as count 0 and
-                // date 0, so a cursor can always address the page after it.
                 // msg's columns are named apart from these aliases: HAVING
                 // would otherwise bind the uncoalesced column.
                 needsMessageAggregate ? "COALESCE(msg.last_date, 0) as last_message_date" : "NULL as last_message_date"
@@ -234,11 +197,6 @@ enum ListChatsTool {
             }
 
             if sinceApple != nil || candidateWidth != nil {
-                // `since` drops chats with no activity in the window, so
-                // the aggregate joins inward. A bounded scan also
-                // joins inward: a chat outside the candidate set has no
-                // claim on this page, and the escalation below is what
-                // brings it back when the page cannot be filled without it.
                 qb.join(messageAggregate, params: innerParams)
             } else if needsMessageAggregate {
                 qb.leftJoin(messageAggregate)
@@ -268,7 +226,6 @@ enum ListChatsTool {
                         )
                     }
                 case .mostActive:
-                    // primary = message_count, secondary = last_message_date
                     if let decoded = ChatListCursor.decode(cursor) {
                         let lastDate = decoded.secondary ?? 0
                         qb.having(
@@ -282,7 +239,6 @@ enum ListChatsTool {
                         )
                     }
                 case .alphabetical:
-                    // `n:name:chatId`, keyed on the same expression the sort uses.
                     if let nameCursor = ChatListCursor.decodeName(cursor) {
                         qb.having(
                             """
@@ -309,20 +265,6 @@ enum ListChatsTool {
             return qb.build()
         }
 
-        // The recent sort orders chats by their newest message, so the
-        // newest K messages in the database name every chat that can lead
-        // the list. Grouping them gives candidates whose last-message dates
-        // are all at least as new as the K-th newest message, so any chat
-        // left out is older than every candidate: a full page drawn from
-        // them is exactly the page the unbounded aggregate would return.
-        // A short page means the participant filters thinned the candidates
-        // below a full page, and only then is a wider scan worth paying for.
-        // Every other sort needs the true aggregate and takes the last,
-        // unbounded entry directly.
-        // Paging is excluded because the cursor cannot narrow the scan
-        // (see buildPageQuery) while it does thin the page, so every deep
-        // page would climb the whole ladder before landing on the
-        // unbounded query anyway.
         let candidateWidths: [Int?] = sortOrder == .recent && recentCursorDate == nil
             ? [2_000, 20_000, 200_000, nil]
             : [nil]
@@ -347,9 +289,6 @@ enum ListChatsTool {
         let hasMore = fetchedRows.count > clampedLimit
         let chatRows = Array(fetchedRows.prefix(clampedLimit))
 
-        // The page query already found each chat's newest message date, so the
-        // preview lookup seeks straight to it. Sorts that skip the aggregate
-        // have no date and fall back to the search.
         let page = try await ChatPage.build(
             chatRows.map { ChatPage.Chat(id: $0.id, guid: $0.guid, explicitName: $0.displayName, newestDate: $0.lastMessageDate) },
             lastMessages: ChatPage.LastMessageOptions(),
@@ -409,8 +348,6 @@ enum ListChatsTool {
         )
     }
 
-    // MARK: - Private Helpers
-
     private struct ChatRow {
         let id: Int64
         let guid: String?
@@ -419,7 +356,6 @@ enum ListChatsTool {
         let lastMessageDate: Int64?
     }
 
-    /// Get total counts
     private static func getTotals(db: Database, scope: ChatScope) throws -> (total: Int, groups: Int, dms: Int) {
         let filter = scope.shownPredicate().map { "WHERE \($0)" } ?? ""
         let sql = """
@@ -445,7 +381,6 @@ enum ListChatsTool {
         return rows.first ?? (0, 0, 0)
     }
 
-    /// Chats the default filter removed from this view. Scoped to `since` when set.
     private static func getFilteredHidden(db: Database, sinceApple: Int64?) throws -> Int {
         if let sinceApple {
             let sql = """

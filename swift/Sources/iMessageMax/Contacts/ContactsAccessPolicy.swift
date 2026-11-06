@@ -1,15 +1,10 @@
 import Foundation
 import IMessageMaxContract
 
-/// Whether this process may put up the macOS Contacts permission dialog.
-/// A process with no terminal (launchd, an MCP client's stdio pipe) cannot
-/// answer the prompt; asking from there leaves the request hanging and the
-/// dialog attributed to whatever launched us. Ported from openclaw/imsg.
 enum ContactsAccessPolicy: Equatable, Sendable {
     case requestIfNeeded
     case skipIfNotDetermined
 
-    /// CLI / environment override. `auto` follows stdin.
     typealias Override = ContactsPolicyOption
 
     static let environmentKey = "IMESSAGE_MAX_CONTACTS_POLICY"
@@ -18,9 +13,6 @@ enum ContactsAccessPolicy: Equatable, Sendable {
         isTTY ? .requestIfNeeded : .skipIfNotDetermined
     }
 
-    /// Precedence: explicit flag, then the environment variable, then stdin.
-    /// Unknown environment values are ignored (the flag is validated by
-    /// ArgumentParser before it gets here).
     static func resolve(flag: Override, environment: [String: String], isTTY: Bool) -> ContactsAccessPolicy {
         switch flag {
         case .request: return .requestIfNeeded

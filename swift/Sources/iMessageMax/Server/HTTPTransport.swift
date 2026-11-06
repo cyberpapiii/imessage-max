@@ -8,34 +8,16 @@ import NIOCore
 import ServiceLifecycle
 import UnixSignals
 
-/// MCP Streamable HTTP server (Hummingbird): POST for both eras, GET-SSE and
-/// DELETE for legacy sessions, each session with its own SDK Server.
 actor HTTPTransport {
-    /// Production uses the defaults; tests shrink them. The only place these
-    /// values are written: `SessionManager` and the SSE types take them from
-    /// here.
     struct Configuration: Sendable {
         var requestTimeout: Duration = .seconds(300)
         var bodyReadDeadline: Duration = .seconds(30)
         var channelIdleTimeout: Duration = .seconds(60)
-        /// Concurrent-session cap. A session costs about half a kilobyte of
-        /// resident memory (measured across 100 live sessions), so the cap is
-        /// a guard against runaway clients rather than a resource limit; 100
-        /// turned a fleet of agents that each open their own session into
-        /// 503s within seconds.
         var maxSessions = 512
-        /// Idle span after which a session may be reclaimed to admit a new
-        /// client once `maxSessions` is reached.
         var reclaimableIdle: TimeInterval = 300
-        /// Expired-session sweep period. Tests shrink it so a leftover sweep
-        /// task cannot pin a `swift test --parallel` worker for five minutes.
         var cleanupInterval: Duration = .seconds(300)
-        /// Idle TTL before a session is reaped.
         var sessionTimeout: TimeInterval = 3600
-        /// SSE heartbeat spacing. It also keeps a listen-only client's
-        /// session from looking idle.
         var sseKeepAliveInterval: Duration = .seconds(30)
-        /// Builds each legacy session's SDK Server.
         var makeServer: @Sendable (ToolCatalog) async -> Server = { await Version.makeServer(catalog: $0) }
     }
 
@@ -47,18 +29,13 @@ actor HTTPTransport {
     private let sseManager: SSEConnectionManager
     private let catalog: ToolCatalog
     private let setupPermissions: SetupPermissionService
-    /// Maps (session, JSON-RPC id) to the POST waiting for the SDK's answer.
     private let pendingRequests: PendingRequestRegistry
-    /// Legacy `tools/call`s answered here rather than by the session's SDK
-    /// Server, by (session, JSON-RPC id), for `notifications/cancelled`.
     private let inFlightToolCalls = InFlightRequests<PendingRequestRegistry.Key>()
     private var isConnected = false
     private var routingConfigured = false
     private var serverTask: Task<Void, Error>?
     private var serviceGroup: ServiceGroup?
 
-    /// Hummingbird and ServiceLifecycle require a Logger. Diagnostics go
-    /// through `Log`, so theirs stays silent.
     private static let silentLogger = Logger(label: "imessage-max.http", factory: { _ in SwiftLogNoOpLogHandler() })
 
     /// Bounds a SIGTERM drain. It stays under launchd's default 20 s
@@ -82,8 +59,6 @@ actor HTTPTransport {
         self.sseManager = SSEConnectionManager(keepAliveInterval: configuration.sseKeepAliveInterval)
     }
 
-    /// Starts listening. SIGTERM and SIGINT trigger a graceful shutdown;
-    /// tests pass no signals so the test process keeps its own handlers.
     func connect(gracefulShutdownSignals: [UnixSignal] = [.sigterm, .sigint]) async throws {
         guard !isConnected else { return }
 
@@ -104,15 +79,11 @@ actor HTTPTransport {
         }
     }
 
-    /// Blocks until the server terminates, propagating any errors, so a
-    /// crashed server exits the process and launchd restarts it.
     func waitForTermination() async throws {
         guard let task = serverTask else { return }
         try await task.value
     }
 
-    /// Does what SIGTERM does, waits for the server to exit, then ends every
-    /// session (which closes its streams and fails its waiting requests).
     func shutdown() async {
         await serviceGroup?.triggerGracefulShutdown()
         _ = try? await serverTask?.value
@@ -120,12 +91,9 @@ actor HTTPTransport {
         for sessionId in await sessionManager.activeSessionIds() {
             await sessionManager.terminateSession(sessionId: sessionId)
         }
-        // A POST that stored its entry as its session ended.
         await pendingRequests.removeAll()
     }
 
-    /// The router-backed application, with session routing wired up.
-    /// `connect` serves it; tests drive it in-process.
     func application() async -> some ApplicationProtocol {
         await configureRoutingIfNeeded()
         isConnected = true
@@ -163,14 +131,9 @@ actor HTTPTransport {
         )
     }
 
-    /// Ends every open SSE stream, and any opened after. An SSE GET never
-    /// finishes on its own, and graceful shutdown waits for open requests,
-    /// so one left open holds the process until the shutdown cap.
     fileprivate func closeAllSSEStreams() async {
         await sseManager.closeAll()
     }
-
-    // MARK: - POST
 
     private func handlePost(request: Request) async throws -> Response {
         guard let contentType = request.headers[.contentType],
@@ -179,8 +142,6 @@ actor HTTPTransport {
             return errorResponse(.unsupportedMediaType, "Invalid Content-Type, expected application/json")
         }
 
-        // Streamable HTTP clients advertise both response shapes because a
-        // request can complete as JSON or as an SSE stream.
         guard let accept = request.headers[.accept],
             HTTPRequestParsing.acceptsStreamableHTTP(accept)
         else {
@@ -198,7 +159,6 @@ actor HTTPTransport {
         case .complete(let data):
             requestData = data
         case .tooLarge:
-            // An empty 413, the shape Hummingbird gives an oversized body.
             return Response(status: .contentTooLarge)
         case .timedOut:
             return errorResponse(.requestTimeout, "Request body read timed out")
@@ -226,8 +186,6 @@ actor HTTPTransport {
         responseHeaders[.contentType] = "application/json"
 
         if message.isInitialize {
-            // Capacity refusal is retryable (503); startup failure is an
-            // internal fault (500).
             let version = LegacyProtocol.negotiate(message.params?["protocolVersion"] as? String)
             switch await sessionManager.createSession(protocolVersion: version) {
             case .created(let session):
@@ -250,7 +208,6 @@ actor HTTPTransport {
             guard let requestSessionId = request.headers[.mcpSessionId] else {
                 return errorResponse(.badRequest, "Missing Mcp-Session-Id header")
             }
-            // 404 tells the client to re-initialize (spec).
             guard await sessionManager.validate(sessionId: requestSessionId) else {
                 return errorResponse(.notFound, "Invalid or expired session. Please re-initialize.")
             }
@@ -266,27 +223,15 @@ actor HTTPTransport {
 
         switch message.kind {
         case .request:
-            // An id that is not a JSON scalar can never be matched to its
-            // answer: the client's error (400), on either route below.
             guard let requestId = message.requestKey else {
                 return errorResponse(.badRequest, "Invalid Request: id must be a string, a number, or null")
             }
             let key = PendingRequestRegistry.Key(sessionId: sessionId, requestId: requestId)
-            // A `tools/call` needs nothing that the session's own Server holds:
-            // handlers live in the catalog and the result fields are identical in
-            // both eras. Answering it here skips routing the request into the SDK,
-            // which re-encodes the whole response through Codable `Value` on the
-            // way out. That round-trip cost about 9 ms of the 26 ms a 12 kB
-            // list_chats reply took on this lane. A call without a string name or
-            // with non-object arguments falls through to the SDK, which owns the
-            // error wording for malformed params.
             if message.method == "tools/call", let toolName = message.toolName, !message.hasMalformedToolArguments {
                 return await legacyToolCallResponse(message: message, name: toolName, key: key, headers: responseHeaders)
             }
             return await forwardRequest(requestData, message: message, key: key, headers: responseHeaders)
         case .notification, .response:
-            // The SDK cancels the requests it holds; the calls answered here
-            // it never saw, so cancel those directly.
             if let cancelled = message.cancelledRequestKey {
                 inFlightToolCalls.cancel(PendingRequestRegistry.Key(sessionId: sessionId, requestId: cancelled))
             }
@@ -297,8 +242,6 @@ actor HTTPTransport {
         }
     }
 
-    /// A request reusing the id of one still in flight on its session, on
-    /// either route, is the client's error: 400 with the id.
     private func idInUseResponse(_ message: JSONRPCMessage) -> Response {
         errorResponse(
             .badRequest,
@@ -307,9 +250,6 @@ actor HTTPTransport {
         )
     }
 
-    /// Routes a request to the session's Server and waits for its answer.
-    /// A reused id is the client's error (400); a timeout or a session that
-    /// ends first is ours (500).
     private func forwardRequest(
         _ requestData: Data, message: JSONRPCMessage, key: PendingRequestRegistry.Key, headers: HTTPFields
     ) async -> Response {
@@ -338,16 +278,6 @@ actor HTTPTransport {
         }
     }
 
-    /// Legacy-era `tools/call`, answered without the session's Server.
-    ///
-    /// The envelope mirrors what the SDK's CallTool handler produced: `content`
-    /// always, `structuredContent` only for a single JSON-object text block,
-    /// `isError` only when the tool failed, and an unknown tool as a
-    /// method-not-found error rather than a result.
-    ///
-    /// The call runs in its own task, listed in `inFlightToolCalls`, so a
-    /// `notifications/cancelled` for its id cancels it the way the SDK cancels
-    /// a stdio call: the tool stops and the reply is its cancelled result.
     private func legacyToolCallResponse(
         message: JSONRPCMessage, name: String, key: PendingRequestRegistry.Key, headers: HTTPFields
     ) async -> Response {
@@ -380,8 +310,6 @@ actor HTTPTransport {
     }
 
     private func handleModernPost(request: Request, message: JSONRPCMessage) async -> Response {
-        // Header requirements for notification POSTs are undefined in this
-        // revision; accept with no body.
         guard message.kind == .request else {
             return Response(status: .accepted)
         }
@@ -391,12 +319,6 @@ actor HTTPTransport {
         return Self.response(for: await ModernDispatcher.handle(message, transport: "http", catalog: catalog))
     }
 
-    /// Enforces the required Streamable HTTP request-metadata headers
-    /// (`MCP-Protocol-Version`, `Mcp-Method`, `Mcp-Name`) and their
-    /// header/body consistency, per the spec's "Server Validation" section.
-    /// The spec names `resources/read` and `prompts/get` too; they are checked
-    /// even though they then answer method-not-found.
-    /// Returns the HeaderMismatch error envelope, or nil when valid.
     private static func headerMismatch(request: Request, message: JSONRPCMessage) -> Data? {
         let method = message.method ?? ""
 
@@ -434,7 +356,6 @@ actor HTTPTransport {
         return nil
     }
 
-    /// The Streamable HTTP status the spec gives each modern outcome.
     static func status(for reply: ModernReply) -> HTTPResponse.Status {
         switch reply {
         case .accepted: .accepted
@@ -454,8 +375,6 @@ actor HTTPTransport {
             body: .init(byteBuffer: ByteBuffer(data: body))
         )
     }
-
-    // MARK: - GET (SSE) and DELETE
 
     func handleGet(request: Request) async -> Response {
         guard let accept = request.headers[.accept], accept.contains("text/event-stream") else {
@@ -479,8 +398,6 @@ actor HTTPTransport {
         let connectionId = connectionInfo.id
         let sseManager = self.sseManager
         let sessionManager = self.sessionManager
-        // A session terminated between the check above and the register
-        // already closed its streams, so this one would never be closed.
         guard await sessionManager.validate(sessionId: sessionId) else {
             await sseManager.unregister(connectionId: connectionId)
             return errorResponse(.notFound, "Invalid or expired session. Please re-initialize.")
@@ -490,15 +407,9 @@ actor HTTPTransport {
             status: .ok,
             headers: responseHeaders,
             body: .init { writer in
-                // The stream includes keep-alives. A write error means the
-                // client went away.
                 do {
                     for await event in channel.stream {
                         try await writer.write(ByteBuffer(string: event))
-                        // An open stream is a live client, even one that only
-                        // listens. Keep-alives land every
-                        // `sseKeepAliveInterval`, so its session never looks
-                        // idle to expiry or reclaim.
                         await sessionManager.touch(sessionId: sessionId)
                     }
                     // Hummingbird only ends the response on finish. Without
@@ -518,16 +429,10 @@ actor HTTPTransport {
             return errorResponse(.notFound, "Invalid or expired session")
         }
 
-        // Stops the session's SDK Server (2 s bound), drops it from the
-        // table, and through the termination handler closes its SSE streams
-        // and fails its waiting requests.
         await sessionManager.terminateSession(sessionId: sessionId)
         return Response(status: .noContent)
     }
 
-    /// Answers from a session's Server: the reply to a waiting POST, or else
-    /// a server-initiated message for the session's SSE streams. Internal so
-    /// tests can inject a server-initiated message.
     func handleServerResponse(sessionId: String, data: Data) async {
         guard isConnected else { return }
 
@@ -536,9 +441,6 @@ actor HTTPTransport {
             return
         }
 
-        // Only a response answers a POST. A server-initiated request carries
-        // an id from the Server's own sequence, which can equal a waiting
-        // client id. Removing through the registry also cancels the timer.
         if message.kind == .response, let key = message.requestKey,
             let pending = await pendingRequests.remove(sessionId: sessionId, id: key)
         {
@@ -552,8 +454,6 @@ actor HTTPTransport {
             await sseManager.broadcast(sessionId: sessionId, event: event.formatted())
         }
     }
-
-    // MARK: - Setup permission route
 
     private func handleSetupPermission(request: Request) async throws -> Response {
         guard HostBindingPolicy.isLoopback(host) else { return Response(status: .notFound) }
@@ -589,8 +489,6 @@ actor HTTPTransport {
         }
     }
 
-    // MARK: - Helpers
-
     private func configureRoutingIfNeeded() async {
         guard !routingConfigured else { return }
 
@@ -610,9 +508,6 @@ actor HTTPTransport {
         let versionHeader = request.headers[.mcpProtocolVersion]
 
         if let versionHeader, !LegacyProtocol.supported.contains(versionHeader) {
-            // Only reachable with arbitrary client input, so the clamp is
-            // load-bearing: keep a garbage header from bloating the response
-            // and the log.
             return errorResponse(.badRequest, "Unsupported protocol version: \(String(versionHeader.prefix(64)))")
         }
 
@@ -636,8 +531,6 @@ actor HTTPTransport {
         return nil
     }
 
-    /// A transport-level failure: the HTTP status carries the meaning, the
-    /// body is a JSON-RPC error, with a null id unless the request's is known.
     private nonisolated func errorResponse(
         _ status: HTTPResponse.Status,
         _ message: String,
@@ -652,10 +545,8 @@ actor HTTPTransport {
     }
 }
 
-/// A request reused the id of one still waiting on the same session.
 private struct DuplicateRequestId: Error {}
 
-/// Waits for graceful shutdown, then closes the transport's SSE streams.
 private struct SSEShutdownService: Service {
     let transport: HTTPTransport
 

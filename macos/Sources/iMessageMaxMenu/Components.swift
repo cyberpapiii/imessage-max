@@ -1,14 +1,11 @@
 import MaxBrand
 import SwiftUI
 
-// Values are this product's tokens, not timings or colours attributed to Benji.
 enum Design {
   static let width: CGFloat = 340
   static let inset: CGFloat = 16
-  /// The tallest the panel grows; shorter screens cap it lower.
   static let maximumPanelHeight: CGFloat = 720
 
-  // One action colour. Status roles are separate and never used for buttons.
   static let blue = Color(
     red: MessageMark.blue.red, green: MessageMark.blue.green, blue: MessageMark.blue.blue)
   static let ready = adaptive(light: 0x237446, dark: 0x79CF9E)
@@ -46,7 +43,6 @@ enum Radius {
   static let control: CGFloat = 7
 }
 
-/// Four type roles. Nothing in the panel is smaller than 12 points.
 extension Font {
   static let maxTitle = Font.system(size: 15, weight: .semibold)
   static let maxLine = Font.system(size: 13)
@@ -55,9 +51,6 @@ extension Font {
   static let maxCode = Font.system(size: 12, design: .monospaced)
 }
 
-/// Per-process motion overrides, injected at the panel's root. Design checks
-/// use them to slow everything down or force Reduce Motion without touching
-/// the Mac's own setting.
 struct MotionSettings: Equatable {
   var scale = 1.0
   var reduce = false
@@ -67,16 +60,12 @@ extension EnvironmentValues {
   @Entry var motionSettings = MotionSettings()
 }
 
-/// The panel's animations at the injected speed. Frequency sets speed:
-/// presses and hovers are quickest, a page change is the slowest thing the
-/// panel does.
 struct Motion {
   enum Kind { case hover, press, toggle, swap, step, glide, morph }
 
   let reduced: Bool
   let scale: Double
 
-  /// The animation for `kind`, or nil when motion is reduced.
   subscript(kind: Kind) -> Animation? {
     guard !reduced else { return nil }
     return switch kind {
@@ -91,8 +80,6 @@ struct Motion {
   }
 }
 
-/// Reduce Motion from the system or the injected settings, with the
-/// injected speed.
 @propertyWrapper
 struct PanelMotion: DynamicProperty {
   @Environment(\.accessibilityReduceMotion) private var system
@@ -100,10 +87,6 @@ struct PanelMotion: DynamicProperty {
   var wrappedValue: Motion { Motion(reduced: system || settings.reduce, scale: settings.scale) }
 }
 
-// MARK: - Face
-
-/// Moves the face with one spring per part, stepped by hand so a new target
-/// bends the motion already under way. Nothing runs while the face is at rest.
 @MainActor @Observable
 final class FaceEngine {
   private(set) var running = false
@@ -119,7 +102,6 @@ final class FaceEngine {
   @ObservationIgnored private var dots: Date?
   @ObservationIgnored private var sheen: Date?
   @ObservationIgnored private var pending: [DispatchWorkItem] = []
-  /// Slows every timing; design checks set it above 1.
   @ObservationIgnored var scale = 1.0
 
   private var sparkTime: Double { 0.6 * scale }
@@ -169,14 +151,12 @@ final class FaceEngine {
     }
   }
 
-  /// The panel closed: drop every timer and land on the current face.
   func sleep() {
     cancel()
     dots = nil
     place(mood.pose)
   }
 
-  /// Advances the springs to `date` and returns what to draw.
   func frame(at date: Date) -> (pose: MaxPose, sparks: CGFloat?, sheen: CGFloat?) {
     if running {
       let elapsed = min(last.map { date.timeIntervalSince($0) } ?? 0, 1.0 / 30)
@@ -203,7 +183,6 @@ final class FaceEngine {
     }
     var drawn = pose
     if let dots {
-      // The three dots hop in turn, 0.4 s each, like a typing indicator.
       let time = date.timeIntervalSince(dots) / scale
       func hop(_ place: Double) -> CGFloat {
         let local = (time - 0.4 * place).truncatingRemainder(dividingBy: 1.2)
@@ -220,7 +199,6 @@ final class FaceEngine {
     )
   }
 
-  /// Called after a frame is on screen; pauses the timeline once still.
   func rest() {
     guard running, settled else { return }
     running = false
@@ -278,14 +256,10 @@ final class FaceEngine {
   }
 }
 
-/// The product's mark, alive: a round speech bubble. Its expression is the
-/// service's state; it is decoration to assistive tech,
-/// which reads the title beside it instead.
 struct MaxFaceView: View {
   let mood: CompanionMood
   let celebration: Int
   var size: CGFloat = 48
-  /// False while the panel is closed, so nothing animates out of sight.
   var awake = true
   @State private var engine = FaceEngine()
   @PanelMotion private var motion
@@ -305,8 +279,6 @@ struct MaxFaceView: View {
         }
         let mark = MessageMark.blue
         let body = Path(MaxFace.silhouette(frame.pose, in: rect))
-        // Lit from above and lifted off the panel by a soft shadow, like the
-        // app icon.
         context.drawLayer { layer in
           layer.addFilter(
             .shadow(
@@ -322,8 +294,6 @@ struct MaxFaceView: View {
               startPoint: CGPoint(x: rect.midX, y: rect.minY),
               endPoint: CGPoint(x: rect.midX, y: rect.maxY)))
         }
-        // The shimmer: a faint light on the shoulder, and a band of light
-        // that crosses the bubble on a click or good news.
         let shine = 1 - dim
         context.drawLayer { layer in
           layer.clip(to: body)
@@ -350,7 +320,6 @@ struct MaxFaceView: View {
           context.fill(Path(badge), with: .color(Design.badge))
         }
         if let progress = frame.sparks {
-          // Five short bars fan over 120 degrees above the bubble and fade.
           let centre = CGPoint(x: rect.midX, y: rect.minY + size * 0.42)
           let ease = 1 - pow(1 - min(progress, 1), 3)
           for index in 0..<5 {
@@ -388,9 +357,6 @@ struct MaxFaceView: View {
   }
 }
 
-// MARK: - Controls
-
-/// A drawn switch: the knob slides, the track changes role colour.
 struct MaxSwitchStyle: ToggleStyle {
   @Environment(\.isEnabled) private var enabled
   @PanelMotion private var motion
@@ -455,7 +421,6 @@ struct MaxButtonStyle: ButtonStyle {
   }
 }
 
-/// A grouped surface. A wash colour marks the one card that needs the person.
 struct Card<Content: View>: View {
   var wash: Color?
   @ViewBuilder var content: Content
@@ -498,7 +463,6 @@ struct StatusLine: View {
   }
 }
 
-/// A row that leads to another page inside the same panel.
 struct NavRow: View {
   let title: String
   let glyph: Glyph
@@ -570,7 +534,6 @@ struct CopyButton: View {
   }
 }
 
-/// A short acknowledgement that floats over the panel and leaves on its own.
 struct Toast: View {
   let text: String
   let good: Bool
@@ -589,7 +552,6 @@ struct Toast: View {
 }
 
 extension View {
-  /// Glass is kept for things that float; older systems get a material.
   @ViewBuilder fileprivate func floatingSurface() -> some View {
     #if compiler(>=6.2)
       if #available(macOS 26.0, *) {

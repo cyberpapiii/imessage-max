@@ -20,7 +20,6 @@ enum ReactionType: Int, CaseIterable {
     static let types = allCases.map(\.rawValue).min()!...allCases.map(\.rawValue).max()!
     static let removalTypes = (types.lowerBound + removalOffset)...(types.upperBound + removalOffset)
 
-    /// The tapback a removal row of `type` takes back, or nil if `type` is not a removal.
     static func removed(by type: Int) -> ReactionType? {
         removalTypes.contains(type) ? ReactionType(rawValue: type - removalOffset) : nil
     }
@@ -38,7 +37,6 @@ enum ReactionType: Int, CaseIterable {
         }
     }
 
-    /// What a reaction string starts with: the custom emoji itself for 2006.
     func token(customEmoji: String?) -> String {
         self == .customEmoji ? customEmoji ?? emoji : emoji
     }

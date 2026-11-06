@@ -1,14 +1,6 @@
 import Darwin
 import Foundation
 
-/// Watches chat.db (and its -wal/-shm siblings and directory) with kqueue
-/// through DispatchSource, debounces to one poll per `debounce`, and always
-/// runs a fallback poll every `fallbackInterval` that also re-checks file
-/// identities (st_dev, st_ino) and re-registers sources after rotation.
-/// Fires `onNewRows(maxRowid)` when SELECT MAX(ROWID) FROM message grows.
-/// The first successful read only seeds the maximum, so an unreadable
-/// chat.db at startup delays live notifications instead of disabling them.
-/// No Task.sleep: all timing is DispatchSourceTimer on a private queue.
 final class MessageWatcher: @unchecked Sendable {
     struct FileIdentity: Equatable {
         let device: UInt64
@@ -32,7 +24,6 @@ final class MessageWatcher: @unchecked Sendable {
     private var identities: [String: FileIdentity?] = [:]
     private var debounceTimer: DispatchSourceTimer?
     private var fallbackTimer: DispatchSourceTimer?
-    /// nil until chat.db has been read once.
     private var lastMax: Int64?
     private var pollFailing = false
     private var running = false
@@ -74,13 +65,10 @@ final class MessageWatcher: @unchecked Sendable {
         queue.sync { running }
     }
 
-    /// Running and has read chat.db at least once, so growth will be reported.
-    /// What diagnose calls the live inbox.
     var isLive: Bool {
         queue.sync { running && lastMax != nil }
     }
 
-    /// Polls now instead of at the next file event or fallback tick.
     func pollNow() {
         queue.sync { poll() }
     }
@@ -155,7 +143,6 @@ final class MessageWatcher: @unchecked Sendable {
         do {
             maxRowid = try currentMaxRowid()
         } catch {
-            // The fallback timer retries every few seconds; say so once.
             if !pollFailing {
                 pollFailing = true
                 Log.warning("MessageWatcher cannot read chat.db, will keep retrying: \(error)")
@@ -172,8 +159,6 @@ final class MessageWatcher: @unchecked Sendable {
         }
         guard maxRowid != previous else { return }
         lastMax = maxRowid
-        // A smaller maximum means chat.db was replaced (restore, reset,
-        // re-sync). Start over from it; those rows are not new mail.
         if maxRowid > previous {
             onNewRows(maxRowid)
         }

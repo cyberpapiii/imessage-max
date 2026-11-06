@@ -1,8 +1,6 @@
 import XCTest
 @testable import iMessageMax
 
-// MARK: - SSEEvent Tests
-
 final class SSEEventTests: XCTestCase {
 
     func testFormattedOutputWithDataOnly() {
@@ -72,8 +70,6 @@ final class SSEEventTests: XCTestCase {
     }
 }
 
-// MARK: - SSE Connection Manager Tests
-
 final class SSEConnectionManagerTests: XCTestCase {
 
     func testRegisterThenUnregister() async {
@@ -91,8 +87,6 @@ final class SSEConnectionManagerTests: XCTestCase {
         XCTAssertEqual(count, 0)
     }
 
-    /// `closeAll` ends open streams and every stream registered after it, so
-    /// a GET that registers during shutdown cannot hold the process open.
     func testCloseAllEndsOpenStreamsAndLaterOnes() async {
         let manager = SSEConnectionManager(keepAliveInterval: .seconds(60))
         let open = await manager.register(info: SSEConnectionInfo(sessionId: "a"))
@@ -109,12 +103,8 @@ final class SSEConnectionManagerTests: XCTestCase {
     }
 }
 
-// MARK: - SSE Channel Tests
-
 final class SSEChannelTests: XCTestCase {
 
-    /// Keep-alive spacing long enough that no heartbeat can race the
-    /// assertions in tests that only care about data events.
     private let quietKeepAlive: Duration = .seconds(600)
 
     func testEventsFlowAndCloseFinishes() async {
@@ -129,15 +119,12 @@ final class SSEChannelTests: XCTestCase {
             received.append(event)
         }
 
-        // Both events arrive in order, then close() ends the stream so the
-        // for-await terminates rather than hanging.
         XCTAssertEqual(received, ["event-one", "event-two"])
     }
 
     func testKeepAlivesInterleave() async {
         let channel = SSEChannel(keepAliveInterval: .milliseconds(20))
 
-        // Bounded: take exactly one item instead of looping.
         var iterator = channel.stream.makeAsyncIterator()
         let first = await iterator.next()
 
@@ -145,8 +132,6 @@ final class SSEChannelTests: XCTestCase {
     }
 
     func testStreamIsStoredAndNotRespawnedPerAccess() async {
-        // `stream` is consumed exactly once: once exhausted it stays
-        // exhausted and never replays or restarts a keep-alive loop.
         let channel = SSEChannel(keepAliveInterval: .milliseconds(50))
 
         channel.send("only-event")
@@ -170,8 +155,6 @@ final class SSEChannelTests: XCTestCase {
     }
 }
 
-// MARK: - Session Manager Lifecycle Tests
-
 final class SessionManagerLifecycleTests: XCTestCase {
 
     func testCreateSessionAtCapacityReturnsAtCapacity() async {
@@ -188,8 +171,6 @@ final class SessionManagerLifecycleTests: XCTestCase {
             return XCTFail("First session should be created, got \(first)")
         }
 
-        // The cap is full: the refusal must be distinguishable from a
-        // startup failure so the caller can answer 503 rather than 500.
         let second = await manager.createSession()
         guard case .atCapacity = second else {
             return XCTFail("Second session should be refused as .atCapacity, got \(second)")
@@ -200,9 +181,6 @@ final class SessionManagerLifecycleTests: XCTestCase {
     }
 
     func testAbandonedSessionIsReclaimedToAdmitANewClient() async {
-        // A client that went away without sending DELETE must not hold its
-        // slot for the full one-hour TTL: at capacity, an idle session is
-        // reclaimed to admit the new client rather than refusing it.
         let manager = SessionManager(
             catalog: makeTestCatalog(),
             configuration: .init(
@@ -252,8 +230,6 @@ final class SessionManagerLifecycleTests: XCTestCase {
         let routedWhileLive = await manager.routeMessage(sessionId: session.id, data: Data())
         XCTAssertTrue(routedWhileLive, "A fresh session should accept messages")
 
-        // Idle past the injected 10ms TTL, then run the reaper the 5-minute
-        // timer loop would otherwise drive.
         await AsyncTimeout.sleep(.milliseconds(100))
         await manager.cleanupExpiredSessions()
 
@@ -265,13 +241,9 @@ final class SessionManagerLifecycleTests: XCTestCase {
     }
 }
 
-// MARK: - JSON-RPC Id Canonicalization Tests
-
 final class JsonRpcIdCanonicalizationTests: XCTestCase {
 
     func testIntAndStringIdsDoNotCollide() {
-        // `1` and `"1"` are distinct legal JSON-RPC ids. Collapsing both to
-        // "1" made the second concurrent request look like a duplicate.
         XCTAssertNotEqual(
             requestKey(["id": 1]),
             requestKey(["id": "1"])
@@ -279,7 +251,6 @@ final class JsonRpcIdCanonicalizationTests: XCTestCase {
     }
 
     func testHugeDoubleIdDoesNotTrap() {
-        // Reaching this assertion at all means the conversion did not trap.
         let key = requestKey(["id": 1e300])
         XCTAssertNotNil(key)
         XCTAssertNotEqual(key, requestKey(["id": "1e300"]))
@@ -309,7 +280,6 @@ final class JsonRpcIdCanonicalizationTests: XCTestCase {
         XCTAssertNotEqual(requestKey(["id": NSNull()]), requestKey(["id": "null"]))
     }
 
-    /// No id, or one that is not a JSON scalar, can never match a response.
     func testMissingOrNonScalarIdHasNoKey() {
         XCTAssertNil(requestKey([:]))
         XCTAssertNil(requestKey(["id": ["a": 1]]))

@@ -1,10 +1,6 @@
 import CoreGraphics
 import Foundation
 
-/// A face is one row of numbers on the bubble's 24-unit grid. Every pose has
-/// the same parts, so any face reaches any other without swapping drawings.
-/// At rest the bubble is plain. When it is busy it shows the product's own
-/// typing dots, which are parked at zero size until then.
 public struct MaxPose: Equatable, Sendable {
   public enum Part: Int, CaseIterable, Sendable {
     case lean, lift, stretchX, stretchY
@@ -46,25 +42,17 @@ public struct MaxPose: Equatable, Sendable {
 
   private static let none: (x: CGFloat, y: CGFloat, width: CGFloat, height: CGFloat) = (12, 11, 0, 0)
 
-  /// The rest pose: a plain bubble, leaning in a little.
   public static let rest = MaxPose(left: none, right: none, lean: -3)
-  /// A badge: a setup step is waiting for the person.
   public static let needsYou = MaxPose(left: none, right: none, lean: -5, badge: 1)
-  /// Three dots: a typing indicator.
   public static let working = MaxPose(
     left: (8.2, 11, 2.7, 2.7), right: (15.8, 11, 2.7, 2.7), middle: 2.7)
-  /// A plain exclamation mark. No sad or angry face.
   public static let trouble = MaxPose(
     left: (12, 8.8, 2.7, 6.2), right: (12, 14.9, 2.7, 2.7))
-  /// A dash; the bubble droops and dims: turned off.
   public static let asleep = MaxPose(
     left: (12, 11.8, 5.2, 1.0), right: (12, 11.8, 0, 0), lean: 4, lift: 0.4, dim: 1)
-  /// A deeper lean in answer to a click.
   public static let wink = MaxPose(left: none, right: none, lean: -8)
 }
 
-/// The service's state as the companion wears it. Every mood-to-face choice,
-/// in the panel and in the menu bar, is made here.
 public enum CompanionMood: Hashable, CaseIterable, Sendable {
   case ready, needsYou, working, resting, trouble
 
@@ -78,9 +66,6 @@ public enum CompanionMood: Hashable, CaseIterable, Sendable {
     }
   }
 
-  /// The menu bar's version: upright and with heavier marks, because 20
-  /// points leaves no room for nuance. Trouble gains a badge so it reads
-  /// without colour.
   public var menuBarPose: MaxPose {
     var pose = pose
     pose[.lean] = 0
@@ -98,8 +83,6 @@ public enum CompanionMood: Hashable, CaseIterable, Sendable {
     return pose
   }
 
-  /// In the menu bar, working and resting are outlines; the others are solid
-  /// with their marks cut out.
   public var menuBarOutlined: Bool { self == .working || self == .resting }
 }
 
@@ -109,8 +92,6 @@ public enum MaxFace {
   private static let badgeRadius: CGFloat = 2.8
   private static let badgeGap: CGFloat = 1.2
 
-  /// Grid space to `rect`, with the pose's lean, squash, and lift applied
-  /// about the bubble's base so a squash stays grounded.
   public static func transform(_ pose: MaxPose, in rect: CGRect) -> CGAffineTransform {
     CGAffineTransform(translationX: -pivot.x, y: -pivot.y)
       .concatenating(CGAffineTransform(scaleX: pose[.stretchX], y: pose[.stretchY]))
@@ -125,8 +106,6 @@ public enum MaxFace {
   nonisolated(unsafe) private static let roundBody = MessageMark.round(
     in: CGRect(x: 0, y: 0, width: 24, height: 24))
 
-  /// The round bubble, with a soft-edged room cut for the badge so it sits in
-  /// front on any background, including a monochrome menu bar.
   public static func silhouette(_ pose: MaxPose, in rect: CGRect) -> CGPath {
     var body = roundBody
     if pose[.badge] > 0.02 {

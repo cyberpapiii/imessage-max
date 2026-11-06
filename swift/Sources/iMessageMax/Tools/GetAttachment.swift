@@ -38,8 +38,6 @@ struct GetAttachment {
         self.resolver = resolver
     }
 
-    // MARK: - Tool Registration
-
     static func definition(db: Database, resolver: ContactResolver) -> ToolDefinition {
         let inputSchema: Value = .object([
             "type": "object",
@@ -85,8 +83,6 @@ struct GetAttachment {
         }
     }
 
-    /// - Parameter allowedRoots: File-system roots that attachment paths must reside under.
-    ///   Defaults to `AttachmentPathPolicy.defaultRoots`. Inject a different value in tests.
     func execute(attachmentId: String, variant: String = "vision", allowedRoots: [String] = AttachmentPathPolicy.defaultRoots) async throws -> AttachmentImage {
         guard let imageVariant = ImageVariant(rawValue: variant) else {
             let validVariants = ImageVariant.allCases.map { $0.rawValue }.sorted()
@@ -131,14 +127,12 @@ struct GetAttachment {
             throw ToolFailure("attachment_unavailable", "Attachment file path not available")
         }
 
-        // Contain paths to allowed roots (security)
         guard let expandedPath = AttachmentPathPolicy.validatedPath(filename, allowedRoots: allowedRoots) else {
             throw ToolFailure("attachment_path_invalid", "Attachment path is outside the Messages attachment store")
         }
         let fileURL = URL(fileURLWithPath: expandedPath)
 
         if !FileManager.default.fileExists(atPath: expandedPath) {
-            // iCloud offload: trigger download and ask caller to retry
             if let downloaded = await tryDownloadFromiCloud(url: fileURL) {
                 if !downloaded {
                     throw ToolFailure(code: "attachment_offloaded", body: AttachmentFailure(error: "attachment_offloaded", message: "Attachment is stored in iCloud and download was triggered. Try again in a few seconds.", filename: fileURL.lastPathComponent))
@@ -184,8 +178,6 @@ struct GetAttachment {
         }
     }
 
-    // MARK: - Private Helpers
-
     private func resolveAttachmentChat(rowId: Int) async throws -> ChatReference? {
         let rows: [(Int64, String?)]
         do {
@@ -216,7 +208,6 @@ struct GetAttachment {
         )[row.0]
     }
 
-    /// iCloud offload: nil = not ubiquitous, false = download started (retry), true = available.
     private func tryDownloadFromiCloud(url: URL) async -> Bool? {
         do {
             let resourceValues = try url.resourceValues(forKeys: [

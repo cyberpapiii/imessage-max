@@ -7,8 +7,7 @@ final class BodyReadDeadlineTests: XCTestCase {
     func testStalledBodyReturnsTimedOutWithinDeadline() async throws {
         let (body, source) = RequestBody.makeStream()
         let producer = Task {
-            await source.yield(ByteBuffer(bytes: [0x7b]))  // "{" then silence
-            // Never finish. The collector must give up on its own.
+            await source.yield(ByteBuffer(bytes: [0x7b]))
         }
         let start = ContinuousClock.now
         let result = try await HTTPRequestParsing.collectBodyDrainingOverflow(

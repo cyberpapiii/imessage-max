@@ -65,7 +65,6 @@ struct UnreadChatSummary: Encodable {
 
 final class GetUnread {
     static let limit = IntArgument(name: "limit", defaultValue: 50, range: 1...100)
-    /// Matches the window Messages.app treats as recent.
     static let defaultSince = "7d"
 
     private let database: Database
@@ -75,8 +74,6 @@ final class GetUnread {
         self.database = database
         self.contactResolver = contactResolver
     }
-
-    // MARK: - Tool Registration
 
     static func definition(db: Database, resolver: ContactResolver) -> ToolDefinition {
         let inputSchema: Value = .object([
@@ -196,11 +193,6 @@ final class GetUnread {
         }
     }
 
-    // MARK: - Private Methods
-
-    /// Unread inbound messages, one row per message under the chat the
-    /// scope lists it in (`c`), so every format and count places a message
-    /// in two chats once, in the same chat.
     private static func unread(
         _ query: QueryBuilder,
         scope: ChatScope,
@@ -220,8 +212,6 @@ final class GetUnread {
         limit: Int,
         cursor: TimelineCursor?
     ) async throws -> UnreadMessagesResponse {
-        // One row per message, so the (date, ROWID) cursor never meets the
-        // same message twice.
         let query = Self.unread(
             QueryBuilder().selectMessages(try database.schema(), MessageInChat.chatColumns),
             scope: scope,
@@ -241,7 +231,6 @@ final class GetUnread {
         let nextCursor = TimelineCursor.next(after: rows.last?.message, pageFull: fetched.count > limit)
 
         let counts = try getUnreadCounts(scope: scope, sinceApple: sinceApple)
-        // Counted on the first page only, as search and list_chats do.
         let filteredHidden = try scope.filteredHidden(firstPage: cursor == nil) {
             try getFilteredHiddenCount(sinceApple: sinceApple)
         }
@@ -287,8 +276,6 @@ final class GetUnread {
                 "c.display_name as chat_display_name",
                 "COUNT(*) as unread_count",
                 "MIN(m.date) as oldest_unread_date",
-                // Free alongside the MIN, and it saves the preview lookup from
-                // searching each chat's history for the message it names.
                 "MAX(m.date) as newest_unread_date"
             ),
             scope: scope,
@@ -334,8 +321,6 @@ final class GetUnread {
             )
         }
 
-        // Totals cover every unread chat, not just this page, as in the
-        // messages format.
         let counts = try getUnreadCounts(scope: scope, sinceApple: sinceApple)
         let filteredHidden = try scope.filteredHidden {
             try getFilteredHiddenCount(sinceApple: sinceApple)
@@ -369,8 +354,6 @@ final class GetUnread {
         return rows.first ?? (0, 0)
     }
 
-    /// Hidden chats holding an unread message, by membership, as search
-    /// counts the hidden chats it leaves out.
     private func getFilteredHiddenCount(sinceApple: Int64?) throws -> Int {
         let query = QueryBuilder()
             .select("COUNT(DISTINCT cmj.chat_id)")
@@ -390,8 +373,6 @@ final class GetUnread {
     }
 
 }
-
-// MARK: - Helper Types
 
 private struct SummaryRow {
     let chatId: Int64

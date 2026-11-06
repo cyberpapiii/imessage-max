@@ -24,15 +24,6 @@ struct SSEEvent: Sendable {
         self.data = data
     }
 
-    /// Formats the event as an SSE message according to the spec.
-    ///
-    /// Format:
-    /// ```
-    /// id: <id>\n
-    /// event: <event>\n
-    /// data: <data>\n
-    /// \n
-    /// ```
     func formatted() -> String {
         var result = ""
 
@@ -44,13 +35,11 @@ struct SSEEvent: Sendable {
             result += "event: \(event)\n"
         }
 
-        // Data can be multi-line, each line needs "data: " prefix
         let lines = data.split(separator: "\n", omittingEmptySubsequences: false)
         for line in lines {
             result += "data: \(line)\n"
         }
 
-        // Empty line to end the event
         result += "\n"
 
         return result
@@ -61,19 +50,11 @@ struct SSEEvent: Sendable {
     }
 }
 
-/// Channel for sending events to an SSE connection.
-/// Includes automatic keep-alive event generation.
 final class SSEChannel: @unchecked Sendable {
     private let continuation: AsyncStream<String>.Continuation
 
-    /// The event stream with interleaved keep-alives.
-    ///
-    /// Single-consumer: built once at init and consumed exactly once. A second
-    /// reader would silently steal events.
     let stream: AsyncStream<String>
 
-    /// - Parameter keepAliveInterval: heartbeat spacing, from
-    ///   `HTTPTransport.Configuration.sseKeepAliveInterval`.
     init(keepAliveInterval: Duration) {
         var cont: AsyncStream<String>.Continuation!
         let baseStream = AsyncStream<String> { cont = $0 }
@@ -89,9 +70,6 @@ final class SSEChannel: @unchecked Sendable {
                         downstream.finish()
                     }
 
-                    // Keep-alive task. AsyncTimeout.sleep is launchd-safe and
-                    // cancellable; the loop checks Task.isCancelled and exits
-                    // when the task is cancelled.
                     group.addTask {
                         while !Task.isCancelled {
                             await AsyncTimeout.sleep(keepAliveInterval)
@@ -105,8 +83,6 @@ final class SSEChannel: @unchecked Sendable {
                 }
             }
 
-            // Client disconnect drops the response-body iterator; stop the
-            // merger instead of letting the keep-alive spin on a dead stream.
             downstream.onTermination = { _ in
                 merger.cancel()
             }
@@ -127,7 +103,6 @@ actor SSEConnectionManager {
     private var channels: [String: SSEChannel] = [:]
     private var sessionConnections: [String: Set<String>] = [:]
     private let keepAliveInterval: Duration
-    /// Set by `closeAll`: a stream registered later starts closed.
     private var isClosed = false
 
     init(keepAliveInterval: Duration) {
@@ -185,8 +160,6 @@ actor SSEConnectionManager {
         }
     }
 
-    /// For shutdown: closes every stream, whatever its session's state,
-    /// and every stream registered from now on.
     func closeAll() {
         isClosed = true
         for channel in channels.values {

@@ -29,8 +29,6 @@ final class ChatDetailsToolTests: XCTestCase {
         XCTAssertNil(participants[0]["service"])
     }
 
-    /// A well-formed id with no chat row is the caller's mistake, not an
-    /// internal error: chat_not_found with a next step, not query_failed.
     func testMissingChatIsChatNotFoundWithANextStep() async throws {
         let fixture = try makeChatDetailsFixture()
 
@@ -53,11 +51,6 @@ final class ChatDetailsToolTests: XCTestCase {
         }
     }
 
-    // MARK: - State
-
-    /// unread_count counts unread messages from others, not mine, read ones
-    /// or tapbacks; first and last activity span the chat's messages and
-    /// ignore tapbacks.
     func testStateCountsUnreadAndSpansActivity() async throws {
         let fixture = try directChatFixture(name: "chat-details-state")
         let hour: Int64 = 60 * appleMinute
@@ -94,10 +87,6 @@ final class ChatDetailsToolTests: XCTestCase {
         XCTAssertNil(details["shared"])
     }
 
-    // MARK: - Unnamed chat names
-
-    /// An unnamed group is named for its participants, alphabetically: all
-    /// of them up to four, then the first three "and N others".
     func testUnnamedGroupNameListsUpToFourThenCountsTheRest() async throws {
         let names = ["Eli Sun", "Ana Lima", "Dee Ray", "Ben Ode", "Cy Park"]
         var contacts: [String: String] = [:]

@@ -30,8 +30,6 @@ final class SchemaCapabilitiesTests: XCTestCase {
         XCTAssertFalse(try fixture.database().schema().has(.messageDateEdited))
     }
 
-    /// Each guarded column's fragment selects the column when the probe saw
-    /// it and still runs, under the column's name, when the column is gone.
     func testGuardedColumnFragmentsRunWithAndWithoutTheirColumn() throws {
         let fragments: [(column: String, sql: KeyPath<SchemaCapabilities, String>)] = [
             ("thread_originator_guid", \.threadOriginatorGuidSQL),

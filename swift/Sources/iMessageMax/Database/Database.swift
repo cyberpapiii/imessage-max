@@ -3,10 +3,6 @@ import IMessageMaxContract
 import SQLite3
 import Synchronization
 
-// Safe as @unchecked Sendable because instances only hold an immutable path
-// string plus a Mutex-guarded schema cache. Every query opens its own
-// short-lived read-only SQLite connection, so there is no shared mutable
-// connection state crossing actor/task boundaries.
 final class Database: @unchecked Sendable {
     static let defaultPath: String = {
         ("~/Library/Messages/chat.db" as NSString).expandingTildeInPath
@@ -20,8 +16,6 @@ final class Database: @unchecked Sendable {
         self.schemaCache = Mutex(nil)
     }
 
-    /// The probed schema, cached after the first successful open. A failed
-    /// open throws and caches nothing, so the next call probes again.
     func schema() throws -> SchemaCapabilities {
         if let cached = schemaCache.withLock({ $0 }) { return cached }
         let conn = try openReadOnly()
@@ -31,13 +25,7 @@ final class Database: @unchecked Sendable {
         return probed
     }
 
-    // MARK: - Access Check
-
-    /// Opens `path` the way every query does. A missing file is
-    /// `database_not_found`; anything else that stops the open is
-    /// `permission_denied` (without Full Disk Access the file is unreadable).
     static func checkAccess(path: String = defaultPath) -> (ok: Bool, status: DatabaseStatus) {
-        // SQLite can open a file it cannot read, so check readability first.
         if FileManager.default.fileExists(atPath: path), !FileManager.default.isReadableFile(atPath: path) {
             return (false, .permissionDenied)
         }
@@ -51,26 +39,18 @@ final class Database: @unchecked Sendable {
         }
     }
 
-    // MARK: - Query Execution
-
-    /// Opt-in query counter for tests: nil (off), or the number of `query`
-    /// calls since it was set. Locked, so concurrent queries count exactly.
     static var queryCountForTesting: Int? {
         get { queryCounter.withLock { $0 } }
         set { queryCounter.withLock { $0 = newValue } }
     }
     private static let queryCounter = Mutex<Int?>(nil)
 
-    /// Opt-in plan recorder for tests: nil (off), or the EXPLAIN QUERY PLAN
-    /// detail lines of each `query` since it was set, in call order.
     static var queryPlansForTesting: [[String]]? {
         get { queryPlans.withLock { $0 } }
         set { queryPlans.withLock { $0 = newValue } }
     }
     private static let queryPlans = Mutex<[[String]]?>(nil)
 
-    /// In-flight read connections so a cancelled `tools/call` can
-    /// `sqlite3_interrupt` them instead of leaving a full-scan running.
     private static let activeQueries = Mutex([ObjectIdentifier: ActiveQuery]())
 
     private final class ActiveQuery: @unchecked Sendable {
@@ -83,10 +63,6 @@ final class Database: @unchecked Sendable {
         func interrupt() { sqlite3_interrupt(conn) }
     }
 
-    /// Identifies one `tools/call`. Queries opened while it is the task's
-    /// `currentCall` (child tasks inherit it) belong to that call, so
-    /// cancelling the call interrupts only its own connections, never
-    /// another client's.
     final class CallScope: Sendable {}
 
     @TaskLocal static var currentCall: CallScope?
@@ -146,8 +122,6 @@ final class Database: @unchecked Sendable {
         }
         return results
     }
-
-    // MARK: - Private
 
     private func openReadOnly() throws -> OpaquePointer {
         guard FileManager.default.fileExists(atPath: path) else {

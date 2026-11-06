@@ -6,9 +6,6 @@ import NIOCore
 import NIOEmbedded
 @testable import iMessageMax
 
-/// Characterization tests for the host-parsing branches of
-/// `OriginValidationMiddleware`, the DNS-rebinding defense: the Origin check,
-/// port stripping, and the IPv6 branches.
 final class OriginHostParsingTests: XCTestCase {
 
     private func makeContext() -> BasicRequestContext {
@@ -51,7 +48,6 @@ final class OriginHostParsingTests: XCTestCase {
         return response.head.status
     }
 
-    /// Drains a middleware `Response` body into a String.
     private func bodyString(of response: Response) async throws -> String {
         let box = ByteBufferBox()
         try await response.body.write(CollectingWriter(box: box))
@@ -66,8 +62,6 @@ final class OriginHostParsingTests: XCTestCase {
     }
 
     func testAllowedHostsWithoutPortAreAccepted() async throws {
-        // "::1" (bare) is in the default allowedHosts alongside "[::1]", and the
-        // multi-colon branch leaves it untouched, so it is accepted.
         for authority in ["localhost", "127.0.0.1", "[::1]", "::1"] {
             let status = try await status(forAuthority: authority)
             XCTAssertEqual(status, .ok, "authority: \(authority)")
@@ -98,9 +92,6 @@ final class OriginHostParsingTests: XCTestCase {
         XCTAssertEqual(status, .ok)
     }
 
-    /// With --allow-external-bind the server is reached by its bound address.
-    /// Before, every non-loopback Host got 403, so external binding never
-    /// served a request.
     func testBoundExternalHostIsAccepted() async throws {
         let middleware = OriginValidationMiddleware<BasicRequestContext>(boundHost: "192.168.1.10")
         for authority in ["192.168.1.10:8080", "192.168.1.10", "localhost:8080"] {
@@ -124,8 +115,6 @@ final class OriginHostParsingTests: XCTestCase {
         XCTAssertEqual(status, .ok)
     }
 }
-
-// MARK: - Body collection helpers
 
 private final class ByteBufferBox: @unchecked Sendable {
     var buffer = ByteBuffer()

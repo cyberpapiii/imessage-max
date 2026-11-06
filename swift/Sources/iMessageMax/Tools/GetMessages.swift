@@ -1,13 +1,9 @@
 import Foundation
 import MCP
 
-// MARK: - Constants
-
 private let sessionGapHours = 4
 let sessionGapNanoseconds: Int64 = Int64(sessionGapHours) * 60 * 60 * 1_000_000_000
 private let maxMedia = 10
-
-// MARK: - Response Types
 
 struct GetMessagesResponse: Encodable {
     let chat: ChatReference
@@ -124,8 +120,6 @@ struct GetMessagesErrorResponse: Encodable, Sendable {
     }
 }
 
-// MARK: - Tool Implementation
-
 actor GetMessagesTool {
     static let limit = IntArgument(name: "limit", defaultValue: 50, range: 1...200)
 
@@ -138,8 +132,6 @@ actor GetMessagesTool {
         self.resolver = resolver
         self.allowedRoots = allowedRoots
     }
-
-    // MARK: - Tool Registration
 
     static func definition(db: Database, resolver: ContactResolver) -> ToolDefinition {
         let tool = GetMessagesTool(db: db, resolver: resolver)
@@ -194,8 +186,6 @@ actor GetMessagesTool {
             try await tool.execute(args: args)
         }
     }
-
-    // MARK: - Execution
 
     func execute(args: [String: Value]?) async throws -> [Tool.Content] {
         let response = try await executeImpl(args: args)
@@ -293,10 +283,6 @@ actor GetMessagesTool {
             var messageMediaTotal = 0
 
             for att in annotations.attachments[row.id] ?? [] {
-                // chat.db paths are data, not trusted input: only paths inside
-                // the allowed roots are opened. Anything else, and images past
-                // the response-wide cap, stay id-bearing summaries so
-                // get_attachment still works.
                 if AttachmentType.from(mimeType: att.mimeType, uti: att.uti) == .image,
                    let path = att.filename,
                    let validatedPath = AttachmentPathPolicy.validatedPath(path, allowedRoots: allowedRoots),
@@ -340,7 +326,6 @@ actor GetMessagesTool {
             finalSessions = finalSessions.filter { $0.sessionId == sessionFilter }
         }
 
-        // Recount after session filter so flags match returned messages.
         var mediaTotal = 0
         var mediaIncluded = 0
         for message in finalMessages {
@@ -356,8 +341,6 @@ actor GetMessagesTool {
         )
 
         let mediaTruncated = mediaTotal > maxMedia
-        // The text and unanswered checks drop rows the query already read,
-        // so the cursor follows what was checked, never skipping a row.
         let nextCursor = TimelineCursor.next(
             kept: messageRows, limit: limit, fetched: fetchedRows, fetchLimit: fetchLimit
         )

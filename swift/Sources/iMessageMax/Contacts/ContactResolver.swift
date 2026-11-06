@@ -3,9 +3,6 @@ import Foundation
 import IMessageMaxContract
 
 actor ContactResolver {
-    /// Contacts access behind three closures so tests never touch
-    /// CNContactStore (mirrors imsg's ContactCatalogSource). Closures run
-    /// inside the actor; `@unchecked` because CNContactStore is not Sendable.
     struct Source: @unchecked Sendable {
         let authorization: () -> (authorized: Bool, status: PermissionStatus)
         let load: () throws -> [String: String]
@@ -33,8 +30,6 @@ actor ContactResolver {
     private var lastAuthorized = false
     private var hasLastGoodCache = false
     private var lastLoadFailed = false
-    /// True when authorization was notDetermined and the policy said not to
-    /// prompt. Surfaced by diagnose as `not_requested_headless`.
     private var accessRequestSkippedHeadless = false
     nonisolated(unsafe) private var changeObserver: (any NSObjectProtocol)?
 
@@ -68,8 +63,6 @@ actor ContactResolver {
     deinit {
         if let changeObserver { NotificationCenter.default.removeObserver(changeObserver) }
     }
-
-    // MARK: - Authorization
 
     private static func authorizationStatus() -> (authorized: Bool, status: PermissionStatus) {
         let status = CNContactStore.authorizationStatus(for: .contacts)
@@ -111,13 +104,6 @@ actor ContactResolver {
         invalidated = true
     }
 
-    // MARK: - Loading
-
-    /// Reloads names when the cache expired, Contacts changed, or
-    /// authorization changed. A failed load keeps names that were good; a
-    /// failure before any good load is reported through `status().loadFailed`.
-    /// The expiry is a backstop: CNContactStoreDidChange delivery to a
-    /// headless launchd agent has not been confirmed.
     private func refresh() {
         checkedAt = now()
         let (authorized, _) = source.authorization()
@@ -132,7 +118,6 @@ actor ContactResolver {
         lastLoadFailed = false
 
         guard authorized else {
-            // Revoked or never granted: never serve names we are no longer allowed to have.
             cache.removeAll()
             hasLastGoodCache = false
             return
@@ -148,8 +133,6 @@ actor ContactResolver {
         }
     }
 
-    /// Lookups refresh at most once a second, so a page that resolves many
-    /// handles asks macOS for the authorization status once.
     private func refreshIfStale() {
         guard invalidated || now() - checkedAt >= 1 else { return }
         refresh()
@@ -189,8 +172,6 @@ actor ContactResolver {
         return names
     }
 
-    // MARK: - Resolution
-
     func resolve(_ handle: String) -> String? {
         refreshIfStale()
         if let name = cache[handle] { return name }
@@ -203,14 +184,11 @@ actor ContactResolver {
         return nil
     }
 
-    /// Case-insensitive match on word starts ("jo" matches "John Smith" and "Mary Jo",
-    /// not "Major"). Queries under two characters match nothing.
     func searchByName(_ query: String) -> [(handle: String, name: String)] {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard q.count >= 2 else { return [] }
         refreshIfStale()
         let queryWords = q.split(separator: " ").map(String.init)
-        // Sorted, so callers that take the first match pick the same one every time.
         return cache.compactMap { handle, name in
             let nameWords = name.lowercased().split(whereSeparator: { $0 == " " || $0 == "-" }).map(String.init)
             let ok = queryWords.allSatisfy { qw in nameWords.contains { $0.hasPrefix(qw) } }

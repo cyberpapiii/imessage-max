@@ -2,44 +2,26 @@ import XCTest
 import MCP
 @testable import iMessageMax
 
-// Characterization tests for list_chats and get_active_conversations.
-// These lock in the current behavior so that a future batching refactor
-// cannot silently change participant resolution, last-message selection,
-// awaiting-reply logic, or exchange-count computation.
-
 final class ListToolCharacterizationTests: XCTestCase {
-
-    // MARK: - Shared fixture
-
-    // Chat 1 (DM): Alice only
-    //   msg 1 from me (oldest)
-    //   msg 2 from Alice (newer) ← should be last_message
-    //   msg 3 from Alice, reaction (newest, but associated_message_type = 2000)
-    // Chat 2 (group, "Trip Crew"): Alice, Bob, Chris
-    //   msg 4 from me (last message)
 
     private func makeListCharacterizationFixture() throws -> ToolTestDatabase {
         let fixture = try ToolTestDatabase(name: "list-characterization")
 
-        try fixture.insertHandle(rowId: 1, handle: "+15550000001")  // Alice
-        try fixture.insertHandle(rowId: 2, handle: "+15550000002")  // Bob
-        try fixture.insertHandle(rowId: 3, handle: "+15550000003")  // Chris
+        try fixture.insertHandle(rowId: 1, handle: "+15550000001")
+        try fixture.insertHandle(rowId: 2, handle: "+15550000002")
+        try fixture.insertHandle(rowId: 3, handle: "+15550000003")
 
-        // Chat 1: DM with Alice
         try fixture.insertChat(rowId: 1, guid: "iMessage;-;alice-dm-guid")
         try fixture.joinChatHandle(chatId: 1, handleId: 1)
 
-        // Chat 2: group "Trip Crew"
         try fixture.insertChat(rowId: 2, guid: "iMessage;+;trip-crew-guid", displayName: "Trip Crew")
         try fixture.joinChatHandle(chatId: 2, handleId: 1)
         try fixture.joinChatHandle(chatId: 2, handleId: 2)
         try fixture.joinChatHandle(chatId: 2, handleId: 3)
 
-        // Apple epoch: nanoseconds since 2001-01-01
         let base = AppleTime.fromDate(Date().addingTimeInterval(-3600))
         let sec: Int64 = 1_000_000_000
 
-        // Chat 1 messages
         try fixture.insertMessage(
             rowId: 10,
             guid: "msg10",
@@ -59,7 +41,6 @@ final class ListToolCharacterizationTests: XCTestCase {
         )
         try fixture.joinChatMessage(chatId: 1, messageId: 11)
 
-        // Reaction from Alice - newer but should NOT be selected as last_message
         try fixture.insertMessage(
             rowId: 12,
             guid: "msg12",
@@ -72,7 +53,6 @@ final class ListToolCharacterizationTests: XCTestCase {
         )
         try fixture.joinChatMessage(chatId: 1, messageId: 12)
 
-        // Chat 2 messages
         try fixture.insertMessage(
             rowId: 20,
             guid: "msg20",
@@ -84,8 +64,6 @@ final class ListToolCharacterizationTests: XCTestCase {
 
         return fixture
     }
-
-    // MARK: - list_chats tests
 
     func testListChatsLastMessagePicksNewestNonReaction() async throws {
         let fixture = try makeListCharacterizationFixture()
@@ -167,26 +145,18 @@ final class ListToolCharacterizationTests: XCTestCase {
         XCTAssertNil(dmChat.group, "DM should not have group flag set")
     }
 
-    // MARK: - get_active_conversations tests
-
-    // For get_active_conversations the messages must fall within the query window.
-    // We use the same base date (near-current) so they always qualify.
-
     private func makeActiveConversationsFixture() throws -> ToolTestDatabase {
         let fixture = try ToolTestDatabase(name: "active-conversations")
 
-        try fixture.insertHandle(rowId: 1, handle: "+15550000001")  // Alice
-        try fixture.insertHandle(rowId: 2, handle: "+15550000002")  // Bob
+        try fixture.insertHandle(rowId: 1, handle: "+15550000001")
+        try fixture.insertHandle(rowId: 2, handle: "+15550000002")
 
-        // Chat 10: will have 3 my-messages, 2 their-messages → exchanges = min(3,2) = 2
         try fixture.insertChat(rowId: 10, guid: "iMessage;+;active-test-guid")
         try fixture.joinChatHandle(chatId: 10, handleId: 1)
 
-        // Recent timestamps (within last 24 hours)
         let now = AppleTime.fromDate(Date())
         let sec: Int64 = 1_000_000_000
 
-        // 3 from me
         for i in 0..<3 {
             let msgId = 100 + i
             try fixture.insertMessage(
@@ -199,7 +169,6 @@ final class ListToolCharacterizationTests: XCTestCase {
             try fixture.joinChatMessage(chatId: 10, messageId: msgId)
         }
 
-        // 2 from them (last from them is newest in window)
         try fixture.insertMessage(
             rowId: 200,
             guid: "active-them-200",
@@ -210,13 +179,11 @@ final class ListToolCharacterizationTests: XCTestCase {
         )
         try fixture.joinChatMessage(chatId: 10, messageId: 200)
 
-        // Their last message (201) is newer than my last (102, now - 8 s), so
-        // chat 10 is awaiting my reply.
         try fixture.insertMessage(
             rowId: 201,
             guid: "active-them-201",
             text: "their second",
-            date: now - (2 * sec),    // newer than any "from me" message
+            date: now - (2 * sec),
             isFromMe: false,
             handleId: 1
         )
@@ -270,13 +237,6 @@ final class ListToolCharacterizationTests: XCTestCase {
         )
     }
 
-    // MARK: - Participant fan-out
-
-    // Joining chat_handle_join alongside the message tables multiplies every
-    // chat's message rows by its participant count. DM fixtures cannot show
-    // that, since one participant multiplies by one, so these two fixtures
-    // use group chats.
-
     private func makeFanOutFixture() throws -> ToolTestDatabase {
         let fixture = try ToolTestDatabase(name: "participant-fan-out")
 
@@ -284,13 +244,9 @@ final class ListToolCharacterizationTests: XCTestCase {
         try fixture.insertHandle(rowId: 2, handle: "+15550000002")
         try fixture.insertHandle(rowId: 3, handle: "+15550000003")
 
-        // Chat 1: DM, 3 messages.
         try fixture.insertChat(rowId: 1, guid: "iMessage;-;fanout-dm")
         try fixture.joinChatHandle(chatId: 1, handleId: 1)
 
-        // Chat 2: group of 3, only 2 messages. Fewer messages than chat 1;
-        // counted per participant it would be 2 x 3 = 6 and rank first for
-        // most_active.
         try fixture.insertChat(rowId: 2, guid: "iMessage;+;fanout-group", displayName: "Fan Out")
         try fixture.joinChatHandle(chatId: 2, handleId: 1)
         try fixture.joinChatHandle(chatId: 2, handleId: 2)
@@ -354,7 +310,6 @@ final class ListToolCharacterizationTests: XCTestCase {
         try fixture.insertHandle(rowId: 2, handle: "+15550000002")
         try fixture.insertHandle(rowId: 3, handle: "+15550000003")
 
-        // Group of 3 with 2 messages each direction.
         try fixture.insertChat(rowId: 20, guid: "iMessage;+;group-activity", displayName: "Group Activity")
         try fixture.joinChatHandle(chatId: 20, handleId: 1)
         try fixture.joinChatHandle(chatId: 20, handleId: 2)
@@ -414,8 +369,6 @@ final class ListToolCharacterizationTests: XCTestCase {
         XCTAssertEqual(convo.activity.exchanges, 2)
     }
 
-    /// One page of named large chats must stay a constant query count,
-    /// not one recent-sender lookup per row.
     func testListChatsQueryCountDoesNotGrowWithPageSize() async throws {
         let fixture = try ToolTestDatabase(name: "list-chats-query-count")
         for rowId in 1...6 {
@@ -423,8 +376,6 @@ final class ListToolCharacterizationTests: XCTestCase {
         }
         let base: Int64 = 700_000_000_000_000_000
         let sec: Int64 = 1_000_000_000
-        // More chats than either page, so both pages fill from the first
-        // candidate scan and differ only in rows.
         for chatId in 1...24 {
             try fixture.insertChat(rowId: chatId, guid: "chat-\(chatId)-guid", displayName: "Group \(chatId)")
             for handleId in 1...6 {
@@ -461,10 +412,6 @@ final class ListToolCharacterizationTests: XCTestCase {
         XCTAssertEqual(twelve, three, "a page of 12 ran \(twelve) queries, a page of 3 ran \(three)")
     }
 
-    // MARK: - get_active_conversations candidates and hidden chats
-
-    /// The chats with enough exchanges are found even when newer chats with
-    /// too few fill the first candidates.
     func testActiveConversationsFindsQualifyingChatsBehindNewerThinOnes() async throws {
         let fixture = try ToolTestDatabase(name: "active")
         let base = AppleTime.fromDate(Date()) - 120 * appleMinute
@@ -496,8 +443,6 @@ final class ListToolCharacterizationTests: XCTestCase {
         XCTAssertEqual(all["more"] as? Bool, false)
     }
 
-    /// A hidden chat is left out of get_active_conversations and of an
-    /// unscoped list_attachments; naming it with chat_id still lists it.
     func testActiveConversationsAndListAttachmentsSkipHiddenChats() async throws {
         let fixture = try ToolTestDatabase(name: "hidden-active")
         try fixture.insertHandle(rowId: 1, handle: "spam@example.com")

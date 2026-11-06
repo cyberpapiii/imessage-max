@@ -1,29 +1,17 @@
 import Foundation
 import MCP
 
-/// The single place a `tools/call` is executed and turned into JSON.
-///
-/// Both protocol eras answer the same request with the same tool handler and
-/// the same result fields, so they share this. Only the envelope around the
-/// result differs, and each lane keeps its own.
 enum ToolCallDispatch {
 
-    /// A finished call. The legacy stdio lane hands it straight to the SDK;
-    /// the other lanes render it with `resultJSON`.
     enum Execution {
-        /// No handler is registered under that name. The eras report this
-        /// differently, so the decision stays with the caller.
         case unknownTool
         case completed(content: [Tool.Content], isError: Bool)
     }
 
-    /// The legacy-era answer to an unknown tool, on stdio (thrown into the
-    /// SDK) and on HTTP (encoded by `JSONRPC.error(id:_:)`).
     static func unknownToolError(_ name: String) -> MCPError {
         .methodNotFound("Unknown tool: \(name)")
     }
 
-    /// Where a call came in, for its log line.
     enum Lane {
         case legacyHTTP(session: String)
         case legacyStdio
@@ -38,14 +26,6 @@ enum ToolCallDispatch {
         }
     }
 
-    /// Runs the handler. Cancelling the calling task interrupts the SQLite
-    /// queries this call opened, and only those.
-    ///
-    /// Logs one line per call with the tool, lane, outcome and duration. It
-    /// never logs arguments: they carry message text and phone numbers.
-    ///
-    /// Arguments arrive already decoded: the raw `Any` a JSON parse yields is
-    /// not `Sendable`, so it must not cross into the handler's task.
     static func execute(name: String, arguments: [String: Value]?, lane: Lane, catalog: ToolCatalog) async -> Execution {
         let start = ContinuousClock.now
         let (execution, outcome) = await run(name, catalog.handler(named: name), arguments: arguments)
@@ -86,22 +66,14 @@ enum ToolCallDispatch {
         return false
     }
 
-    // MARK: - Serialization helpers
-
     static func contentJSON(_ content: [Tool.Content]) -> [[String: Any]] {
         guard let json = JSONRPC.jsonValue(encoding: content) as? [[String: Any]] else {
-            // Shape safety still demands an array, but never silently: an
-            // empty content array turns a successful tool call into an
-            // empty-content success.
             Log.error("contentJSON encode failed; returning empty content")
             return []
         }
         return json
     }
 
-    /// A single JSON-object text content doubles as structuredContent, on
-    /// every lane. The spec requires an object there, so any other JSON text
-    /// (an array, a bare string) gets none.
     static func structuredContent(from content: [Tool.Content]) -> [String: Any]? {
         guard content.count == 1,
             case .text(let text, _, _) = content[0],
@@ -118,8 +90,6 @@ enum ToolCallDispatch {
         return decoded
     }
 
-    /// The `result` object, as JSON-ready objects, that both eras put their
-    /// own envelope around.
     static func resultJSON(content: [Tool.Content], isError: Bool) -> [String: Any] {
         var result: [String: Any] = ["content": contentJSON(content)]
         if !isError, let structured = structuredContent(from: content) {

@@ -1,6 +1,5 @@
 import Foundation
 
-/// Where the caller asked to send: an exact chat, or a person to find.
 enum SendDestination {
     case chatId(String)
     case recipient(String)
@@ -18,7 +17,6 @@ enum SendResolution {
     case ambiguous([RecipientCandidate])
 }
 
-/// Stateless: every lookup goes to chat.db or the ContactResolver actor.
 struct SendResolver: Sendable {
     private let db: Database
     private let resolver: ContactResolver
@@ -66,9 +64,6 @@ struct SendResolver: Sendable {
     }
 
     private func resolveRecipient(_ to: String) async -> SendResolution {
-        // A leading "+" stays on the phone path even when isPhoneNumber says
-        // no ("+55555"), so it fails as a number instead of a contact name.
-        // Short codes ("12345") are phone-shaped too; see resolvePhoneNumber.
         if to.hasPrefix("+") || PhoneUtils.isPhoneNumber(to) {
             return await resolvePhoneNumber(to)
         }
@@ -82,8 +77,6 @@ struct SendResolver: Sendable {
 
     private func resolvePhoneNumber(_ phone: String) async -> SendResolution {
         let raw = phone.trimmingCharacters(in: .whitespaces)
-        // Short codes have no E.164 form and are stored as typed. A "+" that
-        // does not normalize is not a number at all.
         let normalized = PhoneUtils.normalizeToE164(raw)
         if normalized == nil && raw.hasPrefix("+") {
             return .failure("Invalid phone number format: \(phone)")
@@ -107,8 +100,6 @@ struct SendResolver: Sendable {
             }
 
             guard let handle = handles.first else {
-                // A digit string with no conversation may still be a contact's
-                // name ("55555"); only a real number fails here.
                 if normalized == nil {
                     return await resolveContactName(phone)
                 }
@@ -141,10 +132,6 @@ struct SendResolver: Sendable {
     }
 
     private func resolveContactName(_ name: String) async -> SendResolution {
-        // Search the resolver first: a seeded/test cache needs no Contacts
-        // access, and on live machines the cache is what refresh()
-        // populated anyway. Authorization only matters when nothing matched.
-        // It distinguishes "you can't search" from "no such contact".
         let matches = await resolver.searchByName(name)
         if matches.isEmpty {
             let (authorized, _) = await resolver.authorization()
@@ -204,11 +191,6 @@ struct SendResolver: Sendable {
     }
 
     private func findDirectChatForHandle(_ handle: String) throws -> Int64? {
-        // The participant count must be computed over the WHOLE chat, not just the
-        // rows surviving `WHERE h.id = ?`. A `GROUP BY ... HAVING COUNT(...) = 1`
-        // after the handle filter counts only the filtered handle's rows, so every
-        // chat containing the handle (including groups) passes. The correlated
-        // subquery below counts all participants of each candidate chat instead.
         let oneOnOneChats: [Int64] = try db.query(
             """
             SELECT c.ROWID
@@ -253,8 +235,6 @@ struct SendResolver: Sendable {
         return result
     }
 
-    /// The chat's identity as every other tool names it (ChatPage), or nil
-    /// when the chat does not exist.
     private func chatIdentity(_ chatId: Int64) async throws -> ChatIdentity? {
         let rows: [(guid: String?, displayName: String?)] = try db.query(
             "SELECT guid, display_name FROM chat WHERE ROWID = ?",

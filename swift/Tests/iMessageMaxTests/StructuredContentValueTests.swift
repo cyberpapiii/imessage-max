@@ -2,9 +2,6 @@ import MCP
 import XCTest
 @testable import iMessageMax
 
-/// The legacy lane builds structuredContent from the tool's own JSON text.
-/// It stopped using `JSONDecoder` for that, so these pin the replacement to
-/// what the decoder returns, case for case.
 final class StructuredContentValueTests: XCTestCase {
 
     private func assertMatchesDecoder(_ json: String, file: StaticString = #filePath, line: UInt = #line) throws {

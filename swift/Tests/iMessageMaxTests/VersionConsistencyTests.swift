@@ -1,10 +1,6 @@
 import XCTest
 @testable import iMessageMax
 
-/// Pins the hand-written copies of the version to `Version.current`.
-///
-/// This duplicates `scripts/check-version.sh` on purpose: the script is for
-/// CI and `make version`, this test is for the `swift test` loop.
 final class VersionConsistencyTests: XCTestCase {
     func testAllVersionSitesMatchVersionCurrent() throws {
         let root = try findRepoRoot(from: URL(fileURLWithPath: #filePath))

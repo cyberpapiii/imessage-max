@@ -4,8 +4,6 @@ import XCTest
 
 final class DatabaseErrorHandlingTests: XCTestCase {
 
-    // MARK: - Happy path
-
     func testQueryReturnsRowsOnHappyPath() throws {
         let fixture = try ToolTestDatabase()
         try fixture.insertHandle(rowId: 1, handle: "+15550000001")
@@ -18,8 +16,6 @@ final class DatabaseErrorHandlingTests: XCTestCase {
         XCTAssertEqual(rows.count, 1)
         XCTAssertEqual(rows.first, "+15550000001")
     }
-
-    // MARK: - Parameter binder
 
     func testUnsupportedParamTypeThrows() throws {
         let fixture = try ToolTestDatabase()
@@ -38,8 +34,6 @@ final class DatabaseErrorHandlingTests: XCTestCase {
     func testExtraParameterFailsBindInsteadOfRunning() throws {
         let fixture = try ToolTestDatabase()
         let db = fixture.database()
-        // One placeholder-less statement, one param: sqlite3_bind_int64
-        // returns SQLITE_RANGE, which must fail the query, not be ignored.
         XCTAssertThrowsError(
             try db.query("SELECT 1", params: [1]) { _ in 0 }
         ) { error in
@@ -60,16 +54,12 @@ final class DatabaseErrorHandlingTests: XCTestCase {
         XCTAssertEqual(falseRows.count, 0, "false should bind as 0 and not match WHERE ? = 1")
     }
 
-    // MARK: - Access check
-
     func testCheckAccessOnAReadableDatabaseIsAccessible() throws {
         let fixture = try ToolTestDatabase(name: "check-access")
         let access = Database.checkAccess(path: fixture.path)
         XCTAssertEqual(access.status, .accessible)
         XCTAssertTrue(access.ok)
     }
-
-    // MARK: - Missing database
 
     func testQueryAgainstMissingDatabaseThrowsNotFound() throws {
         let db = Database(path: "/nonexistent/nope.sqlite")
@@ -84,12 +74,7 @@ final class DatabaseErrorHandlingTests: XCTestCase {
         }
     }
 
-    // MARK: - Failed-open handle release
-
     func testFailedOpensDoNotAccumulateSQLiteMemory() throws {
-        // A failed sqlite3_open_v2 still allocates a connection handle that
-        // must be passed to sqlite3_close. Skipping the close leaked ~1.5 KiB
-        // per call on the permission_denied path.
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("failed-open-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -131,16 +116,12 @@ final class DatabaseErrorHandlingTests: XCTestCase {
                 } catch DatabaseError.permissionDenied {
                     deniedCount += 1
                 } catch {
-                    // Counted mismatch reported below.
                 }
             }
         }
         let growth = liveMallocBytes() - before
         XCTAssertEqual(deniedCount, calls, "expected every query to fail permission_denied")
 
-        // Pre-fix this retained ~1.4 KiB per failed open (~2.8 MiB across the
-        // measured calls; post-fix delta is 0). The threshold sits well above
-        // the observed ambient noise and well below the leak signal.
         XCTAssertLessThan(
             growth, 1024 * 1024,
             "live malloc bytes grew \(growth) across \(calls) failed opens; "
@@ -148,10 +129,6 @@ final class DatabaseErrorHandlingTests: XCTestCase {
         )
     }
 
-    // MARK: - Recovery without restart
-
-    /// The Database itself must never cache a failed open; once the file
-    /// becomes readable the same instance must serve the next query.
     func testPermissionDeniedIsRetriedOnTheNextQuery() throws {
         try XCTSkipIf(getuid() == 0, "root ignores POSIX mode bits")
 

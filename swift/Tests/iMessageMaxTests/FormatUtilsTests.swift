@@ -1,10 +1,6 @@
 import XCTest
 @testable import iMessageMax
 
-/// Pins the byte-for-byte output of `FormatUtils.encodeJSON`: important keys
-/// first (in `orderedKeys` order), the rest alphabetically, minimal escaping
-/// (`/`, U+2028 and non-ASCII pass through raw). Any change to this literal is a change to every tool response's shape and
-/// must be deliberate.
 final class FormatUtilsTests: XCTestCase {
     private struct GoldenAttachment: Encodable {
         let id: String
@@ -77,14 +73,11 @@ final class FormatUtilsTests: XCTestCase {
         flags: [true, false]
     )
 
-    // Raw string: every backslash below is a literal byte of the JSON output.
-    // `\#u{2028}` is the one interpolated escape (a raw U+2028 in the output).
     private static let expected = #"{"messages":[{"id":"msg_1","from":"Alice","text":"quote \" backslash \\ slash / newline\nTab\tEmoji 🎳 sep\#u{2028}end","ts":"2026-09-01T10:00:00Z","reactions":["❤️ bob","😂 nick"],"media":{"id":"att_1","available":true,"mime":"image/jpeg","size":46080,"filename":"IMG_0001.JPG"},"zebra":"last"},{"id":"msg_2","from":"Bob","text":"control \u0001 bell \u0007 backspace \b formfeed \f cr \r","ts":"2026-09-01T10:05:00Z","reactions":[]}],"total":2,"query":"hello","more":false,"cursor":"abc/def","alpha":"first alphabetically","counts":{"a":1,"b":null},"flags":[true,false],"ratio":1.5,"zulu":3}"#
 
     func testGoldenOrderingForNestedResponse() throws {
         let output = try FormatUtils.encodeJSON(Self.golden)
         XCTAssertEqual(output, Self.expected)
-        // The literal above must itself be valid JSON, or the pin is meaningless.
         XCTAssertNoThrow(try JSONSerialization.jsonObject(with: Data(output.utf8)))
     }
 }

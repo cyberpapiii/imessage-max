@@ -49,8 +49,6 @@ struct iMessageMax: AsyncParsableCommand {
             guard ContactResolver.usageDescriptionEmbedded else {
                 throw ValidationError("This executable has no embedded Info.plist, so macOS cannot grant it Contacts access. Rebuild with `make build` (not a bare `swift build`).")
             }
-            // Re-run ourselves disclaimed so the prompt and the grant belong to
-            // imessage-max rather than the terminal (see ResponsibilityDisclaim).
             let disclaimedKey = "IMESSAGE_MAX_CONTACTS_REQUEST_DISCLAIMED"
             if ProcessInfo.processInfo.environment[disclaimedKey] == nil {
                 guard let executable = Bundle.main.executablePath else {

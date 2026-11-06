@@ -29,8 +29,6 @@ final class ToolTestDatabase {
         try execute(schemaSQL)
     }
 
-    /// Opens an existing fixture file for writing without creating the schema
-    /// or deleting the file on deinit.
     init(attachingTo path: String) throws {
         self.url = URL(fileURLWithPath: path)
         self.path = path
@@ -302,8 +300,6 @@ func makeTestSetupPermissions() -> SetupPermissionService {
     SetupPermissionService(contactsRequest: { (true, "authorized") }, automationRequest: { (true, "authorized") })
 }
 
-/// Runs a tool call that should fail and returns the JSON error body the
-/// client would receive.
 func toolFailureBody<T>(
     file: StaticString = #filePath, line: UInt = #line,
     _ call: () async throws -> T
@@ -318,7 +314,6 @@ func toolFailureBody<T>(
 }
 
 extension ContactResolver {
-    /// A resolver that never touches CNContactStore.
     init(
         seedCache: [String: String],
         authorization: (authorized: Bool, status: PermissionStatus) = (true, "authorized")
@@ -335,9 +330,6 @@ extension ContactResolver {
     }
 }
 
-/// An attributedBody blob in the typedstream shape MessageTextExtractor reads:
-/// junk, the class marker, five skipped bytes, a length field, the UTF-8 text.
-/// The length defaults to a single byte holding `payload.count`.
 func typedstreamBlob(marker: String = "NSString", lengthField: [UInt8]? = nil, payload: [UInt8]) -> Data {
     var bytes: [UInt8] = [0x04, 0x0B]
     bytes += Array(marker.utf8)
@@ -347,8 +339,6 @@ func typedstreamBlob(marker: String = "NSString", lengthField: [UInt8]? = nil, p
     return Data(bytes)
 }
 
-/// Calls a tool through the catalog the server serves and returns the JSON
-/// body a client reads, whether the tool answered or failed.
 func callTool(
     _ name: String,
     _ arguments: [String: Value] = [:],
@@ -365,9 +355,6 @@ func callTool(
     }
 }
 
-/// How many SQL queries `body` ran. Compare runs of different sizes rather
-/// than pinning a number: the query plan is the tool's business, a count
-/// that grows with the rows is the regression.
 func countQueries(_ body: () async throws -> Void) async rethrows -> Int {
     Database.queryCountForTesting = 0
     defer { Database.queryCountForTesting = nil }
@@ -375,18 +362,14 @@ func countQueries(_ body: () async throws -> Void) async rethrows -> Int {
     return Database.queryCountForTesting ?? 0
 }
 
-/// The `id` of every item in `json[key]`.
 func itemIds(_ json: [String: Any], _ key: String, file: StaticString = #filePath, line: UInt = #line) throws -> [String] {
     try decodeJSONArray(json[key], file: file, line: line).compactMap { $0["id"] as? String }
 }
 
-/// The `chat.id` of every item in `json[key]`.
 func itemChatIds(_ json: [String: Any], _ key: String, file: StaticString = #filePath, line: UInt = #line) throws -> [String?] {
     try decodeJSONArray(json[key], file: file, line: line).map { ($0["chat"] as? [String: Any])?["id"] as? String }
 }
 
-/// Follows a tool's cursors until it stops returning one, collecting the
-/// `id` of every item under `resultsKey`. Stops after 20 pages.
 func collectPages(
     _ name: String,
     _ arguments: [String: Value],
@@ -409,20 +392,14 @@ func collectPages(
     return (ids, pages)
 }
 
-// MARK: - Shared tool fixtures
-
 /// Apple-epoch nanoseconds `offset` whole days after 2020-01-06T10:40:00Z,
 /// which is 600,000,000 seconds after the Apple epoch.
 func fixtureDay(_ offset: Int) -> Int64 {
     (600_000_000 + Int64(offset) * 86_400) * 1_000_000_000
 }
 
-/// One minute in Apple-epoch nanoseconds.
 let appleMinute: Int64 = 60_000_000_000
 
-/// Three chats, "Zebra Club 1" to "Zebra Club 3", with `is_filtered` 0, 1
-/// and 36. Chat N holds one unread "zebra N" (msg_N) from +1555000000N,
-/// newer as N grows.
 func filteredChatsFixture() throws -> ToolTestDatabase {
     let fixture = try ToolTestDatabase(name: "filtered-chats")
     let now = AppleTime.fromDate(Date())
@@ -440,8 +417,6 @@ func filteredChatsFixture() throws -> ToolTestDatabase {
     return fixture
 }
 
-/// Chat 1 with +15550000001: one attributedBody-only row (msg_1) holding
-/// "off to Lisbon", then `fillerCount` newer attributedBody-only rows.
 func blobTextFixture(fillerCount: Int) throws -> ToolTestDatabase {
     let fixture = try ToolTestDatabase(name: "blob-text")
     try fixture.insertHandle(rowId: 1, handle: "+15550000001")
@@ -465,12 +440,8 @@ func blobTextFixture(fillerCount: Int) throws -> ToolTestDatabase {
     return fixture
 }
 
-/// Contacts for `participantsFixture`.
 let aliceAndBob = ["+15550000001": "Alice Smith", "+15550000002": "Bob Brown"]
 
-/// Chats 1-12: DMs with Alice (+15550000001), newest last. Chat 20: Alice
-/// and Bob, older than all of them. Chat 30: a DM with pat@example.com,
-/// the newest.
 func participantsFixture() throws -> ToolTestDatabase {
     let fixture = try ToolTestDatabase(name: "participants")
     try fixture.insertHandle(rowId: 1, handle: "+15550000001")
@@ -498,9 +469,6 @@ func participantsFixture() throws -> ToolTestDatabase {
     return fixture
 }
 
-/// Chat 1 is shown and says "volcano trip"; chat 2 is hidden and says
-/// "volcano photos" and "volcano again?"; chat 3 is hidden with no match.
-/// Every message is from me.
 func hiddenMatchesFixture() throws -> ToolTestDatabase {
     let fixture = try ToolTestDatabase(name: "hidden-matches")
     let base = AppleTime.fromDate(Date()) - 60 * appleMinute
@@ -519,8 +487,6 @@ func hiddenMatchesFixture() throws -> ToolTestDatabase {
     return fixture
 }
 
-/// Unread "hello 1" to "hello 3" (msg_1 to msg_3) from +15550000001 an
-/// hour ago, all in shown iMessage chat 1; msg_2 is also in shown SMS chat 2.
 func messageInTwoChatsFixture() throws -> ToolTestDatabase {
     let fixture = try ToolTestDatabase(name: "two-chats")
     let recent = AppleTime.fromDate(Date()) - 60 * appleMinute
@@ -535,9 +501,6 @@ func messageInTwoChatsFixture() throws -> ToolTestDatabase {
     return fixture
 }
 
-/// Shown chat 1 holds unread "hello friend" (msg_1) from +15550000001;
-/// hidden chat 5 holds the newer unread "hello prize" (msg_2) from
-/// spam@example.com. Both are about an hour old.
 func hiddenChatFixture() throws -> ToolTestDatabase {
     let fixture = try ToolTestDatabase(name: "named-hidden")
     let recent = AppleTime.fromDate(Date()) - 60 * appleMinute
@@ -552,12 +515,6 @@ func hiddenChatFixture() throws -> ToolTestDatabase {
     return fixture
 }
 
-/// chat.db's own indexes on the tables the tools read (the
-/// chat_message_join primary key and message_id index, message_idx_date,
-/// message_idx_is_read, and the join tables' keys) over 40 unread
-/// "hello zebra N" messages from the last hour. Every fourth message is in
-/// hidden chat 5 with spam@example.com, the rest in shown chat 1 with
-/// +15550000001. Message 4 has a 10-byte image, att1.
 func indexedHiddenChatFixture() throws -> ToolTestDatabase {
     let fixture = try ToolTestDatabase(name: "named-chat-plan")
     let recent = AppleTime.fromDate(Date()) - 60 * appleMinute
@@ -590,8 +547,6 @@ func indexedHiddenChatFixture() throws -> ToolTestDatabase {
     return fixture
 }
 
-/// Chat 1, "iMessage;-;+15550000001", with handle 1 (+15550000001) joined
-/// and no messages.
 func directChatFixture(name: String = "direct-chat") throws -> ToolTestDatabase {
     let fixture = try ToolTestDatabase(name: name)
     try fixture.insertHandle(rowId: 1, handle: "+15550000001")
@@ -599,8 +554,6 @@ func directChatFixture(name: String = "direct-chat") throws -> ToolTestDatabase 
     try fixture.joinChatHandle(chatId: 1, handleId: 1)
     return fixture
 }
-
-// MARK: - HTTP bodies
 
 func decodeJSONString(from buffer: ByteBuffer) throws -> String {
     var body = buffer
@@ -611,9 +564,6 @@ func decodeJSON(from buffer: ByteBuffer) throws -> [String: Any] {
     try decodeJSONDictionary(from: decodeJSONString(from: buffer))
 }
 
-// MARK: - Repository files
-
-/// The repository root: the nearest ancestor of this file holding icon.png.
 func findRepoRoot(from fileURL: URL = URL(fileURLWithPath: #filePath)) throws -> URL {
     var directory = fileURL.deletingLastPathComponent()
     while directory.path != "/" {

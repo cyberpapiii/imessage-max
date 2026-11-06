@@ -1,7 +1,5 @@
 import Foundation
 
-/// What a page of messages carries beyond its own rows: tapbacks, reply
-/// links and attachments. Each kind is one batched query for the whole page.
 struct MessageAnnotations {
     struct Reaction {
         let type: Int
@@ -25,7 +23,6 @@ struct MessageAnnotations {
         static let attachments = Include(rawValue: 1 << 2)
     }
 
-    /// Keyed by the reacted-to message's guid, in chat.db order.
     var reactions: [String: [Reaction]] = [:]
     var replyToIdByGuid: [String: String] = [:]
     var replyCountByGuid: [String: Int] = [:]
@@ -98,8 +95,6 @@ struct MessageAnnotations {
         return map
     }
 
-    /// Originator ROWIDs not already on the page, then reply counts via
-    /// GROUP BY: two queries per page, never one per row.
     private mutating func loadReplies(db: Database, records: [MessageRecord], pageGuids: [String]) throws {
         guard try db.schema().messageThreadOriginatorGuid else { return }
         for record in records {
@@ -136,8 +131,6 @@ struct MessageAnnotations {
         }
     }
 
-    /// Attachments Messages.app shows on each message, optionally only one
-    /// `AttachmentType.sqlPredicate` kind, in attachment order.
     static func attachmentsByMessage(
         db: Database,
         messageIds: [Int64],
