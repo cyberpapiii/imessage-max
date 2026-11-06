@@ -21,20 +21,6 @@ private func inspection(loaded: Bool, installed: Bool = true, diagnosis: Diagnos
     conflict: false)
 }
 
-private func diagnosis(contacts: Bool = true, automation: String = "supported") throws
-  -> DiagnoseResult
-{
-  try JSONDecoder().decode(
-    DiagnoseResult.self,
-    from: Data(
-      """
-      {"version":"1.8.0","process_id":1,"status":"ok",
-      "database":{"path":"~/Library/Messages/chat.db","accessible":true,"status":"accessible"},
-      "contacts":{"authorized":\(contacts),"status":"\(contacts ? "authorized" : "denied")"},
-      "capabilities":{"perm_automation":{"state":"\(automation)"},"send_text_dm":{"state":"supported"}}}
-      """.utf8))
-}
-
 @Test func firstCheckIsWorkingAndOffersNothingYet() {
   let state = PanelState(inspection: nil, busy: nil, problem: nil, checked: false)
   #expect(state.title == "Checking in…")
