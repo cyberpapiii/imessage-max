@@ -13,11 +13,6 @@ enum IdentityDisplayFormatter {
         return PhoneUtils.formatDisplay(handle)
     }
 
-    static func displayName(handle: String, resolver: ContactResolver) async -> String {
-        let contactName = await resolver.resolve(handle)
-        return displayName(handle: handle, contactName: contactName)
-    }
-
     static func participants(_ participants: [ChatIdentity.Participant]) -> [ChatParticipant] {
         let unique = uniqueByHandle(participants)
         let names = disambiguatedNames(for: unique)

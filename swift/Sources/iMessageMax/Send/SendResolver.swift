@@ -114,7 +114,7 @@ struct SendResolver: Sendable {
                 }
                 return .failure("No conversation found with \(phone)")
             }
-            let name = await IdentityDisplayFormatter.displayName(handle: handle, resolver: resolver)
+            let name = IdentityDisplayFormatter.displayName(handle: handle, contactName: await resolver.resolve(handle))
             return .success(try await participantTarget(handle: handle, displayName: name))
         } catch {
             return .failure(ClientErrorMessages.sanitized(error))
@@ -133,7 +133,7 @@ struct SendResolver: Sendable {
             guard let handle = handles.first else {
                 return .failure("No conversation found with \(email)")
             }
-            let name = await IdentityDisplayFormatter.displayName(handle: handle, resolver: resolver)
+            let name = IdentityDisplayFormatter.displayName(handle: handle, contactName: await resolver.resolve(handle))
             return .success(try await participantTarget(handle: handle, displayName: name))
         } catch {
             return .failure(ClientErrorMessages.sanitized(error))

@@ -139,7 +139,7 @@ swift/
 │   │   ├── IconMetadata.swift  # Embedded icons, the serverInfo icon injection
 │   │   └── Version.swift       # Version.current (source of truth), protocol versions, SDK Server factory
 │   ├── Database/               # SQLite wrapper, query builder, SQLFragments (chat.db rules), schema probe
-│   ├── Models/                 # Identifiers (chat/msg_/att id codecs), ChatIdentity, GroupEvent, Reactions, AttachmentType, ResponsePrimitives
+│   ├── Models/                 # Identifiers (chat/msg_/att id codecs), ChatIdentity and its naming rules, GroupEvent, Reactions, AttachmentType, ResponsePrimitives
 │   ├── Messages/               # Message row and renderer, people map, context window, sender filter, participant→chat matching, reactions/attachments annotations, shared-content query
 │   ├── Tools/                  # One file per MCP tool (plus GetMessagesInternals, SearchInternals)
 │   ├── Send/                   # send tool: resolver, AppleScript template, file stager, verifier

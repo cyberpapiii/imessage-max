@@ -61,7 +61,7 @@ struct SenderLabels {
     static func displayNames(_ handles: [String], resolver: ContactResolver) async -> [String: String] {
         var names: [String: String] = [:]
         for handle in handles where names[handle] == nil {
-            names[handle] = await IdentityDisplayFormatter.displayName(handle: handle, resolver: resolver)
+            names[handle] = IdentityDisplayFormatter.displayName(handle: handle, contactName: await resolver.resolve(handle))
         }
         return names
     }
