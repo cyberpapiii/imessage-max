@@ -186,15 +186,15 @@ final class GetMessagesSinceToolTests: XCTestCase {
         XCTAssertEqual(json["next_rowid"] as? Int, 107)
     }
 
-    func testInvalidChatIdIsInvalidInput() async throws {
+    func testUnresolvableChatIdIsChatNotFound() async throws {
         let fixture = try makeSinceFixture()
         let tool = GetMessagesSinceTool(db: fixture.database(), resolver: makeSeededResolver())
         do {
             _ = try await tool.execute(args: ["chat_id": .string("nope")])
-            XCTFail("expected invalid_input")
+            XCTFail("expected chat_not_found")
         } catch let error as ToolFailure {
             let payload = try decodeJSONDictionary(from: error.content)
-            XCTAssertEqual(payload["error"] as? String, "invalid_input")
+            XCTAssertEqual(payload["error"] as? String, "chat_not_found")
         }
     }
 

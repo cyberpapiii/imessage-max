@@ -233,9 +233,10 @@ actor GetMessagesTool {
             chatId = try await resolveParticipantsToChat(participants: participants)
         }
 
-        guard let numericChatId = parseChatId(chatId) else {
-            throw ToolFailure("chat_not_found", ClientErrorMessages.chatNotFound(chatId ?? "nil"))
+        guard let chatId else {
+            throw ToolFailure.chatNotFound("nil")
         }
+        let numericChatId = Int(try ChatIdentifier.resolve(chatId, db: db))
 
         let chatInfo = try getChatInfo(chatId: numericChatId)
         let chatParticipants = try await ChatSummaryQueries.participants(db: db, chatId: Int64(numericChatId), resolver: resolver)

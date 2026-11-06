@@ -42,6 +42,18 @@ enum SQLFragments {
         """
     }
 
+    /// The one chat a message is listed under where a tool shows one chat
+    /// per message: the lowest chat id it is joined to. `messageId` is the
+    /// SQL expression for the message's ROWID.
+    static func homeChat(of messageId: String = "m.ROWID") -> String {
+        "(SELECT MIN(hcmj.chat_id) FROM chat_message_join hcmj WHERE hcmj.message_id = \(messageId))"
+    }
+
+    /// The message is joined to the chat bound as `?`, home chat or not.
+    static func messageInChat(_ messageId: String = "m.ROWID") -> String {
+        "EXISTS (SELECT 1 FROM chat_message_join icmj WHERE icmj.message_id = \(messageId) AND icmj.chat_id = ?)"
+    }
+
     /// Received messages not yet read. A tapback is never unread.
     static func unreadInbound(_ alias: String = "m") -> String {
         "(\(alias).is_read = 0 AND \(alias).is_from_me = 0 AND \(notReaction(alias)))"
@@ -54,6 +66,24 @@ enum SQLFragments {
 
     /// Tapbacks and other associated messages carry a nonzero type.
     static func notReaction(_ alias: String = "m") -> String { "\(alias).associated_message_type = 0" }
+
+    /// A message that carries the conversation: not a tapback and not a
+    /// group event (rename, membership change, leave).
+    static func conversational(_ alias: String = "m") -> String {
+        "(\(notReaction(alias)) AND \(alias).item_type = 0)"
+    }
+
+    /// Whether chat `chat` (an SQL expression) awaits my reply: its newest
+    /// conversational message, at or after one bound `?` date when
+    /// `sinceBound`, was received. 0 when it has none.
+    static func awaitingReply(chat: String, sinceBound: Bool) -> String {
+        """
+        COALESCE((SELECT ar.is_from_me = 0 FROM chat_message_join arj \
+        JOIN message ar ON ar.ROWID = arj.message_id \
+        WHERE arj.chat_id = \(chat) AND \(conversational("ar"))\(sinceBound ? " AND ar.date >= ?" : "") \
+        ORDER BY ar.date DESC, ar.ROWID DESC LIMIT 1), 0)
+        """
+    }
 
     /// Tapback rows and their removals (see `ReactionType`), nothing else.
     static func tapbackOrRemoval(_ alias: String = "m") -> String {

@@ -120,18 +120,7 @@ final class ListAttachments {
         let effectiveLimit = Self.limit.clamp(limit)
         let effectiveSort = AttachmentSort(rawValue: sort) ?? .recentFirst
 
-        let validTypes = Set(["image", "video", "audio", "pdf", "document", "any"])
-        let typeFilter: String? = if let t = type, validTypes.contains(t) { t } else { nil }
-
-        let numericChatId: Int64?
-        if let chatId {
-            guard let cid = ChatIdentifier.parseRowId(chatId) else {
-                throw ToolFailure("invalid_id", "Invalid chat ID format: \(chatId)")
-            }
-            numericChatId = cid
-        } else {
-            numericChatId = nil
-        }
+        let numericChatId = try chatId.map { try ChatIdentifier.resolve($0, db: db) }
 
         let timelineCursor = cursor.flatMap(TimelineCursor.decode)
         let (sharedMessages, hasMore, nextCursor) = try await SharedMessages.page(
@@ -139,7 +128,7 @@ final class ListAttachments {
             resolver: resolver,
             chatId: numericChatId,
             sender: await SenderFilter.resolve(fromPerson, resolver: resolver),
-            typeFilter: typeFilter,
+            typeFilter: type,
             since: since,
             before: before,
             limit: effectiveLimit,

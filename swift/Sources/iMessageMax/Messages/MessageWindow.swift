@@ -99,28 +99,29 @@ enum MessageWindow {
         var parts: [String] = []
         var params: [Any] = []
         for anchor in anchors {
-            let cursor = anchor.cursor
+            let older = anchor.cursor.predicate(descending: true)
+            let newer = anchor.cursor.predicate(descending: false)
             if before > 0 {
                 parts.append("""
                     SELECT * FROM (
                       SELECT \(columns), ? AS anchor_date, ? AS anchor_id, 1 AS is_before
                       \(from)
-                      WHERE cmj.chat_id = ? AND \(cursor.olderThanSQL) AND \(SQLFragments.notReaction())
+                      WHERE cmj.chat_id = ? AND \(older.sql) AND \(SQLFragments.notReaction())
                       ORDER BY m.date DESC, m.ROWID DESC LIMIT \(before)
                     )
                     """)
-                params += [anchor.date, anchor.messageId, chatId] + cursor.olderThanParams
+                params += [anchor.date, anchor.messageId, chatId] + older.params
             }
             if after > 0 {
                 parts.append("""
                     SELECT * FROM (
                       SELECT \(columns), ? AS anchor_date, ? AS anchor_id, 0 AS is_before
                       \(from)
-                      WHERE cmj.chat_id = ? AND \(cursor.newerThanSQL) AND \(SQLFragments.notReaction())
+                      WHERE cmj.chat_id = ? AND \(newer.sql) AND \(SQLFragments.notReaction())
                       ORDER BY m.date ASC, m.ROWID ASC LIMIT \(after)
                     )
                     """)
-                params += [anchor.date, anchor.messageId, chatId] + cursor.newerThanParams
+                params += [anchor.date, anchor.messageId, chatId] + newer.params
             }
         }
         return (parts.joined(separator: "\nUNION ALL\n"), params)

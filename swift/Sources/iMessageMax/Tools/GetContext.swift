@@ -110,8 +110,8 @@ enum GetContext {
             throw ToolFailure("invalid_params", "chat_id is required when using contains")
         }
 
-        // Reject malformed ids before touching chat.db, so a bad id reads as
-        // invalid_id even when the database cannot be opened.
+        // Reject a malformed message id before touching chat.db, so it reads
+        // as invalid_id even when the database cannot be opened.
         enum Target {
             case message(Int64)
             case text(String, inChat: Int64)
@@ -123,10 +123,7 @@ enum GetContext {
             }
             target = .message(numericId)
         } else if let cId = chatId, let searchText = contains {
-            guard let numericChatId = ChatIdentifier.parseRowId(cId) else {
-                throw ToolFailure("invalid_id", "Invalid chat ID format: \(cId)")
-            }
-            target = .text(searchText, inChat: numericChatId)
+            target = .text(searchText, inChat: try ChatIdentifier.resolve(cId, db: database))
         } else {
             throw ToolFailure("invalid_params", "chat_id and contains are required")
         }
@@ -143,7 +140,7 @@ enum GetContext {
 
         switch target {
         case .message(let numericId):
-            guard let found = try database.query("\(targetQuery)\nWHERE m.ROWID = ?", params: [numericId], map: MessageInChat.init).first else {
+            guard let found = try database.query("\(targetQuery)\nWHERE m.ROWID = ? AND c.ROWID = \(SQLFragments.homeChat())", params: [numericId], map: MessageInChat.init).first else {
                 throw ToolFailure("not_found", ClientErrorMessages.messageNotFound)
             }
             targetResult = found
@@ -168,9 +165,9 @@ enum GetContext {
                       AND \(match.sql)
                     """
                 var params: [Any] = [numericChatId] + match.bindings
-                if let resumeAfter {
-                    sql += "\n  AND \(resumeAfter.olderThanSQL)"
-                    params += resumeAfter.olderThanParams
+                if let older = resumeAfter?.predicate(descending: true) {
+                    sql += "\n  AND \(older.sql)"
+                    params += older.params
                 }
                 sql += "\nORDER BY m.date DESC, m.ROWID DESC\nLIMIT ?"
                 params.append(pageSize)

@@ -324,19 +324,23 @@ enum SearchTool {
         let fetchLimit = (hasQuery || unanswered) ? max(500, clampedLimit * 10) : clampedLimit
 
         let senderFilter = await SenderFilter.resolve(fromPerson, resolver: resolver)
+        let chatFilter = try inChat.map { try ChatIdentifier.resolve($0, db: db) }
 
-        // Single characters match nearly everything, so they are dropped.
+        // Single characters match nearly everything, so they are dropped
+        // from a query with longer words; a query of only single characters
+        // (or one CJK character) is matched whole, as a substring.
         let searchWords: [String]
         if hasQuery, let searchQuery = query?.trimmingCharacters(in: .whitespaces).lowercased(), !searchQuery.isEmpty {
-            searchWords = searchQuery.split(separator: " ")
+            let words = searchQuery.split(separator: " ")
                 .map(String.init)
                 .filter { $0.count >= 2 }
+            searchWords = words.isEmpty ? [searchQuery] : words
         } else {
             searchWords = []
         }
 
         let schema = try db.schema()
-        func fetch(inChat: String?, includeFiltered: Bool, cursor: TimelineCursor?) throws -> [MessageInChat] {
+        func fetch(inChat: Int64?, includeFiltered: Bool, cursor: TimelineCursor?) throws -> [MessageInChat] {
             let (sql, params) = buildQuery(
                 query: query,
                 fromPerson: senderFilter,
@@ -404,7 +408,7 @@ enum SearchTool {
                 db: db,
                 query: query,
                 fromPerson: senderFilter,
-                inChat: inChat,
+                inChat: chatFilter,
                 isGroup: isGroup,
                 has: has,
                 since: since,
@@ -420,7 +424,7 @@ enum SearchTool {
                 var resumeAfter: TimelineCursor?
                 while true {
                     let page = try fetch(
-                        inChat: ChatIdentifier.format(chatId), includeFiltered: true, cursor: resumeAfter
+                        inChat: chatId, includeFiltered: true, cursor: resumeAfter
                     )
                     if try !confirmed(page, limit: 1).isEmpty {
                         count += 1
@@ -433,10 +437,11 @@ enum SearchTool {
             return count
         }
 
-        let filteredHidden = includeFiltered ? nil : try hiddenChatsWithMatch()
+        // Counted on the first page only, as list_chats does.
+        let filteredHidden = includeFiltered || cursor != nil ? nil : try hiddenChatsWithMatch()
 
         let fetched = try fetch(
-            inChat: inChat, includeFiltered: includeFiltered, cursor: cursor.flatMap(TimelineCursor.decode)
+            inChat: chatFilter, includeFiltered: includeFiltered, cursor: cursor.flatMap(TimelineCursor.decode)
         )
         let rows = try confirmed(fetched, limit: clampedLimit)
         let nextCursor = TimelineCursor.next(

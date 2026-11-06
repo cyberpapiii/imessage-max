@@ -5,7 +5,7 @@ extension SearchTool {
         to builder: QueryBuilder,
         query: String?,
         fromPerson: SenderFilter?,
-        inChat: String?,
+        inChat: Int64?,
         isGroup: Bool?,
         has: String?,
         since: String?,
@@ -36,7 +36,7 @@ extension SearchTool {
         }
         builder
             .leftJoin(MessageRecord.senderJoin)
-            .where("m.associated_message_type = ?", 0)
+            .where(SQLFragments.notReaction())
 
         if let chatFilterPredicate {
             builder.where(chatFilterPredicate)
@@ -68,20 +68,12 @@ extension SearchTool {
         }
 
         if let cursor {
-            switch sort {
-            case .recentFirst:
-                builder.where(cursor.olderThanSQL, cursor.date, cursor.date, cursor.messageId)
-            case .oldestFirst:
-                builder.where(cursor.newerThanSQL, cursor.date, cursor.date, cursor.messageId)
-            }
+            let after = cursor.predicate(descending: sort == .recentFirst)
+            builder.where(after.sql, params: after.params)
         }
 
-        if let chatStr = inChat {
-            if let chatId = ChatIdentifier.parseRowId(chatStr) {
-                builder.where("c.ROWID = ?", chatId)
-            } else {
-                builder.where("c.guid LIKE ? ESCAPE '\\'", "%\(QueryBuilder.escapeLike(chatStr))%")
-            }
+        if let inChat {
+            builder.where("c.ROWID = ?", inChat)
         }
 
         if let sender = unanswered ? .me : fromPerson {
@@ -105,7 +97,7 @@ extension SearchTool {
     static func buildQuery(
         query: String?,
         fromPerson: SenderFilter?,
-        inChat: String?,
+        inChat: Int64?,
         isGroup: Bool?,
         has: String?,
         since: String?,
@@ -159,7 +151,7 @@ extension SearchTool {
         db: Database,
         query: String?,
         fromPerson: SenderFilter?,
-        inChat: String?,
+        inChat: Int64?,
         isGroup: Bool?,
         has: String?,
         since: String?,
@@ -188,7 +180,7 @@ extension SearchTool {
     static func filteredHiddenQuery(
         query: String?,
         fromPerson: SenderFilter?,
-        inChat: String?,
+        inChat: Int64?,
         isGroup: Bool?,
         has: String?,
         since: String?,
@@ -355,20 +347,16 @@ extension SearchTool {
         guard let text else { return "" }
         let excerptLength = 160
         let rawWindow = 4 * excerptLength
-        let source: String
-        var rawStart = 0
-        if let query, !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-           let r = text.lowercased().range(of: query.lowercased()) {
-            let center = text.distance(from: text.startIndex, to: r.lowerBound)
-            let start = max(0, center - rawWindow / 2)
-            rawStart = start
-            source = String(text.dropFirst(start).prefix(rawWindow))
-        } else {
-            source = String(text.prefix(rawWindow))
+        /// Characters before the first case-insensitive match of the query.
+        func matchOffset(in string: String) -> Int? {
+            guard let query, !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  let range = string.range(of: query, options: .caseInsensitive) else { return nil }
+            return string.distance(from: string.startIndex, to: range.lowerBound)
         }
+        let rawStart = matchOffset(in: text).map { max(0, $0 - rawWindow / 2) } ?? 0
+        let source = String(text.dropFirst(rawStart).prefix(rawWindow))
         let normalized = SummaryPreviewFormatter.formattedTextPreview(
             text: source,
-            attributedBody: nil,
             maxLength: Int.max
         ) ?? source
 
@@ -379,28 +367,13 @@ extension SearchTool {
             return excerpt
         }
 
-        guard normalized.count > 160 else { return withWindowPrefix(normalized) }
+        guard normalized.count > excerptLength else { return withWindowPrefix(normalized) }
 
-        let nsText = normalized as NSString
-
-        if let query, !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            let lowerText = normalized.lowercased()
-            let lowerQuery = query.lowercased()
-            if let matchRange = lowerText.range(of: lowerQuery) {
-                let matchLocation = lowerText.distance(from: lowerText.startIndex, to: matchRange.lowerBound)
-                let halfWindow = excerptLength / 2
-                let start = max(0, matchLocation - halfWindow)
-                let length = min(excerptLength, nsText.length - start)
-                let excerpt = nsText.substring(with: NSRange(location: start, length: length))
-                let prefix = start > 0 ? "..." : ""
-                let suffix = (start + length) < nsText.length ? "..." : ""
-                return withWindowPrefix(prefix + excerpt + suffix)
-            }
-        }
-
-        let excerpt = nsText.substring(to: min(excerptLength, nsText.length))
-        let head = nsText.length > excerptLength ? excerpt + "..." : excerpt
-        return withWindowPrefix(head)
+        let start = matchOffset(in: normalized).map { max(0, $0 - excerptLength / 2) } ?? 0
+        let excerpt = normalized.dropFirst(start).prefix(excerptLength)
+        let prefix = start > 0 ? "..." : ""
+        let suffix = start + excerpt.count < normalized.count ? "..." : ""
+        return withWindowPrefix(prefix + excerpt + suffix)
     }
 
     static func wordMatches(searchWord: String, in text: String, textWords: [String], fuzzy: Bool) -> Bool {

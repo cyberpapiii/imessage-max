@@ -154,11 +154,9 @@ enum ListChatsTool {
 
         let sinceApple = since.flatMap(AppleTime.parse)
 
-        // Message totals come from a per-chat aggregate subquery rather than
-        // joining chat_handle_join and message in the same FROM. Joining both
-        // multiplies each chat's rows by its participant count, which both
-        // inflated message_count (and therefore the most_active sort) and
-        // forced SQLite to aggregate participants x messages for every chat.
+        // Message totals come from a per-chat aggregate subquery, not from
+        // joining chat_handle_join and message in one FROM, which would
+        // multiply each chat's messages by its participants.
         //
         // The aggregate walks every non-reaction message in the database,
         // so it is only worth paying for when the answer depends on it.
@@ -194,7 +192,7 @@ enum ListChatsTool {
                 // both sides of it, and that chat would then re-appear on a
                 // later page it had already been returned on.
                 messageAggregate = """
-                    (SELECT chat_id, 0 AS message_count, MAX(dt) AS last_message_date
+                    (SELECT chat_id, 0 AS n, MAX(dt) AS last_date
                      FROM (SELECT cmj.chat_id AS chat_id, m.date AS dt
                            FROM chat_message_join cmj
                            JOIN message m ON m.ROWID = cmj.message_id
@@ -206,8 +204,8 @@ enum ListChatsTool {
             } else {
                 messageAggregate = """
                     (SELECT cmj.chat_id AS chat_id,
-                            COUNT(*) AS message_count,
-                            MAX(m.date) AS last_message_date
+                            COUNT(*) AS n,
+                            MAX(m.date) AS last_date
                      FROM chat_message_join cmj
                      JOIN message m ON m.ROWID = cmj.message_id
                      WHERE \(innerFilter)
@@ -221,8 +219,12 @@ enum ListChatsTool {
                 "c.guid",
                 "c.display_name",
                 "\(SQLFragments.participantCount()) as participant_count",
-                needsMessageAggregate ? "COALESCE(msg.message_count, 0) as message_count" : "0 as message_count",
-                needsMessageAggregate ? "msg.last_message_date as last_message_date" : "NULL as last_message_date"
+                needsMessageAggregate ? "COALESCE(msg.n, 0) as message_count" : "0 as message_count",
+                // A chat with no messages sorts and pages as count 0 and
+                // date 0, so a cursor can always address the page after it.
+                // msg's columns are named apart from these aliases: HAVING
+                // would otherwise bind the uncoalesced column.
+                needsMessageAggregate ? "COALESCE(msg.last_date, 0) as last_message_date" : "NULL as last_message_date"
             )
             .from("chat c")
 
@@ -294,9 +296,9 @@ enum ListChatsTool {
 
             switch sortOrder {
             case .recent:
-                qb.orderBy("last_message_date DESC NULLS LAST", "c.ROWID DESC")
+                qb.orderBy("last_message_date DESC", "c.ROWID DESC")
             case .mostActive:
-                qb.orderBy("message_count DESC", "last_message_date DESC NULLS LAST", "c.ROWID DESC")
+                qb.orderBy("message_count DESC", "last_message_date DESC", "c.ROWID DESC")
             case .alphabetical:
                 qb.orderBy("COALESCE(c.display_name, '') ASC", "c.ROWID ASC")
             }
@@ -332,7 +334,6 @@ enum ListChatsTool {
                     id: row.int(0),
                     guid: row.string(1),
                     displayName: row.string(2),
-                    participantCount: Int(row.int(3)),
                     messageCount: row.int(4),
                     lastMessageDate: row.optionalInt(5)
                 )
@@ -401,7 +402,6 @@ enum ListChatsTool {
             totalChats: totals?.total,
             totalGroups: totals?.groups,
             totalDms: totals?.dms,
-            // more and cursor must agree; a NULL keyset value yields no cursor and therefore no next page.
             more: nextCursor != nil,
             cursor: nextCursor,
             filteredHidden: filteredHidden
@@ -414,7 +414,6 @@ enum ListChatsTool {
         let id: Int64
         let guid: String?
         let displayName: String?
-        let participantCount: Int
         let messageCount: Int64
         let lastMessageDate: Int64?
     }

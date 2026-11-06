@@ -44,22 +44,14 @@ struct TimelineCursor: Equatable {
         return TimelineCursor(date: date, messageId: messageId)
     }
 
-    /// SQL fragment for descending timelines (`ORDER BY date DESC, id DESC`).
-    var olderThanSQL: String {
-        "(m.date < ? OR (m.date = ? AND m.ROWID < ?))"
-    }
-
-    var olderThanParams: [Any] {
-        [date, date, messageId]
-    }
-
-    /// SQL fragment for ascending timelines (`ORDER BY date ASC, id ASC`).
-    var newerThanSQL: String {
-        "(m.date > ? OR (m.date = ? AND m.ROWID > ?))"
-    }
-
-    var newerThanParams: [Any] {
-        [date, date, messageId]
+    /// Rows past this cursor in a timeline ordered by `(date, ROWID)` of
+    /// message alias `alias`: older rows when `descending`, newer otherwise.
+    func predicate(descending: Bool, _ alias: String = "m") -> (sql: String, params: [Any]) {
+        let op = descending ? "<" : ">"
+        return (
+            "(\(alias).date \(op) ? OR (\(alias).date = ? AND \(alias).ROWID \(op) ?))",
+            [date, date, messageId]
+        )
     }
 }
 

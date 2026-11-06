@@ -12,13 +12,19 @@ enum ChatIdentifier {
         return Int64(digits)
     }
 
-    /// parseRowId, then the GUID-substring fallback get_messages allows.
-    /// Several chats can share a GUID substring; the most recently active wins.
-    static func resolve(_ raw: String, db: Database) throws -> Int64? {
-        if let id = parseRowId(raw) { return id }
+    /// The chat a tool's chat id argument names: the chat with that row id
+    /// (`123`, `chat123`), else the most recently active chat whose GUID
+    /// contains the text. Every tool that takes a chat id resolves it here,
+    /// and one that names no chat is `chat_not_found`.
+    static func resolve(_ raw: String, db: Database) throws -> Int64 {
+        if let id = parseRowId(raw) {
+            let exists = try db.query("SELECT 1 FROM chat WHERE ROWID = ?", params: [id]) { _ in true }
+            guard !exists.isEmpty else { throw ToolFailure.chatNotFound(raw) }
+            return id
+        }
 
         let trimmed = raw.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else { return nil }
+        guard !trimmed.isEmpty else { throw ToolFailure.chatNotFound(raw) }
 
         let rows: [Int64] = try db.query(
             """
@@ -31,7 +37,8 @@ enum ChatIdentifier {
             row.int(0)
         }
 
-        return rows.first
+        guard let id = rows.first else { throw ToolFailure.chatNotFound(raw) }
+        return id
     }
 }
 

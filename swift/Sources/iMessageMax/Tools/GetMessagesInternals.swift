@@ -38,11 +38,6 @@ extension GetMessagesTool {
         ))
     }
 
-    func parseChatId(_ chatId: String?) -> Int? {
-        guard let chatId = chatId else { return nil }
-        return try? ChatIdentifier.resolve(chatId, db: db).map { Int($0) }
-    }
-
     func getChatInfo(chatId: Int) throws -> String? {
         let rows = try db.query(
             "SELECT display_name FROM chat WHERE ROWID = ?",
@@ -85,7 +80,8 @@ extension GetMessagesTool {
         }
 
         if let cursor {
-            query.where(cursor.olderThanSQL, cursor.date, cursor.date, cursor.messageId)
+            let older = cursor.predicate(descending: true)
+            query.where(older.sql, params: older.params)
         }
 
         if let sender {

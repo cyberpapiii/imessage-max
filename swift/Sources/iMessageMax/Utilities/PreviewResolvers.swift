@@ -1,17 +1,8 @@
 import Foundation
 
 enum MessagePreviewResolver {
-    static func messageSummary(
-        text: String?,
-        attributedBody: Data?,
-        maxLength: Int,
-        attachmentTypes: [AttachmentType]
-    ) -> String {
-        if let formatted = SummaryPreviewFormatter.formattedTextPreview(
-            text: text,
-            attributedBody: attributedBody,
-            maxLength: maxLength
-        ) {
+    static func messageSummary(text: String?, maxLength: Int, attachmentTypes: [AttachmentType]) -> String {
+        if let formatted = SummaryPreviewFormatter.formattedTextPreview(text: text, maxLength: maxLength) {
             return formatted
         }
 

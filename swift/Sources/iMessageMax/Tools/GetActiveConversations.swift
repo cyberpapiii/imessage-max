@@ -126,15 +126,17 @@ enum GetActiveConversations {
         let windowStart = now.addingTimeInterval(-Double(clampedHours) * Seconds.hour)
         let windowStartApple = AppleTime.fromDate(windowStart)
 
+        let conversational = SQLFragments.conversational()
         let query = QueryBuilder()
             .select(
                 "c.ROWID as chat_id",
                 "c.display_name",
                 "\(SQLFragments.participantCount()) as participant_count",
-                "SUM(CASE WHEN m.is_from_me = 1 THEN 1 ELSE 0 END) as my_count",
-                "SUM(CASE WHEN m.is_from_me = 0 THEN 1 ELSE 0 END) as their_count",
-                "MAX(CASE WHEN m.is_from_me = 1 THEN m.date ELSE NULL END) as last_from_me",
-                "MAX(CASE WHEN m.is_from_me = 0 THEN m.date ELSE NULL END) as last_from_them",
+                // Group events (renames, joins, leaves) are no one's turn.
+                "SUM(CASE WHEN m.is_from_me = 1 AND \(conversational) THEN 1 ELSE 0 END) as my_count",
+                "SUM(CASE WHEN m.is_from_me = 0 AND \(conversational) THEN 1 ELSE 0 END) as their_count",
+                "MAX(CASE WHEN m.is_from_me = 1 AND \(conversational) THEN m.date ELSE NULL END) as last_from_me",
+                "MAX(CASE WHEN m.is_from_me = 0 AND \(conversational) THEN m.date ELSE NULL END) as last_from_them",
                 "MIN(m.date) as first_in_window",
                 "MAX(m.date) as last_in_window"
             )
@@ -143,6 +145,7 @@ enum GetActiveConversations {
             .join("message m ON cmj.message_id = m.ROWID")
             .where("m.date >= ?", windowStartApple)
             .where(SQLFragments.notReaction())
+            .where(SQLFragments.shownChat())
             .groupBy("c.ROWID")
             // An exchange needs a message each way, so the qualifying count
             // is the smaller side; minExchanges is at least 1.
@@ -160,7 +163,6 @@ enum GetActiveConversations {
             ChatActivityRow(
                 chatId: row.int(0),
                 displayName: row.string(1),
-                participantCount: Int(row.int(2)),
                 myCount: Int(row.int(3)),
                 theirCount: Int(row.int(4)),
                 lastFromMe: row.optionalInt(5),
@@ -193,7 +195,7 @@ enum GetActiveConversations {
                 chat: entry.summary,
                 details: ActiveConversationDetails(
                     lastMessage: entry.lastMessage?.info,
-                    awaitingReply: row.lastFromThem.map { $0 > (row.lastFromMe ?? .min) } ?? false,
+                    awaitingReply: entry.lastMessage?.awaitingReply ?? false,
                     activity: ConversationActivity(
                         exchanges: min(row.myCount, row.theirCount),
                         myMsgs: row.myCount,
@@ -221,7 +223,6 @@ enum GetActiveConversations {
     private struct ChatActivityRow {
         let chatId: Int64
         let displayName: String?
-        let participantCount: Int
         let myCount: Int
         let theirCount: Int
         let lastFromMe: Int64?
