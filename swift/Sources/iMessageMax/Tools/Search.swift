@@ -365,25 +365,27 @@ enum SearchTool {
         // The SQL terms only prefilter; the word match and the unanswered
         // check decide. Keeps at most `limit` rows.
         let confirmsInSwift = (hasQuery && !searchWords.isEmpty) || unanswered
+        func matchesWords(_ text: String?) -> Bool {
+            guard let text = text?.lowercased() else { return false }
+
+            let textWords = text.split(whereSeparator: { !$0.isLetter && !$0.isNumber })
+                .map(String.init)
+
+            if matchAll {
+                return searchWords.allSatisfy { searchWord in
+                    wordMatches(searchWord: searchWord, in: text, textWords: textWords, fuzzy: fuzzy)
+                }
+            } else {
+                return searchWords.contains { searchWord in
+                    wordMatches(searchWord: searchWord, in: text, textWords: textWords, fuzzy: fuzzy)
+                }
+            }
+        }
+
         func confirmed(_ candidates: [MessageInChat], limit: Int) throws -> [MessageInChat] {
             var rows = candidates
             if hasQuery, !searchWords.isEmpty {
-                rows = rows.filter { row in
-                    guard let text = row.message.text?.lowercased() else { return false }
-
-                    let textWords = text.split(whereSeparator: { !$0.isLetter && !$0.isNumber })
-                        .map(String.init)
-
-                    if matchAll {
-                        return searchWords.allSatisfy { searchWord in
-                            wordMatches(searchWord: searchWord, in: text, textWords: textWords, fuzzy: fuzzy)
-                        }
-                    } else {
-                        return searchWords.contains { searchWord in
-                            wordMatches(searchWord: searchWord, in: text, textWords: textWords, fuzzy: fuzzy)
-                        }
-                    }
-                }
+                rows = rows.filter { matchesWords($0.message.text) }
             }
 
             if unanswered {
@@ -401,24 +403,44 @@ enum SearchTool {
         }
 
         /// Hidden chats with a real match. The SQL prefilter names the
-        /// candidates; when Swift decides, each candidate is walked until
-        /// one of its rows is confirmed.
+        /// candidates; when Swift decides, a candidate counts once one of
+        /// its rows is confirmed.
         func hiddenChatsWithMatch() throws -> Int {
-            let candidates = try filteredHiddenChats(
-                db: db,
-                query: query,
-                fromPerson: senderFilter,
-                inChat: chatFilter,
-                isGroup: isGroup,
-                has: has,
-                since: since,
-                before: before,
-                unanswered: unanswered,
-                terms: searchWords,
-                matchAll: matchAll,
-                fuzzy: fuzzy
-            )
+            func hiddenQuery(columns: String = "DISTINCT c.ROWID") -> (String, [Any]) {
+                filteredHiddenQuery(
+                    query: query,
+                    fromPerson: senderFilter,
+                    inChat: chatFilter,
+                    isGroup: isGroup,
+                    has: has,
+                    since: since,
+                    before: before,
+                    unanswered: unanswered,
+                    terms: searchWords,
+                    matchAll: matchAll,
+                    fuzzy: fuzzy,
+                    columns: columns
+                )
+            }
+            if confirmsInSwift, !unanswered {
+                // The word match reads nothing more, so one query brings
+                // every candidate's text, and a chat's rows after its first
+                // match are not decoded.
+                let (sql, params) = hiddenQuery(columns: "c.ROWID, m.text, m.attributedBody")
+                var matched = Set<Int64>()
+                _ = try db.query(sql, params: params) { row in
+                    let chatId = row.int(0)
+                    guard !matched.contains(chatId) else { return }
+                    let text = MessageTextExtractor.extract(text: row.string(1), attributedBody: row.blob(2))
+                    if matchesWords(text) { matched.insert(chatId) }
+                }
+                return matched.count
+            }
+            let (sql, params) = hiddenQuery()
+            let candidates = try db.query(sql, params: params) { $0.int(0) }
             guard confirmsInSwift else { return candidates.count }
+            // The unanswered check reads each row's replies, so each chat
+            // is walked a page at a time until one row is confirmed.
             var count = 0
             for chatId in candidates {
                 var resumeAfter: TimelineCursor?
