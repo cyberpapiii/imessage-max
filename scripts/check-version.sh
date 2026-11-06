@@ -1,9 +1,17 @@
 #!/usr/bin/env bash
 # Verify every hand-written copy of the version agrees with Version.swift.
+#   --tag    also require HEAD to carry the matching vX.Y.Z tag
+#   --print  print the Version.swift version and exit (the one extractor the
+#            Makefile, build_and_run.sh, and release.yml use)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 swift_v=$(sed -nE 's/^ *static let current = "([^"]+)"/\1/p' swift/Sources/iMessageMax/Server/Version.swift)
+if [[ "${1:-}" == "--print" ]]; then
+  [[ -n "$swift_v" ]] || { echo "No version found in Version.swift" >&2; exit 1; }
+  echo "$swift_v"
+  exit 0
+fi
 plist_short=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' swift/Sources/Resources/Info.plist)
 plist_build=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' swift/Sources/Resources/Info.plist)
 mcpb_v=$(python3 -c 'import json,sys;print(json.load(open("mcpb/manifest.json"))["version"])')
@@ -26,7 +34,7 @@ if [[ "$floor" != "15.0" ]]; then
   status=1
 fi
 
-if [[ -n "${1:-}" && "$1" == "--tag" ]]; then
+if [[ "${1:-}" == "--tag" ]]; then
   tag=$(git describe --tags --exact-match 2>/dev/null || true)
   if [[ "$tag" != "v$swift_v" ]]; then
     echo "TAG MISMATCH HEAD tag '$tag' != v$swift_v" >&2

@@ -21,14 +21,17 @@ final class DatabaseCancellationTests: XCTestCase {
         try fixture.execute(batch)
 
         let db = fixture.database()
+        let scope = Database.CallScope()
         let task = Task {
-            try db.query(
-                "SELECT m1.ROWID FROM message m1 CROSS JOIN message m2 CROSS JOIN message m3"
-            ) { $0.int(0) }
+            try Database.$currentCall.withValue(scope) {
+                try db.query(
+                    "SELECT m1.ROWID FROM message m1 CROSS JOIN message m2 CROSS JOIN message m3"
+                ) { $0.int(0) }
+            }
         }
         await AsyncTimeout.sleep(.milliseconds(15))
         task.cancel()
-        Database.interruptActiveQueries()  // no scope set: interrupt everything
+        Database.interruptActiveQueries(in: scope)
 
         do {
             _ = try await task.value
@@ -42,60 +45,22 @@ final class DatabaseCancellationTests: XCTestCase {
         }
     }
 
-    /// Cancelling one tool call must not abort another client's query. At
-    /// 33e20cb the cancel handler interrupted every open connection in the
-    /// process, so the bystander below failed with `DatabaseError.cancelled`.
-    func testInterruptOnlyReachesTheCancelledCall() async throws {
-        let fixture = try ToolTestDatabase(name: "db-cancel-scope")
-        try fixture.insertChat(rowId: 1, guid: "scope-chat")
-        let db = fixture.database()
-        let slowCount = """
-            WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c WHERE x < 3000000)
-            SELECT count(*) FROM c
-            """
-
-        let cancelled = Database.CallScope()
-        let bystander = Database.CallScope()
-        let victim = Task {
-            try Database.$currentCall.withValue(cancelled) {
-                try db.query(slowCount) { $0.int(0) }
-            }
-        }
-        let survivor = Task {
-            try Database.$currentCall.withValue(bystander) {
-                try db.query(slowCount) { $0.int(0) }
-            }
-        }
-        await AsyncTimeout.sleep(.milliseconds(15))
-        Database.interruptActiveQueries(in: cancelled)
-
-        do {
-            _ = try await victim.value
-            XCTFail("the interrupted call should not finish")
-        } catch DatabaseError.cancelled {}
-        let counted = try await survivor.value
-        XCTAssertEqual(counted, [3_000_000])
-    }
-
-    /// The same guarantee through the real dispatch path both lanes use.
+    /// Cancelling one tool call must not abort another client's query: the
+    /// bystander finishes instead of failing with `DatabaseError.cancelled`.
     func testCancellingOneToolCallLeavesAConcurrentCallRunning() async throws {
         let fixture = try ToolTestDatabase(name: "db-cancel-dispatch")
         try fixture.insertChat(rowId: 1, guid: "dispatch-chat")
         let db = fixture.database()
-        ToolHandlerRegistry.shared.resetForTesting()
-        defer { ToolHandlerRegistry.shared.resetForTesting() }
-        ToolHandlerRegistry.shared.register(
-            tool: Tool(name: "slow_count", description: "test", inputSchema: InputSchema.object(properties: [:]))
-        ) { _ in
+        let catalog = ToolCatalog([fakeTool(named: "slow_count") { _ in
             let rows = try db.query("""
                 WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c WHERE x < 3000000)
                 SELECT count(*) FROM c
                 """) { $0.int(0) }
             return [.plainText("\(rows[0])")]
-        }
+        }])
 
-        let cancelled = Task { await ToolCallDispatch.execute(name: "slow_count", arguments: nil, lane: .legacyStdio) }
-        let bystander = Task { await ToolCallDispatch.execute(name: "slow_count", arguments: nil, lane: .legacyStdio) }
+        let cancelled = Task { await ToolCallDispatch.execute(name: "slow_count", arguments: nil, lane: .legacyStdio, catalog: catalog) }
+        let bystander = Task { await ToolCallDispatch.execute(name: "slow_count", arguments: nil, lane: .legacyStdio, catalog: catalog) }
         await AsyncTimeout.sleep(.milliseconds(15))
         cancelled.cancel()
 

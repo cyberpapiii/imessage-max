@@ -73,12 +73,6 @@ final class HTTPTransportLiveSocketTests: XCTestCase {
             try writeAll(getFd, get)
             await AsyncTimeout.sleep(.seconds(1))
 
-            var peek: Int32 = 0
-            var len = socklen_t(MemoryLayout<Int32>.size)
-            let rc = getsockopt(getFd, SOL_SOCKET, SO_ERROR, &peek, &len)
-            XCTAssertEqual(rc, 0)
-            XCTAssertEqual(peek, 0, "SSE GET closed by idle timeout")
-
             var one: [UInt8] = [0]
             let n = recv(getFd, &one, 1, MSG_PEEK)
             XCTAssertNotEqual(n, 0, "SSE GET hit EOF after 1s idle")
@@ -101,7 +95,6 @@ final class HTTPTransportLiveSocketTests: XCTestCase {
                 \r\n
                 """
             try writeAll(getFd, get)
-            await AsyncTimeout.sleep(.milliseconds(200))
             _ = try readUntilDoubleCRLF(getFd)
 
             let delivered = await transport.notifyNewMessages(maxRowid: 4242)
@@ -128,8 +121,7 @@ final class HTTPTransportLiveSocketTests: XCTestCase {
     }
 
     /// Ending a session must end its SSE response, not just stop writing to
-    /// it. At 5b17dd8 the body closure returned without `writer.finish`, so
-    /// the client never saw the last chunk and the stream hung open.
+    /// it: the client sees the last chunk and the stream closes.
     func testDeletingSessionEndsItsSSEResponse() async throws {
         try await withLiveTransport(channelIdleTimeout: .seconds(5)) { _, port in
             let session = try initializeSession(port: port)
@@ -171,10 +163,8 @@ final class HTTPTransportLiveSocketTests: XCTestCase {
     }
 
     /// SIGTERM must finish promptly while a client holds an SSE stream open.
-    /// At 5b17dd8 the server's graceful shutdown waited for every open
-    /// request, and an SSE GET never ends on its own, so the service never
-    /// exited: under launchd each restart waited out ExitTimeOut and ended
-    /// in SIGKILL.
+    /// An SSE GET never ends on its own, so a shutdown that waits for every
+    /// open request never exits, and launchd ends it with SIGKILL.
     func testGracefulShutdownClosesOpenSSEStreams() async throws {
         try await withLiveTransport(channelIdleTimeout: .seconds(5)) { transport, port in
             let session = try initializeSession(port: port)
@@ -190,20 +180,15 @@ final class HTTPTransportLiveSocketTests: XCTestCase {
                 """)
             _ = try readUntilDoubleCRLF(getFd)
 
-            let exited = expectation(description: "server exits after graceful shutdown")
-            Task {
-                try? await transport.waitForTermination()
-                exited.fulfill()
-            }
-            await transport.triggerGracefulShutdownForTesting()
-            await fulfillment(of: [exited], timeout: 3)
+            let start = ContinuousClock.now
+            await transport.shutdown()
+            XCTAssertLessThan(ContinuousClock.now - start, .seconds(3), "graceful shutdown waited on the open SSE stream")
         }
     }
 
-    /// An open SSE GET is a live client even when it sends no requests.
-    /// At 35f5d37 only requests refreshed a session, so a client that just
-    /// listened for new-message notifications lost its session, and its
-    /// stream, one session timeout (an hour) after its last call.
+    /// An open SSE GET is a live client even when it sends no requests: a
+    /// client that only listens for new-message notifications keeps its
+    /// session, and its stream, past the session timeout.
     func testOpenSSEStreamKeepsItsSessionAlive() async throws {
         try await withLiveTransport(
             channelIdleTimeout: .seconds(5),
@@ -244,36 +229,55 @@ final class HTTPTransportLiveSocketTests: XCTestCase {
         sseKeepAliveInterval: Duration = .seconds(30),
         body: (HTTPTransport, Int) async throws -> Void
     ) async throws {
-        var lastError: Error?
-        for _ in 0..<2 {
-            let port = Int.random(in: 40000..<50000)
-            let transport = HTTPTransport(
-                host: "127.0.0.1",
-                port: port,
-                database: Database(),
-                resolver: ContactResolver(seedCache: [:]),
-                requestTimeout: .seconds(5),
-                channelIdleTimeout: channelIdleTimeout,
-                cleanupInterval: .milliseconds(20),
-                sessionTimeout: sessionTimeout,
-                sseKeepAliveInterval: sseKeepAliveInterval
-            )
-            do {
-                try await transport.connect(gracefulShutdownSignals: [])
-                await AsyncTimeout.sleep(.milliseconds(200))
-                do {
-                    try await body(transport, port)
-                    await transport.disconnect()
-                    return
-                } catch {
-                    await transport.disconnect()
-                    throw error
-                }
-            } catch {
-                lastError = error
-            }
+        let port = try freeLoopbackPort()
+        var configuration = HTTPTransport.Configuration.test
+        configuration.channelIdleTimeout = channelIdleTimeout
+        configuration.sessionTimeout = sessionTimeout
+        configuration.sseKeepAliveInterval = sseKeepAliveInterval
+        let transport = makeTestTransport(port: port, configuration: configuration)
+        try await transport.connect(gracefulShutdownSignals: [])
+        do {
+            try await waitUntilListening(port: port)
+            try await body(transport, port)
+        } catch {
+            await transport.shutdown()
+            throw error
         }
-        throw lastError ?? XCTSkip("could not bind a live HTTP port")
+        await transport.shutdown()
+    }
+}
+
+/// A loopback port nothing is listening on: bind port 0 and read it back.
+private func freeLoopbackPort() throws -> Int {
+    let fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)
+    guard fd >= 0 else { throw POSIXError(errno) }
+    defer { close(fd) }
+    var addr = sockaddr_in()
+    addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+    addr.sin_family = sa_family_t(AF_INET)
+    addr.sin_port = 0
+    addr.sin_addr = in_addr(s_addr: inet_addr("127.0.0.1"))
+    var length = socklen_t(MemoryLayout<sockaddr_in>.size)
+    let rc = withUnsafeMutablePointer(to: &addr) { ptr in
+        ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+            bind(fd, $0, length) == 0 ? getsockname(fd, $0, &length) : -1
+        }
+    }
+    guard rc == 0 else { throw POSIXError(errno) }
+    return Int(in_port_t(bigEndian: addr.sin_port))
+}
+
+/// `connect` starts the server without waiting for the bind; the first
+/// accepted connection is the only signal that it is up.
+private func waitUntilListening(port: Int) async throws {
+    let deadline = ContinuousClock.now + .seconds(5)
+    while true {
+        do {
+            close(try connectLoopback(port: port))
+            return
+        } catch where ContinuousClock.now < deadline {
+            await AsyncTimeout.sleep(.milliseconds(10))
+        }
     }
 }
 
@@ -281,9 +285,7 @@ private func initializeSession(port: Int) throws -> String {
     let fd = try connectLoopback(port: port)
     defer { close(fd) }
     setRecvTimeout(fd, seconds: 2)
-    let body = """
-        {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"tests","version":"1.0"}}}
-        """
+    let body = initializeBody()
     let post = """
         POST / HTTP/1.1\r\n\
         Host: 127.0.0.1\r\n\

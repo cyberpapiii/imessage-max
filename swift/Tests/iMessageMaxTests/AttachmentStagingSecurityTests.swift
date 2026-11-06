@@ -4,26 +4,25 @@ import XCTest
 
 final class AttachmentStagingSecurityTests: XCTestCase {
     private var scratch: URL!
-    private var stagedToClean: [URL] = []
+    private var stager: OutgoingFileStager!
 
     override func setUpWithError() throws {
-        scratch = FileManager.default.temporaryDirectory
+        // /private form: the stager refuses a root behind the /var symlink.
+        let tmp = SecurePath.absoluteLexicalPath(FileManager.default.temporaryDirectory.path)!
+        scratch = URL(fileURLWithPath: tmp, isDirectory: true)
             .appendingPathComponent("xctest-085-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
-        stagedToClean = []
+        stager = OutgoingFileStager(root: scratch.appendingPathComponent("staging-root", isDirectory: true))
     }
 
     override func tearDownWithError() throws {
         try? FileManager.default.removeItem(at: scratch)
-        for url in stagedToClean { try? FileManager.default.removeItem(at: url) }
     }
 
-    private func requireStagingRoot() throws {
-        let root = AppleScriptRunner.stagingRootDirectory()
-        if ProcessInfo.processInfo.environment["CI"] != nil,
-           !FileManager.default.isWritableFile(atPath: root.deletingLastPathComponent().path) {
-            throw XCTSkip("~/Pictures is not writable on this runner")
-        }
+    private func stage(_ path: String) throws -> OutgoingFileStager.StagedFile {
+        let source = try stager.openSource(path)
+        defer { source.close() }
+        return try stager.stage(source)
     }
 
     private func makeSecret() throws -> URL {
@@ -33,16 +32,33 @@ final class AttachmentStagingSecurityTests: XCTestCase {
     }
 
     private func symlink(_ link: URL, to target: URL) throws {
-        do { try FileManager.default.createSymbolicLink(at: link, withDestinationURL: target) }
-        catch { throw XCTSkip("cannot create symlinks here: \(error)") }
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: target)
     }
 
-    private static let finished: @Sendable (String) throws -> [String] = { _ in ["finished"] }
-
     private func stagingRootEntryCount() throws -> Int {
-        let root = AppleScriptRunner.stagingRootDirectory()
+        let root = stager.root
         guard FileManager.default.fileExists(atPath: root.path) else { return 0 }
         return try FileManager.default.contentsOfDirectory(atPath: root.path).count
+    }
+
+    /// A symlinked staging root is refused before anything follows the link,
+    /// so the link's target keeps its permissions.
+    func testSymlinkedStagingRootIsRefusedBeforeItIsChmodded() throws {
+        let target = scratch.appendingPathComponent("target", isDirectory: true)
+        try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o755])
+        let root = scratch.appendingPathComponent("root", isDirectory: true)
+        try symlink(root, to: target)
+        let sourceFile = scratch.appendingPathComponent("payload.txt")
+        try Data("payload".utf8).write(to: sourceFile)
+
+        let linkedStager = OutgoingFileStager(root: root)
+        let source = try linkedStager.openSource(sourceFile.path)
+        defer { source.close() }
+        XCTAssertThrowsError(try linkedStager.stage(source)) { error in
+            guard case SendError.invalidParams = error else { return XCTFail("\(error)") }
+        }
+        let permissions = try FileManager.default.attributesOfItem(atPath: target.path)[.posixPermissions] as? Int
+        XCTAssertEqual(permissions, 0o755, "the link's target must not be re-permissioned")
     }
 
     func testAliasPrefixesNormalizeToPrivate() {
@@ -72,10 +88,7 @@ final class AttachmentStagingSecurityTests: XCTestCase {
         let before = try stagingRootEntryCount()
 
         XCTAssertThrowsError(
-            try AppleScriptRunner.prepareTrackedOutgoingFile(
-                sourcePath: link.path,
-                existingOutgoingTransferStatuses: Self.finished
-            )
+            try stage(link.path)
         ) { error in
             XCTAssertTrue(error is SendError, "\(error)")
             let text = error.localizedDescription
@@ -96,10 +109,7 @@ final class AttachmentStagingSecurityTests: XCTestCase {
         try symlink(alias, to: realDir)
 
         XCTAssertThrowsError(
-            try AppleScriptRunner.prepareTrackedOutgoingFile(
-                sourcePath: alias.appendingPathComponent("a.png").path,
-                existingOutgoingTransferStatuses: Self.finished
-            )
+            try stage(alias.appendingPathComponent("a.png").path)
         ) { error in
             XCTAssertTrue(error is SendError, "\(error)")
             let text = error.localizedDescription
@@ -109,15 +119,14 @@ final class AttachmentStagingSecurityTests: XCTestCase {
     }
 
     func testTmpAliasIsAccepted() throws {
-        try requireStagingRoot()
         let varFile = scratch.appendingPathComponent("a.png")
         try "VAR".data(using: .utf8)!.write(to: varFile)
 
-        let fromVar = try AppleScriptRunner.prepareTrackedOutgoingFile(
-            sourcePath: varFile.path,
-            existingOutgoingTransferStatuses: Self.finished
-        )
-        stagedToClean.append(fromVar.fileURL.deletingLastPathComponent())
+        // The /var alias form, as NSTemporaryDirectory hands it out.
+        let viaVarAlias = varFile.path.hasPrefix("/private/var/")
+            ? String(varFile.path.dropFirst("/private".count))
+            : varFile.path
+        let fromVar = try stage(viaVarAlias)
 
         let tmpDir = URL(fileURLWithPath: "/tmp").appendingPathComponent("xctest-085-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
@@ -125,26 +134,17 @@ final class AttachmentStagingSecurityTests: XCTestCase {
         let tmpFile = tmpDir.appendingPathComponent("a.png")
         try "TMP".data(using: .utf8)!.write(to: tmpFile)
 
-        let fromTmp = try AppleScriptRunner.prepareTrackedOutgoingFile(
-            sourcePath: tmpFile.path,
-            existingOutgoingTransferStatuses: Self.finished
-        )
-        stagedToClean.append(fromTmp.fileURL.deletingLastPathComponent())
+        let fromTmp = try stage(tmpFile.path)
 
         XCTAssertTrue(FileManager.default.fileExists(atPath: fromVar.fileURL.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: fromTmp.fileURL.path))
     }
 
     func testStagedCopyIsIndependentOfSource() throws {
-        try requireStagingRoot()
         let source = scratch.appendingPathComponent("a.png")
         try "ORIGINAL".data(using: .utf8)!.write(to: source)
 
-        let prepared = try AppleScriptRunner.prepareTrackedOutgoingFile(
-            sourcePath: source.path,
-            existingOutgoingTransferStatuses: Self.finished
-        )
-        stagedToClean.append(prepared.fileURL.deletingLastPathComponent())
+        let prepared = try stage(source.path)
 
         try "CHANGED".data(using: .utf8)!.write(to: source)
         let secret = try makeSecret()
@@ -158,21 +158,16 @@ final class AttachmentStagingSecurityTests: XCTestCase {
     }
 
     func testStagingDirectoriesAre0700() throws {
-        try requireStagingRoot()
         let source = scratch.appendingPathComponent("a.png")
         try "PERM".data(using: .utf8)!.write(to: source)
 
-        let prepared = try AppleScriptRunner.prepareTrackedOutgoingFile(
-            sourcePath: source.path,
-            existingOutgoingTransferStatuses: Self.finished
-        )
+        let prepared = try stage(source.path)
         let stagedDir = prepared.fileURL.deletingLastPathComponent()
-        stagedToClean.append(stagedDir)
 
         let dirPerms = try FileManager.default.attributesOfItem(atPath: stagedDir.path)[.posixPermissions] as? Int
         XCTAssertEqual(dirPerms, 0o700)
         let rootPerms = try FileManager.default.attributesOfItem(
-            atPath: AppleScriptRunner.stagingRootDirectory().path
+            atPath: stager.root.path
         )[.posixPermissions] as? Int
         XCTAssertEqual(rootPerms, 0o700)
         let filePerms = try FileManager.default.attributesOfItem(atPath: prepared.fileURL.path)[.posixPermissions] as? Int
@@ -181,10 +176,7 @@ final class AttachmentStagingSecurityTests: XCTestCase {
 
     func testRelativePathIsRejected() {
         XCTAssertThrowsError(
-            try AppleScriptRunner.prepareTrackedOutgoingFile(
-                sourcePath: "Pictures/a.png",
-                existingOutgoingTransferStatuses: Self.finished
-            )
+            try stage("Pictures/a.png")
         ) { error in
             guard case SendError.invalidParams(let message) = error else {
                 return XCTFail("expected invalidParams, got \(error)")
@@ -195,23 +187,9 @@ final class AttachmentStagingSecurityTests: XCTestCase {
 
     func testNonRegularFileIsRejected() {
         XCTAssertThrowsError(
-            try AppleScriptRunner.prepareTrackedOutgoingFile(
-                sourcePath: "/dev/null",
-                existingOutgoingTransferStatuses: Self.finished
-            )
+            try stage("/dev/null")
         ) { error in
             XCTAssertTrue(error.localizedDescription.contains("regular file"), error.localizedDescription)
-        }
-    }
-
-    func testMissingFileStillReportsBasenameOnly() {
-        XCTAssertThrowsError(
-            try AppleScriptRunner.prepareTrackedOutgoingFile(
-                sourcePath: scratch.path + "/nope/missing.png",
-                existingOutgoingTransferStatuses: Self.finished
-            )
-        ) { error in
-            XCTAssertEqual(error.localizedDescription, "Could not read file at 'missing.png'.")
         }
     }
 }

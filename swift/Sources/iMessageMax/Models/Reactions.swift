@@ -1,7 +1,11 @@
-// Sources/iMessageMax/Models/Reactions.swift
 import Foundation
 
-enum ReactionType: Int {
+/// A tapback's `associated_message_type`. Removing a tapback writes a new
+/// row whose type is the tapback's plus 1000 (3000-3007).
+///
+/// Live chat.db also has types 4000 and 4001. Their meaning is not
+/// established, so they are neither tapbacks nor removals here.
+enum ReactionType: Int, CaseIterable {
     case loved = 2000
     case liked = 2001
     case disliked = 2002
@@ -11,13 +15,14 @@ enum ReactionType: Int {
     case customEmoji = 2006
     case sticker = 2007
 
-    /// Live chat.db also has types 4000 (12 rows) and 4001 (4 rows).
-    /// Meaning is not established; they stay unmapped and unfiltered.
-    static let stickerToken = "🩵 sticker"
+    static let removalOffset = 1000
 
-    // Removal types are 3000-3007 (3006 = custom emoji, 3007 = sticker).
-    static func isRemoval(_ type: Int) -> Bool {
-        type >= 3000 && type < 3008
+    static let types = allCases.map(\.rawValue).min()!...allCases.map(\.rawValue).max()!
+    static let removalTypes = (types.lowerBound + removalOffset)...(types.upperBound + removalOffset)
+
+    /// The tapback a removal row of `type` takes back, or nil if `type` is not a removal.
+    static func removed(by type: Int) -> ReactionType? {
+        removalTypes.contains(type) ? ReactionType(rawValue: type - removalOffset) : nil
     }
 
     var emoji: String {
@@ -29,7 +34,12 @@ enum ReactionType: Int {
         case .emphasized: return "‼️"
         case .questioned: return "❓"
         case .customEmoji: return "?"
-        case .sticker: return Self.stickerToken
+        case .sticker: return "🩵 sticker"
         }
+    }
+
+    /// What a reaction string starts with: the custom emoji itself for 2006.
+    func token(customEmoji: String?) -> String {
+        self == .customEmoji ? customEmoji ?? emoji : emoji
     }
 }

@@ -5,14 +5,6 @@ import XCTest
 final class MessageTextExtractorTests: XCTestCase {
 
     /// Builds: <prefix junk> + marker + 5 filler bytes + length field + payload
-    private func typedstreamBlob(marker: String = "NSString", lengthField: [UInt8], payload: [UInt8]) -> Data {
-        var bytes: [UInt8] = [0x04, 0x0B]                 // arbitrary prefix junk
-        bytes += Array(marker.utf8)
-        bytes += [0x01, 0x94, 0x84, 0x01, 0x2B]           // 5 filler bytes (skipped)
-        bytes += lengthField
-        bytes += payload
-        return Data(bytes)
-    }
 
     func testSingleByteLength() {
         let blob = typedstreamBlob(lengthField: [5], payload: Array("hello".utf8))

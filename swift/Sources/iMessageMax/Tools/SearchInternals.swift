@@ -1,58 +1,20 @@
 import Foundation
 
-struct SearchSenderFilter {
-    let value: String
-    let exact: Bool
-}
-
-struct SearchRow {
-    let msgId: Int64
-    let text: String?
-    let attributedBody: Data?
-    let date: Int64?
-    let isFromMe: Bool
-    let senderHandle: String?
-    let chatId: Int64
-    let chatDisplayName: String?
-    let guid: String
-    let threadOriginatorGuid: String?
-    let dateEdited: Int64
-    let hasReactions: Bool
-    let hasReplies: Bool
-}
-
-struct ContextRow {
-    let msgId: Int64
-    let text: String?
-    let attributedBody: Data?
-    let date: Int64?
-    let isFromMe: Bool
-    let senderHandle: String?
-    let guid: String
-    let threadOriginatorGuid: String?
-    let dateEdited: Int64
-    let hasReactions: Bool
-    let hasReplies: Bool
-}
-
-struct GroupedChatData {
-    let id: String
-    var name: String
-    var group: Bool?
-    var participantCount: Int
-    var participantsPreview: [String]
-    var matchCount: Int
-    var firstMatchDate: Date?
-    var lastMatchDate: Date?
-    var results: [SearchSampleMessage]
-}
-
 extension SearchTool {
+    /// The chats a search reads, and how its rows relate to them.
+    enum Chats {
+        /// One row per message, under the chat `scope` lists it in.
+        case listed(ChatScope)
+        /// One row per hidden chat a message is in, only `inChat` when set:
+        /// the filtered_hidden candidates.
+        case hiddenMembership(inChat: Int64?)
+    }
+
     static func applySearchFilters(
         to builder: QueryBuilder,
         query: String?,
-        fromPerson: SearchSenderFilter?,
-        inChat: String?,
+        fromPerson: SenderFilter?,
+        chats: Chats,
         isGroup: Bool?,
         has: String?,
         since: String?,
@@ -62,11 +24,15 @@ extension SearchTool {
         unanswered: Bool,
         terms: [String],
         matchAll: Bool,
-        fuzzy: Bool,
-        chatFilterPredicate: String?,
-        drivenFromChats: Bool = false
+        fuzzy: Bool
     ) {
-        if drivenFromChats {
+        switch chats {
+        case .listed(let scope):
+            scope.read(builder)
+            builder
+                .leftJoin(MessageRecord.senderJoin)
+                .where(SQLFragments.notReaction())
+        case .hiddenMembership(let inChat):
             // CROSS JOIN pins SQLite's loop order: visit the chats the
             // predicate selects, then only their messages by rowid.
             builder
@@ -75,44 +41,32 @@ extension SearchTool {
                     CROSS JOIN chat_message_join cmj ON cmj.chat_id = c.ROWID
                     CROSS JOIN message m ON m.ROWID = cmj.message_id
                     """)
-        } else {
-            builder
-                .from("message m")
-                .join("chat_message_join cmj ON m.ROWID = cmj.message_id")
-                .join("chat c ON cmj.chat_id = c.ROWID")
-        }
-        builder
-            .leftJoin("handle h ON m.handle_id = h.ROWID")
-            .where("m.associated_message_type = ?", 0)
-
-        if let chatFilterPredicate {
-            builder.where(chatFilterPredicate)
+                .leftJoin(MessageRecord.senderJoin)
+                .where(SQLFragments.notReaction())
+                .where(SQLFragments.hiddenChat())
+            if let inChat {
+                builder.where("c.ROWID = ?", inChat)
+            }
         }
 
         if let query, !query.isEmpty {
-            if fuzzy || terms.isEmpty {
+            // At most 8 terms reach SQL. Under match_all any 8 still only
+            // narrow (the Swift word filter checks every term), but an
+            // any-word query OR'ing its first 8 would drop rows matching only
+            // a later word, so a longer any-word query skips the prefilter.
+            let prefilterCap = 8
+            if fuzzy || terms.isEmpty || (!matchAll && terms.count > prefilterCap) {
                 builder.where("(m.text IS NOT NULL OR m.attributedBody IS NOT NULL)")
             } else {
-                // LIKE on text (ASCII case-insensitive) plus instr on the
-                // typedstream blob so attributedBody-only rows do not all
-                // pass and steal the fetchLimit window. instr is
-                // case-sensitive; bind lower / titled / upper UTF-8.
-                // Cap at 8; leftover terms stay in the Swift word filter.
-                let capped = Array(terms.prefix(8))
-                let likeClauses = capped.map { _ in "m.text LIKE ? ESCAPE '\\'" }
-                let blobClauses = capped.map { _ in
-                    "(instr(m.attributedBody, ?) > 0 OR instr(m.attributedBody, ?) > 0 OR instr(m.attributedBody, ?) > 0)"
-                }
+                // Each term's textMayContain, joined as match_all asks, so
+                // attributedBody-only rows without the words never fill the
+                // fetch window.
+                let matches = terms.prefix(prefilterCap).map { SQLFragments.textMayContain($0) }
                 let joiner = matchAll ? " AND " : " OR "
-                let condition = "((\(likeClauses.joined(separator: joiner))) OR (\(blobClauses.joined(separator: joiner))))"
-                var bindings: [Any] = capped.map { "%\(QueryBuilder.escapeLike($0))%" }
-                for term in capped {
-                    let titled = term.prefix(1).uppercased() + term.dropFirst()
-                    bindings.append(Data(term.utf8))
-                    bindings.append(Data(titled.utf8))
-                    bindings.append(Data(term.uppercased().utf8))
-                }
-                builder.where(condition, params: bindings)
+                builder.where(
+                    "(\(matches.map(\.sql).joined(separator: joiner)))",
+                    params: matches.flatMap(\.bindings)
+                )
             }
         }
 
@@ -125,81 +79,27 @@ extension SearchTool {
         }
 
         if let cursor {
-            switch sort {
-            case .recentFirst:
-                builder.where(cursor.olderThanSQL, cursor.date, cursor.date, cursor.messageId)
-            case .oldestFirst:
-                builder.where(cursor.newerThanSQL, cursor.date, cursor.date, cursor.messageId)
-            }
+            let after = cursor.predicate(descending: sort == .recentFirst)
+            builder.where(after.sql, params: after.params)
         }
 
-        if let chatStr = inChat {
-            if let chatId = ChatIdentifier.parseRowId(chatStr) {
-                builder.where("c.ROWID = ?", chatId)
-            } else {
-                builder.where("c.guid LIKE ? ESCAPE '\\'", "%\(QueryBuilder.escapeLike(chatStr))%")
-            }
+        if let sender = unanswered ? .me : fromPerson {
+            builder.where(sender)
         }
 
-        if unanswered {
-            builder.where("m.is_from_me = ?", 1)
-        } else if let person = fromPerson {
-            if person.value.lowercased() == "me" {
-                builder.where("m.is_from_me = ?", 1)
-            } else if person.exact {
-                builder.where("h.id = ?", person.value)
-            } else {
-                builder.where("h.id LIKE ? ESCAPE '\\'", "%\(QueryBuilder.escapeLike(person.value))%")
-            }
+        if let isGroup {
+            builder.where(isGroup ? SQLFragments.isGroup() : SQLFragments.isDirect())
         }
 
-        if let isGroupChat = isGroup {
-            if isGroupChat {
-                builder.where(
-                    "(SELECT COUNT(*) FROM chat_handle_join chj WHERE chj.chat_id = c.ROWID) > ?",
-                    1)
-            } else {
-                builder.where(
-                    "(SELECT COUNT(*) FROM chat_handle_join chj WHERE chj.chat_id = c.ROWID) = ?",
-                    1)
-            }
-        }
-
-        if let hasType = has {
-            switch hasType {
-            case "link":
-                builder.where("(m.text LIKE ? ESCAPE '\\' OR m.balloon_bundle_id = '\(BalloonBundle.urlPreview)')", "%http%")
-            case "attachment":
-                builder.where("""
-                    EXISTS (
-                        SELECT 1 FROM attachment a
-                        JOIN message_attachment_join maj ON a.ROWID = maj.attachment_id
-                        WHERE maj.message_id = m.ROWID
-                          AND COALESCE(a.hide_attachment, 0) = 0
-                    )
-                    """)
-            case "image", "video":
-                if let typePredicate = AttachmentType.sqlPredicate(for: hasType, alias: "a") {
-                    builder.where("""
-                        EXISTS (
-                            SELECT 1 FROM attachment a
-                            JOIN message_attachment_join maj ON a.ROWID = maj.attachment_id
-                            WHERE maj.message_id = m.ROWID
-                              AND (\(typePredicate))
-                              AND COALESCE(a.hide_attachment, 0) = 0
-                        )
-                        """)
-                }
-            default:
-                break
-            }
+        if let has = SQLFragments.has(has) {
+            builder.where(has)
         }
     }
 
     static func buildQuery(
         query: String?,
-        fromPerson: SearchSenderFilter?,
-        inChat: String?,
+        fromPerson: SenderFilter?,
+        inChat: Int64?,
         isGroup: Bool?,
         has: String?,
         since: String?,
@@ -215,25 +115,12 @@ extension SearchTool {
         schema: SchemaCapabilities = .assumed
     ) -> (String, [Any]) {
         let builder = QueryBuilder()
-            .select(
-                "m.ROWID as msg_id",
-                "m.text",
-                "m.attributedBody",
-                "m.date",
-                "m.is_from_me",
-                "h.id as sender_handle",
-                "c.ROWID as chat_id",
-                "c.display_name as chat_display_name",
-                "m.guid",
-                schema.threadOriginatorGuidSQL,
-                schema.dateEditedSQL,
-                schema.hasRepliesSQL
-            )
+            .selectMessages(schema, MessageInChat.chatColumns)
         applySearchFilters(
             to: builder,
             query: query,
             fromPerson: fromPerson,
-            inChat: inChat,
+            chats: .listed(ChatScope(named: inChat, includeFiltered: includeFiltered)),
             isGroup: isGroup,
             has: has,
             since: since,
@@ -243,9 +130,9 @@ extension SearchTool {
             unanswered: unanswered,
             terms: terms,
             matchAll: matchAll,
-            fuzzy: fuzzy,
-            chatFilterPredicate: includeFiltered ? nil : "c.is_filtered = 0"
+            fuzzy: fuzzy
         )
+        builder.leftJoin(MessageRecord.otherHandleJoin)
 
         if sort == .oldestFirst {
             builder.orderBy("m.date ASC", "m.ROWID ASC")
@@ -258,14 +145,14 @@ extension SearchTool {
         return builder.build()
     }
 
-    /// Counts filtered chats with a match. Runs on every search that hides
-    /// them, so it starts from the few filtered chats rather than scanning
-    /// every message a second time.
-    static func countFilteredHidden(
+    /// Filtered chats with a row that passes the SQL prefilter. Runs on
+    /// every search that hides them, so it starts from the few filtered
+    /// chats rather than scanning every message a second time.
+    static func filteredHiddenChats(
         db: Database,
         query: String?,
-        fromPerson: SearchSenderFilter?,
-        inChat: String?,
+        fromPerson: SenderFilter?,
+        inChat: Int64?,
         isGroup: Bool?,
         has: String?,
         since: String?,
@@ -274,7 +161,7 @@ extension SearchTool {
         terms: [String],
         matchAll: Bool,
         fuzzy: Bool
-    ) throws -> Int {
+    ) throws -> [Int64] {
         let (sql, params) = filteredHiddenQuery(
             query: query,
             fromPerson: fromPerson,
@@ -288,16 +175,13 @@ extension SearchTool {
             matchAll: matchAll,
             fuzzy: fuzzy
         )
-        let rows: [Int] = try db.query(sql, params: params) { row in
-            Int(row.int(0))
-        }
-        return rows.first ?? 0
+        return try db.query(sql, params: params) { $0.int(0) }
     }
 
     static func filteredHiddenQuery(
         query: String?,
-        fromPerson: SearchSenderFilter?,
-        inChat: String?,
+        fromPerson: SenderFilter?,
+        inChat: Int64?,
         isGroup: Bool?,
         has: String?,
         since: String?,
@@ -308,12 +192,12 @@ extension SearchTool {
         fuzzy: Bool
     ) -> (String, [Any]) {
         let builder = QueryBuilder()
-            .select("COUNT(DISTINCT c.ROWID)")
+            .select("DISTINCT c.ROWID")
         applySearchFilters(
             to: builder,
             query: query,
             fromPerson: fromPerson,
-            inChat: inChat,
+            chats: .hiddenMembership(inChat: inChat),
             isGroup: isGroup,
             has: has,
             since: since,
@@ -323,117 +207,66 @@ extension SearchTool {
             unanswered: unanswered,
             terms: terms,
             matchAll: matchAll,
-            fuzzy: fuzzy,
-            chatFilterPredicate: "c.is_filtered != 0",
-            drivenFromChats: true
+            fuzzy: fuzzy
         )
         return builder.build()
     }
 
     static func buildFlatResponse(
         db: Database,
-        rows: [SearchRow],
+        rows: [MessageInChat],
         query: String?,
-        limit: Int,
+        nextCursor: String?,
         includeContext: Bool,
         resolver: ContactResolver,
         filteredHidden: Int?
     ) async throws -> String {
         var results: [SearchResult] = []
-        let identityByChat = try await identitiesByChat(db: db, rows: rows, resolver: resolver)
-        var contextRowsByAnchor: [String: (before: [ContextRow], after: [ContextRow])] = [:]
+        let chatByID = try await ChatReferences(rows.chats, db: db, resolver: resolver)
+        var windows: [MessageWindow.Anchor: MessageWindow.Context] = [:]
         if includeContext {
-            let anchors = rows.compactMap { row -> (chatId: Int64, date: Int64)? in
-                guard let date = row.date else { return nil }
-                return (row.chatId, date)
-            }
-            contextRowsByAnchor = try getContextBatch(db: db, anchors: anchors)
+            let anchors = rows.map { MessageWindow.Anchor(chatId: $0.chatId, message: $0.message) }
+            windows = try MessageWindow.around(anchors, before: 2, after: 2, db: db)
         }
 
-        let contextRows = contextRowsByAnchor.values.flatMap { $0.before + $0.after }
-        var pageIdByGuid: [String: Int] = [:]
-        for row in rows {
-            pageIdByGuid[row.guid] = Int(row.msgId)
-        }
-        for row in contextRows {
-            pageIdByGuid[row.guid] = Int(row.msgId)
-        }
-        let annotations = try MessageAnnotations.loadIfNeeded(
-            db: db,
-            guids: Array(pageIdByGuid.keys),
-            pageIdByGuid: pageIdByGuid,
-            originatorGuids: rows.compactMap(\.threadOriginatorGuid) + contextRows.compactMap(\.threadOriginatorGuid),
-            fetchReactions: !pageIdByGuid.isEmpty,
-            fetchReplies: rows.contains(where: { $0.hasReplies || ($0.threadOriginatorGuid?.isEmpty == false) })
-                || contextRows.contains(where: { $0.hasReplies || ($0.threadOriginatorGuid?.isEmpty == false) })
-        )
-        var reactorNames: [String: String] = [:]
-        for recs in annotations.reactions.values {
-            for reaction in recs {
-                guard let handle = reaction.fromHandle, reactorNames[handle] == nil else { continue }
-                reactorNames[handle] = await IdentityDisplayFormatter.displayName(
-                    handle: handle, resolver: resolver
-                )
-            }
-        }
-        let reactorName: (String?) -> String = { handle in
-            guard let handle else { return "Me" }
-            return reactorNames[handle] ?? handle
-        }
-
-        var contextByAnchor: [String: (before: [SearchContextMessage], after: [SearchContextMessage])] = [:]
-        for (key, raw) in contextRowsByAnchor {
-            var before: [SearchContextMessage] = []
-            for row in raw.before {
-                before.append(await formatContextMessage(row: row, annotations: annotations, reactorName: reactorName, resolver: resolver))
-            }
-            var after: [SearchContextMessage] = []
-            for row in raw.after {
-                after.append(await formatContextMessage(row: row, annotations: annotations, reactorName: reactorName, resolver: resolver))
-            }
-            contextByAnchor[key] = (before, after)
-        }
-
-        for row in rows {
-            let text = MessageTextExtractor.extract(text: row.text, attributedBody: row.attributedBody)
-            let msgDate = AppleTime.toDate(row.date)
-            let senderName = await resolveSenderName(
-                isFromMe: row.isFromMe,
-                handle: row.senderHandle,
-                resolver: resolver
+        let records = rows.map(\.message) + windows.values.flatMap { $0.before + $0.after }
+        let annotations = try MessageAnnotations.load(for: records, include: [.reactions, .replies], db: db)
+        let renderer = MessageRenderer(
+            annotations: annotations,
+            labels: await SenderLabels.displayNames(
+                me: "Me", unknown: "Unknown", for: records, annotations: annotations, resolver: resolver
             )
+        )
+        func contextMessages(_ records: [MessageRecord]) -> [ContextMessage]? {
+            records.isEmpty ? nil : records.map { ContextMessage(renderer.render($0), showAgo: false) }
+        }
 
-            let chatName = identityByChat[row.chatId]?.displayName ?? "Unknown Chat"
+        for searchRow in rows {
+            let message = renderer.render(searchRow.message)
 
             var result = SearchResult(
-                id: "msg_\(row.msgId)",
-                chat: ChatReference(id: "chat\(row.chatId)", name: chatName),
-                from: senderName,
-                excerpt: makeExcerpt(text: text, query: query),
-                ago: TimeUtils.formatCompactRelative(msgDate),
-                ts: TimeUtils.formatISO(msgDate),
+                id: message.id,
+                chat: chatByID[searchRow.chatId],
+                from: message.from,
+                excerpt: makeExcerpt(text: message.text, query: query),
+                ago: message.ago,
+                ts: message.ts,
                 contextBefore: nil,
                 contextAfter: nil,
-                reactions: MessageAnnotations.render(
-                    annotations.reactions[row.guid] ?? [],
-                    reactorName: reactorName
-                ),
-                replyTo: row.threadOriginatorGuid.flatMap { annotations.replies.originatorIdByGuid[$0] },
-                replyCount: annotations.replies.replyCountByGuid[row.guid],
-                edited: row.dateEdited != 0 ? true : nil
+                reactions: message.reactions,
+                replyTo: message.replyTo,
+                replyCount: message.replyCount,
+                edited: message.edited
             )
 
-            if includeContext, let msgDate = row.date {
-                if let ctx = contextByAnchor["\(row.chatId):\(msgDate)"] {
-                    result.contextBefore = ctx.before.isEmpty ? nil : ctx.before
-                    result.contextAfter = ctx.after.isEmpty ? nil : ctx.after
-                }
+            if let window = windows[MessageWindow.Anchor(chatId: searchRow.chatId, message: searchRow.message)] {
+                result.contextBefore = contextMessages(window.before)
+                result.contextAfter = contextMessages(window.after)
             }
 
             results.append(result)
         }
 
-        let nextCursor = Self.nextCursor(from: rows, limit: limit)
         let response = SearchFlatResponse(
             results: results,
             total: results.count,
@@ -446,101 +279,52 @@ extension SearchTool {
 
     static func buildGroupedResponse(
         db: Database,
-        rows: [SearchRow],
+        rows: [MessageInChat],
         query: String?,
-        limit: Int,
+        nextCursor: String?,
         resolver: ContactResolver,
         filteredHidden: Int?
     ) async throws -> String {
-        var chatsData: [Int64: GroupedChatData] = [:]
-        let identityByChat = try await identitiesByChat(db: db, rows: rows, resolver: resolver)
-        let recentSenderChatIds = identityByChat.compactMap { chatId, identity -> Int64? in
-            (identity.isNamed && identity.participantCount > 4) ? chatId : nil
-        }
-        let recentSendersByChat = try ChatSummaryQueries.recentSendersByChat(
+        let page = try await ChatPage.build(
+            rows.chats,
+            lastMessages: nil,
             db: db,
-            chatIds: recentSenderChatIds
+            resolver: resolver
         )
-        var summaryByChat: [Int64: ChatSummary] = [:]
-        for (chatId, identity) in identityByChat {
-            summaryByChat[chatId] = try ChatSummaryBuilder.buildSummary(
-                db: db,
-                chatId: chatId,
-                identity: identity,
-                recentSenders: recentSendersByChat[chatId]
-            )
-        }
+        let renderer = MessageRenderer(
+            annotations: .none,
+            labels: await SenderLabels.displayNames(me: "Me", unknown: "Unknown", for: rows.map(\.message), resolver: resolver)
+        )
 
-        for row in rows {
-            let chatId = row.chatId
-            let senderName = await resolveSenderName(
-                isFromMe: row.isFromMe,
-                handle: row.senderHandle,
-                resolver: resolver
-            )
-            let text = MessageTextExtractor.extract(text: row.text, attributedBody: row.attributedBody)
-            let msgDate = AppleTime.toDate(row.date)
-
-            guard let chatSummary = summaryByChat[chatId] else { continue }
-
-            if chatsData[chatId] == nil {
-                chatsData[chatId] = GroupedChatData(
-                    id: chatSummary.id,
-                    name: chatSummary.name,
-                    group: chatSummary.group,
-                    participantCount: chatSummary.participantCount,
-                    participantsPreview: chatSummary.participantsPreview,
-                    matchCount: 0,
-                    firstMatchDate: msgDate,
-                    lastMatchDate: msgDate,
-                    results: []
-                )
-            }
-
-            guard var chat = chatsData[chatId] else { continue }
-            chat.matchCount += 1
-
-            if let date = msgDate {
-                if let first = chat.firstMatchDate {
-                    if date < first { chat.firstMatchDate = date }
-                } else {
-                    chat.firstMatchDate = date
+        let rowsByChat = Dictionary(grouping: rows, by: \.chatId)
+        var chats = rowsByChat.compactMap { chatId, matches -> SearchGroupedChat? in
+            guard let summary = page[chatId]?.summary else { return nil }
+            let dates = matches.compactMap { AppleTime.toDate($0.message.date) }
+            return SearchGroupedChat(
+                id: summary.id,
+                name: summary.name,
+                group: summary.group,
+                participantCount: summary.participantCount,
+                participantsPreview: summary.participantsPreview,
+                matchCount: matches.count,
+                firstMatch: TimeUtils.formatISO(dates.min()),
+                lastMatch: TimeUtils.formatISO(dates.max()),
+                results: matches.prefix(3).map { match in
+                    let message = renderer.render(match.message)
+                    return SearchSampleMessage(
+                        id: message.id,
+                        from: message.from,
+                        excerpt: makeExcerpt(text: message.text, query: query),
+                        ts: message.ts
+                    )
                 }
-                if let last = chat.lastMatchDate {
-                    if date > last { chat.lastMatchDate = date }
-                } else {
-                    chat.lastMatchDate = date
-                }
-            }
-
-            if chat.results.count < 3 {
-                chat.results.append(SearchSampleMessage(
-                    id: "msg_\(row.msgId)",
-                    from: senderName,
-                    excerpt: makeExcerpt(text: text, query: query),
-                    ts: TimeUtils.formatISO(msgDate)
-                ))
-            }
-
-            chatsData[chatId] = chat
-        }
-
-        var chats = chatsData.values.map { data in
-            SearchGroupedChat(
-                id: data.id,
-                name: data.name,
-                group: data.group,
-                participantCount: data.participantCount,
-                participantsPreview: data.participantsPreview,
-                matchCount: data.matchCount,
-                firstMatch: TimeUtils.formatISO(data.firstMatchDate),
-                lastMatch: TimeUtils.formatISO(data.lastMatchDate),
-                results: data.results
             )
         }
-        chats.sort { $0.matchCount > $1.matchCount }
+        // Most matches first; ties go to the most recent match so the order is stable.
+        chats.sort {
+            ($0.matchCount, $0.lastMatch ?? "", $0.id) > ($1.matchCount, $1.lastMatch ?? "", $1.id)
+        }
 
-        let nextCursor = Self.nextCursor(from: rows, limit: limit)
         let response = SearchGroupedResponse(
             chats: chats,
             total: chats.reduce(0) { $0 + $1.matchCount },
@@ -553,235 +337,6 @@ extension SearchTool {
         return try FormatUtils.encodeJSON(response)
     }
 
-    /// One statement per distinct chat: UNION ALL of per-anchor LIMIT 2
-    /// before/after windows. `getContext` stays for the get_context tool.
-    static func getContextBatch(
-        db: Database,
-        anchors: [(chatId: Int64, date: Int64)]
-    ) throws -> [String: (before: [ContextRow], after: [ContextRow])] {
-        guard !anchors.isEmpty else { return [:] }
-
-        var datesByChat: [Int64: [Int64]] = [:]
-        for anchor in anchors {
-            datesByChat[anchor.chatId, default: []].append(anchor.date)
-        }
-
-        let schema = try db.schema()
-        var result: [String: (before: [ContextRow], after: [ContextRow])] = [:]
-        for (chatId, dates) in datesByChat {
-            var rowsById: [Int64: ContextRow] = [:]
-            var beforeIdsByDate: [Int64: [Int64]] = [:]
-            var afterIdsByDate: [Int64: [Int64]] = [:]
-
-            var chunkStart = 0
-            while chunkStart < dates.count {
-                let chunkEnd = min(chunkStart + 100, dates.count)
-                let chunk = Array(dates[chunkStart..<chunkEnd])
-                let (sql, params) = perAnchorContextSQL(chatId: chatId, dates: chunk, schema: schema)
-                let rows = try db.query(sql, params: params) { row in
-                    (
-                        anchorDate: row.int(0),
-                        side: row.string(1) ?? "",
-                        context: mapContextRow(row, columnOffset: 2)
-                    )
-                }
-
-                for item in rows {
-                    if rowsById[item.context.msgId] == nil {
-                        rowsById[item.context.msgId] = item.context
-                    }
-                    if item.side == "before" {
-                        beforeIdsByDate[item.anchorDate, default: []].append(item.context.msgId)
-                    } else {
-                        afterIdsByDate[item.anchorDate, default: []].append(item.context.msgId)
-                    }
-                }
-                chunkStart = chunkEnd
-            }
-
-            for date in dates {
-                let before = Array((beforeIdsByDate[date] ?? []).reversed().compactMap { rowsById[$0] })
-                let after = (afterIdsByDate[date] ?? []).compactMap { rowsById[$0] }
-                result["\(chatId):\(date)"] = (before, after)
-            }
-        }
-        return result
-    }
-
-    /// Caps at 100 anchors (200 subselects, 600 bindings). SQLite's default
-    /// variable limit is 32766.
-    private static func perAnchorContextSQL(
-        chatId: Int64,
-        dates: [Int64],
-        schema: SchemaCapabilities
-    ) -> (String, [Any]) {
-        let columns = contextSelectColumns(schema)
-        let fromJoin = """
-            FROM message m
-            JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
-            LEFT JOIN handle h ON m.handle_id = h.ROWID
-            """
-        var parts: [String] = []
-        var params: [Any] = []
-        for date in dates {
-            parts.append("""
-                SELECT * FROM (
-                  SELECT ? AS anchor_date, 'before' AS side, \(columns)
-                  \(fromJoin)
-                  WHERE cmj.chat_id = ? AND m.date < ? AND m.associated_message_type = 0
-                  ORDER BY m.date DESC LIMIT 2
-                )
-                """)
-            params.append(contentsOf: [date, chatId, date])
-            parts.append("""
-                SELECT * FROM (
-                  SELECT ? AS anchor_date, 'after' AS side, \(columns)
-                  \(fromJoin)
-                  WHERE cmj.chat_id = ? AND m.date > ? AND m.associated_message_type = 0
-                  ORDER BY m.date ASC LIMIT 2
-                )
-                """)
-            params.append(contentsOf: [date, chatId, date])
-        }
-        return (parts.joined(separator: "\nUNION ALL\n"), params)
-    }
-
-    static func contextSelectColumns(_ schema: SchemaCapabilities) -> String {
-        """
-        m.ROWID as msg_id, m.text, m.attributedBody, m.date, m.is_from_me, h.id as sender_handle,
-        m.guid, \(schema.threadOriginatorGuidSQL), \(schema.dateEditedSQL),
-        \(schema.hasRepliesSQL)
-        """
-    }
-
-    static func mapContextRow(_ row: SQLiteRow, columnOffset: Int = 0) -> ContextRow {
-        let base = Int32(columnOffset)
-        return ContextRow(
-            msgId: row.int(base + 0),
-            text: row.string(base + 1),
-            attributedBody: row.blob(base + 2),
-            date: row.optionalInt(base + 3),
-            isFromMe: row.int(base + 4) != 0,
-            senderHandle: row.string(base + 5),
-            guid: row.string(base + 6) ?? "",
-            threadOriginatorGuid: row.string(base + 7),
-            dateEdited: row.optionalInt(base + 8) ?? 0,
-            hasReactions: false,
-            hasReplies: row.int(base + 9) != 0
-        )
-    }
-
-    static func getContext(
-        db: Database,
-        chatId: Int64,
-        msgDate: Int64,
-        resolver: ContactResolver
-    ) async throws -> ([SearchContextMessage], [SearchContextMessage]) {
-        let schema = try db.schema()
-        let columns = contextSelectColumns(schema)
-        let beforeRows = try db.query("""
-            SELECT \(columns)
-            FROM message m
-            JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
-            LEFT JOIN handle h ON m.handle_id = h.ROWID
-            WHERE cmj.chat_id = ? AND m.date < ? AND m.associated_message_type = 0
-            ORDER BY m.date DESC LIMIT 2
-            """,
-            params: [chatId, msgDate]
-        ) { mapContextRow($0) }
-
-        let afterRows = try db.query("""
-            SELECT \(columns)
-            FROM message m
-            JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
-            LEFT JOIN handle h ON m.handle_id = h.ROWID
-            WHERE cmj.chat_id = ? AND m.date > ? AND m.associated_message_type = 0
-            ORDER BY m.date ASC LIMIT 2
-            """,
-            params: [chatId, msgDate]
-        ) { mapContextRow($0) }
-
-        let allRows = beforeRows + afterRows
-        var pageIdByGuid: [String: Int] = [:]
-        for row in allRows {
-            pageIdByGuid[row.guid] = Int(row.msgId)
-        }
-        let annotations = try MessageAnnotations.loadIfNeeded(
-            db: db,
-            guids: Array(pageIdByGuid.keys),
-            pageIdByGuid: pageIdByGuid,
-            originatorGuids: allRows.compactMap(\.threadOriginatorGuid),
-            fetchReactions: !pageIdByGuid.isEmpty,
-            fetchReplies: allRows.contains(where: { $0.hasReplies || ($0.threadOriginatorGuid?.isEmpty == false) })
-        )
-        var reactorNames: [String: String] = [:]
-        for recs in annotations.reactions.values {
-            for reaction in recs {
-                guard let handle = reaction.fromHandle, reactorNames[handle] == nil else { continue }
-                reactorNames[handle] = await IdentityDisplayFormatter.displayName(
-                    handle: handle, resolver: resolver
-                )
-            }
-        }
-        let reactorName: (String?) -> String = { handle in
-            guard let handle else { return "Me" }
-            return reactorNames[handle] ?? handle
-        }
-
-        var contextBefore: [SearchContextMessage] = []
-        var contextAfter: [SearchContextMessage] = []
-
-        for row in beforeRows.reversed() {
-            let msg = await formatContextMessage(
-                row: row,
-                annotations: annotations,
-                reactorName: reactorName,
-                resolver: resolver
-            )
-            contextBefore.append(msg)
-        }
-
-        for row in afterRows {
-            let msg = await formatContextMessage(
-                row: row,
-                annotations: annotations,
-                reactorName: reactorName,
-                resolver: resolver
-            )
-            contextAfter.append(msg)
-        }
-
-        return (contextBefore, contextAfter)
-    }
-
-    static func formatContextMessage(
-        row: ContextRow,
-        annotations: MessageAnnotations.Loaded,
-        reactorName: (String?) -> String,
-        resolver: ContactResolver
-    ) async -> SearchContextMessage {
-        let text = MessageTextExtractor.extract(text: row.text, attributedBody: row.attributedBody)
-        let msgDate = AppleTime.toDate(row.date)
-
-        return SearchContextMessage(
-            id: "msg_\(row.msgId)",
-            from: await resolveSenderName(
-                isFromMe: row.isFromMe,
-                handle: row.senderHandle,
-                resolver: resolver
-            ),
-            text: text,
-            ts: TimeUtils.formatISO(msgDate),
-            reactions: MessageAnnotations.render(
-                annotations.reactions[row.guid] ?? [],
-                reactorName: reactorName
-            ),
-            replyTo: row.threadOriginatorGuid.flatMap { annotations.replies.originatorIdByGuid[$0] },
-            replyCount: annotations.replies.replyCountByGuid[row.guid],
-            edited: row.dateEdited != 0 ? true : nil
-        )
-    }
-
     /// Excerpt is centred on the first query match. A URL that straddles the
     /// raw-window boundary is collapsed from its truncated form, so
     /// `[Link: host]` may become `[Link: link]` or the raw fragment may appear.
@@ -791,20 +346,16 @@ extension SearchTool {
         guard let text else { return "" }
         let excerptLength = 160
         let rawWindow = 4 * excerptLength
-        let source: String
-        var rawStart = 0
-        if let query, !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-           let r = text.lowercased().range(of: query.lowercased()) {
-            let center = text.distance(from: text.startIndex, to: r.lowerBound)
-            let start = max(0, center - rawWindow / 2)
-            rawStart = start
-            source = String(text.dropFirst(start).prefix(rawWindow))
-        } else {
-            source = String(text.prefix(rawWindow))
+        /// Characters before the first case-insensitive match of the query.
+        func matchOffset(in string: String) -> Int? {
+            guard let query, !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  let range = string.range(of: query, options: .caseInsensitive) else { return nil }
+            return string.distance(from: string.startIndex, to: range.lowerBound)
         }
+        let rawStart = matchOffset(in: text).map { max(0, $0 - rawWindow / 2) } ?? 0
+        let source = String(text.dropFirst(rawStart).prefix(rawWindow))
         let normalized = SummaryPreviewFormatter.formattedTextPreview(
             text: source,
-            attributedBody: nil,
             maxLength: Int.max
         ) ?? source
 
@@ -815,67 +366,13 @@ extension SearchTool {
             return excerpt
         }
 
-        guard normalized.count > 160 else { return withWindowPrefix(normalized) }
+        guard normalized.count > excerptLength else { return withWindowPrefix(normalized) }
 
-        let nsText = normalized as NSString
-
-        if let query, !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            let lowerText = normalized.lowercased()
-            let lowerQuery = query.lowercased()
-            if let matchRange = lowerText.range(of: lowerQuery) {
-                let matchLocation = lowerText.distance(from: lowerText.startIndex, to: matchRange.lowerBound)
-                let halfWindow = excerptLength / 2
-                let start = max(0, matchLocation - halfWindow)
-                let length = min(excerptLength, nsText.length - start)
-                let excerpt = nsText.substring(with: NSRange(location: start, length: length))
-                let prefix = start > 0 ? "..." : ""
-                let suffix = (start + length) < nsText.length ? "..." : ""
-                return withWindowPrefix(prefix + excerpt + suffix)
-            }
-        }
-
-        let excerpt = nsText.substring(to: min(excerptLength, nsText.length))
-        let head = nsText.length > excerptLength ? excerpt + "..." : excerpt
-        return withWindowPrefix(head)
-    }
-
-    static func resolveSenderName(
-        isFromMe: Bool,
-        handle: String?,
-        resolver: ContactResolver
-    ) async -> String {
-        if isFromMe {
-            return "Me"
-        }
-        guard let handle else { return "Unknown" }
-        return await IdentityDisplayFormatter.displayName(handle: handle, resolver: resolver)
-    }
-
-    static func identitiesByChat(
-        db: Database,
-        rows: [SearchRow],
-        resolver: ContactResolver
-    ) async throws -> [Int64: ChatIdentity] {
-        let chatIds = Array(Set(rows.map(\.chatId)))
-        let participantsByChat = try await ChatSummaryQueries.participantsByChat(
-            db: db,
-            chatIds: chatIds,
-            resolver: resolver
-        )
-        var explicitNameByChat: [Int64: String?] = [:]
-        for row in rows where explicitNameByChat[row.chatId] == nil {
-            explicitNameByChat[row.chatId] = row.chatDisplayName
-        }
-        var result: [Int64: ChatIdentity] = [:]
-        for chatId in chatIds {
-            result[chatId] = ChatIdentity.from(
-                chatId: chatId,
-                guid: nil,
-                explicitName: explicitNameByChat[chatId] ?? nil,
-                rows: participantsByChat[chatId] ?? []
-            )
-        }
-        return result
+        let start = matchOffset(in: normalized).map { max(0, $0 - excerptLength / 2) } ?? 0
+        let excerpt = normalized.dropFirst(start).prefix(excerptLength)
+        let prefix = start > 0 ? "..." : ""
+        let suffix = start + excerpt.count < normalized.count ? "..." : ""
+        return withWindowPrefix(prefix + excerpt + suffix)
     }
 
     static func wordMatches(searchWord: String, in text: String, textWords: [String], fuzzy: Bool) -> Bool {
@@ -928,28 +425,4 @@ extension SearchTool {
         return prevRow[n]
     }
 
-    static func resolveFromPersonFilter(
-        _ fromPerson: String?,
-        resolver: ContactResolver
-    ) async -> SearchSenderFilter? {
-        guard let fromPerson, !fromPerson.isEmpty else { return nil }
-        if fromPerson.lowercased() == "me" {
-            return SearchSenderFilter(value: "me", exact: true)
-        }
-        if let normalized = PhoneUtils.normalizeToE164(fromPerson) {
-            return SearchSenderFilter(value: normalized, exact: true)
-        }
-        if PhoneUtils.isEmail(fromPerson) {
-            return SearchSenderFilter(value: fromPerson.lowercased(), exact: true)
-        }
-        if let firstMatch = await resolver.searchByName(fromPerson).first {
-            return SearchSenderFilter(value: firstMatch.handle, exact: true)
-        }
-        return SearchSenderFilter(value: fromPerson, exact: false)
-    }
-
-    static func nextCursor(from rows: [SearchRow], limit: Int) -> String? {
-        guard rows.count >= limit, let last = rows.last else { return nil }
-        return TimelineCursor.encode(date: last.date, messageId: last.msgId)
-    }
 }

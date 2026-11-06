@@ -40,7 +40,7 @@ final class UnreadCharacterizationTests: XCTestCase {
 
         // Apple epoch: nanoseconds since 2001-01-01; ~1 hour ago so the
         // default "7d" window includes everything and ago is non-nil.
-        let base = Int64(Date().timeIntervalSinceReferenceDate * 1_000_000_000) - 3_600_000_000_000
+        let base = AppleTime.fromDate(Date().addingTimeInterval(-3600))
         let sec: Int64 = 1_000_000_000
 
         // Chat 1 messages

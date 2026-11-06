@@ -1,4 +1,3 @@
-// Sources/iMessageMax/Tools/ListChats.swift
 import Foundation
 import MCP
 
@@ -9,15 +8,14 @@ enum ListChatsSort: String {
     case mostActive = "most_active"
 }
 
-/// Response structure for list_chats tool
-struct ListChatsResponse: Codable {
+struct ListChatsResponse: Encodable {
     let chats: [ChatInfo]
     let totalChats: Int?
     let totalGroups: Int?
     let totalDms: Int?
     let more: Bool
     let cursor: String?
-    let filteredHidden: Int?
+    var filteredHidden: Int? = nil
 
     enum CodingKeys: String, CodingKey {
         case chats
@@ -28,97 +26,33 @@ struct ListChatsResponse: Codable {
         case cursor
         case filteredHidden = "filtered_hidden"
     }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(chats, forKey: .chats)
-        try container.encodeIfPresent(totalChats, forKey: .totalChats)
-        try container.encodeIfPresent(totalGroups, forKey: .totalGroups)
-        try container.encodeIfPresent(totalDms, forKey: .totalDms)
-        try container.encode(more, forKey: .more)
-        try container.encodeIfPresent(cursor, forKey: .cursor)
-        try container.encodeIfPresent(filteredHidden, forKey: .filteredHidden)
-    }
-
-    init(
-        chats: [ChatInfo],
-        totalChats: Int?,
-        totalGroups: Int?,
-        totalDms: Int?,
-        more: Bool,
-        cursor: String?,
-        filteredHidden: Int? = nil
-    ) {
-        self.chats = chats
-        self.totalChats = totalChats
-        self.totalGroups = totalGroups
-        self.totalDms = totalDms
-        self.more = more
-        self.cursor = cursor
-        self.filteredHidden = filteredHidden
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        chats = try container.decode([ChatInfo].self, forKey: .chats)
-        totalChats = try container.decodeIfPresent(Int.self, forKey: .totalChats)
-        totalGroups = try container.decodeIfPresent(Int.self, forKey: .totalGroups)
-        totalDms = try container.decodeIfPresent(Int.self, forKey: .totalDms)
-        more = try container.decode(Bool.self, forKey: .more)
-        cursor = try container.decodeIfPresent(String.self, forKey: .cursor)
-        filteredHidden = try container.decodeIfPresent(Int.self, forKey: .filteredHidden)
-    }
 }
 
-/// Individual chat info in response
-struct ChatInfo: Codable {
-    let id: String
-    let name: String
-    let group: Bool?
-    let participantCount: Int
-    let participantsPreview: [String]
+typealias ChatInfo = ChatListing<ChatInfoDetails>
+
+struct ChatInfoDetails: Encodable {
     let lastMessage: LastMessageSummary?
     let awaitingReply: Bool?
 
     enum CodingKeys: String, CodingKey {
-        case id
-        case name
-        case group
-        case participantCount = "participant_count"
-        case participantsPreview = "participants_preview"
         case lastMessage = "last_message"
         case awaitingReply = "awaiting_reply"
     }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(id, forKey: .id)
-        try container.encode(name, forKey: .name)
-        try container.encodeIfPresent(lastMessage, forKey: .lastMessage)
-        try container.encodeIfPresent(awaitingReply, forKey: .awaitingReply)
-        try container.encodeIfPresent(group, forKey: .group)
-        try container.encode(participantCount, forKey: .participantCount)
-        try container.encode(participantsPreview, forKey: .participantsPreview)
-    }
-}
-
-/// Error response
-struct ListChatsError: Error, Codable {
-    let error: String
-    let message: String
 }
 
 /// Implementation of the list_chats tool
 enum ListChatsTool {
+    static let limit = IntArgument(name: "limit", defaultValue: 20, range: 1...100)
+
     // MARK: - Tool Registration
 
-    static func register(on server: Server, db: Database, resolver: ContactResolver) {
+    static func definition(db: Database, resolver: ContactResolver) -> ToolDefinition {
         let inputSchema: Value = .object([
             "type": "object",
             "properties": .object([
                 "limit": .object([
                     "type": "integer",
-                    "description": "Max chats to return (default 20, max 100)",
+                    "description": "Max chats to return (\(limit.defaultAndMax))",
                 ]),
                 "since": .object([
                     "type": "string",
@@ -153,7 +87,7 @@ enum ListChatsTool {
             "additionalProperties": false,
         ])
 
-        server.registerTool(
+        return ToolDefinition(
             name: "list_chats",
             description: "List recent chats with previews. Returns chat ids for follow-up tool calls and chat names for user-facing summaries. When explaining results to the user, refer to chats by name, not by id. Good starting point for broad catch-ups and discovery before drilling deeper. Totals (total_chats, total_groups, total_dms) appear on the first page only.",
             inputSchema: inputSchema,
@@ -166,7 +100,7 @@ enum ListChatsTool {
                 openWorldHint: false
             )
         ) { arguments in
-            let limit = arguments?["limit"]?.intValue ?? 20
+            let limit = Self.limit.read(arguments)
             let since = arguments?["since"]?.stringValue
             let isGroup = arguments?["is_group"]?.boolValue
             let includeFiltered = arguments?["include_filtered"]?.boolValue ?? false
@@ -175,7 +109,7 @@ enum ListChatsTool {
             let sort = arguments?["sort"]?.stringValue ?? "recent"
             let cursor = arguments?["cursor"]?.stringValue
 
-            let result = await execute(
+            let result = try await execute(
                 limit: limit,
                 since: since,
                 isGroup: isGroup,
@@ -188,18 +122,13 @@ enum ListChatsTool {
                 resolver: resolver
             )
 
-            switch result {
-            case .success(let response):
-                return [.plainText(try FormatUtils.encodeJSON(response))]
-            case .failure(let error):
-                throw ToolError(content: [.plainText(try FormatUtils.encodeJSON(error))])
-            }
+            return [.plainText(try FormatUtils.encodeJSON(result))]
         }
     }
 
     /// List recent chats with previews
     /// - Parameters:
-    ///   - limit: Max chats to return (default 20, clamped to 1-100)
+    ///   - limit: Max chats to return, clamped by `ListChatsTool.limit`
     ///   - since: Only chats with activity since this time
     ///   - isGroup: True for groups only, False for DMs only
     ///   - minParticipants: Filter to chats with at least N participants
@@ -208,7 +137,7 @@ enum ListChatsTool {
     ///   - db: Database instance
     ///   - resolver: ContactResolver for name lookups
     static func execute(
-        limit: Int = 20,
+        limit: Int = ListChatsTool.limit.defaultValue,
         since: String? = nil,
         isGroup: Bool? = nil,
         minParticipants: Int? = nil,
@@ -216,136 +145,131 @@ enum ListChatsTool {
         sort: String = "recent",
         cursor: String? = nil,
         includeFiltered: Bool = false,
-        db: Database = Database(),
+        db: Database,
         resolver: ContactResolver
-    ) async -> Result<ListChatsResponse, ListChatsError> {
-        let clampedLimit = max(1, min(limit, 100))
+    ) async throws -> ListChatsResponse {
+        let clampedLimit = Self.limit.clamp(limit)
 
         let sortOrder = ListChatsSort(rawValue: sort) ?? .recent
 
-        do {
-            try await resolver.initialize()
-        } catch {
-            // Continue without contacts - not a fatal error
-        }
+        let sinceApple = since.flatMap(AppleTime.parse)
+        let scope = ChatScope(named: nil, includeFiltered: includeFiltered)
 
-        do {
-            let sinceApple = since.flatMap(AppleTime.parse)
+        // Message totals come from a per-chat aggregate subquery, not from
+        // joining chat_handle_join and message in one FROM, which would
+        // multiply each chat's messages by its participants.
+        //
+        // The aggregate walks every non-reaction message in the database,
+        // so it is only worth paying for when the answer depends on it.
+        // Neither message_count nor last_message_date reaches the response:
+        // the last-message preview comes from ChatSummaryQueries. They are
+        // ordering and cursor keys, and the alphabetical sort orders and
+        // pages by name, so it needs neither. `since` still does, because
+        // it decides which chats appear at all.
+        let needsMessageAggregate = sinceApple != nil || sortOrder != .alphabetical
 
-            // Message totals come from a per-chat aggregate subquery rather than
-            // joining chat_handle_join and message in the same FROM. Joining both
-            // multiplies each chat's rows by its participant count, which both
-            // inflated message_count (and therefore the most_active sort) and
-            // forced SQLite to aggregate participants x messages for every chat.
-            //
-            // The aggregate walks every non-reaction message in the database,
-            // so it is only worth paying for when the answer depends on it.
-            // Neither message_count nor last_message_date reaches the response:
-            // the last-message preview comes from ChatSummaryQueries. They are
-            // ordering and cursor keys, and the alphabetical sort orders and
-            // pages by name, so it needs neither. `since` still does, because
-            // it decides which chats appear at all.
-            let needsMessageAggregate = sinceApple != nil || sortOrder != .alphabetical
+        let recentCursorDate: Int64? = sortOrder == .recent
+            ? cursor.flatMap(ChatListCursor.decode)?.primary
+            : nil
 
-            let recentCursorDate: Int64? = sortOrder == .recent
-                ? cursor.flatMap(ChatListCursor.decode)?.primary
-                : nil
+        /// Builds the page query, optionally bounding the aggregate to the
+        /// newest `candidateWidth` messages.
+        func buildPageQuery(candidateWidth: Int?) -> (String, [Any]) {
+            var innerFilter = SQLFragments.notReaction()
+            var innerParams: [Any] = []
+            if let sinceApple {
+                innerFilter += "\n                       AND m.date >= ?"
+                innerParams.append(sinceApple)
+            }
 
-            /// Builds the page query, optionally bounding the aggregate to the
-            /// newest `candidateWidth` messages.
-            func buildPageQuery(candidateWidth: Int?) -> (String, [Any]) {
-                var innerFilter = "m.associated_message_type = 0"
-                var innerParams: [Any] = []
-                if let sinceApple {
-                    innerFilter += "\n                       AND m.date >= ?"
-                    innerParams.append(sinceApple)
-                }
+            let messageAggregate: String
+            if let candidateWidth {
+                // The inner scan takes a date-ordered prefix, so every chat
+                // it surfaces has its own newest message inside that prefix
+                // and MAX(dt) is that chat's true last-message date. The
+                // recent cursor deliberately does NOT push down into the
+                // scan: narrowing it to messages at or before the cursor
+                // would truncate the maximum for any chat with messages on
+                // both sides of it, and that chat would then re-appear on a
+                // later page it had already been returned on.
+                messageAggregate = """
+                    (SELECT chat_id, 0 AS n, MAX(dt) AS last_date
+                     FROM (SELECT cmj.chat_id AS chat_id, m.date AS dt
+                           FROM chat_message_join cmj
+                           JOIN message m ON m.ROWID = cmj.message_id
+                           WHERE \(innerFilter)
+                           ORDER BY m.date DESC
+                           LIMIT \(candidateWidth))
+                     GROUP BY chat_id) msg ON msg.chat_id = c.ROWID
+                    """
+            } else {
+                messageAggregate = """
+                    (SELECT cmj.chat_id AS chat_id,
+                            COUNT(*) AS n,
+                            MAX(m.date) AS last_date
+                     FROM chat_message_join cmj
+                     JOIN message m ON m.ROWID = cmj.message_id
+                     WHERE \(innerFilter)
+                     GROUP BY cmj.chat_id) msg ON msg.chat_id = c.ROWID
+                    """
+            }
 
-                let messageAggregate: String
-                if let candidateWidth {
-                    // The inner scan takes a date-ordered prefix, so every chat
-                    // it surfaces has its own newest message inside that prefix
-                    // and MAX(dt) is that chat's true last-message date. The
-                    // recent cursor deliberately does NOT push down into the
-                    // scan: narrowing it to messages at or before the cursor
-                    // would truncate the maximum for any chat with messages on
-                    // both sides of it, and that chat would then re-appear on a
-                    // later page it had already been returned on.
-                    messageAggregate = """
-                        (SELECT chat_id, 0 AS message_count, MAX(dt) AS last_message_date
-                         FROM (SELECT cmj.chat_id AS chat_id, m.date AS dt
-                               FROM chat_message_join cmj
-                               JOIN message m ON m.ROWID = cmj.message_id
-                               WHERE \(innerFilter)
-                               ORDER BY m.date DESC
-                               LIMIT \(candidateWidth))
-                         GROUP BY chat_id) msg ON msg.chat_id = c.ROWID
-                        """
-                } else {
-                    messageAggregate = """
-                        (SELECT cmj.chat_id AS chat_id,
-                                COUNT(*) AS message_count,
-                                MAX(m.date) AS last_message_date
-                         FROM chat_message_join cmj
-                         JOIN message m ON m.ROWID = cmj.message_id
-                         WHERE \(innerFilter)
-                         GROUP BY cmj.chat_id) msg ON msg.chat_id = c.ROWID
-                        """
-                }
+            let qb = QueryBuilder()
+            qb.select(
+                "c.ROWID as id",
+                "c.guid",
+                "c.display_name",
+                "\(SQLFragments.participantCount()) as participant_count",
+                needsMessageAggregate ? "COALESCE(msg.n, 0) as message_count" : "0 as message_count",
+                // A chat with no messages sorts and pages as count 0 and
+                // date 0, so a cursor can always address the page after it.
+                // msg's columns are named apart from these aliases: HAVING
+                // would otherwise bind the uncoalesced column.
+                needsMessageAggregate ? "COALESCE(msg.last_date, 0) as last_message_date" : "NULL as last_message_date"
+            )
+            .from("chat c")
 
-                let qb = QueryBuilder()
-                qb.select(
-                    "c.ROWID as id",
-                    "c.guid",
-                    "c.display_name",
-                    "(SELECT COUNT(DISTINCT chj.handle_id) FROM chat_handle_join chj"
-                        + " WHERE chj.chat_id = c.ROWID) as participant_count",
-                    needsMessageAggregate ? "COALESCE(msg.message_count, 0) as message_count" : "0 as message_count",
-                    needsMessageAggregate ? "msg.last_message_date as last_message_date" : "NULL as last_message_date"
-                )
-                .from("chat c")
+            if let shown = scope.shownPredicate() {
+                qb.where(shown)
+            }
 
-                if !includeFiltered {
-                    qb.where("c.is_filtered = 0")
-                }
+            if sinceApple != nil || candidateWidth != nil {
+                // `since` drops chats with no activity in the window, so
+                // the aggregate joins inward. A bounded scan also
+                // joins inward: a chat outside the candidate set has no
+                // claim on this page, and the escalation below is what
+                // brings it back when the page cannot be filled without it.
+                qb.join(messageAggregate, params: innerParams)
+            } else if needsMessageAggregate {
+                qb.leftJoin(messageAggregate)
+            }
 
-                if sinceApple != nil || candidateWidth != nil {
-                    // `since` previously filtered the joined message rows in
-                    // WHERE, which dropped chats with no activity in the window.
-                    // An inner join keeps that behavior. A bounded scan also
-                    // joins inward: a chat outside the candidate set has no
-                    // claim on this page, and the escalation below is what
-                    // brings it back when the page cannot be filled without it.
-                    qb.join(messageAggregate, params: innerParams)
-                } else if needsMessageAggregate {
-                    qb.leftJoin(messageAggregate)
-                }
+            qb.groupBy("c.ROWID")
 
-                qb.groupBy("c.ROWID")
+            if let minP = minParticipants {
+                qb.having("participant_count >= ?", minP)
+            }
+            if let maxP = maxParticipants {
+                qb.having("participant_count <= ?", maxP)
+            }
+            if let isGroup = isGroup {
+                qb.having(isGroup
+                    ? SQLFragments.isGroup(count: "participant_count")
+                    : SQLFragments.isDirect(count: "participant_count"))
+            }
 
-                if let minP = minParticipants {
-                    qb.having("participant_count >= ?", minP)
-                }
-                if let maxP = maxParticipants {
-                    qb.having("participant_count <= ?", maxP)
-                }
-                if let isGroup = isGroup {
-                    if isGroup {
-                        qb.having("participant_count > 1")
-                    } else {
-                        qb.having("participant_count <= 1")
-                    }
-                }
-
-                if let cursor, let decoded = ChatListCursor.decode(cursor) {
-                    switch sortOrder {
-                    case .recent:
+            if let cursor {
+                switch sortOrder {
+                case .recent:
+                    if let decoded = ChatListCursor.decode(cursor) {
                         qb.having(
                             "(last_message_date < ? OR (last_message_date = ? AND c.ROWID < ?))",
                             decoded.primary, decoded.primary, decoded.chatId
                         )
-                    case .mostActive:
-                        // primary = message_count, secondary = last_message_date
+                    }
+                case .mostActive:
+                    // primary = message_count, secondary = last_message_date
+                    if let decoded = ChatListCursor.decode(cursor) {
                         let lastDate = decoded.secondary ?? 0
                         qb.having(
                             """
@@ -356,198 +280,133 @@ enum ListChatsTool {
                             decoded.primary, decoded.primary, lastDate,
                             decoded.primary, lastDate, decoded.chatId
                         )
-                    case .alphabetical:
-                        // primary unused; secondary unused — lexicographic via chat id only is unsafe.
-                        // Alphabetical cursor encodes name hash in primary as 0 and uses chatId with name HAVING.
-                        break
+                    }
+                case .alphabetical:
+                    // `n:name:chatId`, keyed on the same expression the sort uses.
+                    if let nameCursor = ChatListCursor.decodeName(cursor) {
+                        qb.having(
+                            """
+                            (COALESCE(c.display_name, '') > ?
+                             OR (COALESCE(c.display_name, '') = ? AND c.ROWID > ?))
+                            """,
+                            nameCursor.name, nameCursor.name, nameCursor.chatId
+                        )
                     }
                 }
-
-                // Alphabetical keyset: "name\\0chatId" stored as opaque string via ChatListCursor.name form.
-                if sortOrder == .alphabetical, let cursor, let nameCursor = ChatListCursor.decodeName(cursor) {
-                    qb.having(
-                        """
-                        (COALESCE(c.display_name, '') > ?
-                         OR (COALESCE(c.display_name, '') = ? AND c.ROWID > ?))
-                        """,
-                        nameCursor.name, nameCursor.name, nameCursor.chatId
-                    )
-                }
-
-                switch sortOrder {
-                case .recent:
-                    qb.orderBy("last_message_date DESC NULLS LAST", "c.ROWID DESC")
-                case .mostActive:
-                    qb.orderBy("message_count DESC", "last_message_date DESC NULLS LAST", "c.ROWID DESC")
-                case .alphabetical:
-                    qb.orderBy("COALESCE(c.display_name, '') ASC", "c.ROWID ASC")
-                }
-
-                qb.limit(clampedLimit + 1)
-
-                return qb.build()
             }
 
-            // The recent sort orders chats by their newest message, so the
-            // newest K messages in the database name every chat that can lead
-            // the list. Grouping them gives candidates whose last-message dates
-            // are all at least as new as the K-th newest message, so any chat
-            // left out is older than every candidate: a full page drawn from
-            // them is exactly the page the unbounded aggregate would return.
-            // A short page means the participant filters thinned the candidates
-            // below a full page, and only then is a wider scan worth paying for.
-            // Every other sort needs the true aggregate and takes the last,
-            // unbounded entry directly.
-            // Paging is excluded because the cursor cannot narrow the scan
-            // (see buildPageQuery) while it does thin the page, so every deep
-            // page would climb the whole ladder before landing on the same
-            // unbounded query it starts from today.
-            let candidateWidths: [Int?] = sortOrder == .recent && recentCursorDate == nil
-                ? [2_000, 20_000, 200_000, nil]
-                : [nil]
-
-            var fetchedRows: [ChatRow] = []
-            for candidateWidth in candidateWidths {
-                let (sql, params) = buildPageQuery(candidateWidth: candidateWidth)
-                fetchedRows = try db.query(sql, params: params) { row in
-                    ChatRow(
-                        id: row.int(0),
-                        guid: row.string(1),
-                        displayName: row.string(2),
-                        participantCount: Int(row.int(3)),
-                        messageCount: row.int(4),
-                        lastMessageDate: row.optionalInt(5)
-                    )
-                }
-                if candidateWidth == nil || fetchedRows.count > clampedLimit {
-                    break
-                }
+            switch sortOrder {
+            case .recent:
+                qb.orderBy("last_message_date DESC", "c.ROWID DESC")
+            case .mostActive:
+                qb.orderBy("message_count DESC", "last_message_date DESC", "c.ROWID DESC")
+            case .alphabetical:
+                qb.orderBy("COALESCE(c.display_name, '') ASC", "c.ROWID ASC")
             }
 
-            let hasMore = fetchedRows.count > clampedLimit
-            let chatRows = Array(fetchedRows.prefix(clampedLimit))
+            qb.limit(clampedLimit + 1)
 
-            // Batch-fetch participants and last messages for all chats at once.
-            let chatIds = chatRows.map(\.id)
-            let participantsByChat = try await ChatSummaryQueries.participantsByChat(
-                db: db,
-                chatIds: chatIds,
-                resolver: resolver
-            )
-            // The page query already found each chat's newest message date, so
-            // the preview lookup can seek straight to it instead of searching
-            // the chat's history again. Sorts that skip the aggregate have no
-            // dates to give and fall back to the search.
-            var newestDates: [Int64: Int64] = [:]
-            for chatRow in chatRows {
-                if let date = chatRow.lastMessageDate {
-                    newestDates[chatRow.id] = date
-                }
-            }
-            let lastMessagesByChat = try await ChatSummaryQueries.lastMessagesByChat(
-                db: db,
-                chatIds: chatIds,
-                resolver: resolver,
-                newestDates: newestDates
-            )
-            let recentSenderChatIds = chatRows.compactMap { row -> Int64? in
-                let trimmed = row.displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
-                let isNamed = trimmed?.isEmpty == false
-                let count = (participantsByChat[row.id] ?? []).count
-                return (isNamed && count > 4) ? row.id : nil
-            }
-            let recentSendersByChat = try ChatSummaryQueries.recentSendersByChat(
-                db: db,
-                chatIds: recentSenderChatIds
-            )
-
-            var chats: [ChatInfo] = []
-
-            for chatRow in chatRows {
-                let participantRows = participantsByChat[chatRow.id] ?? []
-
-                let identityParticipants = participantRows.map { p in
-                    ChatIdentity.makeParticipant(handle: p.handle, contactName: p.name)
-                }
-
-                let identity = ChatIdentity(
-                    mcpId: "chat\(chatRow.id)",
-                    guid: chatRow.guid,
-                    explicitName: chatRow.displayName,
-                    participants: identityParticipants
-                )
-                let isGroupChat = identity.participantCount > 1
-
-                let lastMsg = lastMessagesByChat[chatRow.id]
-
-                let chatInfo = ChatInfo(
-                    id: identity.mcpId,
-                    name: identity.displayName,
-                    group: isGroupChat ? true : nil,
-                    participantCount: identity.participantCount,
-                    participantsPreview: try ChatSummaryBuilder.participantsPreview(
-                        db: db,
-                        chatId: chatRow.id,
-                        identity: identity,
-                        recentSenders: recentSendersByChat[chatRow.id]
-                    ),
-                    lastMessage: lastMsg?.info,
-                    awaitingReply: lastMsg?.awaitingReply
-                )
-
-                chats.append(chatInfo)
-            }
-
-            let totals = cursor == nil ? try getTotals(db: db, includeFiltered: includeFiltered) : nil
-            let filteredHidden = (cursor == nil && !includeFiltered)
-                ? try getFilteredHidden(db: db, sinceApple: sinceApple)
-                : nil
-
-            let nextCursor: String?
-            if hasMore, let last = chatRows.last {
-                switch sortOrder {
-                case .recent:
-                    nextCursor = ChatListCursor.encode(
-                        primary: last.lastMessageDate,
-                        secondary: nil,
-                        chatId: last.id
-                    )
-                case .mostActive:
-                    nextCursor = ChatListCursor.encode(
-                        primary: last.messageCount,
-                        secondary: last.lastMessageDate,
-                        chatId: last.id
-                    )
-                case .alphabetical:
-                    nextCursor = ChatListCursor.encodeName(
-                        name: last.displayName ?? "",
-                        chatId: last.id
-                    )
-                }
-            } else {
-                nextCursor = nil
-            }
-
-            return .success(ListChatsResponse(
-                chats: chats,
-                totalChats: totals?.total,
-                totalGroups: totals?.groups,
-                totalDms: totals?.dms,
-                // more and cursor must agree; a NULL keyset value yields no cursor and therefore no next page.
-                more: nextCursor != nil,
-                cursor: nextCursor,
-                filteredHidden: filteredHidden
-            ))
-
-        } catch let error as DatabaseError {
-            let mapped = ToolErrorMapping.map(error, context: "list_chats")
-            return .failure(ListChatsError(error: mapped.code, message: mapped.message))
-        } catch {
-            return .failure(ListChatsError(
-                error: "internal_error",
-                message: ClientErrorMessages.sanitized(error)
-            ))
+            return qb.build()
         }
+
+        // The recent sort orders chats by their newest message, so the
+        // newest K messages in the database name every chat that can lead
+        // the list. Grouping them gives candidates whose last-message dates
+        // are all at least as new as the K-th newest message, so any chat
+        // left out is older than every candidate: a full page drawn from
+        // them is exactly the page the unbounded aggregate would return.
+        // A short page means the participant filters thinned the candidates
+        // below a full page, and only then is a wider scan worth paying for.
+        // Every other sort needs the true aggregate and takes the last,
+        // unbounded entry directly.
+        // Paging is excluded because the cursor cannot narrow the scan
+        // (see buildPageQuery) while it does thin the page, so every deep
+        // page would climb the whole ladder before landing on the
+        // unbounded query anyway.
+        let candidateWidths: [Int?] = sortOrder == .recent && recentCursorDate == nil
+            ? [2_000, 20_000, 200_000, nil]
+            : [nil]
+
+        var fetchedRows: [ChatRow] = []
+        for candidateWidth in candidateWidths {
+            let (sql, params) = buildPageQuery(candidateWidth: candidateWidth)
+            fetchedRows = try db.query(sql, params: params) { row in
+                ChatRow(
+                    id: row.int(0),
+                    guid: row.string(1),
+                    displayName: row.string(2),
+                    messageCount: row.int(4),
+                    lastMessageDate: row.optionalInt(5)
+                )
+            }
+            if candidateWidth == nil || fetchedRows.count > clampedLimit {
+                break
+            }
+        }
+
+        let hasMore = fetchedRows.count > clampedLimit
+        let chatRows = Array(fetchedRows.prefix(clampedLimit))
+
+        // The page query already found each chat's newest message date, so the
+        // preview lookup seeks straight to it. Sorts that skip the aggregate
+        // have no date and fall back to the search.
+        let page = try await ChatPage.build(
+            chatRows.map { ChatPage.Chat(id: $0.id, guid: $0.guid, explicitName: $0.displayName, newestDate: $0.lastMessageDate) },
+            lastMessages: ChatPage.LastMessageOptions(),
+            db: db,
+            resolver: resolver
+        )
+        let chats = chatRows.compactMap { row in
+            page[row.id].map { entry in
+                ChatInfo(
+                    chat: entry.summary,
+                    details: ChatInfoDetails(
+                        lastMessage: entry.lastMessage?.info,
+                        awaitingReply: entry.lastMessage?.awaitingReply
+                    )
+                )
+            }
+        }
+
+        let totals = cursor == nil ? try getTotals(db: db, scope: scope) : nil
+        let filteredHidden = try scope.filteredHidden(firstPage: cursor == nil) {
+            try getFilteredHidden(db: db, sinceApple: sinceApple)
+        }
+
+        let nextCursor: String?
+        if hasMore, let last = chatRows.last {
+            switch sortOrder {
+            case .recent:
+                nextCursor = ChatListCursor.encode(
+                    primary: last.lastMessageDate,
+                    secondary: nil,
+                    chatId: last.id
+                )
+            case .mostActive:
+                nextCursor = ChatListCursor.encode(
+                    primary: last.messageCount,
+                    secondary: last.lastMessageDate,
+                    chatId: last.id
+                )
+            case .alphabetical:
+                nextCursor = ChatListCursor.encodeName(
+                    name: last.displayName ?? "",
+                    chatId: last.id
+                )
+            }
+        } else {
+            nextCursor = nil
+        }
+
+        return ListChatsResponse(
+            chats: chats,
+            totalChats: totals?.total,
+            totalGroups: totals?.groups,
+            totalDms: totals?.dms,
+            more: nextCursor != nil,
+            cursor: nextCursor,
+            filteredHidden: filteredHidden
+        )
     }
 
     // MARK: - Private Helpers
@@ -556,25 +415,22 @@ enum ListChatsTool {
         let id: Int64
         let guid: String?
         let displayName: String?
-        let participantCount: Int
         let messageCount: Int64
         let lastMessageDate: Int64?
     }
 
     /// Get total counts
-    private static func getTotals(db: Database, includeFiltered: Bool) throws -> (total: Int, groups: Int, dms: Int) {
-        let filter = includeFiltered ? "" : "WHERE c.is_filtered = 0"
+    private static func getTotals(db: Database, scope: ChatScope) throws -> (total: Int, groups: Int, dms: Int) {
+        let filter = scope.shownPredicate().map { "WHERE \($0)" } ?? ""
         let sql = """
             SELECT
                 COUNT(*) as total,
-                SUM(CASE WHEN cnt > 1 THEN 1 ELSE 0 END) as groups,
-                SUM(CASE WHEN cnt <= 1 THEN 1 ELSE 0 END) as dms
+                SUM(CASE WHEN \(SQLFragments.isGroup(count: "cnt")) THEN 1 ELSE 0 END) as groups,
+                SUM(CASE WHEN \(SQLFragments.isDirect(count: "cnt")) THEN 1 ELSE 0 END) as dms
             FROM (
-                SELECT c.ROWID, COUNT(chj.handle_id) as cnt
+                SELECT \(SQLFragments.participantCount()) as cnt
                 FROM chat c
-                LEFT JOIN chat_handle_join chj ON c.ROWID = chj.chat_id
                 \(filter)
-                GROUP BY c.ROWID
             )
             """
 
@@ -595,13 +451,13 @@ enum ListChatsTool {
             let sql = """
                 SELECT COUNT(*)
                 FROM chat c
-                WHERE c.is_filtered != 0
+                WHERE \(SQLFragments.hiddenChat())
                   AND EXISTS (
                     SELECT 1
                     FROM chat_message_join cmj
                     JOIN message m ON m.ROWID = cmj.message_id
                     WHERE cmj.chat_id = c.ROWID
-                      AND m.associated_message_type = 0
+                      AND \(SQLFragments.notReaction())
                       AND m.date >= ?
                   )
                 """
@@ -612,7 +468,7 @@ enum ListChatsTool {
         }
 
         let rows: [Int] = try db.query(
-            "SELECT COUNT(*) FROM chat c WHERE c.is_filtered != 0",
+            "SELECT COUNT(*) FROM chat c WHERE \(SQLFragments.hiddenChat())",
             params: []
         ) { row in
             Int(row.int(0))

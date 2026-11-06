@@ -1,7 +1,8 @@
 import XCTest
+import IMessageMaxContract
 @testable import iMessageMax
 
-/// Tests for the 15-key capability contract (design §2.2 / §2.4 / §3.2).
+/// Tests for the 15-key capability contract.
 ///
 /// All three probes (DB, contacts, automation) are injected so tests are hermetic.
 /// The real automation probe reads live macOS TCC; CI runners return "not_determined".
@@ -15,14 +16,6 @@ final class CapabilityContractTests: XCTestCase {
         }
     }
 
-    private static func contactsProbe(ok: Bool) -> ContactsProbe {
-        if ok {
-            return { (true, "authorized") }
-        } else {
-            return { (false, "denied") }
-        }
-    }
-
     private static let probeAutomationGranted: AutomationProbe = { (true, "authorized") }
     private static let probeAutomationDenied: AutomationProbe = { (false, "denied") }
     private static let probeAutomationNotDetermined: AutomationProbe = { (false, "not_determined") }
@@ -32,12 +25,13 @@ final class CapabilityContractTests: XCTestCase {
         contactsOk: Bool = true,
         automation: AutomationProbe = CapabilityContractTests.probeAutomationGranted
     ) async throws -> DiagnoseResult {
-        // Use a seeded resolver so initialize() is a no-op (already initialized)
-        let resolver = ContactResolver(seedCache: [:])
+        let resolver = ContactResolver(
+            seedCache: [:],
+            authorization: contactsOk ? (true, "authorized") : (false, "denied")
+        )
         return try await DiagnoseTool.execute(
             resolver: resolver,
             dbProbe: CapabilityContractTests.dbProbe(ok: dbOk),
-            contactsProbe: CapabilityContractTests.contactsProbe(ok: contactsOk),
             automationProbe: automation,
             liveInboxProbe: { false }
         )
@@ -51,7 +45,7 @@ final class CapabilityContractTests: XCTestCase {
         XCTAssertEqual(caps["send_text_group"]?.state, "supported")
         XCTAssertEqual(caps["send_file_dm"]?.state, "supported")
 
-        // send_file_group: supported with a routing caveat when automation granted (plan 017)
+        // send_file_group: supported with a routing caveat when automation is granted
         XCTAssertEqual(caps["send_file_group"]?.state, "supported")
         XCTAssertNotNil(caps["send_file_group"]?.note)
 
@@ -74,35 +68,11 @@ final class CapabilityContractTests: XCTestCase {
         XCTAssertEqual(caps["perm_automation"]?.state, "supported")
     }
 
-    /// CI=true makes ContactResolver skip contact loading, so contacts.status
-    /// becomes "skipped_ci". Permission is still granted, so the perm_contacts
-    /// capability must stay "supported" rather than falling to "unverified".
-    func testPermContactsStaysSupportedWhenCILoadSkipped() async throws {
-        let previous = ProcessInfo.processInfo.environment["CI"]
-        setenv("CI", "true", 1)
-        defer {
-            if let previous { setenv("CI", previous, 1) } else { unsetenv("CI") }
-        }
-
-        let result = try await DiagnoseTool.execute(
-            resolver: ContactResolver(),
-            dbProbe: CapabilityContractTests.dbProbe(ok: true),
-            contactsProbe: CapabilityContractTests.contactsProbe(ok: true),
-            automationProbe: CapabilityContractTests.probeAutomationGranted,
-            liveInboxProbe: { false }
-        )
-
-        XCTAssertEqual(result.contacts.status, "skipped_ci")
-        XCTAssertEqual(result.capabilities["perm_contacts"]?.state, "supported")
-        XCTAssertNil(result.capabilities["perm_contacts"]?.fix)
-    }
-
     func testLiveInboxSupportedWhenProbeReportsRunning() async throws {
         let resolver = ContactResolver(seedCache: [:])
         let result = try await DiagnoseTool.execute(
             resolver: resolver,
             dbProbe: CapabilityContractTests.dbProbe(ok: true),
-            contactsProbe: CapabilityContractTests.contactsProbe(ok: true),
             automationProbe: CapabilityContractTests.probeAutomationGranted,
             liveInboxProbe: { true }
         )
@@ -176,7 +146,7 @@ final class CapabilityContractTests: XCTestCase {
             "perm_full_disk", "perm_contacts", "perm_automation",
             "rich_backend",
         ]
-        XCTAssertEqual(Set(caps.keys), expectedKeys, "capabilities must contain exactly the 15 §2.2 keys")
+        XCTAssertEqual(Set(caps.keys), expectedKeys, "capabilities must contain exactly the 15 contract keys")
 
         for key in ["send_text_dm", "verified_send", "perm_automation", "rich_backend"] {
             let entry = try XCTUnwrap(caps[key] as? [String: Any], "\(key) must be a JSON object")
@@ -189,8 +159,11 @@ final class CapabilityContractTests: XCTestCase {
         XCTAssertNotNil(decoded["version"])
         XCTAssertNotNil(decoded["process_id"])
         XCTAssertNotNil(decoded["status"])
+        // Grouped sections replaced these flat keys.
+        XCTAssertNil(decoded["database_accessible"])
+        XCTAssertNil(decoded["contacts_authorized"])
 
-        // verified_send detail key name (§3.2)
+        // verified_send detail key name
         let verifiedSend = try XCTUnwrap(caps["verified_send"] as? [String: Any])
         XCTAssertEqual(verifiedSend["state"] as? String, "supported")
         XCTAssertEqual(verifiedSend["detail"] as? String, "db_reread")

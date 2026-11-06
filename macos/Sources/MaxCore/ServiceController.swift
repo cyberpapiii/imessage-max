@@ -1,15 +1,16 @@
 import Foundation
+import IMessageMaxContract
 
 public struct ServiceInspection: Sendable {
   public let configuration: ServiceConfiguration
   public let loaded: Bool
   public let processID: Int32?
-  public let diagnosis: Diagnosis?
+  public let diagnosis: DiagnoseResult?
   public let problem: String?
   public let conflict: Bool
 
   public init(
-    configuration: ServiceConfiguration, loaded: Bool, processID: Int32?, diagnosis: Diagnosis?,
+    configuration: ServiceConfiguration, loaded: Bool, processID: Int32?, diagnosis: DiagnoseResult?,
     problem: String?, conflict: Bool
   ) {
     self.configuration = configuration
@@ -23,7 +24,15 @@ public struct ServiceInspection: Sendable {
 
 public enum ServiceAction: Sendable { case start, stop, restart }
 
-public actor ServiceController {
+/// What the companion asks of the service. `ServiceController` is the real
+/// one; design fixtures supply a canned one that never touches launchd.
+public protocol ServiceControlling: Sendable {
+  func inspect() async throws -> ServiceInspection
+  func perform(_ action: ServiceAction) async throws
+  func requestPermission(_ permission: SetupPermission) async throws -> SetupPermissionReply
+}
+
+public actor ServiceController: ServiceControlling {
   private let home: URL
   private let bundledHelper: URL
   private let template: URL
@@ -39,8 +48,7 @@ public actor ServiceController {
   }
 
   public func configuration() throws -> ServiceConfiguration {
-    let path = home.appendingPathComponent(
-      "Library/LaunchAgents/\(ServiceConfiguration.label).plist")
+    let path = home.appendingPathComponent(ServiceDefaults.launchAgentPath)
     let data = FileManager.default.fileExists(atPath: path.path) ? try Data(contentsOf: path) : nil
     return try ServiceConfiguration(data: data, home: home)
   }
@@ -62,7 +70,9 @@ public actor ServiceController {
       // ownership independently so a sick owned server remains repairable.
       let result = try await ProcessRunner.run(
         "/usr/sbin/lsof",
-        arguments: ["-nP", "-iTCP:\(config.endpoint.port ?? 8080)", "-sTCP:LISTEN", "-t"],
+        arguments: [
+          "-nP", "-iTCP:\(config.endpoint.port ?? ServiceDefaults.port)", "-sTCP:LISTEN", "-t",
+        ],
         timeout: 3)
       let listeners = Set(result.output.components(separatedBy: .newlines).compactMap(Int32.init))
       let conflict = Self.hasForeignListener(ownedPID: pid, listeners: listeners)
@@ -101,7 +111,7 @@ public actor ServiceController {
     }
   }
 
-  public func requestPermission(_ permission: PermissionKind) async throws -> SetupPermissionReply {
+  public func requestPermission(_ permission: SetupPermission) async throws -> SetupPermissionReply {
     guard !operating else {
       throw CoreError.commandFailed("A service change is already in progress.")
     }
@@ -112,12 +122,9 @@ public actor ServiceController {
     guard let pid = inspection.processID else {
       throw CoreError.commandFailed("Start iMessage Max before finishing setup.")
     }
-    if permission == .automation
-      && inspection.diagnosis?.capabilities["perm_automation"]?.state == "supported"
-      || permission == .contacts && inspection.diagnosis?.namesReady == true
-    {
+    if inspection.diagnosis?.grants(permission) == true {
       return SetupPermissionReply(
-        permission: permission, authorized: true, status: "authorized", processID: pid)
+        permission: permission, authorized: true, status: .authorized, processID: pid)
     }
     return try await client.requestPermission(
       endpoint: inspection.configuration.endpoint,
@@ -173,5 +180,3 @@ public actor ServiceController {
     listeners.contains { $0 != ownedPID }
   }
 }
-
-public enum PermissionKind: String, Codable, Sendable { case contacts, automation }

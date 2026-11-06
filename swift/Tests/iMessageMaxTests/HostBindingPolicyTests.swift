@@ -34,4 +34,14 @@ final class HostBindingPolicyTests: XCTestCase {
             )
         }
     }
+
+    func testRequestHostsAreLoopbackOrTheBoundHost() {
+        for host in ["localhost", "LOCALHOST", "127.0.0.1", "::1", "[::1]"] {
+            XCTAssertTrue(HostBindingPolicy.isAllowedRequestHost(host, boundHost: "127.0.0.1"), host)
+        }
+        XCTAssertFalse(HostBindingPolicy.isAllowedRequestHost("192.168.1.10", boundHost: "127.0.0.1"))
+        XCTAssertTrue(HostBindingPolicy.isAllowedRequestHost("192.168.1.10", boundHost: "192.168.1.10"))
+        XCTAssertTrue(HostBindingPolicy.isAllowedRequestHost("Example.COM", boundHost: "example.com"))
+        XCTAssertFalse(HostBindingPolicy.isAllowedRequestHost("evil.example", boundHost: "example.com"))
+    }
 }

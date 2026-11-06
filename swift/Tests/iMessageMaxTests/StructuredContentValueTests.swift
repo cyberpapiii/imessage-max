@@ -15,6 +15,13 @@ final class StructuredContentValueTests: XCTestCase {
         XCTAssertEqual(built, decoded, "Mismatch for \(json)", file: file, line: line)
     }
 
+    func testStructuredContentIsOnlyEverAnObject() {
+        XCTAssertNotNil(ToolCallDispatch.structuredContent(from: [.plainText(#"{"a":1}"#)]))
+        XCTAssertNil(ToolCallDispatch.structuredContent(from: [.plainText("[1,2]")]))
+        XCTAssertNil(ToolCallDispatch.structuredContent(from: [.plainText(#""text""#)]))
+        XCTAssertNil(ToolCallDispatch.structuredContent(from: [.plainText("{}"), .plainText("{}")]))
+    }
+
     func testScalarsMatchTheDecoder() throws {
         for json in [
             "{\"v\":null}",
@@ -60,11 +67,11 @@ final class StructuredContentValueTests: XCTestCase {
         )
         try fixture.joinChatMessage(chatId: 10, messageId: 1)
 
-        let result = await ListChatsTool.execute(
+        let result = try await ListChatsTool.execute(
             db: fixture.database(),
             resolver: ContactResolver(seedCache: [:])
         )
-        guard case .success(let response) = result else { return XCTFail("execute failed") }
+        let response = result
         try assertMatchesDecoder(try FormatUtils.encodeJSON(response))
     }
 }

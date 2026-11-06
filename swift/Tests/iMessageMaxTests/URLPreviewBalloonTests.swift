@@ -33,14 +33,6 @@ final class URLPreviewBalloonTests: XCTestCase {
         return fixture
     }
 
-    private func typedstreamBlob(marker: String = "NSString", lengthField: [UInt8], payload: [UInt8]) -> Data {
-        var bytes: [UInt8] = [0x04, 0x0B]
-        bytes += Array(marker.utf8)
-        bytes += [0x01, 0x94, 0x84, 0x01, 0x2B]
-        bytes += lengthField
-        bytes += payload
-        return Data(bytes)
-    }
 
     func testBalloonRowRendersOnceWithURLAsText() async throws {
         let fixture = try makeBalloonFixture()
@@ -73,7 +65,7 @@ final class URLPreviewBalloonTests: XCTestCase {
 
     func testSearchFindsBalloonRowOnce() async throws {
         let fixture = try makeBalloonFixture()
-        let json = try decodeSearchResponse(
+        let json = try decodeJSONDictionary(from:
             await SearchTool.execute(
                 query: "example.com",
                 db: fixture.database(),
@@ -98,7 +90,7 @@ final class URLPreviewBalloonTests: XCTestCase {
 
     func testSearchHasLinkReturnsBalloonRow() async throws {
         let fixture = try makeBalloonFixture()
-        let json = try decodeSearchResponse(
+        let json = try decodeJSONDictionary(from:
             await SearchTool.execute(
                 query: "example",
                 has: "link",
@@ -136,8 +128,7 @@ final class URLPreviewBalloonTests: XCTestCase {
     func testListAttachmentsSkipsHiddenPayload() async throws {
         let fixture = try makeBalloonFixture()
         let tool = ListAttachments(db: fixture.database(), resolver: makeSeededResolver())
-        let result = await tool.execute(chatId: "chat1")
-        let response = try result.get()
+        let response = try await tool.execute(chatId: "chat1")
         XCTAssertEqual(response.messages.count, 0)
     }
 
@@ -166,14 +157,14 @@ final class URLPreviewBalloonTests: XCTestCase {
         XCTAssertNil(balloon["attachments"])
 
         let list = ListAttachments(db: fixture.database(), resolver: makeSeededResolver())
-        let listed = try await list.execute(chatId: "chat1").get()
+        let listed = try await list.execute(chatId: "chat1")
         XCTAssertEqual(listed.messages.count, 1)
         XCTAssertEqual(listed.messages.first?.attachments.first?.id, "att7002")
     }
 
     func testSearchHasAttachmentIgnoresHiddenPayload() async throws {
         let fixture = try makeBalloonFixture()
-        let hidden = try decodeSearchResponse(
+        let hidden = try decodeJSONDictionary(from:
             await SearchTool.execute(
                 query: "example",
                 has: "attachment",
@@ -189,7 +180,7 @@ final class URLPreviewBalloonTests: XCTestCase {
             totalBytes: 12, hideAttachment: false
         )
         try fixture.joinMessageAttachment(messageId: 701, attachmentId: 7002)
-        let visible = try decodeSearchResponse(
+        let visible = try decodeJSONDictionary(from:
             await SearchTool.execute(
                 query: "example",
                 has: "attachment",

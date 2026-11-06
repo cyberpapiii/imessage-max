@@ -1,4 +1,3 @@
-// Sources/iMessageMax/Database/QueryBuilder.swift
 import Foundation
 
 final class QueryBuilder {

@@ -2,8 +2,7 @@ import XCTest
 @testable import iMessageMax
 
 // Tests for SendVerifier, the pure chat.db re-read layer that backs the
-// verified-sends proof vocabulary. All tests use maxAttempts: 1 for speed
-// unless explicitly testing multi-attempt behaviour.
+// verified-sends proof vocabulary. All tests use maxAttempts: 1 for speed.
 
 final class SendVerifierTests: XCTestCase {
 
@@ -40,7 +39,7 @@ final class SendVerifierTests: XCTestCase {
         let result = try await verifier.verify(
             intendedChatId: 1,
             handle: "+15550000001",
-            sendTime: Date(),
+            afterRowId: 0,
             expectedText: "Hello Alice"
         )
 
@@ -51,7 +50,7 @@ final class SendVerifierTests: XCTestCase {
     }
 
     // Row with error = 22 (measured failed-send pattern) → failedDelivery, not confirmed.
-    // This is §3 finding 3: failed iMessage sends write rows with error = 22 immediately.
+    // Failed iMessage sends write their row with error = 22 at once.
     func testErrorRowClassifiesAsFailedDelivery() async throws {
         let fixture = try makeFixture()
         let date = nowNs()
@@ -66,7 +65,7 @@ final class SendVerifierTests: XCTestCase {
         let result = try await verifier.verify(
             intendedChatId: 1,
             handle: "+15550000001",
-            sendTime: Date(),
+            afterRowId: 0,
             expectedText: "Hello Alice"
         )
 
@@ -81,17 +80,16 @@ final class SendVerifierTests: XCTestCase {
         let result = try await verifier.verify(
             intendedChatId: 1,
             handle: "+15550000001",
-            sendTime: Date(),
+            afterRowId: 0,
             expectedText: "Hello Alice"
         )
 
         XCTAssertEqual(result, .notFound)
     }
 
-    // Row older than the look-behind window (> 2s before sendTime) → notFound.
+    // Row at or below the pre-send ROWID baseline → notFound.
     func testOldRowOutsideWindowIsIgnored() async throws {
         let fixture = try makeFixture()
-        // Insert a row 5 seconds before "now", outside the 2s skew window.
         let oldDate = AppleTime.fromDate(Date().addingTimeInterval(-5))
 
         try fixture.insertMessage(
@@ -104,11 +102,11 @@ final class SendVerifierTests: XCTestCase {
         let result = try await verifier.verify(
             intendedChatId: 1,
             handle: nil,
-            sendTime: Date(),   // window lower bound = now - 2s; row is at now - 5s
+            afterRowId: 3,      // baseline read after row 3 was written
             expectedText: "Hello Alice"
         )
 
-        XCTAssertEqual(result, .notFound, "Row older than the 2s skew should be outside the window")
+        XCTAssertEqual(result, .notFound, "A row at or below the baseline predates the send")
     }
 
     func testMismatchWhenRowIsInDifferentChat() async throws {
@@ -125,7 +123,7 @@ final class SendVerifierTests: XCTestCase {
         let result = try await verifier.verify(
             intendedChatId: 1,          // intended: chat 1
             handle: "+15550000001",     // handle is in chat 1 AND chat 2
-            sendTime: Date(),
+            afterRowId: 0,
             expectedText: "Hello Alice"
         )
 
@@ -154,7 +152,7 @@ final class SendVerifierTests: XCTestCase {
         let result = try await verifier.verify(
             intendedChatId: 1,
             handle: nil,
-            sendTime: Date(),
+            afterRowId: 0,
             expectedText: "Hello Alice"
         )
 
@@ -181,7 +179,7 @@ final class SendVerifierTests: XCTestCase {
         let result = try await verifier.verify(
             intendedChatId: 1,
             handle: nil,
-            sendTime: Date(),
+            afterRowId: 0,
             expectedText: "Hello Alice"
         )
 
@@ -190,51 +188,7 @@ final class SendVerifierTests: XCTestCase {
         }
     }
 
-    /// Builds: <prefix junk> + marker + 5 filler bytes + length field + payload.
-    /// Copied from MessageTextExtractorTests (private there).
-    private func typedstreamBlob(marker: String = "NSString", lengthField: [UInt8], payload: [UInt8]) -> Data {
-        var bytes: [UInt8] = [0x04, 0x0B]                 // arbitrary prefix junk
-        bytes += Array(marker.utf8)
-        bytes += [0x01, 0x94, 0x84, 0x01, 0x2B]           // 5 filler bytes (skipped)
-        bytes += lengthField
-        bytes += payload
-        return Data(bytes)
-    }
-
-    // Multi-attempt polling: with a pre-inserted matching row the verifier
-    // confirms within the first attempt and finishes well before maxAttempts
-    // × pollInterval elapses. Proves the polling loop structure is sound.
-    func testMultiAttemptPollingFindsExistingRow() async throws {
-        let fixture = try makeFixture()
-        let date = nowNs()
-
-        try fixture.insertMessage(
-            rowId: 6, guid: "msg-guid-poll", text: "Polling test",
-            date: date, isFromMe: true, error: 0
-        )
-        try fixture.joinChatMessage(chatId: 1, messageId: 6)
-
-        // Use maxAttempts: 3 with a tiny interval; row is already present so
-        // the first attempt finds it.
-        let verifier = SendVerifier(
-            db: fixture.database(),
-            maxAttempts: 3,
-            pollInterval: .milliseconds(50)
-        )
-        let result = try await verifier.verify(
-            intendedChatId: 1,
-            handle: nil,
-            sendTime: Date(),
-            expectedText: "Polling test"
-        )
-
-        guard case .confirmed(let guid, _) = result else {
-            return XCTFail("Expected .confirmed within 3 attempts, got \(result)")
-        }
-        XCTAssertEqual(guid, "msg-guid-poll")
-    }
-
-    // MARK: - Failed-delivery classification (plan 021)
+    // MARK: - Failed-delivery classification
 
     // A failed row AND a clean row both match in the intended chat → confirmed.
     // Covers Messages' own immediate-retry behaviour: a clean row anywhere in the
@@ -259,7 +213,7 @@ final class SendVerifierTests: XCTestCase {
         let result = try await verifier.verify(
             intendedChatId: 1,
             handle: "+15550000001",
-            sendTime: Date(),
+            afterRowId: 0,
             expectedText: "Hello Alice"
         )
 
@@ -271,7 +225,7 @@ final class SendVerifierTests: XCTestCase {
     }
 
     // A failed row in a chat OTHER than the intended one stays invisible → notFound.
-    // Mismatch fires only on clean rows, exactly as before this change.
+    // Mismatch fires only on clean rows.
     func testFailedRowInDifferentChatIsInvisible() async throws {
         let fixture = try makeFixture()
         let date = nowNs()
@@ -287,7 +241,7 @@ final class SendVerifierTests: XCTestCase {
         let result = try await verifier.verify(
             intendedChatId: 1,
             handle: "+15550000001",
-            sendTime: Date(),
+            afterRowId: 0,
             expectedText: "Hello Alice"
         )
 
@@ -310,11 +264,41 @@ final class SendVerifierTests: XCTestCase {
         let result = try await verifier.verify(
             intendedChatId: nil,        // no intended chat → fallback handle scan only
             handle: "+15550000001",
-            sendTime: Date(),
+            afterRowId: 0,
             expectedText: "Hello Alice"
         )
 
         XCTAssertEqual(result, .failedDelivery(guid: "msg-guid-fallback-failed", errorCode: 22),
             "The fallback scan must classify a failed matching row as failedDelivery")
+    }
+
+    /// Two concurrent identical sends share one verifier. Each row confirms
+    /// at most one of them.
+    func testIdenticalSendsCannotConfirmTheSameRow() async throws {
+        let fixture = try makeFixture()
+        let verifier = makeVerifier(fixture: fixture)
+        let baseline = try verifier.baseline()
+        try fixture.insertMessage(rowId: 70, guid: "same-70", text: "Same text", date: nowNs(), isFromMe: true)
+        try fixture.joinChatMessage(chatId: 1, messageId: 70)
+
+        let first = try await verifier.verify(intendedChatId: 1, handle: nil, afterRowId: baseline, expectedText: "Same text")
+        let second = try await verifier.verify(intendedChatId: 1, handle: nil, afterRowId: baseline, expectedText: "Same text")
+        guard case .confirmed(let firstGuid, _) = first else { return XCTFail("expected confirmed, got \(first)") }
+        XCTAssertEqual(firstGuid, "same-70")
+        XCTAssertEqual(second, .notFound, "the row is already claimed by the first send")
+
+        try fixture.insertMessage(rowId: 71, guid: "same-71", text: "Same text", date: nowNs(), isFromMe: true)
+        try fixture.joinChatMessage(chatId: 1, messageId: 71)
+        let third = try await verifier.verify(intendedChatId: 1, handle: nil, afterRowId: baseline, expectedText: "Same text")
+        guard case .confirmed(let thirdGuid, _) = third else { return XCTFail("expected confirmed, got \(third)") }
+        XCTAssertEqual(thirdGuid, "same-71", "the second send confirms its own row")
+    }
+
+    func testBaselineIsTheNewestMessageRowId() throws {
+        let fixture = try makeFixture()
+        let verifier = makeVerifier(fixture: fixture)
+        XCTAssertEqual(try verifier.baseline(), 0)
+        try fixture.insertMessage(rowId: 42, guid: "x", text: "x", date: nowNs(), isFromMe: true)
+        XCTAssertEqual(try verifier.baseline(), 42)
     }
 }

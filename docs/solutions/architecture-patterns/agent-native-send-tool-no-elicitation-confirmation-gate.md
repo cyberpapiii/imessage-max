@@ -19,7 +19,7 @@ applies_when:
 root_cause: missing_validation
 resolution_type: code_fix
 related_components:
-  - swift/Sources/iMessageMax/Tools/Send.swift
+  - swift/Sources/iMessageMax/Send/SendTool.swift
   - swift/Sources/iMessageMax/Server/HTTPTransport.swift
   - swift/Sources/iMessageMax/Server/SSEConnection.swift
   - swift/Sources/iMessageMax/Server/SessionManager.swift
@@ -102,7 +102,7 @@ Companion rule for the runtime layer: no `Task.sleep` anywhere in the launchd se
 runtime. Sleeping unstructured Swift tasks abort in `swift_task_dealloc` at wakeup in
 this runtime. Use Dispatch timers instead. `AsyncTimeout.sleep` is a
 `CheckedContinuation` resumed by `DispatchQueue.asyncAfter`, and
-`HTTPTransport.storePendingRequest` shows the `DispatchWorkItem` pattern.
+`PendingRequestRegistry.store` shows the `DispatchWorkItem` pattern.
 
 ## Why this matters
 
@@ -134,10 +134,10 @@ this runtime. Use Dispatch timers instead. `AsyncTimeout.sleep` is a
   booleans as gates.
 - Any timer or sleep inside the launchd service. Dispatch primitives only. Search the
   repo's own comments before adding concurrency primitives. The 014 crash violated a
-  constraint already written down in `HTTPTransport.storePendingRequest`.
+  constraint already written down in `PendingRequestRegistry.store`.
 - Reintroducing any send gate requires operator sign-off and session-level proof of a
   working elicitation round trip, per the `AGENTS.md` send contract and the
-  `Send.swift` policy comment. The bar: it must add safety an agent-set boolean cannot
+  `Send/SendTool.swift` policy comment. The bar: it must add safety an agent-set boolean cannot
   defeat, and it must never block on an interactive channel.
 
 ## Examples

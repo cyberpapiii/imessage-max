@@ -1,19 +1,25 @@
-// Sources/iMessageMax/Database/AppleTime.swift
 import Foundation
 
+/// Lengths the relative-time parser and formatter agree on.
+enum Seconds {
+    static let minute: Double = 60
+    static let hour: Double = 3600
+    static let day: Double = 86_400
+    static let week: Double = 604_800
+    /// "m" in a relative bound means about a month.
+    static let month: Double = 30 * day
+}
+
+/// chat.db stores times as nanoseconds since 2001-01-01 UTC.
 enum AppleTime {
-    /// Apple epoch: January 1, 2001 00:00:00 UTC
     private static let epoch = Date(timeIntervalSinceReferenceDate: 0)
 
-    /// Convert Apple nanoseconds timestamp to Date
     static func toDate(_ nanoseconds: Int64?) -> Date? {
         guard let ns = nanoseconds else { return nil }
         let seconds = Double(ns) / 1_000_000_000.0
         return epoch.addingTimeInterval(seconds)
     }
 
-    /// Convert Date to Apple nanoseconds timestamp.
-    ///
     /// Saturates at the Int64 range instead of trapping: `Int64(Double)` crashes
     /// on values outside ±9.2e18, which a relative bound like "999999999h" or an
     /// ISO year 9999 reaches easily. A trap here takes down the launchd service.
@@ -25,19 +31,16 @@ enum AppleTime {
         return Int64(nanoseconds)
     }
 
-    /// Parse various time formats to Apple timestamp
     static func parse(_ input: String) -> Int64? {
-        // Try relative formats first: "24h", "7d", "2w"
+        // Relative first: "24h", "7d", "2w"
         if let relative = parseRelative(input) {
             return fromDate(relative)
         }
 
-        // Try ISO 8601
         if let iso = parseISO(input) {
             return fromDate(iso)
         }
 
-        // Try natural language: "yesterday", "last week"
         if let natural = parseNatural(input) {
             return fromDate(natural)
         }
@@ -58,28 +61,34 @@ enum AppleTime {
         let unit = String(input[unitRange])
         let seconds: Double
         switch unit {
-        case "h": seconds = num * 3600
-        case "d": seconds = num * 86400
-        case "w": seconds = num * 604800
-        case "m": seconds = num * 2592000  // ~30 days
+        case "h": seconds = num * Seconds.hour
+        case "d": seconds = num * Seconds.day
+        case "w": seconds = num * Seconds.week
+        case "m": seconds = num * Seconds.month
         default: return nil
         }
 
         // Cap relative bounds at 100 years so the caller gets "everything"
         // rather than an overflowing Date arithmetic result.
-        let maxRelativeSeconds: Double = 100 * 365 * 86400
+        let maxRelativeSeconds: Double = 100 * 365 * Seconds.day
         let bounded = min(seconds, maxRelativeSeconds)
         return Date().addingTimeInterval(-bounded)
     }
 
+    // ISO8601DateFormatter is thread-safe once configured.
+    nonisolated(unsafe) private static let isoWithFraction: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+    nonisolated(unsafe) private static let isoWhole: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return f
+    }()
+
     private static func parseISO(_ input: String) -> Date? {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = formatter.date(from: input) {
-            return date
-        }
-        formatter.formatOptions = [.withInternetDateTime]
-        return formatter.date(from: input)
+        isoWithFraction.date(from: input) ?? isoWhole.date(from: input)
     }
 
     private static func parseNatural(_ input: String) -> Date? {
@@ -88,13 +97,11 @@ enum AppleTime {
         let now = Date()
 
         switch lower {
-        // Simple keywords
         case "yesterday":
-            return calendar.date(byAdding: .day, value: -1, to: now)
+            return calendar.date(byAdding: .day, value: -1, to: calendar.startOfDay(for: now))
         case "today":
             return calendar.startOfDay(for: now)
 
-        // This period
         case "this week":
             return calendar.date(from: calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: now))
         case "this month":
@@ -102,7 +109,6 @@ enum AppleTime {
         case "this year":
             return calendar.date(from: calendar.dateComponents([.year], from: now))
 
-        // Last period
         case "last week":
             return calendar.date(byAdding: .weekOfYear, value: -1, to: now)
         case "last month":

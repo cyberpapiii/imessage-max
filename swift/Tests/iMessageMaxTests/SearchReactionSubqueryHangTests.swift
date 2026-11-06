@@ -2,40 +2,13 @@ import XCTest
 @testable import iMessageMax
 
 final class SearchReactionSubqueryHangTests: XCTestCase {
-    func testSearchAndContextSQLHaveNoCorrelatedInstrOrSubstrSubquery() {
-        let (searchSQL, _) = SearchTool.buildQuery(
-            query: "lisbon",
-            fromPerson: nil,
-            inChat: nil,
-            isGroup: nil,
-            has: nil,
-            since: nil,
-            before: nil,
-            cursor: nil,
-            limit: 10,
-            sort: .recentFirst,
-            unanswered: false,
-            terms: ["lisbon"]
-        )
-        XCTAssertFalse(
-            containsCorrelatedInstrOrSubstr(searchSQL),
-            "search SQL still has a correlated instr/substr subquery: \(searchSQL)"
-        )
-
-        let contextSQL = SearchTool.contextSelectColumns(.assumed)
-        XCTAssertFalse(
-            containsCorrelatedInstrOrSubstr(contextSQL),
-            "context SQL still has a correlated instr/substr subquery: \(contextSQL)"
-        )
-    }
-
     func testSearchAndContextFinishOnThousandsOfAttributedBodyRowsWithReactions() async throws {
         let fixture = try makeHangFixture(fillerCount: 2500)
         let db = fixture.database()
         let resolver = makeSeededResolver()
 
         let searchStart = ContinuousClock.now
-        let search = try await decodeSearchResponse(
+        let search = try await decodeJSONDictionary(from:
             SearchTool.execute(
                 query: "lisbon",
                 db: db,
@@ -49,7 +22,7 @@ final class SearchReactionSubqueryHangTests: XCTestCase {
         XCTAssertEqual(results.first?["reactions"] as? [String], ["❤️ Alice Smith"])
 
         let contextStart = ContinuousClock.now
-        let context = await GetContext.execute(
+        let context = try await GetContext.execute(
             messageId: "msg_1",
             before: 5,
             after: 5,
@@ -58,60 +31,14 @@ final class SearchReactionSubqueryHangTests: XCTestCase {
         )
         let contextElapsed = ContinuousClock.now - contextStart
         XCTAssertLessThan(contextElapsed, .seconds(2), "get_context took \(contextElapsed)")
-        switch context {
-        case .success(let response):
-            XCTAssertEqual(response.message.id, "msg_1")
-        case .failure(let error):
-            XCTFail("get_context failed: \(error)")
-        }
-    }
-
-    func testSearchFindsAttributedBodyMatchOlderThanFiveHundredAttributedBodyOnlyRows() async throws {
-        let fixture = try makeHangFixture(fillerCount: 600)
-        let search = try await decodeSearchResponse(
-            SearchTool.execute(
-                query: "lisbon",
-                db: fixture.database(),
-                resolver: makeSeededResolver()
-            )
-        )
-        let results = try decodeJSONArray(try XCTUnwrap(search["results"]))
-        XCTAssertEqual(results.compactMap { $0["id"] as? String }, ["msg_1"])
-    }
-
-    private func containsCorrelatedInstrOrSubstr(_ sql: String) -> Bool {
-        var search = sql[...]
-        while let exists = search.range(of: "EXISTS", options: .caseInsensitive) {
-            var cursor = exists.upperBound
-            while cursor < search.endIndex, search[cursor].isWhitespace {
-                cursor = search.index(after: cursor)
-            }
-            guard cursor < search.endIndex, search[cursor] == "(" else {
-                search = search[exists.upperBound...]
-                continue
-            }
-            var depth = 0
-            var end = cursor
-            while end < search.endIndex {
-                if search[end] == "(" { depth += 1 }
-                if search[end] == ")" {
-                    depth -= 1
-                    if depth == 0 { break }
-                }
-                end = search.index(after: end)
-            }
-            let block = search[cursor...end].lowercased()
-            if block.contains("instr(") || block.contains("substr(") {
-                return true
-            }
-            search = search[search.index(after: end)...]
-        }
-        return false
+        let response = context
+        XCTAssertEqual(response.message.id, "msg_1")
     }
 
     /// One old attributedBody match plus `fillerCount` newer attributedBody-only
-    /// rows that do not contain the term. Half the fillers also have a reaction
-    /// so the old correlated subquery would full-scan on every candidate.
+    /// rows that do not contain the term. Half the fillers also have a
+    /// reaction, so a correlated reaction subquery would full-scan on every
+    /// candidate.
     private func makeHangFixture(fillerCount: Int) throws -> ToolTestDatabase {
         let fixture = try ToolTestDatabase(name: "search-hang-\(fillerCount)")
         try fixture.insertHandle(rowId: 1, handle: "+15550000001")
@@ -168,11 +95,3 @@ final class SearchReactionSubqueryHangTests: XCTestCase {
     }
 }
 
-private func typedstreamBlob(marker: String = "NSString", lengthField: [UInt8], payload: [UInt8]) -> Data {
-    var bytes: [UInt8] = [0x04, 0x0B]
-    bytes += Array(marker.utf8)
-    bytes += [0x01, 0x94, 0x84, 0x01, 0x2B]
-    bytes += lengthField
-    bytes += payload
-    return Data(bytes)
-}

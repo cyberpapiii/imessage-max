@@ -4,14 +4,13 @@ import Foundation
 /// A face is one row of numbers on the bubble's 24-unit grid. Every pose has
 /// the same parts, so any face reaches any other without swapping drawings.
 /// At rest the bubble is plain. When it is busy it shows the product's own
-/// typing dots, which are parked at zero size until then. The sparkle part is
-/// kept for poses that want one; none of the current poses do.
+/// typing dots, which are parked at zero size until then.
 public struct MaxPose: Equatable, Sendable {
   public enum Part: Int, CaseIterable, Sendable {
     case lean, lift, stretchX, stretchY
     case leftX, leftY, leftWidth, leftHeight
     case rightX, rightY, rightWidth, rightHeight
-    case middle, middleLift, arch, badge, dim, spark, spin, blink
+    case middle, middleLift, badge, dim
   }
 
   public var values: [CGFloat]
@@ -24,8 +23,8 @@ public struct MaxPose: Equatable, Sendable {
   public init(
     left: (x: CGFloat, y: CGFloat, width: CGFloat, height: CGFloat),
     right: (x: CGFloat, y: CGFloat, width: CGFloat, height: CGFloat),
-    lean: CGFloat = 0, lift: CGFloat = 0, middle: CGFloat = 0, arch: CGFloat = 0,
-    badge: CGFloat = 0, dim: CGFloat = 0, spark: CGFloat = 0, spin: CGFloat = 0
+    lean: CGFloat = 0, lift: CGFloat = 0, middle: CGFloat = 0, badge: CGFloat = 0,
+    dim: CGFloat = 0
   ) {
     values = Array(repeating: 0, count: Part.allCases.count)
     self[.lean] = lean
@@ -41,11 +40,8 @@ public struct MaxPose: Equatable, Sendable {
     self[.rightWidth] = right.width
     self[.rightHeight] = right.height
     self[.middle] = middle
-    self[.arch] = arch
     self[.badge] = badge
     self[.dim] = dim
-    self[.spark] = spark
-    self[.spin] = spin
   }
 
   private static let none: (x: CGFloat, y: CGFloat, width: CGFloat, height: CGFloat) = (12, 11, 0, 0)
@@ -63,10 +59,48 @@ public struct MaxPose: Equatable, Sendable {
   /// A dash; the bubble droops and dims: turned off.
   public static let asleep = MaxPose(
     left: (12, 11.8, 5.2, 1.0), right: (12, 11.8, 0, 0), lean: 4, lift: 0.4, dim: 1)
-  /// Used only for rare good news; the panel adds its own burst around it.
-  public static let happy = MaxPose(left: none, right: none, lean: -3)
   /// A deeper lean in answer to a click.
   public static let wink = MaxPose(left: none, right: none, lean: -8)
+}
+
+/// The service's state as the companion wears it. Every mood-to-face choice,
+/// in the panel and in the menu bar, is made here.
+public enum CompanionMood: Hashable, CaseIterable, Sendable {
+  case ready, needsYou, working, resting, trouble
+
+  public var pose: MaxPose {
+    switch self {
+    case .ready: .rest
+    case .needsYou: .needsYou
+    case .working: .working
+    case .resting: .asleep
+    case .trouble: .trouble
+    }
+  }
+
+  /// The menu bar's version: upright and with heavier marks, because 20
+  /// points leaves no room for nuance. Trouble gains a badge so it reads
+  /// without colour.
+  public var menuBarPose: MaxPose {
+    var pose = pose
+    pose[.lean] = 0
+    pose[.lift] = 0
+    switch self {
+    case .working, .trouble:
+      for part in [MaxPose.Part.leftWidth, .rightWidth, .middle] { pose[part] *= 1.25 }
+      for part in [MaxPose.Part.leftHeight, .rightHeight] { pose[part] *= 1.2 }
+      if self == .trouble { pose[.badge] = 1 }
+    case .resting:
+      pose[.leftHeight] = 1.6
+    case .ready, .needsYou:
+      break
+    }
+    return pose
+  }
+
+  /// In the menu bar, working and resting are outlines; the others are solid
+  /// with their marks cut out.
+  public var menuBarOutlined: Bool { self == .working || self == .resting }
 }
 
 public enum MaxFace {
@@ -106,13 +140,10 @@ public enum MaxFace {
   public static func eyes(_ pose: MaxPose, in rect: CGRect) -> CGPath {
     let path = CGMutablePath()
     path.addPath(
-      eye(
-        x: pose[.leftX], y: pose[.leftY], width: pose[.leftWidth], height: pose[.leftHeight],
-        arch: pose[.arch]))
+      eye(x: pose[.leftX], y: pose[.leftY], width: pose[.leftWidth], height: pose[.leftHeight]))
     path.addPath(
       eye(
-        x: pose[.rightX], y: pose[.rightY], width: pose[.rightWidth], height: pose[.rightHeight],
-        arch: pose[.arch]))
+        x: pose[.rightX], y: pose[.rightY], width: pose[.rightWidth], height: pose[.rightHeight]))
     if pose[.middle] > 0.05 {
       let centre = CGPoint(
         x: (pose[.leftX] + pose[.rightX]) / 2,
@@ -121,44 +152,6 @@ public enum MaxFace {
     }
     var matrix = transform(pose, in: rect)
     return path.copy(using: &matrix) ?? path
-  }
-
-  /// Bubble, sparkle, and dots as one even-odd path: the marks are holes,
-  /// so they take the colour of whatever is behind the bubble.
-  public static func path(_ pose: MaxPose, in rect: CGRect) -> CGPath {
-    let path = CGMutablePath()
-    path.addPath(silhouette(pose, in: rect))
-    path.addPath(eyes(pose, in: rect))
-    path.addPath(sparkle(pose, in: rect))
-    return path
-  }
-
-  /// The sparkle at the bubble's centre. A blink flattens it; `spin` turns it.
-  public static func sparkle(_ pose: MaxPose, in rect: CGRect) -> CGPath {
-    guard pose[.spark] > 0.02 else { return CGMutablePath() }
-    let shape = star(.zero, 5.6 * pose[.spark])
-    var place = CGAffineTransform(rotationAngle: pose[.spin] * .pi / 180)
-      .concatenating(CGAffineTransform(scaleX: 1, y: max(1 - 0.88 * pose[.blink], 0.05)))
-      .concatenating(CGAffineTransform(translationX: 12, y: 11))
-      .concatenating(transform(pose, in: rect))
-    return shape.copy(using: &place) ?? shape
-  }
-
-  private static func star(_ centre: CGPoint, _ radius: CGFloat) -> CGPath {
-    let path = CGMutablePath()
-    let pinch = radius * 0.14
-    let points: [(CGFloat, CGFloat)] = [(0, -1), (1, 0), (0, 1), (-1, 0)]
-    path.move(to: CGPoint(x: centre.x, y: centre.y - radius))
-    for index in 1...4 {
-      let (fromX, fromY) = points[index - 1]
-      let (toX, toY) = points[index % 4]
-      path.addQuadCurve(
-        to: CGPoint(x: centre.x + toX * radius, y: centre.y + toY * radius),
-        control: CGPoint(
-          x: centre.x + (fromX + toX) * pinch, y: centre.y + (fromY + toY) * pinch))
-    }
-    path.closeSubpath()
-    return path
   }
 
   public static func badge(_ pose: MaxPose, in rect: CGRect) -> CGPath? {
@@ -174,17 +167,11 @@ public enum MaxFace {
       transform: nil)
   }
 
-  private static func eye(x: CGFloat, y: CGFloat, width: CGFloat, height: CGFloat, arch: CGFloat)
-    -> CGPath
-  {
+  private static func eye(x: CGFloat, y: CGFloat, width: CGFloat, height: CGFloat) -> CGPath {
     guard width > 0.05, height > 0.05 else { return CGMutablePath() }
     let corner = min(width, height) * 0.499
-    let pill = CGPath(
+    return CGPath(
       roundedRect: CGRect(x: x - width / 2, y: y - height / 2, width: width, height: height),
       cornerWidth: corner, cornerHeight: corner, transform: nil)
-    guard arch > 0.02 else { return pill }
-    let cheek = width * 0.95
-    return pill.subtracting(
-      circle(CGPoint(x: x, y: y + height / 2 + cheek - arch * height * 0.62), cheek))
   }
 }

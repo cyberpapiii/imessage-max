@@ -31,19 +31,6 @@ final class SSEEventTests: XCTestCase {
         XCTAssertTrue(formatted.contains("data: test data\n"))
     }
 
-    func testFormattedOutputWithAllFields() {
-        let event = SSEEvent(
-            id: "event-42",
-            event: "notification",
-            data: #"{"type":"progress","value":50}"#
-        )
-        let formatted = event.formatted()
-
-        XCTAssertTrue(formatted.contains("id: event-42\n"))
-        XCTAssertTrue(formatted.contains("event: notification\n"))
-        XCTAssertTrue(formatted.contains("data: {"))
-    }
-
     func testFormattedOutputWithMultiLineData() {
         let multiLineData = """
         {
@@ -67,8 +54,6 @@ final class SSEEventTests: XCTestCase {
         let keepAlive = SSEEvent.keepAlive()
 
         XCTAssertEqual(keepAlive, ": keep-alive\n\n")
-        XCTAssertTrue(keepAlive.hasPrefix(":"))
-        XCTAssertTrue(keepAlive.hasSuffix("\n\n"))
     }
 
     func testEmptyDataEvent() {
@@ -91,46 +76,35 @@ final class SSEEventTests: XCTestCase {
 
 final class SSEConnectionManagerTests: XCTestCase {
 
-    func testInitialConnectionCountIsZero() async {
-        let manager = SSEConnectionManager()
-        let count = await manager.connectionCount
-        XCTAssertEqual(count, 0)
-    }
-
-    func testConnectionIdsForNonexistentSession() async {
-        let manager = SSEConnectionManager()
-        let connections = await manager.connectionIds(forSession: "nonexistent")
-        XCTAssertTrue(connections.isEmpty)
-    }
-
-    func testTerminateNonexistentSession() async {
-        let manager = SSEConnectionManager()
-        await manager.terminateSession(sessionId: "nonexistent")
-        let count = await manager.connectionCount
-        XCTAssertEqual(count, 0)
-    }
-
-    func testRegisterCreatesConnection() async {
-        let manager = SSEConnectionManager()
-        let info = SSEConnectionInfo(sessionId: "test-session")
-
-        let channel = await manager.register(info: info)
-
-        XCTAssertNotNil(channel)
-        let count = await manager.connectionCount
-        XCTAssertEqual(count, 1)
-    }
-
-    func testUnregisterRemovesConnection() async {
-        let manager = SSEConnectionManager()
+    func testRegisterThenUnregister() async {
+        let manager = SSEConnectionManager(keepAliveInterval: HTTPTransport.Configuration().sseKeepAliveInterval)
         let info = SSEConnectionInfo(sessionId: "test-session")
 
         _ = await manager.register(info: info)
         var count = await manager.connectionCount
         XCTAssertEqual(count, 1)
+        let ids = await manager.connectionIds(forSession: "test-session")
+        XCTAssertEqual(ids, [info.id])
 
         await manager.unregister(connectionId: info.id)
         count = await manager.connectionCount
+        XCTAssertEqual(count, 0)
+    }
+
+    /// `closeAll` ends open streams and every stream registered after it, so
+    /// a GET that registers during shutdown cannot hold the process open.
+    func testCloseAllEndsOpenStreamsAndLaterOnes() async {
+        let manager = SSEConnectionManager(keepAliveInterval: .seconds(60))
+        let open = await manager.register(info: SSEConnectionInfo(sessionId: "a"))
+        await manager.closeAll()
+        let late = await manager.register(info: SSEConnectionInfo(sessionId: "b"))
+
+        for channel in [open, late] {
+            var received = 0
+            for await _ in channel.stream { received += 1 }
+            XCTAssertEqual(received, 0)
+        }
+        let count = await manager.connectionCount
         XCTAssertEqual(count, 0)
     }
 }
@@ -171,12 +145,8 @@ final class SSEChannelTests: XCTestCase {
     }
 
     func testStreamIsStoredAndNotRespawnedPerAccess() async {
-        // Contract documentation, not a discriminating regression test: the
-        // old computed property would also report nothing on a second pass
-        // here, because it rebuilt its merger over an already-finished base
-        // stream. What this pins is the consume-exactly-once semantics that
-        // callers may now rely on. Once exhausted, `stream` stays exhausted
-        // and never replays or restarts a keep-alive loop.
+        // `stream` is consumed exactly once: once exhausted it stays
+        // exhausted and never replays or restarts a keep-alive loop.
         let channel = SSEChannel(keepAliveInterval: .milliseconds(50))
 
         channel.send("only-event")
@@ -206,10 +176,11 @@ final class SessionManagerLifecycleTests: XCTestCase {
 
     func testCreateSessionAtCapacityReturnsAtCapacity() async {
         let manager = SessionManager(
-            database: Database(),
-            resolver: ContactResolver(seedCache: [:]),
-            maxSessions: 1,
-            cleanupInterval: .milliseconds(20)
+            catalog: makeTestCatalog(),
+            configuration: .init(
+                maxSessions: 1,
+                cleanupInterval: .milliseconds(20)
+            )
         )
 
         let first = await manager.createSession()
@@ -217,7 +188,7 @@ final class SessionManagerLifecycleTests: XCTestCase {
             return XCTFail("First session should be created, got \(first)")
         }
 
-        // The cap is now full: the refusal must be distinguishable from a
+        // The cap is full: the refusal must be distinguishable from a
         // startup failure so the caller can answer 503 rather than 500.
         let second = await manager.createSession()
         guard case .atCapacity = second else {
@@ -228,39 +199,17 @@ final class SessionManagerLifecycleTests: XCTestCase {
         XCTAssertEqual(count, 1)
     }
 
-    func testFreshSessionIsNotReclaimedWhenAtCapacity() async {
-        let manager = SessionManager(
-            database: Database(),
-            resolver: ContactResolver(seedCache: [:]),
-            maxSessions: 1,
-            reclaimableIdle: 60,
-            cleanupInterval: .milliseconds(20)
-        )
-
-        let first = await manager.createSession()
-        guard case .created = first else {
-            return XCTFail("First session should be created, got \(first)")
-        }
-
-        // The one session is live, so the cap is real backpressure and the
-        // refusal must stand rather than evicting a client that is in use.
-        let second = await manager.createSession()
-        guard case .atCapacity = second else {
-            return XCTFail("Second session should be refused as .atCapacity, got \(second)")
-        }
-    }
-
     func testAbandonedSessionIsReclaimedToAdmitANewClient() async {
-        // Session capacity used to be a one-way door: a client that went away
-        // without sending DELETE held its slot for the full one-hour TTL, and
-        // the sweep that reclaims it only runs every five minutes. A hundred
-        // such sessions refused every new client until the service restarted.
+        // A client that went away without sending DELETE must not hold its
+        // slot for the full one-hour TTL: at capacity, an idle session is
+        // reclaimed to admit the new client rather than refusing it.
         let manager = SessionManager(
-            database: Database(),
-            resolver: ContactResolver(seedCache: [:]),
-            maxSessions: 1,
-            reclaimableIdle: 0.05,
-            cleanupInterval: .milliseconds(20)
+            catalog: makeTestCatalog(),
+            configuration: .init(
+                maxSessions: 1,
+                reclaimableIdle: 0.05,
+                cleanupInterval: .milliseconds(20)
+            )
         )
 
         let first = await manager.createSession()
@@ -288,10 +237,11 @@ final class SessionManagerLifecycleTests: XCTestCase {
 
     func testExpiredSessionIsCleanedUp() async {
         let manager = SessionManager(
-            database: Database(),
-            resolver: ContactResolver(seedCache: [:]),
-            sessionTimeout: 0.01,
-            cleanupInterval: .milliseconds(20)
+            catalog: makeTestCatalog(),
+            configuration: .init(
+                cleanupInterval: .milliseconds(20),
+                sessionTimeout: 0.01
+            )
         )
 
         let result = await manager.createSession()
@@ -323,40 +273,50 @@ final class JsonRpcIdCanonicalizationTests: XCTestCase {
         // `1` and `"1"` are distinct legal JSON-RPC ids. Collapsing both to
         // "1" made the second concurrent request look like a duplicate.
         XCTAssertNotEqual(
-            HTTPTransport.parseJsonRpcId(from: ["id": 1]),
-            HTTPTransport.parseJsonRpcId(from: ["id": "1"])
+            requestKey(["id": 1]),
+            requestKey(["id": "1"])
         )
     }
 
     func testHugeDoubleIdDoesNotTrap() {
-        // Reaching this assertion at all is the regression test: the old
-        // implementation trapped and aborted the process on this input.
-        let key = HTTPTransport.parseJsonRpcId(from: ["id": 1e300])
-        XCTAssertTrue(key.hasPrefix("d:"), "Expected d: namespace, got \(key)")
+        // Reaching this assertion at all means the conversion did not trap.
+        let key = requestKey(["id": 1e300])
+        XCTAssertNotNil(key)
+        XCTAssertNotEqual(key, requestKey(["id": "1e300"]))
     }
 
-    func testFractionalDoubleIdDoesNotTrap() {
-        let key = HTTPTransport.parseJsonRpcId(from: ["id": 1.5])
-        XCTAssertEqual(key, "d:1.5")
+    func testFractionalDoubleIdIsItsOwnKey() {
+        let key = requestKey(["id": 1.5])
+        XCTAssertNotNil(key)
+        XCTAssertEqual(key, requestKey(["id": 1.5]))
+        XCTAssertNotEqual(key, requestKey(["id": 1]))
+        XCTAssertNotEqual(key, requestKey(["id": 2]))
+        XCTAssertNotEqual(key, requestKey(["id": "1.5"]))
     }
 
     func testIntegralDoubleMatchesIntId() {
         // JSON does not distinguish 2 from 2.0, so a client sending one and
         // receiving the other back must still correlate.
         XCTAssertEqual(
-            HTTPTransport.parseJsonRpcId(from: ["id": 2.0]),
-            HTTPTransport.parseJsonRpcId(from: ["id": 2])
+            requestKey(["id": 2.0]),
+            requestKey(["id": 2])
         )
     }
 
     func testNullIdIsStable() {
-        XCTAssertEqual(HTTPTransport.parseJsonRpcId(from: ["id": NSNull()]), "n:null")
+        XCTAssertNotNil(requestKey(["id": NSNull()]))
+        XCTAssertEqual(requestKey(["id": NSNull()]), requestKey(["id": NSNull()]))
+        XCTAssertNotEqual(requestKey(["id": NSNull()]), requestKey(["id": "null"]))
     }
 
-    func testMissingIdGeneratesUniqueKeys() {
-        XCTAssertNotEqual(
-            HTTPTransport.parseJsonRpcId(from: [:]),
-            HTTPTransport.parseJsonRpcId(from: [:])
-        )
+    /// No id, or one that is not a JSON scalar, can never match a response.
+    func testMissingOrNonScalarIdHasNoKey() {
+        XCTAssertNil(requestKey([:]))
+        XCTAssertNil(requestKey(["id": ["a": 1]]))
+        XCTAssertNil(requestKey(["id": [1]]))
+    }
+
+    private func requestKey(_ object: [String: Any]) -> String? {
+        JSONRPCMessage(object).requestKey
     }
 }

@@ -16,6 +16,7 @@ let package = Package(
         // Already resolved through Hummingbird; named here because the HTTP
         // transport builds its own ServiceGroup for graceful shutdown.
         .package(url: "https://github.com/swift-server/swift-service-lifecycle.git", from: "2.12.0"),
+        .package(path: "../contract"),
     ],
     targets: [
         .executableTarget(
@@ -26,6 +27,7 @@ let package = Package(
                 .product(name: "Hummingbird", package: "hummingbird"),
                 .product(name: "ServiceLifecycle", package: "swift-service-lifecycle"),
                 .product(name: "UnixSignals", package: "swift-service-lifecycle"),
+                .product(name: "IMessageMaxContract", package: "contract"),
             ],
             path: "Sources/iMessageMax"
         ),
@@ -33,6 +35,7 @@ let package = Package(
             name: "iMessageMaxTests",
             dependencies: [
                 "iMessageMax",
+                .product(name: "IMessageMaxContract", package: "contract"),
                 .product(name: "Hummingbird", package: "hummingbird"),
                 .product(name: "HummingbirdTesting", package: "hummingbird"),
             ],

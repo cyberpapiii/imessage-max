@@ -84,31 +84,38 @@ final class MessageWatcherTests: XCTestCase {
         defer { watcher.stop() }
 
         let walPath = fixture.path + "-wal"
-        let before = watcher.watchedIdentitiesForTesting()[walPath]
+        let walInode = { (try? FileManager.default.attributesOfItem(atPath: walPath)[.systemFileNumber]) as? Int }
+        try fixture.insertMessage(rowId: 6, guid: "w-6", text: "before", date: 1, isFromMe: false, handleId: 1)
+        let before = try XCTUnwrap(walInode())
+        let seeded = await waitUntil { collected.withLock { $0.contains(6) } }
+        XCTAssertTrue(seeded, "watcher did not observe ROWID 6")
+        // Leaving WAL mode needs the watcher's reads out of the way.
+        try fixture.execute("PRAGMA busy_timeout=2000;")
 
-        try fixture.execute("PRAGMA wal_checkpoint(TRUNCATE);")
-        let aside = fixture.path + "-wal.aside"
-        do {
-            if FileManager.default.fileExists(atPath: walPath) {
-                try FileManager.default.moveItem(atPath: walPath, toPath: aside)
-            }
-            try fixture.insertMessage(rowId: 7, guid: "w-7", text: "after", date: 2, isFromMe: false, handleId: 1)
-        } catch {
-            throw XCTSkip("SQLite refused the -wal rename or follow-up insert: \(error)")
-        }
-        defer { try? FileManager.default.removeItem(atPath: aside) }
+        // Leaving WAL mode checkpoints and deletes -wal; the next write in WAL
+        // mode creates a new one. Messages.app rotates it the same way when
+        // its last connection closes. (Renaming -wal under an open
+        // connection is a disk I/O error in SQLite, which made this skip.)
+        try fixture.execute("PRAGMA journal_mode=DELETE;")
+        XCTAssertNil(walInode(), "-wal should be gone outside WAL mode")
+        try fixture.execute("PRAGMA journal_mode=WAL;")
+        try fixture.insertMessage(rowId: 7, guid: "w-7", text: "after", date: 2, isFromMe: false, handleId: 1)
+        XCTAssertNotEqual(try XCTUnwrap(walInode()), before, "-wal should be a new file")
 
-        watcher.pollNowForTesting()
-        let after = watcher.watchedIdentitiesForTesting()[walPath]
-        if before != nil {
-            XCTAssertNotEqual(before, after, "expected -wal identity to change after rotation")
-        }
-        XCTAssertTrue(collected.withLock { $0.contains(7) }, "insert after rotation was not reported")
+        // The fallback poll is 30 s out, so only file events can report these.
+        let reported = await waitUntil { collected.withLock { $0.contains(7) } }
+        XCTAssertTrue(reported, "insert after rotation was not reported")
+
+        // The new -wal already exists, so this write raises no directory
+        // event: only a source registered on the new file sees it.
+        try fixture.insertMessage(rowId: 8, guid: "w-8", text: "later", date: 3, isFromMe: false, handleId: 1)
+        let followed = await waitUntil { collected.withLock { $0.contains(8) } }
+        XCTAssertTrue(followed, "watcher did not follow the rotated -wal")
     }
 
     /// chat.db unreadable at startup must not switch live notifications off
-    /// for the life of the process. At f005283 start() threw, the caller
-    /// logged it, and nothing ever tried again.
+    /// for the life of the process: the watcher keeps trying until it can
+    /// read the database.
     func testStartsWatchingOnceTheDatabaseBecomesReadable() async throws {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("watcher-late-\(UUID().uuidString)")
@@ -127,26 +134,26 @@ final class MessageWatcherTests: XCTestCase {
         watcher.start()
         defer { watcher.stop() }
         XCTAssertTrue(watcher.isRunning)
-        XCTAssertFalse(LiveInboxState.isRunning, "not live until chat.db has been read")
+        XCTAssertFalse(watcher.isLive, "not live until chat.db has been read")
 
         let fixture = try makeWalFixture()
         try fixture.insertMessage(rowId: 3, guid: "late-3", text: "old", date: 1, isFromMe: false, handleId: 1)
         // A WAL database copied without its -shm cannot be opened read-only.
         try fixture.execute("PRAGMA journal_mode=DELETE;")
         try FileManager.default.copyItem(atPath: fixture.path, toPath: path)
-        watcher.pollNowForTesting()
+        watcher.pollNow()
         XCTAssertEqual(collected.withLock { $0 }, [], "the first read only seeds")
-        XCTAssertTrue(LiveInboxState.isRunning)
+        XCTAssertTrue(watcher.isLive)
 
         let late = try ToolTestDatabase(attachingTo: path)
         try late.insertMessage(rowId: 4, guid: "late-4", text: "new", date: 2, isFromMe: false, handleId: 1)
-        watcher.pollNowForTesting()
+        watcher.pollNow()
         XCTAssertEqual(collected.withLock { $0 }, [4])
     }
 
-    /// A replaced chat.db (restore, reset, re-sync) restarts ROWIDs low.
-    /// At f005283 the watcher kept the old maximum and stayed silent until
-    /// new rows passed it.
+    /// A replaced chat.db (restore, reset, re-sync) restarts ROWIDs low. The
+    /// watcher resets its maximum rather than staying silent until new rows
+    /// pass the old one.
     func testResetsWhenTheDatabaseIsReplaced() async throws {
         let fixture = try makeWalFixture()
         try fixture.insertMessage(rowId: 20, guid: "old-20", text: "old", date: 1, isFromMe: false, handleId: 1)
@@ -168,12 +175,12 @@ final class MessageWatcherTests: XCTestCase {
             try? FileManager.default.removeItem(atPath: fixture.path + suffix)
         }
         _ = try FileManager.default.replaceItemAt(fixture.url, withItemAt: replacement.url)
-        watcher.pollNowForTesting()
+        watcher.pollNow()
         XCTAssertEqual(collected.withLock { $0 }, [], "a smaller maximum is a reset, not new mail")
 
         let reopened = try ToolTestDatabase(attachingTo: fixture.path)
         try reopened.insertMessage(rowId: 3, guid: "new-3", text: "after", date: 2, isFromMe: false, handleId: 1)
-        watcher.pollNowForTesting()
+        watcher.pollNow()
         XCTAssertEqual(collected.withLock { $0 }, [3])
     }
 
@@ -191,6 +198,7 @@ final class MessageWatcherTests: XCTestCase {
         watcher.stop()
         watcher.stop()
         XCTAssertFalse(watcher.isRunning)
+        XCTAssertFalse(watcher.isLive)
 
         try fixture.insertMessage(rowId: 9, guid: "w-9", text: "late", date: 3, isFromMe: false, handleId: 1)
         let fired = await waitUntil(.seconds(1)) { !collected.withLock { $0.isEmpty } }

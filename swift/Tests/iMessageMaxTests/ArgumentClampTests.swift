@@ -3,26 +3,16 @@ import MCP
 import XCTest
 @testable import iMessageMax
 
-/// Regression tests for plan 042. Each method feeds a tool the argument that
-/// used to trap the whole launchd service (Int64 overflow in a multiply or a
-/// Date conversion, or `prefix` on a negative count) and asserts the call
-/// returns a normal, decodable response instead.
+/// Each method feeds a tool an argument that could trap the whole launchd
+/// service (Int64 overflow in a multiply or a Date conversion, or `prefix`
+/// on a negative count) and asserts the call returns a normal, decodable
+/// response instead.
 final class ArgumentClampTests: XCTestCase {
-
-    override func setUp() {
-        super.setUp()
-        ToolHandlerRegistry.shared.resetForTesting()
-    }
-
-    override func tearDown() {
-        ToolHandlerRegistry.shared.resetForTesting()
-        super.tearDown()
-    }
 
     // MARK: - Fixture
 
-    /// Two handles, a DM and a group chat, plus one outgoing question in the
-    /// DM with no reply so the `unanswered` paths have a row to inspect.
+    /// Two handles, a DM and a group chat, plus two outgoing messages in the
+    /// DM with no reply so the `unanswered` paths have rows to inspect.
     private func makeFixture() throws -> ToolTestDatabase {
         let fixture = try ToolTestDatabase(name: "argument-clamp")
 
@@ -46,6 +36,11 @@ final class ArgumentClampTests: XCTestCase {
         )
         try fixture.joinChatMessage(chatId: 1, messageId: 1)
         try fixture.insertMessage(
+            rowId: 3, guid: "msg-clamp-3", text: "still there?",
+            date: now - hourNs, isFromMe: true
+        )
+        try fixture.joinChatMessage(chatId: 1, messageId: 3)
+        try fixture.insertMessage(
             rowId: 2, guid: "msg-clamp-2", text: "hello from the group",
             date: now - hourNs, isFromMe: false, handleId: 2
         )
@@ -54,58 +49,18 @@ final class ArgumentClampTests: XCTestCase {
         return fixture
     }
 
-    private func makeServer() -> Server {
-        Server(
-            name: Version.name,
-            version: Version.current,
-            title: Version.title,
-            instructions: Version.instructions,
-            capabilities: Version.serverCapabilities
-        )
-    }
-
-    /// Runs a tool through its registered handler (the closure that parses the
-    /// raw argument dictionary) and returns the JSON body whether the tool
-    /// answered normally or threw a structured `ToolError`.
-    private func callRegistered(_ name: String, arguments: [String: Value]) async throws -> [String: Any] {
-        let handler = try XCTUnwrap(ToolHandlerRegistry.shared.getHandler(for: name), "\(name) should be registered")
-        do {
-            return try decodeJSONDictionary(from: try await handler(arguments))
-        } catch let error as ToolError {
-            return try decodeJSONDictionary(from: error.content)
-        }
-    }
-
     // MARK: - search
 
     func testSearchWithHugeUnansweredHoursReturns() async throws {
         let fixture = try makeFixture()
-        SearchTool.register(on: makeServer(), db: fixture.database(), resolver: makeSeededResolver())
-
-        let json = try await callRegistered("search", arguments: [
+        let json = try await callTool("search", [
             "query": .string("hello"),
             "unanswered": .bool(true),
             "unanswered_hours": .int(Int.max),
-        ])
+        ], database: fixture.database())
 
         XCTAssertNotEqual(json["error"] as? String, "internal_error", "search must clamp unanswered_hours, not fail: \(json)")
         XCTAssertNotNil(json["results"], "search should answer normally with a clamped window: \(json)")
-    }
-
-    func testSearchExecuteWithHugeUnansweredHoursReturns() async throws {
-        let fixture = try makeFixture()
-
-        let result = await SearchTool.execute(
-            query: "hello",
-            unanswered: true,
-            unansweredHours: Int.max,
-            db: fixture.database(),
-            resolver: makeSeededResolver()
-        )
-
-        let json = try decodeSearchResponse(result)
-        XCTAssertNotEqual(json["error"] as? String, "internal_error", "static execute must clamp unanswered_hours: \(json)")
-        XCTAssertNotNil(json["results"], "static execute should answer normally with a clamped window: \(json)")
     }
 
     // MARK: - get_messages
@@ -121,7 +76,7 @@ final class ArgumentClampTests: XCTestCase {
 
         let json = try decodeJSONDictionary(from: contents)
         let messages = try decodeJSONArray(json["messages"])
-        XCTAssertLessThanOrEqual(messages.count, 1, "a negative limit clamps to 1, not to SQLite's unbounded LIMIT")
+        XCTAssertEqual(messages.count, 1, "a negative limit clamps to 1, not to SQLite's unbounded LIMIT")
     }
 
     func testGetMessagesWithHugeUnansweredHoursReturns() async throws {
@@ -149,7 +104,7 @@ final class ArgumentClampTests: XCTestCase {
 
         let json = try decodeJSONDictionary(from: contents)
         let messages = try decodeJSONArray(json["messages"])
-        XCTAssertEqual(messages.count, 1, "a capped relative bound still includes every message in the chat: \(json)")
+        XCTAssertEqual(messages.count, 2, "a capped relative bound still includes every message in the chat: \(json)")
     }
 
     // MARK: - find_chat

@@ -1,25 +1,20 @@
-// Sources/iMessageMax/Utilities/MessageTextExtractor.swift
 import Foundation
 
 enum MessageTextExtractor {
-    /// Replaces \u{FFFC} (object replacement character) with [Photo].
-    /// Falls back to attributedBody typedstream when plain text is empty.
+    /// Shown where Messages.app put an inline attachment.
+    static let photoPlaceholder = "[Photo]"
+
+    /// Replaces \u{FFFC} (object replacement character, one per inline
+    /// attachment) with `photoPlaceholder`. Falls back to the attributedBody
+    /// typedstream when plain text is empty.
     static func extract(text: String?, attributedBody: Data?) -> String? {
-        if let text = text, !text.isEmpty {
-            return text.replacingOccurrences(of: "\u{FFFC}", with: "[Photo]")
-        }
-        guard let blob = attributedBody else { return nil }
-        guard let parsed = extractFromTypedstream(blob) else { return nil }
-        return parsed.replacingOccurrences(of: "\u{FFFC}", with: "[Photo]")
+        let raw = text.flatMap { $0.isEmpty ? nil : $0 } ?? attributedBody.flatMap(extractFromTypedstream)
+        return raw?.replacingOccurrences(of: "\u{FFFC}", with: photoPlaceholder)
     }
 
     /// Parse Apple typedstream: find "NSString"/"NSMutableString", skip 5 bytes,
-    /// read length byte (0x81 = 2-byte, 0x82 = 3-byte, < 0x80 = literal
-    /// single byte). Any other byte (0x80-0x83, 0x84+) is an unrecognized
-    /// length marker and returns nil rather than misreading it as a literal
-    /// length. Garbage extraction is worse than nil here, since
-    /// SendVerifier.textMatches matches send-verification text against it.
-    /// Then reads UTF-8 text of the parsed length.
+    /// read the length (0x81 = 2-byte, 0x82 = 3-byte, < 0x80 = literal
+    /// single byte), then UTF-8 text of that length.
     static func extractFromTypedstream(_ data: Data) -> String? {
         // Re-base: callers may pass a Data slice whose indices don't start
         // at 0; all math below assumes zero-based absolute indexing.

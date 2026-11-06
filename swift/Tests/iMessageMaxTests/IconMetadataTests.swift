@@ -20,6 +20,15 @@ final class IconMetadataTests: XCTestCase {
         }
     }
 
+    func testInjectServerIconsAddsIconsForARevisionNewerThanTheLatest() throws {
+        let response = Data(
+            #"{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2026-03-01","serverInfo":{"name":"x","version":"1"},"capabilities":{}}}"#.utf8
+        )
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: IconMetadata.injectServerIcons(into: response)) as? [String: Any])
+        let serverInfo = try XCTUnwrap((object["result"] as? [String: Any])?["serverInfo"] as? [String: Any])
+        XCTAssertNotNil(serverInfo["icons"])
+    }
+
     func testEmbeddedIconsArePNGsMatchingDeclaredSizes() throws {
         let icons = try XCTUnwrap(IconMetadata.icons)
         XCTAssertEqual(icons.map { $0.sizes?.first }, ["64x64", "32x32", "16x16"])
@@ -130,16 +139,6 @@ final class IconMetadataTests: XCTestCase {
         }
     }
 
-    func testInjectServerIconsSkipsLegacyProtocolInitializeResponse() {
-        let response = Data("""
-        {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-03-26","serverInfo":{"name":"imessage-max","title":"iMessage Max"},"capabilities":{}}}
-        """.utf8)
-
-        let injected = IconMetadata.injectServerIcons(into: response)
-
-        XCTAssertEqual(injected, response)
-    }
-
     func testInjectServerIconsSkipsNonInitializeResponses() {
         let response = Data("""
         {"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"send"}]}}
@@ -166,21 +165,4 @@ private func pngSize(_ data: Data) throws -> (width: Int, height: Int) {
     let width = data[16..<20].reduce(0) { ($0 << 8) | Int($1) }
     let height = data[20..<24].reduce(0) { ($0 << 8) | Int($1) }
     return (width, height)
-}
-
-private func jsonObject(at url: URL) throws -> [String: Any] {
-    let data = try Data(contentsOf: url)
-    return try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
-}
-
-private func findRepoRoot(from fileURL: URL) throws -> URL {
-    var directory = fileURL.deletingLastPathComponent()
-    while directory.path != "/" {
-        let iconURL = directory.appendingPathComponent("icon.png")
-        if FileManager.default.fileExists(atPath: iconURL.path) {
-            return directory
-        }
-        directory.deleteLastPathComponent()
-    }
-    throw CocoaError(.fileNoSuchFile)
 }

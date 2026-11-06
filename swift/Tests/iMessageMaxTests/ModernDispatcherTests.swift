@@ -7,47 +7,32 @@ import MCP
 /// `_meta` validation, version negotiation, discovery, catalog cache hints,
 /// deterministic ordering, and protocol/tool error separation.
 final class ModernDispatcherTests: XCTestCase {
-    override func setUp() {
-        super.setUp()
-        ToolHandlerRegistry.shared.resetForTesting()
-    }
-
-    override func tearDown() {
-        ToolHandlerRegistry.shared.resetForTesting()
-        super.tearDown()
-    }
+    private var definitions: [ToolDefinition] = []
+    private var catalog: ToolCatalog { ToolCatalog(definitions) }
 
     // MARK: - Era detection
 
     func testModernMessageDetection() throws {
-        XCTAssertTrue(ModernDispatcher.isModernMessage(try json(discoverPayload())))
+        XCTAssertTrue(isModern(try json(discoverPayload())))
         XCTAssertTrue(
-            ModernDispatcher.isModernMessage(
-                try json(modernRequest(method: "tools/list"))
-            )
+            isModern(try json(modernRequest(method: "tools/list")))
         )
         XCTAssertFalse(
-            ModernDispatcher.isModernMessage(
-                try json(Data(#"{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}"#.utf8))
-            )
+            isModern(try json(Data(#"{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}"#.utf8)))
         )
         XCTAssertFalse(
-            ModernDispatcher.isModernMessage(
-                try json(Data(#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}}"#.utf8))
-            )
+            isModern(try json(Data(#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25"}}"#.utf8)))
         )
         XCTAssertFalse(
-            ModernDispatcher.isModernMessage(
-                try json(Data(#"{"jsonrpc":"2.0","id":1,"result":{}}"#.utf8))
-            )
+            isModern(try json(Data(#"{"jsonrpc":"2.0","id":1,"result":{}}"#.utf8)))
         )
     }
 
     // MARK: - server/discover
 
     func testDiscoverReturnsSupportedVersionsCapabilitiesAndCacheHints() async throws {
-        let outcome = await ModernDispatcher.handle(discoverPayload(), transport: "test")
-        XCTAssertEqual(outcome.httpStatus, 200)
+        let outcome = await dispatch(discoverPayload())
+        XCTAssertEqual(HTTPTransport.status(for: outcome).code, 200)
         let result = try result(from: outcome)
 
         XCTAssertEqual(result["resultType"] as? String, "complete")
@@ -57,7 +42,8 @@ final class ModernDispatcherTests: XCTestCase {
         XCTAssertNotNil(result["instructions"] as? String)
 
         let capabilities = try XCTUnwrap(result["capabilities"] as? [String: Any])
-        XCTAssertNotNil(capabilities["tools"])
+        XCTAssertEqual(capabilities.count, 1, "\(capabilities)")
+        XCTAssertEqual(capabilities["tools"] as? [String: Bool], ["listChanged": false])
 
         let meta = try XCTUnwrap(result["_meta"] as? [String: Any])
         let serverInfo = try XCTUnwrap(
@@ -65,6 +51,7 @@ final class ModernDispatcherTests: XCTestCase {
         )
         XCTAssertEqual(serverInfo["name"] as? String, Version.name)
         XCTAssertEqual(serverInfo["version"] as? String, Version.current)
+        XCTAssertEqual(serverInfo["title"] as? String, Version.title)
         XCTAssertNotNil(serverInfo["icons"])
     }
 
@@ -77,8 +64,8 @@ final class ModernDispatcherTests: XCTestCase {
             "method": "server/discover",
             "params": ["_meta": ["io.modelcontextprotocol/clientCapabilities": [:]]],
         ])
-        let outcome = await ModernDispatcher.handle(payload, transport: "test")
-        XCTAssertEqual(outcome.httpStatus, 400)
+        let outcome = await dispatch(payload)
+        XCTAssertEqual(HTTPTransport.status(for: outcome).code, 400)
         let error = try error(from: outcome)
         XCTAssertEqual(error["code"] as? Int, -32602)
     }
@@ -90,19 +77,16 @@ final class ModernDispatcherTests: XCTestCase {
             "method": "tools/list",
             "params": ["_meta": ["io.modelcontextprotocol/protocolVersion": "2026-07-28"]],
         ])
-        let outcome = await ModernDispatcher.handle(payload, transport: "test")
-        XCTAssertEqual(outcome.httpStatus, 400)
+        let outcome = await dispatch(payload)
+        XCTAssertEqual(HTTPTransport.status(for: outcome).code, 400)
         let error = try error(from: outcome)
         XCTAssertEqual(error["code"] as? Int, -32602)
         XCTAssertTrue((error["message"] as? String ?? "").contains("clientCapabilities"))
     }
 
     func testUnsupportedVersionReturnsSupportedList() async throws {
-        let outcome = await ModernDispatcher.handle(
-            modernRequest(method: "tools/list", protocolVersion: "2027-01-01"),
-            transport: "test"
-        )
-        XCTAssertEqual(outcome.httpStatus, 400)
+        let outcome = await dispatch(modernRequest(method: "tools/list", protocolVersion: "2027-01-01"))
+        XCTAssertEqual(HTTPTransport.status(for: outcome).code, 400)
         let error = try error(from: outcome)
         XCTAssertEqual(error["code"] as? Int, -32022)
         let data = try XCTUnwrap(error["data"] as? [String: Any])
@@ -112,11 +96,8 @@ final class ModernDispatcherTests: XCTestCase {
 
     func testUnknownMethodIsMethodNotFoundWith404() async throws {
         for legacyOnlyMethod in ["ping", "logging/setLevel", "subscriptions/listen", "no/such"] {
-            let outcome = await ModernDispatcher.handle(
-                modernRequest(method: legacyOnlyMethod),
-                transport: "test"
-            )
-            XCTAssertEqual(outcome.httpStatus, 404, legacyOnlyMethod)
+            let outcome = await dispatch(modernRequest(method: legacyOnlyMethod))
+            XCTAssertEqual(HTTPTransport.status(for: outcome).code, 404, legacyOnlyMethod)
             let error = try error(from: outcome)
             XCTAssertEqual(error["code"] as? Int, -32601, legacyOnlyMethod)
         }
@@ -131,9 +112,9 @@ final class ModernDispatcherTests: XCTestCase {
                 "_meta": modernMeta(),
             ],
         ])
-        let outcome = await ModernDispatcher.handle(payload, transport: "test")
-        XCTAssertEqual(outcome.httpStatus, 202)
-        XCTAssertNil(outcome.data)
+        let outcome = await dispatch(payload)
+        XCTAssertEqual(HTTPTransport.status(for: outcome).code, 202)
+        XCTAssertNil(outcome.body)
     }
 
     // MARK: - tools/list
@@ -143,11 +124,8 @@ final class ModernDispatcherTests: XCTestCase {
         registerFakeTool(named: "alpha_tool")
         registerFakeTool(named: "mid_tool")
 
-        let outcome = await ModernDispatcher.handle(
-            modernRequest(method: "tools/list"),
-            transport: "test"
-        )
-        XCTAssertEqual(outcome.httpStatus, 200)
+        let outcome = await dispatch(modernRequest(method: "tools/list"))
+        XCTAssertEqual(HTTPTransport.status(for: outcome).code, 200)
         let result = try result(from: outcome)
         XCTAssertEqual(result["resultType"] as? String, "complete")
         XCTAssertEqual(result["cacheScope"] as? String, "private")
@@ -169,14 +147,11 @@ final class ModernDispatcherTests: XCTestCase {
             [.plainText(#"{"ok":true}"#)]
         }
 
-        let outcome = await ModernDispatcher.handle(
-            modernRequest(
+        let outcome = await dispatch(modernRequest(
                 method: "tools/call",
                 extraParams: ["name": "modern_echo", "arguments": ["x": 1]]
-            ),
-            transport: "test"
-        )
-        XCTAssertEqual(outcome.httpStatus, 200)
+            ))
+        XCTAssertEqual(HTTPTransport.status(for: outcome).code, 200)
         let result = try result(from: outcome)
         XCTAssertEqual(result["resultType"] as? String, "complete")
         XCTAssertNil(result["isError"])
@@ -190,32 +165,26 @@ final class ModernDispatcherTests: XCTestCase {
 
     func testToolErrorBecomesIsErrorResultNotProtocolError() async throws {
         registerFakeTool(named: "modern_fail") { _ in
-            throw ToolError(content: [.plainText("tool exploded")])
+            throw ToolFailure("tool_exploded", "tool exploded")
         }
 
-        let outcome = await ModernDispatcher.handle(
-            modernRequest(
+        let outcome = await dispatch(modernRequest(
                 method: "tools/call",
                 extraParams: ["name": "modern_fail", "arguments": [:]]
-            ),
-            transport: "test"
-        )
+            ))
         // Tool execution failures are results with isError, not JSON-RPC errors.
-        XCTAssertEqual(outcome.httpStatus, 200)
+        XCTAssertEqual(HTTPTransport.status(for: outcome).code, 200)
         let result = try result(from: outcome)
         XCTAssertEqual(result["isError"] as? Bool, true)
         XCTAssertEqual(result["resultType"] as? String, "complete")
     }
 
     func testUnknownToolIsInvalidParams() async throws {
-        let outcome = await ModernDispatcher.handle(
-            modernRequest(
+        let outcome = await dispatch(modernRequest(
                 method: "tools/call",
                 extraParams: ["name": "does_not_exist", "arguments": [:]]
-            ),
-            transport: "test"
-        )
-        XCTAssertEqual(outcome.httpStatus, 400)
+            ))
+        XCTAssertEqual(HTTPTransport.status(for: outcome).code, 400)
         let error = try error(from: outcome)
         XCTAssertEqual(error["code"] as? Int, -32602)
     }
@@ -223,104 +192,43 @@ final class ModernDispatcherTests: XCTestCase {
     // MARK: - Base64 sentinel
 
     func testBase64SentinelDecoding() {
-        XCTAssertEqual(ModernDispatcher.decodeBase64Sentinel("plain"), "plain")
+        XCTAssertEqual(HTTPRequestParsing.decodeBase64Sentinel("plain"), "plain")
         let encoded = "=?base64?" + Data("héllo".utf8).base64EncodedString() + "?="
-        XCTAssertEqual(ModernDispatcher.decodeBase64Sentinel(encoded), "héllo")
-        XCTAssertEqual(ModernDispatcher.decodeBase64Sentinel("=?base64?!!?="), "=?base64?!!?=")
-    }
-
-    // MARK: - Catalog cache
-
-    func testCatalogCacheInvalidatesOnRegistryChange() async throws {
-        registerFakeTool(named: "first_tool")
-
-        let firstOutcome = await ModernDispatcher.handle(
-            modernRequest(method: "tools/list"),
-            transport: "test"
-        )
-        let firstTools = try XCTUnwrap(try result(from: firstOutcome)["tools"] as? [[String: Any]])
-        XCTAssertEqual(firstTools.map { $0["name"] as? String }, ["first_tool"])
-
-        // Registering bumps catalogVersion. Without that bump the second list
-        // would serve the stale single-tool cache.
-        registerFakeTool(named: "second_tool")
-
-        let secondOutcome = await ModernDispatcher.handle(
-            modernRequest(method: "tools/list"),
-            transport: "test"
-        )
-        let secondTools = try XCTUnwrap(try result(from: secondOutcome)["tools"] as? [[String: Any]])
-        XCTAssertEqual(
-            secondTools.map { $0["name"] as? String },
-            ["first_tool", "second_tool"]
-        )
-    }
-
-    func testCatalogCacheServesConsistentResultAcrossCalls() async throws {
-        registerFakeTool(named: "zeta_tool")
-        registerFakeTool(named: "alpha_tool")
-        registerFakeTool(named: "mid_tool")
-
-        let firstOutcome = await ModernDispatcher.handle(
-            modernRequest(method: "tools/list"),
-            transport: "test"
-        )
-        let secondOutcome = await ModernDispatcher.handle(
-            modernRequest(method: "tools/list"),
-            transport: "test"
-        )
-
-        let firstTools = try XCTUnwrap(try result(from: firstOutcome)["tools"] as? [[String: Any]])
-        let secondTools = try XCTUnwrap(try result(from: secondOutcome)["tools"] as? [[String: Any]])
-
-        XCTAssertEqual(
-            firstTools.map { $0["name"] as? String },
-            secondTools.map { $0["name"] as? String }
-        )
-        XCTAssertEqual(
-            secondTools.map { $0["name"] as? String },
-            ["zeta_tool", "alpha_tool", "mid_tool"]
-        )
+        XCTAssertEqual(HTTPRequestParsing.decodeBase64Sentinel(encoded), "héllo")
+        XCTAssertEqual(HTTPRequestParsing.decodeBase64Sentinel("=?base64?!!?="), "=?base64?!!?=")
     }
 
     // MARK: - Log sanitization
 
     func testLogFieldSanitization() {
         // A newline would let a client forge whole log lines.
-        XCTAssertEqual(ModernDispatcher.sanitizedLogField("evil\nname"), "evilname")
-        XCTAssertEqual(ModernDispatcher.sanitizedLogField("tab\there\r\n"), "tabhere")
+        XCTAssertEqual(Log.sanitizedField("evil\nname"), "evilname")
+        XCTAssertEqual(Log.sanitizedField("tab\there\r\n"), "tabhere")
 
         // Unbounded input is clamped so a client cannot flood the service log.
         let long = String(repeating: "a", count: 300)
-        XCTAssertEqual(ModernDispatcher.sanitizedLogField(long).count, 64)
+        XCTAssertEqual(Log.sanitizedField(long).count, 64)
 
-        XCTAssertEqual(ModernDispatcher.sanitizedLogField("plug/1.2.3"), "plug/1.2.3")
+        XCTAssertEqual(Log.sanitizedField("plug/1.2.3"), "plug/1.2.3")
     }
 
     func testSerializeFallbackPreservesScalarId() {
         // The correlation rule behind the id-preserving fallback: a client
         // waiting on id 7 must not receive an id:null envelope.
-        XCTAssertEqual(ModernDispatcher.fallbackEnvelopeId(for: 7) as? Int, 7)
-        XCTAssertEqual(ModernDispatcher.fallbackEnvelopeId(for: "req-7") as? String, "req-7")
-        XCTAssertTrue(ModernDispatcher.fallbackEnvelopeId(for: nil) is NSNull)
+        XCTAssertEqual(JSONRPC.fallbackId(for: 7) as? Int, 7)
+        XCTAssertEqual(JSONRPC.fallbackId(for: "req-7") as? String, "req-7")
+        XCTAssertTrue(JSONRPC.fallbackId(for: nil) is NSNull)
         // Non-scalar ids have no safe echo, so they degrade to null.
-        XCTAssertTrue(ModernDispatcher.fallbackEnvelopeId(for: ["a": 1]) is NSNull)
+        XCTAssertTrue(JSONRPC.fallbackId(for: ["a": 1]) is NSNull)
     }
 
     // MARK: - Helpers
 
     private func registerFakeTool(
         named name: String,
-        handler: @escaping @Sendable ([String: Value]?) async throws -> [Tool.Content] = { _ in
-            [.plainText("ok")]
-        }
+        handler: @escaping @Sendable ([String: Value]?) async throws -> [Tool.Content] = { _ in [.plainText("ok")] }
     ) {
-        let tool = Tool(
-            name: name,
-            description: "test tool",
-            inputSchema: InputSchema.object(properties: [:])
-        )
-        ToolHandlerRegistry.shared.register(tool: tool, handler: handler)
+        definitions.append(fakeTool(named: name, handler: handler))
     }
 
     private func modernMeta(protocolVersion: String = "2026-07-28") -> [String: Any] {
@@ -350,6 +258,18 @@ final class ModernDispatcherTests: XCTestCase {
         modernRequest(method: "server/discover")
     }
 
+    private func dispatch(_ data: Data) async -> ModernReply {
+        guard case .message(let message) = JSONRPCMessage.parse(data) else {
+            XCTFail("payload is not a JSON object")
+            return .accepted
+        }
+        return await ModernDispatcher.handle(message, transport: "test", catalog: catalog)
+    }
+
+    private func isModern(_ object: [String: Any]) -> Bool {
+        JSONRPCMessage(object).era == .modern
+    }
+
     private func payloadData(_ object: [String: Any]) throws -> Data {
         try JSONSerialization.data(withJSONObject: object)
     }
@@ -358,13 +278,13 @@ final class ModernDispatcherTests: XCTestCase {
         try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
     }
 
-    private func result(from outcome: ModernDispatchResult) throws -> [String: Any] {
-        let envelope = try json(XCTUnwrap(outcome.data))
+    private func result(from outcome: ModernReply) throws -> [String: Any] {
+        let envelope = try json(XCTUnwrap(outcome.body))
         return try XCTUnwrap(envelope["result"] as? [String: Any])
     }
 
-    private func error(from outcome: ModernDispatchResult) throws -> [String: Any] {
-        let envelope = try json(XCTUnwrap(outcome.data))
+    private func error(from outcome: ModernReply) throws -> [String: Any] {
+        let envelope = try json(XCTUnwrap(outcome.body))
         return try XCTUnwrap(envelope["error"] as? [String: Any])
     }
 }

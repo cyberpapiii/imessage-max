@@ -3,8 +3,8 @@ import MCP
 import XCTest
 @testable import iMessageMax
 
-/// Regression coverage for the still-open product items closed after the thermos sweep:
-/// mime `has:` filters, FindChat group/content, most_active + cursors, AsyncTimeout cancel.
+/// `has:` filters by attachment mime type, find_chat by group and content,
+/// and list_chats' most_active sort.
 final class ProductOpenItemsTests: XCTestCase {
 
     // MARK: - has:images mime filter
@@ -81,61 +81,18 @@ final class ProductOpenItemsTests: XCTestCase {
         XCTAssertEqual(chats.first?["id"] as? String, "chat1")
     }
 
-    // MARK: - most_active sort + list_chats cursor
+    // MARK: - most_active sort
 
     func testListChatsMostActiveOrdersByMessageCount() async throws {
         let fixture = try makeMostActiveFixture()
-        let result = await ListChatsTool.execute(
+        let result = try await ListChatsTool.execute(
             limit: 10,
             sort: "most_active",
             db: fixture.database(),
             resolver: makeSeededResolver()
         )
-        guard case .success(let response) = result else {
-            return XCTFail("list_chats failed")
-        }
+        let response = result
         XCTAssertEqual(response.chats.map(\.id), ["chat2", "chat1"])
-    }
-
-    func testListChatsCursorPagesRecent() async throws {
-        let fixture = try makeMostActiveFixture()
-        let first = await ListChatsTool.execute(
-            limit: 1,
-            sort: "recent",
-            db: fixture.database(),
-            resolver: makeSeededResolver()
-        )
-        guard case .success(let page1) = first else {
-            return XCTFail("page1 failed")
-        }
-        XCTAssertTrue(page1.more)
-        XCTAssertNotNil(page1.cursor)
-        XCTAssertEqual(page1.chats.count, 1)
-
-        let second = await ListChatsTool.execute(
-            limit: 1,
-            sort: "recent",
-            cursor: page1.cursor,
-            db: fixture.database(),
-            resolver: makeSeededResolver()
-        )
-        guard case .success(let page2) = second else {
-            return XCTFail("page2 failed")
-        }
-        XCTAssertEqual(page2.chats.count, 1)
-        XCTAssertNotEqual(page1.chats.first?.id, page2.chats.first?.id)
-    }
-
-    // MARK: - AsyncTimeout cancellation
-
-    func testAsyncTimeoutSleepHonorsCancellation() async {
-        let task = Task {
-            await AsyncTimeout.sleep(.seconds(30))
-        }
-        await AsyncTimeout.sleep(.milliseconds(20))
-        task.cancel()
-        await task.value
-        XCTAssertTrue(task.isCancelled)
     }
 
     // MARK: - Fixtures
@@ -242,14 +199,5 @@ final class ProductOpenItemsTests: XCTestCase {
             try fixture.joinChatMessage(chatId: 2, messageId: id)
         }
         return fixture
-    }
-
-    private func typedstreamBlob(payload: [UInt8]) -> Data {
-        var bytes: [UInt8] = [0x04, 0x0B]
-        bytes += Array("NSString".utf8)
-        bytes += [0x01, 0x94, 0x84, 0x01, 0x2B]
-        bytes += [UInt8(payload.count)]
-        bytes += payload
-        return Data(bytes)
     }
 }

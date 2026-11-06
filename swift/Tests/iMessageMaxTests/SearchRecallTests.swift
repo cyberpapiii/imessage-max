@@ -6,7 +6,7 @@ final class SearchRecallTests: XCTestCase {
         let fixture = try makeRecallFixture()
         let resolver = makeSeededResolver()
 
-        let response = try await decodeSearchResponse(
+        let response = try await decodeJSONDictionary(from:
             SearchTool.execute(
                 query: "zebra",
                 db: fixture.database(),
@@ -23,7 +23,7 @@ final class SearchRecallTests: XCTestCase {
         let fixture = try makeAttributedBodyRecallFixture()
         let resolver = makeSeededResolver()
 
-        let response = try await decodeSearchResponse(
+        let response = try await decodeJSONDictionary(from:
             SearchTool.execute(
                 query: "zebra",
                 db: fixture.database(),
@@ -69,14 +69,6 @@ private func makeRecallFixture() throws -> ToolTestDatabase {
 
 /// Builds: <prefix junk> + marker + 5 filler bytes + length field + payload.
 /// Copied from SendVerifierTests (private there).
-private func typedstreamBlob(marker: String = "NSString", lengthField: [UInt8], payload: [UInt8]) -> Data {
-    var bytes: [UInt8] = [0x04, 0x0B]
-    bytes += Array(marker.utf8)
-    bytes += [0x01, 0x94, 0x84, 0x01, 0x2B]
-    bytes += lengthField
-    bytes += payload
-    return Data(bytes)
-}
 
 private func makeAttributedBodyRecallFixture() throws -> ToolTestDatabase {
     let fixture = try ToolTestDatabase(name: "search-recall-attr")

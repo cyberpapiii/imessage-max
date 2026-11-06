@@ -7,9 +7,8 @@ import NIOEmbedded
 @testable import iMessageMax
 
 /// Characterization tests for the host-parsing branches of
-/// `OriginValidationMiddleware`, the DNS-rebinding defense. The existing
-/// integration test only exercises authorities "localhost" and "example.com";
-/// these pin the port-stripping and IPv6 branches.
+/// `OriginValidationMiddleware`, the DNS-rebinding defense: the Origin check,
+/// port stripping, and the IPv6 branches.
 final class OriginHostParsingTests: XCTestCase {
 
     private func makeContext() -> BasicRequestContext {
@@ -87,24 +86,42 @@ final class OriginHostParsingTests: XCTestCase {
         XCTAssertEqual(status, .forbidden, "a non-numeric suffix keeps the whole authority, which is not an allowed host")
     }
 
+    func testForeignOriginIsRejectedAndLocalOriginAccepted() async throws {
+        let foreign = try await status(forAuthority: "localhost", origin: "https://malicious.example")
+        XCTAssertEqual(foreign, .forbidden)
+        let local = try await status(forAuthority: "localhost", origin: "http://localhost:3000")
+        XCTAssertEqual(local, .ok)
+    }
+
     func testMissingOriginIsAllowedByDefault() async throws {
         let status = try await status(forAuthority: "localhost", origin: nil)
         XCTAssertEqual(status, .ok)
     }
 
-    func testRequireOriginRejectsMissingOrigin() async throws {
-        let middleware = OriginValidationMiddleware<BasicRequestContext>(requireOrigin: true)
-        let response = try await middleware.handle(
-            makeRequest(authority: "localhost", origin: nil),
-            context: makeContext()
-        ) { _, _ in
-            XCTFail("A missing Origin in strict mode should not reach the next handler")
-            return Response(status: .ok)
+    /// With --allow-external-bind the server is reached by its bound address.
+    /// Before, every non-loopback Host got 403, so external binding never
+    /// served a request.
+    func testBoundExternalHostIsAccepted() async throws {
+        let middleware = OriginValidationMiddleware<BasicRequestContext>(boundHost: "192.168.1.10")
+        for authority in ["192.168.1.10:8080", "192.168.1.10", "localhost:8080"] {
+            let status = try await status(forAuthority: authority, middleware: middleware)
+            XCTAssertEqual(status, .ok, "authority: \(authority)")
         }
-        XCTAssertEqual(response.head.status, .forbidden)
+        let origin = try await status(forAuthority: "192.168.1.10:8080", origin: "http://192.168.1.10:3000", middleware: middleware)
+        XCTAssertEqual(origin, .ok)
 
-        let body = try await bodyString(of: response)
-        XCTAssertTrue(body.contains("Origin header required"), "body: \(body)")
+        for authority in ["192.168.1.11:8080", "evil.example"] {
+            let status = try await status(forAuthority: authority, middleware: middleware)
+            XCTAssertEqual(status, .forbidden, "authority: \(authority)")
+        }
+        let foreignOrigin = try await status(forAuthority: "192.168.1.10", origin: "https://evil.example", middleware: middleware)
+        XCTAssertEqual(foreignOrigin, .forbidden)
+    }
+
+    func testBoundIPv6HostIsAcceptedBracketed() async throws {
+        let middleware = OriginValidationMiddleware<BasicRequestContext>(boundHost: "fd00::5")
+        let status = try await status(forAuthority: "[fd00::5]:8080", middleware: middleware)
+        XCTAssertEqual(status, .ok)
     }
 }
 

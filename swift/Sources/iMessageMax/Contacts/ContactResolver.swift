@@ -1,14 +1,13 @@
-// Sources/iMessageMax/Contacts/ContactResolver.swift
 import Contacts
 import Foundation
+import IMessageMaxContract
 
 actor ContactResolver {
     /// Contacts access behind three closures so tests never touch
     /// CNContactStore (mirrors imsg's ContactCatalogSource). Closures run
-    /// inside the actor; `@unchecked` for the same reason the old
-    /// `nonisolated(unsafe) store` existed: CNContactStore is not Sendable.
+    /// inside the actor; `@unchecked` because CNContactStore is not Sendable.
     struct Source: @unchecked Sendable {
-        let authorization: () -> (authorized: Bool, status: String)
+        let authorization: () -> (authorized: Bool, status: PermissionStatus)
         let load: () throws -> [String: String]
         let requestAccess: () async -> Bool
 
@@ -29,13 +28,11 @@ actor ContactResolver {
     private var cache: [String: String] = [:]
     private var isInitialized = false
     private var loadedAt: TimeInterval = -.infinity
+    private var checkedAt: TimeInterval = -.infinity
     private var invalidated = false
     private var lastAuthorized = false
     private var hasLastGoodCache = false
-    /// True when `initialize` returned early because `CI=true` was set.
-    /// Surfaced by diagnose so an operator with CI exported in their shell
-    /// can see why no names resolve.
-    private var skippedForCI = false
+    private var lastLoadFailed = false
     /// True when authorization was notDetermined and the policy said not to
     /// prompt. Surfaced by diagnose as `not_requested_headless`.
     private var accessRequestSkippedHeadless = false
@@ -50,35 +47,15 @@ actor ContactResolver {
         )
     }
 
-    init(seedCache: [String: String]) {
-        self.init(
-            source: Source(
-                authorization: { (true, "authorized") },
-                load: { seedCache },
-                requestAccess: { true }
-            ),
-            refreshInterval: .infinity,
-            now: { 0 },
-            seedCache: seedCache
-        )
-    }
-
     init(
         source: Source,
         refreshInterval: TimeInterval,
         now: @escaping () -> TimeInterval,
-        seedCache: [String: String]? = nil,
         observeChanges: Bool = false
     ) {
         self.source = source
         self.refreshInterval = refreshInterval
         self.now = now
-        if let seedCache {
-            self.cache = seedCache
-            self.isInitialized = true
-            self.lastAuthorized = true
-            self.hasLastGoodCache = true
-        }
         if observeChanges {
             changeObserver = NotificationCenter.default.addObserver(
                 forName: .CNContactStoreDidChange, object: nil, queue: nil
@@ -94,15 +71,15 @@ actor ContactResolver {
 
     // MARK: - Authorization
 
-    static func authorizationStatus() -> (authorized: Bool, status: String) {
+    private static func authorizationStatus() -> (authorized: Bool, status: PermissionStatus) {
         let status = CNContactStore.authorizationStatus(for: .contacts)
         switch status {
-        case .authorized: return (true, "authorized")
-        case .denied: return (false, "denied")
-        case .restricted: return (false, "restricted")
-        case .notDetermined: return (false, "not_determined")
-        case .limited: return (true, "limited")
-        @unknown default: return (false, "unknown")
+        case .authorized: return (true, .authorized)
+        case .denied: return (false, .denied)
+        case .restricted: return (false, .restricted)
+        case .notDetermined: return (false, .notDetermined)
+        case .limited: return (true, .limited)
+        @unknown default: return (false, .unknown)
         }
     }
 
@@ -113,9 +90,13 @@ actor ContactResolver {
         Bundle.main.object(forInfoDictionaryKey: "NSContactsUsageDescription") != nil
     }
 
+    func authorization() -> (authorized: Bool, status: PermissionStatus) {
+        source.authorization()
+    }
+
     func requestAccessIfAllowed(policy: ContactsAccessPolicy) async {
         let (_, status) = source.authorization()
-        guard status == "not_determined" else { return }
+        guard status == .notDetermined else { return }
         switch policy {
         case .requestIfNeeded:
             let granted = await source.requestAccess()
@@ -130,20 +111,15 @@ actor ContactResolver {
         invalidated = true
     }
 
-    // MARK: - Initialization
+    // MARK: - Loading
 
-    func initialize() throws {
-        // GitHub-hosted macos runners report Contacts as authorized, then
-        // `enumerateContacts` talks to AddressBook over XPC. The daemon is
-        // not running, so Core Data retries for minutes per call and
-        // `swift test` never finishes (serial run 33573931260: one
-        // list_attachments test took 298s, then the next never returned).
-        if ProcessInfo.processInfo.environment["CI"] == "true" {
-            skippedForCI = true
-            isInitialized = true
-            return
-        }
-
+    /// Reloads names when the cache expired, Contacts changed, or
+    /// authorization changed. A failed load keeps names that were good; a
+    /// failure before any good load is reported through `status().loadFailed`.
+    /// The expiry is a backstop: CNContactStoreDidChange delivery to a
+    /// headless launchd agent has not been confirmed.
+    private func refresh() {
+        checkedAt = now()
         let (authorized, _) = source.authorization()
         let expired = now() - loadedAt >= refreshInterval
         let authorizationChanged = authorized != lastAuthorized
@@ -153,6 +129,7 @@ actor ContactResolver {
         loadedAt = now()
         lastAuthorized = authorized
         isInitialized = true
+        lastLoadFailed = false
 
         guard authorized else {
             // Revoked or never granted: never serve names we are no longer allowed to have.
@@ -164,12 +141,18 @@ actor ContactResolver {
             cache = try source.load()
             hasLastGoodCache = true
         } catch {
-            // Keep the last good cache; a transient AddressBook failure must
-            // not fail five tools every 30 s. First-ever failure still throws
-            // so diagnose can report `<status>_load_failed`.
-            Log.warning("Contacts: refresh failed, keeping \(cache.count) cached names")
-            if !hasLastGoodCache { throw error }
+            Log.warning("Contacts: refresh failed, keeping \(cache.count) cached names: \(error.localizedDescription)")
+            if !hasLastGoodCache {
+                lastLoadFailed = true
+            }
         }
+    }
+
+    /// Lookups refresh at most once a second, so a page that resolves many
+    /// handles asks macOS for the authorization status once.
+    private func refreshIfStale() {
+        guard invalidated || now() - checkedAt >= 1 else { return }
+        refresh()
     }
 
     private static func loadNames(from store: CNContactStore) throws -> [String: String] {
@@ -209,6 +192,7 @@ actor ContactResolver {
     // MARK: - Resolution
 
     func resolve(_ handle: String) -> String? {
+        refreshIfStale()
         if let name = cache[handle] { return name }
         if let normalized = PhoneUtils.normalizeToE164(handle),
            let name = cache[normalized]
@@ -224,15 +208,34 @@ actor ContactResolver {
     func searchByName(_ query: String) -> [(handle: String, name: String)] {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard q.count >= 2 else { return [] }
+        refreshIfStale()
         let queryWords = q.split(separator: " ").map(String.init)
+        // Sorted, so callers that take the first match pick the same one every time.
         return cache.compactMap { handle, name in
             let nameWords = name.lowercased().split(whereSeparator: { $0 == " " || $0 == "-" }).map(String.init)
             let ok = queryWords.allSatisfy { qw in nameWords.contains { $0.hasPrefix(qw) } }
             return ok ? (handle, name) : nil
         }
+        .sorted { ($0.name, $0.handle) < ($1.name, $1.handle) }
     }
 
-    func getStats() -> (initialized: Bool, handleCount: Int, skippedForCI: Bool, accessRequestSkippedHeadless: Bool) {
-        (isInitialized, cache.count, skippedForCI, accessRequestSkippedHeadless)
+    struct Status: Sendable {
+        let authorized: Bool
+        let authorization: PermissionStatus
+        let handleCount: Int
+        let loadFailed: Bool
+        let accessRequestSkippedHeadless: Bool
+    }
+
+    func status() -> Status {
+        refresh()
+        let (authorized, authorization) = source.authorization()
+        return Status(
+            authorized: authorized,
+            authorization: authorization,
+            handleCount: cache.count,
+            loadFailed: lastLoadFailed,
+            accessRequestSkippedHeadless: accessRequestSkippedHeadless
+        )
     }
 }

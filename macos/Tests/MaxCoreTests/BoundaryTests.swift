@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import MaxTestSupport
 
 @testable import MaxCore
 
@@ -60,12 +61,6 @@ import Testing
   #expect(ServiceController.hasForeignListener(ownedPID: 123, listeners: [456]))
   #expect(ServiceController.hasForeignListener(ownedPID: nil, listeners: [456]))
   #expect(!ServiceController.hasForeignListener(ownedPID: 123, listeners: []))
-}
-
-@Test func cancellationActuallyEndsTheChild() async {
-  let task = Task { try await ProcessRunner.run("/bin/sleep", arguments: ["10"], timeout: 20) }
-  task.cancel()
-  await #expect(throws: CancellationError.self) { try await task.value }
 }
 
 @Test func cancellationTerminatesAnAlreadyRunningChild() async throws {

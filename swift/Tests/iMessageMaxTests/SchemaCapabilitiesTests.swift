@@ -5,50 +5,56 @@ final class SchemaCapabilitiesTests: XCTestCase {
     func testProbeReportsEveryFixtureColumnPresent() throws {
         let fixture = try ToolTestDatabase()
         let schema = try fixture.database().schema()
-        XCTAssertTrue(schema.messageThreadOriginatorGuid)
-        XCTAssertTrue(schema.messageDateEdited)
-        XCTAssertTrue(schema.messageAssociatedMessageEmoji)
-        XCTAssertTrue(schema.chatIsFiltered)
-        XCTAssertFalse(schema.messageDateRead)
-        XCTAssertFalse(schema.chatMessageJoinMessageDate)
+        XCTAssertTrue(schema.has(.messageThreadOriginatorGuid))
+        XCTAssertTrue(schema.has(.messageDateEdited))
+        XCTAssertTrue(schema.has(.messageAssociatedMessageEmoji))
+        XCTAssertTrue(schema.has(.chatIsFiltered))
+        XCTAssertFalse(schema.has(.messageDateRead))
+        XCTAssertFalse(schema.has(.chatMessageJoinMessageDate))
     }
 
     func testProbeSeesDroppedColumn() throws {
         let fixture = try ToolTestDatabase()
         try fixture.execute("ALTER TABLE message DROP COLUMN date_edited")
         let schema = try fixture.database().schema()
-        XCTAssertFalse(schema.messageDateEdited)
-        XCTAssertTrue(schema.messageThreadOriginatorGuid)
+        XCTAssertFalse(schema.has(.messageDateEdited))
+        XCTAssertTrue(schema.has(.messageThreadOriginatorGuid))
     }
 
     func testProbeIsCachedPerInstance() throws {
         let fixture = try ToolTestDatabase()
         let cached = fixture.database()
-        XCTAssertTrue(try cached.schema().messageDateEdited)
+        XCTAssertTrue(try cached.schema().has(.messageDateEdited))
         try fixture.execute("ALTER TABLE message DROP COLUMN date_edited")
-        XCTAssertTrue(try cached.schema().messageDateEdited)
-        XCTAssertFalse(try fixture.database().schema().messageDateEdited)
+        XCTAssertTrue(try cached.schema().has(.messageDateEdited))
+        XCTAssertFalse(try fixture.database().schema().has(.messageDateEdited))
     }
 
-    func testOverrideInitializerReplacesOnlyNamedFlags() {
-        let overridden = SchemaCapabilities(base: .assumed, messageDateEdited: false)
-        XCTAssertFalse(overridden.messageDateEdited)
-        XCTAssertEqual(
-            SchemaCapabilities(base: overridden, messageDateEdited: true).messageDateEdited,
-            SchemaCapabilities.assumed.messageDateEdited
-        )
-        XCTAssertTrue(overridden.messageThreadOriginatorGuid)
-        XCTAssertTrue(overridden.messageAssociatedMessageEmoji)
-        XCTAssertTrue(overridden.chatIsFiltered)
-        XCTAssertTrue(overridden.messageDateRead)
-        XCTAssertEqual(overridden.messageThreadOriginatorPart, SchemaCapabilities.assumed.messageThreadOriginatorPart)
-        XCTAssertEqual(overridden.messageIsDelivered, SchemaCapabilities.assumed.messageIsDelivered)
-        XCTAssertEqual(overridden.attachmentHideAttachment, SchemaCapabilities.assumed.attachmentHideAttachment)
+    /// Each guarded column's fragment selects the column when the probe saw
+    /// it and still runs, under the column's name, when the column is gone.
+    func testGuardedColumnFragmentsRunWithAndWithoutTheirColumn() throws {
+        let fragments: [(column: String, sql: KeyPath<SchemaCapabilities, String>)] = [
+            ("thread_originator_guid", \.threadOriginatorGuidSQL),
+            ("date_edited", \.dateEditedSQL),
+            ("associated_message_emoji", \.associatedMessageEmojiSQL),
+        ]
+        for (column, sql) in fragments {
+            let fixture = try ToolTestDatabase()
+            try fixture.insertMessage(rowId: 1, guid: "g", date: 1, isFromMe: true)
+            let present = fixture.database()
+            XCTAssertEqual(try present.query("SELECT \(column) FROM (SELECT \(try present.schema()[keyPath: sql]) FROM message m)") { $0.int(0) }.count, 1)
+
+            try fixture.execute("ALTER TABLE message DROP COLUMN \(column)")
+            let dropped = fixture.database()
+            XCTAssertEqual(try dropped.query("SELECT \(column) FROM (SELECT \(try dropped.schema()[keyPath: sql]) FROM message m)") { $0.int(0) }.count, 1)
+        }
     }
 
-    func testFeaturesDictionaryUsesTableDotColumnKeys() {
-        XCTAssertEqual(SchemaCapabilities.assumed.features["message.date_edited"], true)
-        XCTAssertEqual(SchemaCapabilities.assumed.features.count, 19)
+    func testFeaturesNameEveryOptionalColumnByTableDotColumn() {
+        let features = SchemaCapabilities.assumed.without(.messageDateEdited).features
+        XCTAssertEqual(features["message.date_edited"], false)
+        XCTAssertEqual(features["attachment.hide_attachment"], true)
+        XCTAssertTrue(features.keys.allSatisfy { $0.split(separator: ".").count == 2 }, "\(features.keys)")
     }
 
     func testProbeOnUnreadableFileThrowsPermissionDenied() throws {

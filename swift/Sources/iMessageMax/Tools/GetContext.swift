@@ -1,32 +1,12 @@
-// Sources/iMessageMax/Tools/GetContext.swift
 import Foundation
 import MCP
 
 struct GetContextResponse: Codable {
-    let chat: ChatInfo
+    let chat: ChatReference
     let people: [String: PersonInfo]
     let message: ContextMessage
     let before: [ContextMessage]
     let after: [ContextMessage]
-
-    struct ContextMessage: Codable {
-        let id: String
-        let from: String
-        let text: String?
-        let ago: String?
-        let ts: String?
-        let reactions: [String]?
-        let replyTo: String?
-        let replyCount: Int?
-        let edited: Bool?
-
-        enum CodingKeys: String, CodingKey {
-            case id, from, text, ago, ts, reactions
-            case replyTo = "reply_to"
-            case replyCount = "reply_count"
-            case edited
-        }
-    }
 
     struct PersonInfo: Codable {
         let name: String
@@ -38,26 +18,18 @@ struct GetContextResponse: Codable {
             case isMe = "is_me"
         }
     }
-
-    struct ChatInfo: Codable {
-        let id: String
-        let name: String
-    }
-}
-
-struct GetContextError: LocalizedError, Codable {
-    let error: String
-    let message: String
-
-    var errorDescription: String? {
-        message
-    }
 }
 
 enum GetContext {
+    static let before = IntArgument(name: "before", defaultValue: 5, range: 0...50)
+    static let after = IntArgument(name: "after", defaultValue: 10, range: 0...50)
+
+    /// Stands in for a received message's NULL sender handle in `people`.
+    private static let noHandle = "unknown"
+
     // MARK: - Tool Registration
 
-    static func register(on server: Server, db: Database, resolver: ContactResolver) {
+    static func definition(db: Database, resolver: ContactResolver) -> ToolDefinition {
         let inputSchema: Value = .object([
             "type": "object",
             "properties": .object([
@@ -75,17 +47,17 @@ enum GetContext {
                 ]),
                 "before": .object([
                     "type": "integer",
-                    "description": "Number of messages before the target (default 5, max 50)",
+                    "description": "Number of messages before the target (\(before.defaultAndMax))",
                 ]),
                 "after": .object([
                     "type": "integer",
-                    "description": "Number of messages after the target (default 10, max 50)",
+                    "description": "Number of messages after the target (\(after.defaultAndMax))",
                 ]),
             ]),
             "additionalProperties": false,
         ])
 
-        server.registerTool(
+        return ToolDefinition(
             name: "get_context",
             description: "Get messages surrounding a specific message. Returns the containing chat id for follow-up tool calls and chat name for user-facing summaries. When explaining results to the user, refer to chats by name, not by id.",
             inputSchema: inputSchema,
@@ -101,10 +73,10 @@ enum GetContext {
             let messageId = arguments?["message_id"]?.stringValue
             let chatId = arguments?["chat_id"]?.stringValue
             let contains = arguments?["contains"]?.stringValue
-            let before = arguments?["before"]?.intValue ?? 5
-            let after = arguments?["after"]?.intValue ?? 10
+            let before = Self.before.read(arguments)
+            let after = Self.after.read(arguments)
 
-            let result = await execute(
+            let result = try await execute(
                 messageId: messageId,
                 chatId: chatId,
                 contains: contains,
@@ -114,12 +86,7 @@ enum GetContext {
                 resolver: resolver
             )
 
-            switch result {
-            case .success(let response):
-                return [.plainText(try FormatUtils.encodeJSON(response))]
-            case .failure(let error):
-                throw ToolError(content: [.plainText(try FormatUtils.encodeJSON(error))])
-            }
+            return [.plainText(try FormatUtils.encodeJSON(result))]
         }
     }
 
@@ -127,485 +94,154 @@ enum GetContext {
         messageId: String? = nil,
         chatId: String? = nil,
         contains: String? = nil,
-        before: Int = 5,
-        after: Int = 10,
-        database: Database = Database(),
-        resolver: ContactResolver = ContactResolver()
-    ) async -> Result<GetContextResponse, GetContextError> {
-        let beforeCount = max(0, min(before, 50))
-        let afterCount = max(0, min(after, 50))
+        before: Int = GetContext.before.defaultValue,
+        after: Int = GetContext.after.defaultValue,
+        database: Database,
+        resolver: ContactResolver
+    ) async throws -> GetContextResponse {
+        let beforeCount = Self.before.clamp(before)
+        let afterCount = Self.after.clamp(after)
 
         if messageId == nil && (chatId == nil || contains == nil) {
-            return .failure(GetContextError(
-                error: "invalid_params",
-                message: "Either message_id OR (chat_id + contains) is required"
-            ))
+            throw ToolFailure("invalid_params", "Either message_id OR (chat_id + contains) is required")
         }
 
         if contains != nil && chatId == nil {
-            return .failure(GetContextError(
-                error: "invalid_params",
-                message: "chat_id is required when using contains"
-            ))
+            throw ToolFailure("invalid_params", "chat_id is required when using contains")
         }
 
-        // Reject malformed ids before touching chat.db, so a bad id reads as
-        // invalid_id even when the database cannot be opened.
+        // Reject a malformed message id before touching chat.db, so it reads
+        // as invalid_id even when the database cannot be opened.
+        enum Target {
+            case message(Int64)
+            case text(String, inChat: Int64)
+        }
+        let target: Target
         if let msgIdStr = messageId {
-            if parseMessageId(msgIdStr) == nil {
-                return .failure(GetContextError(
-                    error: "invalid_id",
-                    message: "Invalid message ID format: \(msgIdStr)"
-                ))
+            guard let numericId = MessageIdentifier.parse(msgIdStr) else {
+                throw ToolFailure("invalid_id", "Invalid message ID format: \(msgIdStr)")
             }
-        } else if let cId = chatId, ChatIdentifier.parseRowId(cId) == nil {
-            return .failure(GetContextError(
-                error: "invalid_id",
-                message: "Invalid chat ID format: \(cId)"
-            ))
+            target = .message(numericId)
+        } else if let cId = chatId, let searchText = contains {
+            target = .text(searchText, inChat: try ChatIdentifier.resolve(cId, db: database))
+        } else {
+            throw ToolFailure("invalid_params", "chat_id and contains are required")
         }
 
-        try? await resolver.initialize()
+        let schema = try database.schema()
+        let targetQuery = """
+            SELECT \(MessageRecord.selectList(schema)), \(MessageInChat.chatColumns)
+            FROM message m
+            JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
+            JOIN chat c ON cmj.chat_id = c.ROWID
+            \(MessageRecord.handleJoinsSQL)
+            """
+        let targetResult: MessageInChat
 
-        do {
-            let schema = try database.schema()
-            let targetResult: (msgId: Int64, text: String?, attributedBody: Data?, date: Int64, isFromMe: Bool, senderHandle: String?, chatId: Int64, chatName: String?, guid: String, threadOriginatorGuid: String?, dateEdited: Int64)
+        switch target {
+        case .message(let numericId):
+            guard let found = try database.query("\(targetQuery)\nWHERE m.ROWID = ? AND c.ROWID = \(ChatScope.byMessage.listedChat())", params: [numericId], map: MessageInChat.init).first else {
+                throw ToolFailure("not_found", ClientErrorMessages.messageNotFound)
+            }
+            targetResult = found
 
-            if let msgIdStr = messageId {
-                guard let numericId = parseMessageId(msgIdStr) else {
-                    return .failure(GetContextError(
-                        error: "invalid_id",
-                        message: "Invalid message ID format: \(msgIdStr)"
-                    ))
-                }
+        case .text(let searchText, let numericChatId):
+            // Page newest-first through the rows that may contain the text;
+            // the decoded-text check below is the one that decides.
+            let pageSize = 500
+            let scanCap = 5000
+            let match = SQLFragments.textMayContain(searchText)
+            let searchLower = searchText.lowercased()
+            var scanned = 0
+            var resumeAfter: TimelineCursor?
+            var foundRow: MessageInChat?
+            var exhausted = false
 
-                let sql = """
-                    SELECT
-                        m.ROWID as msg_id,
-                        m.text,
-                        m.attributedBody,
-                        m.date,
-                        m.is_from_me,
-                        h.id as sender_handle,
-                        c.ROWID as chat_id,
-                        c.display_name as chat_name,
-                            m.guid,
-                        \(schema.threadOriginatorGuidSQL),
-                        \(schema.dateEditedSQL)
-                    FROM message m
-                    JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
-                    JOIN chat c ON cmj.chat_id = c.ROWID
-                    LEFT JOIN handle h ON m.handle_id = h.ROWID
-                    WHERE m.ROWID = ?
+            while foundRow == nil && !exhausted && scanned < scanCap {
+                var sql = """
+                    \(targetQuery)
+                    WHERE c.ROWID = ?
+                      AND \(SQLFragments.notReaction())
+                      AND \(match.sql)
                     """
-
-                let rows = try database.query(sql, params: [numericId]) { row in
-                    (
-                        msgId: row.int(0),
-                        text: row.string(1),
-                        attributedBody: row.blob(2),
-                        date: row.int(3),
-                        isFromMe: row.int(4) != 0,
-                        senderHandle: row.string(5),
-                        chatId: row.int(6),
-                        chatName: row.string(7),
-                        guid: row.string(8) ?? "",
-                        threadOriginatorGuid: row.string(9),
-                        dateEdited: row.optionalInt(10) ?? 0
-                    )
+                var params: [Any] = [numericChatId] + match.bindings
+                if let older = resumeAfter?.predicate(descending: true) {
+                    sql += "\n  AND \(older.sql)"
+                    params += older.params
                 }
+                sql += "\nORDER BY m.date DESC, m.ROWID DESC\nLIMIT ?"
+                params.append(pageSize)
 
-                guard let found = rows.first else {
-                    return .failure(GetContextError(
-                        error: "not_found",
-                        message: ClientErrorMessages.messageNotFound
-                    ))
-                }
-                targetResult = found
-
-            } else {
-                guard let cId = chatId, let searchText = contains else {
-                    return .failure(GetContextError(
-                        error: "invalid_params",
-                        message: "chat_id and contains are required"
-                    ))
-                }
-
-                guard let numericChatId = ChatIdentifier.parseRowId(cId) else {
-                    return .failure(GetContextError(
-                        error: "invalid_id",
-                        message: "Invalid chat ID format: \(cId)"
-                    ))
-                }
-
-                // Page newest-first through the chat. LIKE prefilters rows with
-                // plain text; rows whose text is NULL (attributedBody-only) are
-                // always admitted so the Swift decode can check them. LIKE is
-                // ASCII-case-insensitive; the Swift check below is the one
-                // that decides, so the prefilter can only remove non-matches.
-                let pageSize = 500
-                let scanCap = 5000
-                let pattern = "%\(QueryBuilder.escapeLike(searchText))%"
-                let searchLower = searchText.lowercased()
-                var scanned = 0
-                var offset = 0
-                var foundRow: (msgId: Int64, text: String?, attributedBody: Data?, date: Int64, isFromMe: Bool, senderHandle: String?, chatId: Int64, chatName: String?, guid: String, threadOriginatorGuid: String?, dateEdited: Int64)?
-                var exhausted = false
-
-                while foundRow == nil && !exhausted && scanned < scanCap {
-                    let rows = try database.query(
-                        """
-                        SELECT
-                            m.ROWID as msg_id,
-                            m.text,
-                            m.attributedBody,
-                            m.date,
-                            m.is_from_me,
-                            h.id as sender_handle,
-                            c.ROWID as chat_id,
-                            c.display_name as chat_name,
-                            m.guid,
-                            \(schema.threadOriginatorGuidSQL),
-                            \(schema.dateEditedSQL)
-                        FROM message m
-                        JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
-                        JOIN chat c ON cmj.chat_id = c.ROWID
-                        LEFT JOIN handle h ON m.handle_id = h.ROWID
-                        WHERE c.ROWID = ?
-                          AND m.associated_message_type = 0
-                          AND (m.text LIKE ? ESCAPE '\\' OR (m.text IS NULL AND m.attributedBody IS NOT NULL))
-                        ORDER BY m.date DESC
-                        LIMIT ? OFFSET ?
-                        """,
-                        params: [numericChatId, pattern, pageSize, offset]
-                    ) { row in
-                        (
-                            msgId: row.int(0),
-                            text: row.string(1),
-                            attributedBody: row.blob(2),
-                            date: row.int(3),
-                            isFromMe: row.int(4) != 0,
-                            senderHandle: row.string(5),
-                            chatId: row.int(6),
-                            chatName: row.string(7),
-                            guid: row.string(8) ?? "",
-                            threadOriginatorGuid: row.string(9),
-                            dateEdited: row.optionalInt(10) ?? 0
-                        )
-                    }
-                    scanned += rows.count
-                    offset += pageSize
-                    exhausted = rows.count < pageSize
-                    foundRow = rows.first(where: { row in
-                        let extracted = MessageTextExtractor.extract(text: row.text, attributedBody: row.attributedBody)
-                        return extracted?.lowercased().contains(searchLower) ?? false
-                    })
-                }
-
-                guard let found = foundRow else {
-                    if exhausted {
-                        return .failure(GetContextError(
-                            error: "not_found",
-                            message: "No message found containing '\(searchText)'"
-                        ))
-                    }
-                    return .failure(GetContextError(
-                        error: "not_found_in_window",
-                        message: "No message containing '\(searchText)' in the newest \(scanned) candidate messages of this chat (scan cap \(scanCap)). Narrow the phrase or use search with chat_id to find the message id, then call get_context with message_id."
-                    ))
-                }
-                targetResult = found
-            }
-
-            let targetDate = targetResult.date
-            let targetChatId = targetResult.chatId
-
-            let beforeSql = """
-                SELECT
-                    m.ROWID as msg_id,
-                    m.text,
-                    m.attributedBody,
-                    m.date,
-                    m.is_from_me,
-                    h.id as sender_handle,
-                    m.guid,
-                    \(schema.threadOriginatorGuidSQL),
-                    \(schema.dateEditedSQL)
-                FROM message m
-                JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
-                LEFT JOIN handle h ON m.handle_id = h.ROWID
-                WHERE cmj.chat_id = ?
-                AND m.date < ?
-                AND m.associated_message_type = 0
-                ORDER BY m.date DESC
-                LIMIT ?
-                """
-
-            let beforeRows = try database.query(beforeSql, params: [targetChatId, targetDate, beforeCount]) { row in
-                (
-                    msgId: row.int(0),
-                    text: row.string(1),
-                    attributedBody: row.blob(2),
-                    date: row.int(3),
-                    isFromMe: row.int(4) != 0,
-                    senderHandle: row.string(5),
-                    guid: row.string(6) ?? "",
-                    threadOriginatorGuid: row.string(7),
-                    dateEdited: row.optionalInt(8) ?? 0
-                )
-            }.reversed()
-
-            let afterSql = """
-                SELECT
-                    m.ROWID as msg_id,
-                    m.text,
-                    m.attributedBody,
-                    m.date,
-                    m.is_from_me,
-                    h.id as sender_handle,
-                    m.guid,
-                    \(schema.threadOriginatorGuidSQL),
-                    \(schema.dateEditedSQL)
-                FROM message m
-                JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
-                LEFT JOIN handle h ON m.handle_id = h.ROWID
-                WHERE cmj.chat_id = ?
-                AND m.date > ?
-                AND m.associated_message_type = 0
-                ORDER BY m.date ASC
-                LIMIT ?
-                """
-
-            let afterRows = try database.query(afterSql, params: [targetChatId, targetDate, afterCount]) { row in
-                (
-                    msgId: row.int(0),
-                    text: row.string(1),
-                    attributedBody: row.blob(2),
-                    date: row.int(3),
-                    isFromMe: row.int(4) != 0,
-                    senderHandle: row.string(5),
-                    guid: row.string(6) ?? "",
-                    threadOriginatorGuid: row.string(7),
-                    dateEdited: row.optionalInt(8) ?? 0
-                )
-            }
-
-            var people: [String: GetContextResponse.PersonInfo] = [:]
-            var handleToKey: [String: String] = [:]
-            var personCounter = 1
-
-            func generateUniqueKey(baseName: String, existing: [String: GetContextResponse.PersonInfo]) -> String {
-                if existing[baseName] == nil { return baseName }
-                var suffix = 2
-                while existing["\(baseName)\(suffix)"] != nil {
-                    suffix += 1
-                }
-                return "\(baseName)\(suffix)"
-            }
-
-            func getPersonKey(isFromMe: Bool, handle: String?) async -> String {
-                if isFromMe {
-                    if people["me"] == nil {
-                        people["me"] = GetContextResponse.PersonInfo(name: "Me", handle: nil, isMe: true)
-                    }
-                    return "me"
+                let rows = try database.query(sql, params: params, map: MessageInChat.init)
+                scanned += rows.count
+                foundRow = rows.first { $0.message.text?.lowercased().contains(searchLower) ?? false }
+                if let last = rows.last?.message, let date = last.date, rows.count == pageSize {
+                    resumeAfter = TimelineCursor(date: date, messageId: last.id)
                 } else {
-                    let h = handle ?? "unknown"
-                    if let existingKey = handleToKey[h] {
-                        return existingKey
-                    }
-
-                    let name = await resolver.resolve(h)
-
-                    let key: String
-                    if let resolvedName = name {
-                        let firstName = resolvedName.split(separator: " ").first.map(String.init) ?? resolvedName
-                        key = generateUniqueKey(baseName: firstName.lowercased(), existing: people)
-                    } else {
-                        key = "p\(personCounter)"
-                        personCounter += 1
-                    }
-                    handleToKey[h] = key
-
-                    people[key] = GetContextResponse.PersonInfo(
-                        name: name ?? h,
-                        handle: h,
-                        isMe: nil
-                    )
-                    return key
+                    exhausted = true
                 }
             }
 
-            var pageIdByGuid: [String: Int] = [targetResult.guid: Int(targetResult.msgId)]
-            var originatorGuids: [String] = []
-            if let originator = targetResult.threadOriginatorGuid {
-                originatorGuids.append(originator)
-            }
-            for row in beforeRows {
-                pageIdByGuid[row.guid] = Int(row.msgId)
-                if let originator = row.threadOriginatorGuid {
-                    originatorGuids.append(originator)
+            guard let found = foundRow else {
+                if exhausted {
+                    throw ToolFailure("not_found", "No message found containing '\(searchText)'")
                 }
+                throw ToolFailure("not_found_in_window", "No message containing '\(searchText)' in the newest \(scanned) candidate messages of this chat (scan cap \(scanCap)). Narrow the phrase or use search with chat_id to find the message id, then call get_context with message_id.")
             }
-            for row in afterRows {
-                pageIdByGuid[row.guid] = Int(row.msgId)
-                if let originator = row.threadOriginatorGuid {
-                    originatorGuids.append(originator)
-                }
-            }
-            let annotations = try MessageAnnotations.loadIfNeeded(
-                db: database,
-                guids: Array(pageIdByGuid.keys),
-                pageIdByGuid: pageIdByGuid,
-                originatorGuids: originatorGuids,
-                fetchReactions: true,
-                fetchReplies: true
-            )
-            for recs in annotations.reactions.values {
-                for reaction in recs {
-                    _ = await getPersonKey(isFromMe: reaction.fromHandle == nil, handle: reaction.fromHandle)
-                }
-            }
-
-            func formatMessage(
-                msgId: Int64,
-                text: String?,
-                attributedBody: Data?,
-                date: Int64,
-                isFromMe: Bool,
-                senderHandle: String?,
-                guid: String,
-                threadOriginatorGuid: String?,
-                dateEdited: Int64
-            ) async -> GetContextResponse.ContextMessage {
-                let messageText = MessageTextExtractor.extract(text: text, attributedBody: attributedBody)
-                let msgDate = AppleTime.toDate(date)
-
-                return GetContextResponse.ContextMessage(
-                    id: "msg_\(msgId)",
-                    from: await getPersonKey(isFromMe: isFromMe, handle: senderHandle),
-                    text: messageText,
-                    ago: TimeUtils.formatCompactRelative(msgDate),
-                    ts: TimeUtils.formatISO(msgDate),
-                    reactions: MessageAnnotations.render(
-                        annotations.reactions[guid] ?? [],
-                        reactorName: { handle in
-                            if let handle {
-                                return handleToKey[handle] ?? "unknown"
-                            }
-                            return "me"
-                        }
-                    ),
-                    replyTo: threadOriginatorGuid.flatMap { annotations.replies.originatorIdByGuid[$0] },
-                    replyCount: annotations.replies.replyCountByGuid[guid],
-                    edited: dateEdited != 0 ? true : nil
-                )
-            }
-
-            let targetMessage = await formatMessage(
-                msgId: targetResult.msgId,
-                text: targetResult.text,
-                attributedBody: targetResult.attributedBody,
-                date: targetResult.date,
-                isFromMe: targetResult.isFromMe,
-                senderHandle: targetResult.senderHandle,
-                guid: targetResult.guid,
-                threadOriginatorGuid: targetResult.threadOriginatorGuid,
-                dateEdited: targetResult.dateEdited
-            )
-
-            var beforeMessages: [GetContextResponse.ContextMessage] = []
-            for row in beforeRows {
-                let msg = await formatMessage(
-                    msgId: row.msgId,
-                    text: row.text,
-                    attributedBody: row.attributedBody,
-                    date: row.date,
-                    isFromMe: row.isFromMe,
-                    senderHandle: row.senderHandle,
-                    guid: row.guid,
-                    threadOriginatorGuid: row.threadOriginatorGuid,
-                    dateEdited: row.dateEdited
-                )
-                beforeMessages.append(msg)
-            }
-
-            var afterMessages: [GetContextResponse.ContextMessage] = []
-            for row in afterRows {
-                let msg = await formatMessage(
-                    msgId: row.msgId,
-                    text: row.text,
-                    attributedBody: row.attributedBody,
-                    date: row.date,
-                    isFromMe: row.isFromMe,
-                    senderHandle: row.senderHandle,
-                    guid: row.guid,
-                    threadOriginatorGuid: row.threadOriginatorGuid,
-                    dateEdited: row.dateEdited
-                )
-                afterMessages.append(msg)
-            }
-
-            let chatName = try await displayNameForChat(
-                chatId: targetChatId,
-                explicitName: targetResult.chatName,
-                database: database,
-                resolver: resolver
-            )
-
-            let response = GetContextResponse(
-                chat: GetContextResponse.ChatInfo(
-                    id: "chat\(targetChatId)",
-                    name: chatName
-                ),
-                people: people,
-                message: targetMessage,
-                before: beforeMessages,
-                after: afterMessages
-            )
-
-            return .success(response)
-
-        } catch let error as DatabaseError {
-            let mapped = ToolErrorMapping.map(error, context: "get_context")
-            return .failure(GetContextError(error: mapped.code, message: mapped.message))
-        } catch {
-            return .failure(GetContextError(
-                error: "internal_error",
-                message: ClientErrorMessages.sanitized(error)
-            ))
+            targetResult = found
         }
-    }
 
-    // MARK: - Private Helpers
+        let targetChatId = targetResult.chatId
+        let window = try MessageWindow.around(
+            [MessageWindow.Anchor(chatId: targetChatId, message: targetResult.message)],
+            before: beforeCount,
+            after: afterCount,
+            db: database
+        ).values.first ?? MessageWindow.Context()
+        let beforeRows = window.before
+        let afterRows = window.after
 
-    private static func parseMessageId(_ idStr: String) -> Int64? {
-        var numStr = idStr
-        if numStr.hasPrefix("msg_") {
-            numStr = String(numStr.dropFirst(4))
-        } else if numStr.hasPrefix("msg") {
-            numStr = String(numStr.dropFirst(3))
+        let shown = [targetResult.message] + beforeRows + afterRows
+        let annotations = try MessageAnnotations.load(for: shown, include: [.reactions, .replies], db: database)
+
+        // Keys go to reactors first, then senders, each in window order.
+        var people = PeopleMap(rules: .seen)
+        func see(_ handle: String?) async {
+            guard let handle else { return people.addMe() }
+            people.add(handle: handle, name: await resolver.resolve(handle))
         }
-        return Int64(numStr)
-    }
-
-    private static func displayNameForChat(
-        chatId: Int64,
-        explicitName: String?,
-        database: Database,
-        resolver: ContactResolver
-    ) async throws -> String {
-        let rows = try await ChatSummaryQueries.participants(
-            db: database,
-            chatId: chatId,
-            resolver: resolver
+        for message in shown {
+            for reaction in annotations.reactions[message.guid] ?? [] {
+                await see(reaction.fromHandle)
+            }
+        }
+        for message in shown {
+            await see(message.isFromMe ? nil : message.senderHandle ?? noHandle)
+        }
+        let renderer = MessageRenderer(
+            annotations: annotations,
+            labels: people.labels(noHandle: people.keyByHandle[noHandle] ?? noHandle)
         )
-        return ChatIdentity.from(
-            chatId: chatId,
-            guid: nil,
-            explicitName: explicitName,
-            rows: rows
-        ).displayName
-    }
+        func context(_ rows: [MessageRecord]) -> [ContextMessage] {
+            rows.map { ContextMessage(renderer.render($0), showAgo: true) }
+        }
 
+        let chat = try await ChatReferences([targetResult].chats, db: database, resolver: resolver)[targetChatId]
+
+        let response = GetContextResponse(
+            chat: chat,
+            people: Dictionary(uniqueKeysWithValues: people.people.map { person in
+                (person.key, GetContextResponse.PersonInfo(
+                    name: person.name ?? person.handle ?? "Me",
+                    handle: person.handle,
+                    isMe: person.isMe ? true : nil
+                ))
+            }),
+            message: ContextMessage(renderer.render(targetResult.message), showAgo: true),
+            before: context(beforeRows),
+            after: context(afterRows)
+        )
+
+        return response
+    }
 }

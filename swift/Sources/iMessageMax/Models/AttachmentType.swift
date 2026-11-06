@@ -1,4 +1,3 @@
-// Sources/iMessageMax/Models/AttachmentType.swift
 import Foundation
 
 /// Attachment type derived from MIME type or UTI
@@ -10,47 +9,35 @@ enum AttachmentType: String, Codable {
     case document
     case other
 
+    /// Substrings of the lowercased MIME type or UTI that mark each kind,
+    /// in the order `from` tries them. Both `from` and `sqlPredicate` read
+    /// this one table.
+    private static let markers: [(type: AttachmentType, mime: [String], uti: [String])] = [
+        (.image, ["image"], ["image", "jpeg", "png", "heic"]),
+        (.video, ["video"], ["movie", "video"]),
+        (.audio, ["audio"], ["audio"]),
+        (.pdf, ["pdf"], ["pdf"]),
+        (.document, ["document", "msword", "spreadsheet", "presentation"], []),
+    ]
+
     static func from(mimeType: String?, uti: String?) -> AttachmentType {
         let mime = (mimeType ?? "").lowercased()
         let utiStr = (uti ?? "").lowercased()
-
-        if mime.contains("image") || utiStr.contains("image") ||
-            utiStr.contains("jpeg") || utiStr.contains("png") || utiStr.contains("heic") {
-            return .image
-        } else if mime.contains("video") || utiStr.contains("movie") || utiStr.contains("video") {
-            return .video
-        } else if mime.contains("audio") || utiStr.contains("audio") {
-            return .audio
-        } else if mime.contains("pdf") || utiStr.contains("pdf") {
-            return .pdf
-        } else if mime.contains("document") || mime.contains("msword") ||
-            mime.contains("spreadsheet") || mime.contains("presentation") {
-            return .document
-        } else {
-            return .other
-        }
+        return markers.first { marker in
+            marker.mime.contains { mime.contains($0) } || marker.uti.contains { utiStr.contains($0) }
+        }?.type ?? .other
     }
 
-    /// SQL boolean expression over `alias.mime_type` / `alias.uti`.
-    /// Returns nil for `"any"` / unknown filters.
+    /// SQL boolean expression over `alias.mime_type` / `alias.uti`: the
+    /// row carries this kind's markers. Unlike `from`, it does not check
+    /// that no earlier kind matched first. Returns nil for `"any"` and
+    /// unknown filters.
     static func sqlPredicate(for typeFilter: String?, alias: String = "a") -> String? {
-        guard let typeFilter, typeFilter != "any" else { return nil }
+        guard let marker = markers.first(where: { $0.type.rawValue == typeFilter }) else { return nil }
 
         let mime = "LOWER(COALESCE(\(alias).mime_type, ''))"
         let uti = "LOWER(COALESCE(\(alias).uti, ''))"
-        switch typeFilter {
-        case "image":
-            return "\(mime) LIKE '%image%' OR \(uti) LIKE '%image%' OR \(uti) LIKE '%jpeg%' OR \(uti) LIKE '%png%' OR \(uti) LIKE '%heic%'"
-        case "video":
-            return "\(mime) LIKE '%video%' OR \(uti) LIKE '%movie%' OR \(uti) LIKE '%video%'"
-        case "audio":
-            return "\(mime) LIKE '%audio%' OR \(uti) LIKE '%audio%'"
-        case "pdf":
-            return "\(mime) LIKE '%pdf%' OR \(uti) LIKE '%pdf%'"
-        case "document":
-            return "\(mime) LIKE '%document%' OR \(mime) LIKE '%msword%' OR \(mime) LIKE '%spreadsheet%' OR \(mime) LIKE '%presentation%'"
-        default:
-            return nil
-        }
+        return (marker.mime.map { "\(mime) LIKE '%\($0)%'" } + marker.uti.map { "\(uti) LIKE '%\($0)%'" })
+            .joined(separator: " OR ")
     }
 }

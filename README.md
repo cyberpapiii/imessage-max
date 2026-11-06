@@ -113,9 +113,10 @@ brew install imessage-max
 ```bash
 git clone https://github.com/cyberpapiii/imessage-max.git
 cd imessage-max/swift
-swift build -c release
+make build
 
-# Binary is at .build/release/imessage-max
+# Binary is at .build/arm64-apple-macosx/release/imessage-max
+# (a bare `swift build` omits the embedded Info.plist, so Contacts can't be granted)
 ```
 
 For local development, advanced setup, and the signed install workflow, see:
@@ -433,7 +434,7 @@ diagnose()  # Returns: database status, contacts count, permissions, capabilitie
 
 `database.features` lists which optional `chat.db` columns exist on this Mac, keyed `table.column` (for example `message.date_edited`). When one is `false`, the tools that read it degrade instead of failing: no `reply_to` or `reply_count` without `message.thread_originator_guid`, no `edited` without `message.date_edited`, no custom-emoji reaction text without `message.associated_message_emoji`.
 
-`contacts.status` is one of `authorized`, `limited`, `denied`, `restricted`, `not_determined`, `not_requested_headless`, `skipped_ci`, or `<status>_load_failed`. A headless process that skipped the prompt reports `not_requested_headless` and the fix names `--request-contacts-access`.
+`contacts.status` is one of `authorized`, `limited`, `denied`, `restricted`, `not_determined`, `not_requested_headless`, or `<status>_load_failed`. A headless process that skipped the prompt reports `not_requested_headless` and the fix names `--request-contacts-access`.
 
 ## Release checks
 
@@ -507,7 +508,8 @@ executable and the steps:
    earlier code signature looks present but does not work; `make
    setup-signing` gives the binary a stable identity so rebuilds keep it.
 3. The grant applies only to newly launched processes. Relaunch:
-   `launchctl kickstart -k gui/$(id -u)/local.imessage-max` or `cd swift && make restart`.
+   `cd swift && make restart` (launchctl bootout, then bootstrap; `kickstart -k`
+   can hit the launchd crash throttle).
 4. Bisect from a terminal: `sqlite3 -readonly ~/Library/Messages/chat.db 'pragma quick_check;'`.
    `ok` means your terminal has access and the server process does not;
    `unable to open database file` means the grant is missing for your user.

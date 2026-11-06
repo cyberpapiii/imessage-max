@@ -10,6 +10,30 @@ struct TimelineCursor: Equatable {
         return "\(date):\(messageId)"
     }
 
+    /// The cursor for the page after `last`; nil when the page was not full.
+    static func next(after last: MessageRecord?, pageFull: Bool) -> String? {
+        guard pageFull, let last else { return nil }
+        return encode(date: last.date, messageId: last.id)
+    }
+
+    /// The cursor for a page Swift filtered after the query: `fetched` is
+    /// what a query limited to `fetchLimit` returned, `kept` what survived,
+    /// in the same order. A full page resumes after its last kept row, since
+    /// the rows behind it may not have been checked. A short page from a
+    /// full fetch resumes after the last row fetched, since every row up to
+    /// there was checked and dropped; only a short fetch ends the timeline.
+    static func next(
+        kept: [MessageRecord],
+        limit: Int,
+        fetched: [MessageRecord],
+        fetchLimit: Int
+    ) -> String? {
+        if kept.count >= limit {
+            return next(after: kept.prefix(limit).last, pageFull: true)
+        }
+        return next(after: fetched.last, pageFull: fetched.count >= fetchLimit)
+    }
+
     static func decode(_ raw: String) -> TimelineCursor? {
         let parts = raw.split(separator: ":")
         guard parts.count == 2,
@@ -20,22 +44,14 @@ struct TimelineCursor: Equatable {
         return TimelineCursor(date: date, messageId: messageId)
     }
 
-    /// SQL fragment for descending timelines (`ORDER BY date DESC, id DESC`).
-    var olderThanSQL: String {
-        "(m.date < ? OR (m.date = ? AND m.ROWID < ?))"
-    }
-
-    var olderThanParams: [Any] {
-        [date, date, messageId]
-    }
-
-    /// SQL fragment for ascending timelines (`ORDER BY date ASC, id ASC`).
-    var newerThanSQL: String {
-        "(m.date > ? OR (m.date = ? AND m.ROWID > ?))"
-    }
-
-    var newerThanParams: [Any] {
-        [date, date, messageId]
+    /// Rows past this cursor in a timeline ordered by `(date, ROWID)` of
+    /// message alias `alias`: older rows when `descending`, newer otherwise.
+    func predicate(descending: Bool, _ alias: String = "m") -> (sql: String, params: [Any]) {
+        let op = descending ? "<" : ">"
+        return (
+            "(\(alias).date \(op) ? OR (\(alias).date = ? AND \(alias).ROWID \(op) ?))",
+            [date, date, messageId]
+        )
     }
 }
 

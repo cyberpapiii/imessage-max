@@ -1,4 +1,3 @@
-// Sources/iMessageMax/Utilities/FormatUtils.swift
 import Foundation
 
 enum FormatUtils {
@@ -112,13 +111,6 @@ enum FormatUtils {
         return String(decoding: buffer, as: UTF8.self)
     }
 
-    static func encodeJSONObject(_ value: Any) throws -> String {
-        var buffer: [UInt8] = []
-        buffer.reserveCapacity(256)
-        try appendOrderedJSON(value, to: &buffer)
-        return String(decoding: buffer, as: UTF8.self)
-    }
-
     private static func appendOrderedJSON(_ value: Any, to out: inout [UInt8]) throws {
         switch value {
         case is NSNull:
@@ -131,8 +123,6 @@ enum FormatUtils {
             } else {
                 out.append(contentsOf: number.stringValue.utf8)
             }
-        case let bool as Bool:
-            out.append(contentsOf: (bool ? "true" : "false").utf8)
         case let array as [Any]:
             out.append(UInt8(ascii: "["))
             for (index, item) in array.enumerated() {

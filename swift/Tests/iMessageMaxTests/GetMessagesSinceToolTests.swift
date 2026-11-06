@@ -59,6 +59,18 @@ final class GetMessagesSinceToolTests: XCTestCase {
         XCTAssertEqual(json["has_more"] as? Bool, false)
     }
 
+    func testLinksAreCappedAtTenLikeGetMessages() async throws {
+        let fixture = try makeSinceFixture()
+        let text = (1...12).map { "https://l\($0).example.com" }.joined(separator: " ")
+        try fixture.insertMessage(rowId: 108, guid: "s-108", text: text, date: date(108), isFromMe: false, handleId: 1)
+        try fixture.joinChatMessage(chatId: 1, messageId: 108)
+        let tool = GetMessagesSinceTool(db: fixture.database(), resolver: makeSeededResolver())
+        let json = try decodeJSONDictionary(from: try await tool.execute(args: ["since_rowid": .int(107)]))
+        let message = try XCTUnwrap(try decodeJSONArray(json["messages"]).first)
+        XCTAssertEqual((message["links"] as? [String])?.count, 10)
+        XCTAssertEqual((message["links"] as? [String])?.last, "https://l10.example.com")
+    }
+
     func testOmittedCursorReturnsCurrentRowidOnly() async throws {
         let fixture = try makeSinceFixture()
         let tool = GetMessagesSinceTool(db: fixture.database(), resolver: makeSeededResolver())
@@ -174,32 +186,118 @@ final class GetMessagesSinceToolTests: XCTestCase {
         XCTAssertEqual(json["next_rowid"] as? Int, 107)
     }
 
-    func testInvalidChatIdIsInvalidInput() async throws {
+    func testUnresolvableChatIdIsChatNotFound() async throws {
         let fixture = try makeSinceFixture()
         let tool = GetMessagesSinceTool(db: fixture.database(), resolver: makeSeededResolver())
         do {
             _ = try await tool.execute(args: ["chat_id": .string("nope")])
-            XCTFail("expected invalid_input")
-        } catch let error as ToolError {
+            XCTFail("expected chat_not_found")
+        } catch let error as ToolFailure {
             let payload = try decodeJSONDictionary(from: error.content)
-            XCTAssertEqual(payload["error"] as? String, "invalid_input")
+            XCTAssertEqual(payload["error"] as? String, "chat_not_found")
         }
     }
 
-    func testLimitIsClamped() {
-        XCTAssertEqual(GetMessagesSinceTool.clampLimit(0), 1)
-        XCTAssertEqual(GetMessagesSinceTool.clampLimit(9999), 500)
-        XCTAssertEqual(GetMessagesSinceTool.clampLimit(nil), 100)
-    }
-
-    func testQueryCountIsBounded() async throws {
+    func testLimitIsClamped() async throws {
         let fixture = try makeSinceFixture()
         let tool = GetMessagesSinceTool(db: fixture.database(), resolver: makeSeededResolver())
-        Database.queryCountForTesting = 0
-        defer { Database.queryCountForTesting = nil }
-        _ = try await tool.execute(args: ["since_rowid": .int(99), "limit": .int(5)])
-        let count = try XCTUnwrap(Database.queryCountForTesting)
-        // MAX(ROWID) + scan + reactions + reply counts + attachments + participants.
-        XCTAssertEqual(count, 6, "unexpected query count \(count)")
+        func ids(limit: Int) async throws -> [String?] {
+            let json = try decodeJSONDictionary(from: try await tool.execute(args: ["since_rowid": .int(99), "limit": .int(limit)]))
+            return try decodeJSONArray(json["messages"]).map { $0["id"] as? String }
+        }
+        let floor = try await ids(limit: 0)
+        XCTAssertEqual(floor, ["msg_100"], "limit 0 clamps up to 1")
+        let ceiling = try await ids(limit: 9999)
+        XCTAssertEqual(ceiling, ["msg_100", "msg_101", "msg_103", "msg_106", "msg_107"])
+    }
+
+    /// Reactions, reply counts, attachments and participants are fetched per
+    /// page, not per message.
+    func testQueryCountDoesNotGrowWithPageSize() async throws {
+        let fixture = try makeSinceFixture()
+        let tool = GetMessagesSinceTool(db: fixture.database(), resolver: makeSeededResolver())
+        let one = try await countQueries {
+            _ = try await tool.execute(args: ["since_rowid": .int(99), "limit": .int(1)])
+        }
+        let five = try await countQueries {
+            _ = try await tool.execute(args: ["since_rowid": .int(99), "limit": .int(5)])
+        }
+        XCTAssertGreaterThan(one, 0)
+        XCTAssertEqual(five, one, "a page of 5 ran \(five) queries, a page of 1 ran \(one)")
+    }
+
+    // MARK: - Paging, hidden chats and chat filter
+
+    func testFilteredHiddenCountsHiddenChatsNotMessages() async throws {
+        let fixture = try hiddenMatchesFixture()
+        let page = try await callTool("get_messages_since", ["since_rowid": 0], database: fixture.database())
+        XCTAssertEqual(page["filtered_hidden"] as? Int, 2)
+        XCTAssertEqual(try itemIds(page, "messages"), ["msg_1"])
+    }
+
+    /// A full page whose last kept row is the last row of the batch read
+    /// still reports more, and the next page starts right after it.
+    func testFullPageEndingOnABatchsLastRowStillReportsMore() async throws {
+        let fixture = try ToolTestDatabase(name: "since-full-batch")
+        try fixture.insertHandle(rowId: 1, handle: "+15550000001")
+        try fixture.insertChat(rowId: 1, guid: "iMessage;-;+15550000001")
+        try fixture.insertChat(rowId: 2, guid: "SMS;-;spam", isFiltered: 1)
+        let base: Int64 = 700_000_000_000_000_000
+        // limit 31 reads a first batch of 32 rows; one of them is hidden, so
+        // the 31st kept row is the batch's last.
+        try fixture.insertMessage(rowId: 1, guid: "h", text: "spam", date: base, isFromMe: false, handleId: 1)
+        try fixture.joinChatMessage(chatId: 2, messageId: 1)
+        for row in 2...40 {
+            try fixture.insertMessage(rowId: row, guid: "g\(row)", text: "m\(row)", date: base + Int64(row), isFromMe: false, handleId: 1)
+            try fixture.joinChatMessage(chatId: 1, messageId: row)
+        }
+
+        let first = try await callTool("get_messages_since", ["since_rowid": 0, "limit": 31], database: fixture.database())
+        XCTAssertEqual(try itemIds(first, "messages").count, 31)
+        XCTAssertEqual(first["has_more"] as? Bool, true)
+        XCTAssertEqual(first["next_rowid"] as? Int, 32)
+
+        let second = try await callTool("get_messages_since", ["since_rowid": 32, "limit": 31], database: fixture.database())
+        XCTAssertEqual(try itemIds(second, "messages"), (33...40).map { "msg_\($0)" })
+        XCTAssertEqual(second["has_more"] as? Bool, false)
+    }
+
+    /// `chat_id` matches a message joined to that chat even when its home
+    /// chat is another; unfiltered, the message is listed under its home chat.
+    func testChatFilterMatchesAMessageWhoseHomeChatIsAnother() async throws {
+        let fixture = try ToolTestDatabase(name: "since-second-chat")
+        try fixture.insertHandle(rowId: 1, handle: "+15550000001")
+        try fixture.insertChat(rowId: 1, guid: "iMessage;-;+15550000001")
+        try fixture.insertChat(rowId: 2, guid: "SMS;-;+15550000001", serviceName: "SMS")
+        try fixture.insertMessage(rowId: 1, guid: "g1", text: "in both", date: 700_000_000_000_000_000, isFromMe: false, handleId: 1)
+        try fixture.joinChatMessage(chatId: 1, messageId: 1)
+        try fixture.joinChatMessage(chatId: 2, messageId: 1)
+
+        let filtered = try await callTool("get_messages_since", ["since_rowid": 0, "chat_id": "chat2"], database: fixture.database())
+        let messages = try decodeJSONArray(filtered["messages"])
+        XCTAssertEqual(messages.compactMap { $0["id"] as? String }, ["msg_1"])
+        XCTAssertEqual((messages.first?["chat"] as? [String: Any])?["id"] as? String, "chat2")
+
+        let unfiltered = try await callTool("get_messages_since", ["since_rowid": 0], database: fixture.database())
+        let home = try decodeJSONArray(unfiltered["messages"]).first?["chat"] as? [String: Any]
+        XCTAssertEqual(home?["id"] as? String, "chat1")
+    }
+
+    func testMissingReplyAndEditColumnsDegradeToPlainMessages() async throws {
+        let fixture = try makeSinceFixture()
+        try fixture.execute("ALTER TABLE message DROP COLUMN thread_originator_guid")
+        try fixture.execute("ALTER TABLE message DROP COLUMN date_edited")
+        try fixture.execute("ALTER TABLE message DROP COLUMN associated_message_emoji")
+
+        let json = try await callTool("get_messages_since", ["since_rowid": 99, "limit": 50], database: fixture.database())
+        let messages = try decodeJSONArray(json["messages"])
+        XCTAssertEqual(messages.compactMap { $0["id"] as? String }, ["msg_100", "msg_101", "msg_103", "msg_106", "msg_107"])
+        for message in messages {
+            XCTAssertNil(message["reply_to"])
+            XCTAssertNil(message["reply_count"])
+            XCTAssertNil(message["edited"])
+        }
+        let reacted = try XCTUnwrap(messages.first)
+        XCTAssertNotNil(reacted["reactions"], "the tapback still attaches without associated_message_emoji: \(reacted)")
     }
 }

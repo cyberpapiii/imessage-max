@@ -1,3 +1,4 @@
+import IMessageMaxContract
 import XCTest
 @testable import iMessageMax
 
@@ -6,7 +7,7 @@ final class ContactResolverTests: XCTestCase {
         var loads = 0
         var requested = false
         var authorized = true
-        var status = "authorized"
+        var status: PermissionStatus = "authorized"
         var names: [String: String] = [:]
         var failNext = false
         var clock: TimeInterval = 0
@@ -33,15 +34,6 @@ final class ContactResolverTests: XCTestCase {
         return (resolver, box)
     }
 
-    private func withoutCI(_ body: () async throws -> Void) async rethrows {
-        let previous = ProcessInfo.processInfo.environment["CI"]
-        unsetenv("CI")
-        defer {
-            if let previous { setenv("CI", previous, 1) } else { unsetenv("CI") }
-        }
-        try await body()
-    }
-
     private func seeded() -> ContactResolver {
         ContactResolver(seedCache: [
             "+15550000001": "John Smith",
@@ -56,6 +48,16 @@ final class ContactResolverTests: XCTestCase {
         XCTAssertTrue(empty.isEmpty)
         let whitespace = await resolver.searchByName("   ")
         XCTAssertTrue(whitespace.isEmpty)
+    }
+
+    func testMatchesComeBackSortedByNameThenHandle() async {
+        let resolver = ContactResolver(seedCache: [
+            "+15550000009": "Sam Lee",
+            "sam@example.com": "Sam Lee",
+            "+15550000001": "Sam Adams",
+        ])
+        let matches = await resolver.searchByName("sam")
+        XCTAssertEqual(matches.map(\.handle), ["+15550000001", "+15550000009", "sam@example.com"])
     }
 
     func testSingleCharacterMatchesNothing() async {
@@ -76,112 +78,90 @@ final class ContactResolverTests: XCTestCase {
         XCTAssertEqual(matches.map(\.name), ["John Smith"])
     }
 
-    func testHeadlessPolicySkipsRequestWhenNotDetermined() async throws {
-        try await withoutCI {
-            let (resolver, box) = makeInjected()
-            box.authorized = false
-            box.status = "not_determined"
-            await resolver.requestAccessIfAllowed(policy: .skipIfNotDetermined)
-            XCTAssertFalse(box.requested)
-            let stats = await resolver.getStats()
-            XCTAssertTrue(stats.accessRequestSkippedHeadless)
-        }
+    func testHeadlessPolicySkipsRequestWhenNotDetermined() async {
+        let (resolver, box) = makeInjected()
+        box.authorized = false
+        box.status = "not_determined"
+        await resolver.requestAccessIfAllowed(policy: .skipIfNotDetermined)
+        XCTAssertFalse(box.requested)
+        let stats = await resolver.status()
+        XCTAssertTrue(stats.accessRequestSkippedHeadless)
     }
 
-    func testInteractivePolicyRequestsWhenNotDetermined() async throws {
-        try await withoutCI {
-            let (resolver, box) = makeInjected()
-            box.authorized = false
-            box.status = "not_determined"
-            await resolver.requestAccessIfAllowed(policy: .requestIfNeeded)
-            XCTAssertTrue(box.requested)
-            let stats = await resolver.getStats()
-            XCTAssertFalse(stats.accessRequestSkippedHeadless)
-        }
+    func testInteractivePolicyRequestsWhenNotDetermined() async {
+        let (resolver, box) = makeInjected()
+        box.authorized = false
+        box.status = "not_determined"
+        await resolver.requestAccessIfAllowed(policy: .requestIfNeeded)
+        XCTAssertTrue(box.requested)
+        let stats = await resolver.status()
+        XCTAssertFalse(stats.accessRequestSkippedHeadless)
     }
 
-    func testNoRequestWhenAlreadyDetermined() async throws {
-        try await withoutCI {
-            let (resolver, box) = makeInjected()
-            box.authorized = false
-            box.status = "denied"
-            await resolver.requestAccessIfAllowed(policy: .requestIfNeeded)
-            XCTAssertFalse(box.requested)
-            let stats = await resolver.getStats()
-            XCTAssertFalse(stats.accessRequestSkippedHeadless)
-        }
+    func testNoRequestWhenAlreadyDetermined() async {
+        let (resolver, box) = makeInjected()
+        box.authorized = false
+        box.status = "denied"
+        await resolver.requestAccessIfAllowed(policy: .requestIfNeeded)
+        XCTAssertFalse(box.requested)
+        let stats = await resolver.status()
+        XCTAssertFalse(stats.accessRequestSkippedHeadless)
     }
 
-    func testCacheRefreshesAfterTTL() async throws {
-        try await withoutCI {
-            let (resolver, box) = makeInjected()
-            box.names = ["+15550000001": "Old"]
-            try await resolver.initialize()
-            let first = await resolver.resolve("+15550000001")
-            XCTAssertEqual(first, "Old")
-            box.names["+15550000001"] = "New"
-            try await resolver.initialize()
-            let stillOld = await resolver.resolve("+15550000001")
-            XCTAssertEqual(stillOld, "Old")
-            XCTAssertEqual(box.loads, 1)
-            box.clock += 31
-            try await resolver.initialize()
-            let refreshed = await resolver.resolve("+15550000001")
-            XCTAssertEqual(refreshed, "New")
-            XCTAssertEqual(box.loads, 2)
-        }
+    func testCacheRefreshesAfterTTL() async {
+        let (resolver, box) = makeInjected()
+        box.names = ["+15550000001": "Old"]
+        let first = await resolver.resolve("+15550000001")
+        XCTAssertEqual(first, "Old")
+        box.names["+15550000001"] = "New"
+        let stillOld = await resolver.resolve("+15550000001")
+        XCTAssertEqual(stillOld, "Old")
+        XCTAssertEqual(box.loads, 1)
+        box.clock += 31
+        let refreshed = await resolver.resolve("+15550000001")
+        XCTAssertEqual(refreshed, "New")
+        XCTAssertEqual(box.loads, 2)
     }
 
-    func testChangeNotificationInvalidatesCache() async throws {
-        try await withoutCI {
-            let (resolver, box) = makeInjected()
-            box.names = ["+15550000001": "Old"]
-            try await resolver.initialize()
-            box.names["+15550000001"] = "New"
-            await resolver.invalidate()
-            try await resolver.initialize()
-            let name = await resolver.resolve("+15550000001")
-            XCTAssertEqual(name, "New")
-        }
+    func testChangeNotificationInvalidatesCache() async {
+        let (resolver, box) = makeInjected()
+        box.names = ["+15550000001": "Old"]
+        _ = await resolver.resolve("+15550000001")
+        box.names["+15550000001"] = "New"
+        await resolver.invalidate()
+        let name = await resolver.resolve("+15550000001")
+        XCTAssertEqual(name, "New")
     }
 
-    func testRevokeClearsCachedNames() async throws {
-        try await withoutCI {
-            let (resolver, box) = makeInjected()
-            box.names = ["+15550000001": "Old"]
-            try await resolver.initialize()
-            box.authorized = false
-            box.status = "denied"
-            box.clock += 31
-            try await resolver.initialize()
-            let name = await resolver.resolve("+15550000001")
-            let stats = await resolver.getStats()
-            let search = await resolver.searchByName("ol")
-            XCTAssertNil(name)
-            XCTAssertEqual(stats.handleCount, 0)
-            XCTAssertTrue(search.isEmpty)
-        }
+    func testRevokeClearsCachedNames() async {
+        let (resolver, box) = makeInjected()
+        box.names = ["+15550000001": "Old"]
+        _ = await resolver.resolve("+15550000001")
+        box.authorized = false
+        box.status = "denied"
+        box.clock += 31
+        let name = await resolver.resolve("+15550000001")
+        let stats = await resolver.status()
+        let search = await resolver.searchByName("ol")
+        XCTAssertNil(name)
+        XCTAssertEqual(stats.handleCount, 0)
+        XCTAssertTrue(search.isEmpty)
     }
 
-    func testLoadFailureKeepsLastGoodCache() async throws {
-        try await withoutCI {
-            let (resolver, box) = makeInjected()
-            box.names = ["+15550000001": "Old"]
-            try await resolver.initialize()
-            box.failNext = true
-            box.clock += 31
-            try await resolver.initialize()
-            let name = await resolver.resolve("+15550000001")
-            XCTAssertEqual(name, "Old")
+    func testLoadFailureKeepsLastGoodCache() async {
+        let (resolver, box) = makeInjected()
+        box.names = ["+15550000001": "Old"]
+        _ = await resolver.resolve("+15550000001")
+        box.failNext = true
+        box.clock += 31
+        let name = await resolver.resolve("+15550000001")
+        XCTAssertEqual(name, "Old")
+        let kept = await resolver.status()
+        XCTAssertFalse(kept.loadFailed, "a failure after a good load keeps the names")
 
-            let (fresh, failBox) = makeInjected()
-            failBox.failNext = true
-            do {
-                try await fresh.initialize()
-                XCTFail("first load failure must throw")
-            } catch {
-                // expected
-            }
-        }
+        let (fresh, failBox) = makeInjected()
+        failBox.failNext = true
+        let status = await fresh.status()
+        XCTAssertTrue(status.loadFailed, "a first load failure is reported")
     }
 }

@@ -10,6 +10,16 @@ final class AppleTimeParseTests: XCTestCase {
 
     private let tolerance: TimeInterval = 2
 
+    /// Runs `body` with the start of today, again if midnight passed while it
+    /// ran, so a parse and the day it is checked against always agree.
+    private func onOneDay<T>(_ body: (Date) throws -> T) rethrows -> (today: Date, value: T) {
+        while true {
+            let today = Calendar.current.startOfDay(for: Date())
+            let value = try body(today)
+            if Calendar.current.startOfDay(for: Date()) == today { return (today, value) }
+        }
+    }
+
     /// Round-trips the Apple-epoch nanoseconds back into a Date.
     private func parsedDate(_ input: String, file: StaticString = #filePath, line: UInt = #line) throws -> Date {
         let ns = try XCTUnwrap(AppleTime.parse(input), "\(input) should parse", file: file, line: line)
@@ -55,11 +65,17 @@ final class AppleTimeParseTests: XCTestCase {
             XCTAssertNotNil(AppleTime.parse(keyword), "\(keyword) should parse")
         }
 
-        let today = try parsedDate("today")
-        let startOfDay = Calendar.current.startOfDay(for: Date())
+        let (startOfDay, today) = try onOneDay { _ in try parsedDate("today") }
         XCTAssertEqual(
             today.timeIntervalSince1970, startOfDay.timeIntervalSince1970, accuracy: tolerance,
             "today should be the start of the current day"
+        )
+
+        let (startOfToday, yesterday) = try onOneDay { _ in try parsedDate("yesterday") }
+        let startOfYesterday = try XCTUnwrap(Calendar.current.date(byAdding: .day, value: -1, to: startOfToday))
+        XCTAssertEqual(
+            yesterday.timeIntervalSince1970, startOfYesterday.timeIntervalSince1970, accuracy: tolerance,
+            "yesterday should be the start of the previous day"
         )
     }
 
@@ -76,10 +92,11 @@ final class AppleTimeParseTests: XCTestCase {
             ("thursday", 5), ("friday", 6), ("saturday", 7),
         ]
         let calendar = Calendar.current
-        let today = calendar.startOfDay(for: Date())
-        for (name, weekday) in weekdays {
+        let (today, dates) = try onOneDay { _ in
+            try weekdays.map { try parsedDate("last \($0.name)") }
+        }
+        for ((name, weekday), date) in zip(weekdays, dates) {
             let input = "last \(name)"
-            let date = try parsedDate(input)
             XCTAssertEqual(
                 calendar.component(.weekday, from: date), weekday,
                 "\(input) should land on a \(name)"
@@ -90,8 +107,9 @@ final class AppleTimeParseTests: XCTestCase {
     }
 
     func testCaseAndWhitespaceInsensitiveNatural() throws {
-        let padded = try parsedDate("  Yesterday ")
-        let plain = try parsedDate("yesterday")
+        let (_, (padded, plain)) = try onOneDay { _ in
+            (try parsedDate("  Yesterday "), try parsedDate("yesterday"))
+        }
         XCTAssertEqual(
             padded.timeIntervalSince1970, plain.timeIntervalSince1970, accuracy: tolerance,
             "the natural parser lowercases and trims its input"
@@ -105,15 +123,11 @@ final class AppleTimeParseTests: XCTestCase {
     }
 
     func testHugeRelativeValueDoesNotTrap() {
+        // Reaching the end is the point: none of these may trap.
         for input in ["999999999h", "99999999999d", "9999-01-01T00:00:00Z", "0001-01-01T00:00:00Z", "999999999 days ago"] {
-            let result = AppleTime.parse(input)
-            // Either nil (rejected) or a finite Int64; the point is no trap.
-            if let result {
-                XCTAssertTrue(result <= Int64.max && result >= Int64.min, input)
-            }
+            _ = AppleTime.parse(input)
         }
         // A relative bound is capped at 100 years, not dropped.
-        let capped = try? XCTUnwrap(AppleTime.parse("999999999h"))
-        XCTAssertNotNil(capped)
+        XCTAssertNotNil(AppleTime.parse("999999999h"))
     }
 }

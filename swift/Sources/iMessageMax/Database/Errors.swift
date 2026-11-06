@@ -1,5 +1,5 @@
-// Sources/iMessageMax/Database/Errors.swift
 import Foundation
+import IMessageMaxContract
 
 enum DatabaseError: LocalizedError {
     case permissionDenied(String)
@@ -20,6 +20,16 @@ enum DatabaseError: LocalizedError {
             return "Invalid data: \(msg)"
         case .cancelled:
             return "Query cancelled"
+        }
+    }
+
+    var clientCode: String {
+        switch self {
+        case .notFound: DatabaseStatus.databaseNotFound.rawValue
+        case .permissionDenied: DatabaseStatus.permissionDenied.rawValue
+        case .queryFailed: "query_failed"
+        case .invalidData: "invalid_data"
+        case .cancelled: "cancelled"
         }
     }
 }

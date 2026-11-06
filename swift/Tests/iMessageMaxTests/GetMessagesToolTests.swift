@@ -3,21 +3,20 @@ import MCP
 @testable import iMessageMax
 
 final class GetMessagesToolTests: XCTestCase {
-    func testExactChatIdReturnsMessagesAndGeneratedChatName() async throws {
+    func testExactChatIdReturnsMessagesAndTheSameNameListChatsGives() async throws {
         let fixture = try makeGetMessagesFixture()
-        let tool = GetMessagesTool(db: fixture.database(), resolver: makeSeededResolver())
+        let resolver = makeSeededResolver()
+        let tool = GetMessagesTool(db: fixture.database(), resolver: resolver)
 
-        let response = try await decodeGetMessagesResponse(
+        let response = try await decodeJSONDictionary(from:
             await tool.execute(args: ["chat_id": .string("chat20")])
         )
 
         let chat = try XCTUnwrap(response["chat"] as? [String: Any])
         XCTAssertEqual(chat["id"] as? String, "chat20")
-        let generatedName = try XCTUnwrap(chat["name"] as? String)
-        XCTAssertEqual(
-            Set(generatedName.components(separatedBy: ", ").filter { !$0.isEmpty }),
-            ["Alice Smith", "Bob Brown"]
-        )
+        let listed = try await ListChatsTool.execute(db: fixture.database(), resolver: resolver)
+        let listedName = try XCTUnwrap(listed.chats.first { $0.id == "chat20" }?.name)
+        XCTAssertEqual(chat["name"] as? String, listedName)
 
         let messages = try decodeJSONArray(try XCTUnwrap(response["messages"]))
         XCTAssertEqual(messages.count, 4)
@@ -27,7 +26,7 @@ final class GetMessagesToolTests: XCTestCase {
         let fixture = try makeGetMessagesFixture()
         let tool = GetMessagesTool(db: fixture.database(), resolver: makeSeededResolver())
 
-        let response = try await decodeGetMessagesResponse(
+        let response = try await decodeJSONDictionary(from:
             await tool.execute(args: [
                 "participants": .array([.string("Alice"), .string("Bob")]),
                 "limit": .int(10),
@@ -47,9 +46,12 @@ final class GetMessagesToolTests: XCTestCase {
                 "participants": .array([.string("Bob")]),
             ])
             XCTFail("Expected ambiguous participant error")
-        } catch let error as ToolError {
+        } catch let error as ToolFailure {
             let payload = try decodeJSONDictionary(from: error.content)
             XCTAssertEqual(payload["error"] as? String, "ambiguous_participants")
+            let names = try decodeJSONArray(payload["candidates"]).compactMap { $0["name"] as? String }
+            XCTAssertFalse(names.isEmpty)
+            XCTAssertFalse(names.contains("(Unnamed)"), "unnamed chats get the generated name: \(names)")
         }
     }
 
@@ -57,7 +59,7 @@ final class GetMessagesToolTests: XCTestCase {
         let fixture = try makeGetMessagesFixture()
         let tool = GetMessagesTool(db: fixture.database(), resolver: makeSeededResolver())
 
-        let response = try await decodeGetMessagesResponse(
+        let response = try await decodeJSONDictionary(from:
             await tool.execute(args: [
                 "chat_id": .string("chat20"),
                 "from_person": .string("Bob"),
@@ -70,7 +72,7 @@ final class GetMessagesToolTests: XCTestCase {
         XCTAssertEqual(messages.count, 1)
         XCTAssertEqual(messages.first?["id"] as? String, "msg_200")
 
-        let linksResponse = try await decodeGetMessagesResponse(
+        let linksResponse = try await decodeJSONDictionary(from:
             await tool.execute(args: [
                 "chat_id": .string("chat20"),
                 "has": .string("links"),
@@ -82,12 +84,54 @@ final class GetMessagesToolTests: XCTestCase {
         XCTAssertEqual(linkMessages.first?["id"] as? String, "msg_201")
     }
 
+    /// Recent macOS leaves message.text NULL and keeps the words only in
+    /// attributedBody; `contains` must still find them, and must not match the
+    /// blob's own class names.
+    func testContainsMatchesTextStoredOnlyInAttributedBody() async throws {
+        let fixture = try ToolTestDatabase(name: "get-messages-contains-blob")
+        try fixture.insertHandle(rowId: 1, handle: "+15550000001")
+        try fixture.insertChat(rowId: 1, guid: "iMessage;-;+15550000001")
+        try fixture.joinChatHandle(chatId: 1, handleId: 1)
+        let base = AppleTime.fromDate(Date().addingTimeInterval(-3600))
+        for (rowId, words) in [(1, "Volcano trip on Friday"), (2, "nothing to see")] {
+            try fixture.insertMessage(
+                rowId: rowId, guid: "g\(rowId)", date: base + Int64(rowId), isFromMe: false, handleId: 1,
+                attributedBody: typedstreamBlob(payload: Array(words.utf8))
+            )
+            try fixture.joinChatMessage(chatId: 1, messageId: rowId)
+        }
+        let tool = GetMessagesTool(db: fixture.database(), resolver: makeSeededResolver())
+
+        func ids(containing term: String) async throws -> [String] {
+            let response = try await decodeJSONDictionary(from:
+                await tool.execute(args: ["chat_id": .string("chat1"), "contains": .string(term)])
+            )
+            return try decodeJSONArray(response["messages"]).compactMap { $0["id"] as? String }
+        }
+        let volcano = try await ids(containing: "volcano")
+        XCTAssertEqual(volcano, ["msg_1"])
+        let className = try await ids(containing: "string")
+        XCTAssertEqual(className, [], "NSString in the blob is not message text")
+    }
+
+    func testUnresolvedFromPersonFiltersInsteadOfReturningEveryone() async throws {
+        let fixture = try makeGetMessagesFixture()
+        let tool = GetMessagesTool(db: fixture.database(), resolver: makeSeededResolver())
+
+        for person in ["nobody@example.com", "Zed Nobody"] {
+            let response = try await decodeJSONDictionary(from:
+                await tool.execute(args: ["chat_id": .string("chat20"), "from_person": .string(person)])
+            )
+            XCTAssertEqual(try decodeJSONArray(try XCTUnwrap(response["messages"])).count, 0, person)
+        }
+    }
+
     func testReactionsAndAttachmentMediaSummariesAreIncluded() async throws {
         let fixture = try makeGetMessagesFixture()
         // Fixture images live in the temp dir; the tool contains chat.db paths to allowed roots, so the test supplies its own root.
         let tool = GetMessagesTool(db: fixture.database(), resolver: makeSeededResolver(), allowedRoots: [FileManager.default.temporaryDirectory.path])
 
-        let response = try await decodeGetMessagesResponse(
+        let response = try await decodeJSONDictionary(from:
             await tool.execute(args: [
                 "chat_id": .string("chat20"),
                 "limit": .int(10),
@@ -110,7 +154,7 @@ final class GetMessagesToolTests: XCTestCase {
         let fixture = try makeGetMessagesFixture()
         let tool = GetMessagesTool(db: fixture.database(), resolver: makeSeededResolver())
 
-        let response = try await decodeGetMessagesResponse(
+        let response = try await decodeJSONDictionary(from:
             await tool.execute(args: [
                 "chat_id": .string("chat20"),
                 "limit": .int(10),
@@ -138,7 +182,7 @@ final class GetMessagesToolTests: XCTestCase {
         let fixture = try makeGetMessagesFixture()
         let tool = GetMessagesTool(db: fixture.database(), resolver: makeSeededResolver())
 
-        let response = try await decodeGetMessagesResponse(
+        let response = try await decodeJSONDictionary(from:
             await tool.execute(args: [
                 "chat_id": .string("chat20"),
                 "limit": .int(10),
@@ -170,7 +214,7 @@ final class GetMessagesToolTests: XCTestCase {
         try fixture.joinChatMessage(chatId: 20, messageId: 403)
 
         let tool = GetMessagesTool(db: fixture.database(), resolver: makeSeededResolver())
-        let response = try await decodeGetMessagesResponse(
+        let response = try await decodeJSONDictionary(from:
             await tool.execute(args: [
                 "chat_id": .string("chat20"),
                 "limit": .int(10),
@@ -181,6 +225,32 @@ final class GetMessagesToolTests: XCTestCase {
         let target = try XCTUnwrap(messages.first(where: { $0["id"] as? String == "msg_201" }))
         let reactions = try XCTUnwrap(target["reactions"] as? [String])
         XCTAssertEqual(reactions, ["🥕 bob", "🩵 sticker me"])
+    }
+
+    func testTapbackOnALinkPreviewBalloonIsShown() async throws {
+        let fixture = try makeGetMessagesFixture()
+        let base: Int64 = 1_000_000_000_000
+        let minute: Int64 = 60 * 1_000_000_000
+        try fixture.insertMessage(
+            rowId: 405,
+            guid: "reaction-on-balloon",
+            text: nil,
+            date: base + (6 * minute),
+            isFromMe: false,
+            handleId: 1,
+            associatedMessageType: 2003,
+            associatedMessageGuid: "bp:gm202"
+        )
+        try fixture.joinChatMessage(chatId: 20, messageId: 405)
+
+        let tool = GetMessagesTool(db: fixture.database(), resolver: makeSeededResolver())
+        let response = try await decodeJSONDictionary(from:
+            await tool.execute(args: ["chat_id": .string("chat20"), "limit": .int(10)])
+        )
+
+        let messages = try decodeJSONArray(try XCTUnwrap(response["messages"]))
+        let target = try XCTUnwrap(messages.first(where: { $0["id"] as? String == "msg_202" }))
+        XCTAssertEqual(target["reactions"] as? [String], ["😂 alice"])
     }
 
     func testRemovalBeforeAddKeepsReaction() async throws {
@@ -200,7 +270,7 @@ final class GetMessagesToolTests: XCTestCase {
         try fixture.joinChatMessage(chatId: 20, messageId: 404)
 
         let tool = GetMessagesTool(db: fixture.database(), resolver: makeSeededResolver())
-        let response = try await decodeGetMessagesResponse(
+        let response = try await decodeJSONDictionary(from:
             await tool.execute(args: [
                 "chat_id": .string("chat20"),
                 "limit": .int(10),
@@ -217,7 +287,7 @@ final class GetMessagesToolTests: XCTestCase {
         let fixture = try makeGetMessagesFixture()
         let tool = GetMessagesTool(db: fixture.database(), resolver: makeSeededResolver())
 
-        let unanswered = try await decodeGetMessagesResponse(
+        let unanswered = try await decodeJSONDictionary(from:
             await tool.execute(args: [
                 "chat_id": .string("chat20"),
                 "unanswered": .bool(true),
@@ -229,7 +299,7 @@ final class GetMessagesToolTests: XCTestCase {
         XCTAssertEqual(unansweredMessages.count, 1)
         XCTAssertEqual(unansweredMessages.first?["id"] as? String, "msg_203")
 
-        let fullResponse = try await decodeGetMessagesResponse(
+        let fullResponse = try await decodeJSONDictionary(from:
             await tool.execute(args: [
                 "chat_id": .string("chat20"),
                 "limit": .int(10),
@@ -241,7 +311,7 @@ final class GetMessagesToolTests: XCTestCase {
         let sessionStartMessage = try XCTUnwrap(fullMessages.first(where: { $0["id"] as? String == "msg_202" }))
         XCTAssertEqual(sessionStartMessage["session_gap_hours"] as? Double, 16.0)
 
-        let sessionFiltered = try await decodeGetMessagesResponse(
+        let sessionFiltered = try await decodeJSONDictionary(from:
             await tool.execute(args: [
                 "chat_id": .string("chat20"),
                 "session": .string("session_2"),
@@ -257,7 +327,7 @@ final class GetMessagesToolTests: XCTestCase {
         let fixture = try makeGetMessagesFixture()
         let tool = GetMessagesTool(db: fixture.database(), resolver: makeSeededResolver())
 
-        let firstPage = try await decodeGetMessagesResponse(
+        let firstPage = try await decodeJSONDictionary(from:
             await tool.execute(args: [
                 "chat_id": .string("chat20"),
                 "limit": .int(1),
@@ -269,7 +339,7 @@ final class GetMessagesToolTests: XCTestCase {
         XCTAssertEqual(firstMessages.first?["id"] as? String, "msg_203")
         let cursor = try XCTUnwrap(firstPage["cursor"] as? String)
 
-        let secondPage = try await decodeGetMessagesResponse(
+        let secondPage = try await decodeJSONDictionary(from:
             await tool.execute(args: [
                 "chat_id": .string("chat20"),
                 "limit": .int(1),
@@ -290,7 +360,7 @@ final class GetMessagesToolTests: XCTestCase {
             allowedRoots: [FileManager.default.temporaryDirectory.path]
         )
 
-        let response = try await decodeGetMessagesResponse(
+        let response = try await decodeJSONDictionary(from:
             await tool.execute(args: [
                 "chat_id": .string("chat40"),
                 "limit": .int(10),
@@ -311,7 +381,7 @@ final class GetMessagesToolTests: XCTestCase {
         XCTAssertNotNil(attachments.first?["id"] as? String)
     }
 
-    // Plan 049: the GUID-substring fallback binds the caller's text into a
+    // The GUID-substring fallback binds the caller's text into a
     // LIKE pattern. Without escaping, "%" (or "_", or "") matches every chat
     // and hands back the first row's messages.
     func testChatIdWildcardDoesNotMatchEveryChat() async throws {
@@ -322,7 +392,7 @@ final class GetMessagesToolTests: XCTestCase {
             do {
                 _ = try await tool.execute(args: ["chat_id": .string(wildcard)])
                 XCTFail("chat_id \(wildcard.debugDescription) must not resolve to a chat")
-            } catch let error as ToolError {
+            } catch let error as ToolFailure {
                 let payload = try decodeJSONDictionary(from: error.content)
                 XCTAssertEqual(
                     payload["error"] as? String, "chat_not_found",
@@ -337,7 +407,7 @@ final class GetMessagesToolTests: XCTestCase {
         try fixture.insertChat(rowId: 50, guid: "iMessage;-;50%_off", displayName: "Percent Chat")
         let tool = GetMessagesTool(db: fixture.database(), resolver: makeSeededResolver())
 
-        let response = try await decodeGetMessagesResponse(
+        let response = try await decodeJSONDictionary(from:
             await tool.execute(args: ["chat_id": .string("50%_off")])
         )
 
@@ -352,7 +422,7 @@ final class GetMessagesToolTests: XCTestCase {
         try fixture.joinChatHandle(chatId: 7, handleId: 1)
 
         let base: Int64 = 1_000_000_000_000
-        for messageId in 1...3 {
+        for messageId in 1...4 {
             try fixture.insertMessage(
                 rowId: messageId,
                 guid: "null-date-\(messageId)",
@@ -363,15 +433,18 @@ final class GetMessagesToolTests: XCTestCase {
             )
             try fixture.joinChatMessage(chatId: 7, messageId: messageId)
         }
-        try fixture.execute("UPDATE message SET date = NULL WHERE ROWID = 1")
+        // Two undated rows sort last, so a page of 3 ends on one of them
+        // with one more row behind it.
+        try fixture.execute("UPDATE message SET date = NULL WHERE ROWID IN (1, 4)")
 
         let tool = GetMessagesTool(db: fixture.database(), resolver: ContactResolver(seedCache: [:]))
-        let response = try await decodeGetMessagesResponse(
+        let response = try await decodeJSONDictionary(from:
             await tool.execute(args: [
                 "chat_id": .string("chat7"),
                 "limit": .int(3),
             ])
         )
+        XCTAssertEqual(try decodeJSONArray(response["messages"]).count, 3)
         XCTAssertEqual(
             response["more"] as? Bool,
             response["cursor"] != nil && !(response["cursor"] is NSNull)
@@ -382,7 +455,7 @@ final class GetMessagesToolTests: XCTestCase {
         let fixture = try makeGroupEventFixture()
         let tool = GetMessagesTool(db: fixture.database(), resolver: makeSeededResolver())
 
-        let response = try await decodeGetMessagesResponse(
+        let response = try await decodeJSONDictionary(from:
             await tool.execute(args: [
                 "chat_id": .string("chat40"),
                 "limit": .int(10),
@@ -406,7 +479,7 @@ final class GetMessagesToolTests: XCTestCase {
         let fixture = try makeGroupEventFixture()
         let tool = GetMessagesTool(db: fixture.database(), resolver: makeSeededResolver())
 
-        let response = try await decodeGetMessagesResponse(
+        let response = try await decodeJSONDictionary(from:
             await tool.execute(args: [
                 "chat_id": .string("chat40"),
                 "limit": .int(10),
@@ -416,18 +489,6 @@ final class GetMessagesToolTests: XCTestCase {
         let messages = try decodeJSONArray(try XCTUnwrap(response["messages"]))
         let ordinary = try XCTUnwrap(messages.first(where: { $0["id"] as? String == "msg_499" }))
         XCTAssertFalse(ordinary.keys.contains("event"))
-    }
-
-    func testExistingFixtureIsUnchanged() async throws {
-        let fixture = try makeGetMessagesFixture()
-        let tool = GetMessagesTool(db: fixture.database(), resolver: makeSeededResolver())
-
-        let response = try await decodeGetMessagesResponse(
-            await tool.execute(args: ["chat_id": .string("chat20")])
-        )
-
-        let messages = try decodeJSONArray(try XCTUnwrap(response["messages"]))
-        XCTAssertEqual(messages.count, 4)
     }
 
     func testExplicitChatIdIgnoresIsFiltered() async throws {
@@ -444,14 +505,14 @@ final class GetMessagesToolTests: XCTestCase {
             rowId: 1,
             guid: "explicit-filtered-msg",
             text: "still visible",
-            date: Int64(Date().timeIntervalSinceReferenceDate * 1_000_000_000),
+            date: AppleTime.fromDate(Date()),
             isFromMe: false,
             handleId: 1
         )
         try fixture.joinChatMessage(chatId: 9, messageId: 1)
 
         let tool = GetMessagesTool(db: fixture.database(), resolver: ContactResolver(seedCache: [:]))
-        let response = try await decodeGetMessagesResponse(
+        let response = try await decodeJSONDictionary(from:
             await tool.execute(args: ["chat_id": .string("chat9")])
         )
         let messages = try decodeJSONArray(try XCTUnwrap(response["messages"]))
@@ -465,7 +526,7 @@ final class GetMessagesToolTests: XCTestCase {
         try fixture.execute("ALTER TABLE message DROP COLUMN date_edited")
         try fixture.execute("ALTER TABLE message DROP COLUMN associated_message_emoji")
         let tool = GetMessagesTool(db: fixture.database(), resolver: makeSeededResolver())
-        let response = try await decodeGetMessagesResponse(
+        let response = try await decodeJSONDictionary(from:
             await tool.execute(args: ["chat_id": .string("chat20")])
         )
         let messages = try decodeJSONArray(try XCTUnwrap(response["messages"]))
@@ -477,30 +538,100 @@ final class GetMessagesToolTests: XCTestCase {
         }
     }
 
-    func testSchemaOverrideIsConsultedEvenWhenColumnsExist() async throws {
-        let fixture = try makeGetMessagesFixture()
-        let db = Database(
-            path: fixture.path,
-            schemaOverride: SchemaCapabilities(
-                base: .assumed,
-                messageThreadOriginatorGuid: false,
-                messageDateEdited: false
-            )
-        )
-        let tool = GetMessagesTool(db: db, resolver: makeSeededResolver())
-        let response = try await decodeGetMessagesResponse(
-            await tool.execute(args: ["chat_id": .string("chat20")])
-        )
-        let messages = try decodeJSONArray(try XCTUnwrap(response["messages"]))
-        for message in messages {
-            XCTAssertNil(message["reply_to"])
-            XCTAssertNil(message["edited"])
-        }
-    }
-}
+    // MARK: - Paging and participants
 
-private func decodeGetMessagesResponse(_ contents: [Tool.Content]) async throws -> [String: Any] {
-    return try decodeJSONDictionary(from: contents)
+    func testUnansweredPagesPastNonQuestions() async throws {
+        let fixture = try directChatFixture(name: "unanswered-paging")
+        let base = AppleTime.fromDate(Date()) - 1_000 * appleMinute
+        try fixture.insertMessage(rowId: 1, guid: "Q", text: "are you coming?", date: base, isFromMe: true)
+        try fixture.joinChatMessage(chatId: 1, messageId: 1)
+        for row in 2...5 {
+            try fixture.insertMessage(rowId: row, guid: "N\(row)", text: "note \(row)", date: base + Int64(row) * appleMinute, isFromMe: true)
+            try fixture.joinChatMessage(chatId: 1, messageId: row)
+        }
+
+        let found = try await collectPages(
+            "get_messages", ["chat_id": "chat1", "unanswered": true, "limit": 1], resultsKey: "messages", database: fixture.database()
+        )
+        XCTAssertEqual(found.ids, ["msg_1"])
+    }
+
+    func testParticipantsFindTheOnlyChatWithEveryoneBehindTenNewerCandidates() async throws {
+        let fixture = try participantsFixture()
+        let page = try await callTool(
+            "get_messages", ["participants": ["Alice", "Bob"]], database: fixture.database(),
+            resolver: ContactResolver(seedCache: aliceAndBob)
+        )
+        XCTAssertEqual((page["chat"] as? [String: Any])?["id"] as? String, "chat20")
+    }
+
+    func testAnUnresolvedParticipantIsAnError() async throws {
+        let fixture = try participantsFixture()
+        let body = try await callTool(
+            "get_messages", ["participants": ["Alice", "Bob", "Nobody Known"]], database: fixture.database(),
+            resolver: ContactResolver(seedCache: aliceAndBob)
+        )
+        XCTAssertEqual(body["error"] as? String, "invalid_participants")
+        XCTAssertTrue((body["message"] as? String ?? "").contains("Nobody Known"), "\(body)")
+    }
+
+    func testParticipantsAcceptAnEmailInAnyCase() async throws {
+        let fixture = try participantsFixture()
+        let page = try await callTool("get_messages", ["participants": ["Pat@Example.com"]], database: fixture.database())
+        XCTAssertEqual((page["chat"] as? [String: Any])?["id"] as? String, "chat30")
+    }
+
+    /// unanswered counts a message as a question when it ends with an asking
+    /// phrase, in any case and with trailing spaces, even without "?".
+    func testUnansweredTreatsAskingPhraseEndingsAsQuestions() async throws {
+        let fixture = try directChatFixture(name: "unanswered-phrases")
+        let texts = [
+            "send me the address, lmk",
+            "pick it up on the way, can you",
+            "Let Me Know  ",
+            "here's the draft, thoughts",
+            "grab milk please",
+            "sounds good",
+            "see you at six",
+        ]
+        let base = AppleTime.fromDate(Date()) - 600 * appleMinute
+        for (index, text) in texts.enumerated() {
+            try fixture.insertMessage(rowId: index + 1, guid: "q\(index)", text: text, date: base + Int64(index) * 60 * appleMinute, isFromMe: true)
+            try fixture.joinChatMessage(chatId: 1, messageId: index + 1)
+        }
+
+        let json = try await callTool("get_messages", ["chat_id": "chat1", "unanswered": true], database: fixture.database())
+        XCTAssertEqual(Set(try itemIds(json, "messages")), ["msg_1", "msg_2", "msg_3", "msg_4", "msg_5"])
+    }
+
+    /// Only a conversational message answers a question: a group event
+    /// after it does not, in get_messages or in search.
+    func testAGroupEventDoesNotAnswerAQuestion() async throws {
+        let fixture = try ToolTestDatabase(name: "unanswered-event")
+        for row in 1...2 { try fixture.insertHandle(rowId: row, handle: "+1555000000\(row)") }
+        try fixture.insertChat(rowId: 1, guid: "iMessage;+;chat-group", displayName: "Group")
+        try fixture.joinChatHandle(chatId: 1, handleId: 1)
+        try fixture.joinChatHandle(chatId: 1, handleId: 2)
+        // A DM where the question did get a reply.
+        try fixture.insertChat(rowId: 2, guid: "iMessage;-;+15550000002")
+        try fixture.joinChatHandle(chatId: 2, handleId: 2)
+        let recent = AppleTime.fromDate(Date()) - 60 * appleMinute
+        try fixture.insertMessage(rowId: 1, guid: "q1", text: "dinner at 7?", date: recent, isFromMe: true)
+        try fixture.insertMessage(rowId: 2, guid: "e1", text: nil, date: recent + appleMinute, isFromMe: false, handleId: 1,
+                                  itemType: 2, groupTitle: "Dinner Club")
+        for row in 1...2 { try fixture.joinChatMessage(chatId: 1, messageId: row) }
+        try fixture.insertMessage(rowId: 3, guid: "q2", text: "who is driving?", date: recent, isFromMe: true)
+        try fixture.insertMessage(rowId: 4, guid: "r2", text: "me", date: recent + appleMinute, isFromMe: false, handleId: 2)
+        for row in 3...4 { try fixture.joinChatMessage(chatId: 2, messageId: row) }
+
+        let search = try await callTool("search", ["unanswered": true], database: fixture.database())
+        XCTAssertEqual(try itemIds(search, "results"), ["msg_1"])
+
+        let messages = try await callTool("get_messages", ["chat_id": "chat1", "unanswered": true], database: fixture.database())
+        XCTAssertEqual(try itemIds(messages, "messages"), ["msg_1"])
+        let answered = try await callTool("get_messages", ["chat_id": "chat2", "unanswered": true], database: fixture.database())
+        XCTAssertEqual(try itemIds(answered, "messages"), [])
+    }
 }
 
 private func assertGroupEvent(

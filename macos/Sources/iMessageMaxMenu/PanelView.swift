@@ -1,4 +1,5 @@
 import AppKit
+import IMessageMaxContract
 import MaxCore
 import SwiftUI
 
@@ -9,9 +10,8 @@ enum PanelSection: String { case connection, details, preferences }
 /// inside the same panel.
 struct PanelView: View {
   let model: AppModel
-  var dismissPanel: () -> Void = {}
   @State private var contentHeight: CGFloat = 260
-  @MotionReduced private var reduceMotion
+  @PanelMotion private var motion
   private static let footerHeight: CGFloat = 41
 
   var body: some View {
@@ -20,10 +20,12 @@ struct PanelView: View {
         ZStack(alignment: .top) {
           if let section = model.section {
             page(section).id(section)
-              .transition(reduceMotion ? .opacity : .move(edge: .trailing).combined(with: .opacity))
+              .transition(
+                motion.reduced ? .opacity : .move(edge: .trailing).combined(with: .opacity))
           } else {
             home
-              .transition(reduceMotion ? .opacity : .move(edge: .leading).combined(with: .opacity))
+              .transition(
+                motion.reduced ? .opacity : .move(edge: .leading).combined(with: .opacity))
           }
         }
         .padding([.horizontal, .top], Design.inset).padding(.bottom, Space.snug)
@@ -43,35 +45,34 @@ struct PanelView: View {
     .background(Design.canvas)
     .overlay(alignment: .bottom) {
       if let notice = model.notice {
-        Toast(text: notice, good: model.problem == nil && !notice.hasPrefix("Setup isn’t"))
+        Toast(text: notice.text, good: notice.tone == .good && model.problem == nil)
           .padding(.bottom, Self.footerHeight + Space.tight)
-          .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
+          .transition(motion.reduced ? .opacity : .move(edge: .bottom).combined(with: .opacity))
       }
     }
     .tint(Design.blue)
-    .animation(reduceMotion ? nil : Move.step, value: model.section)
-    .animation(reduceMotion ? nil : Move.swap, value: model.notice)
-    .animation(reduceMotion ? nil : Move.glide, value: model.problem)
-    .animation(reduceMotion ? nil : Move.glide, value: model.diagnosis?.readiness)
-    .animation(reduceMotion ? nil : Move.swap, value: model.busy)
-    .onAppear { Task { await model.refresh() } }
+    .animation(motion[.step], value: model.section)
+    .animation(motion[.swap], value: model.notice)
+    .animation(motion[.glide], value: model.problem)
+    .animation(motion[.glide], value: model.diagnosis?.readiness)
+    .animation(motion[.swap], value: model.busy)
     .onChange(of: model.notice) {
       guard let notice = model.notice else { return }
       model.noticeAppeared()
       NSAccessibility.post(
         element: NSApplication.shared, notification: .announcementRequested,
-        userInfo: [.announcement: notice, .priority: NSAccessibilityPriorityLevel.medium.rawValue])
-    }
-    .onExitCommand {
-      if model.section != nil { model.section = nil } else { dismissPanel() }
+        userInfo: [
+          .announcement: notice.text, .priority: NSAccessibilityPriorityLevel.medium.rawValue,
+        ])
     }
   }
 
   // MARK: Home
 
   private var home: some View {
-    VStack(alignment: .leading, spacing: Space.regular) {
-      header
+    let state = model.state
+    return VStack(alignment: .leading, spacing: Space.regular) {
+      header(state)
       if let problem = model.problem {
         Card(wash: Design.attention) {
           IconLabel(title: "Needs a little attention", glyph: .warning)
@@ -88,17 +89,16 @@ struct PanelView: View {
         if !model.ready { SetupStep(model: model).transition(.opacity) }
         status
       }
-      if model.diagnosis == nil || model.ready {
-        Button(action: primaryAction) {
+      if state.primary != nil {
+        Button(action: model.runPrimary) {
           HStack(spacing: Space.tight) {
-            Text(model.primaryTitle).contentTransition(.interpolate)
-            ActionGlyph(
-              mark: model.busy != nil ? .more : (model.stopped ? .play : .arrow), size: 14)
+            Text(state.primaryTitle).contentTransition(.interpolate)
+            ActionGlyph(mark: state.primaryMark, size: 14)
           }
           .frame(maxWidth: .infinity)
         }
         .buttonStyle(MaxButtonStyle(primary: true))
-        .disabled(model.busy != nil || (model.lastCheck == nil && model.problem == nil))
+        .disabled(!state.primaryEnabled)
         .accessibilityIdentifier("primaryAction")
       }
       VStack(spacing: Space.hairline) {
@@ -112,12 +112,12 @@ struct PanelView: View {
     }
   }
 
-  private var header: some View {
+  private func header(_ state: PanelState) -> some View {
     HStack(alignment: .top, spacing: Space.snug + Space.hairline) {
-      MaxFaceView(mood: model.mood, celebration: model.celebration, awake: model.panelOpen)
+      MaxFaceView(mood: state.mood, celebration: model.celebration, awake: model.panelOpen)
       VStack(alignment: .leading, spacing: Space.hairline) {
         HStack(alignment: .center) {
-          Text(model.title).font(.maxTitle).contentTransition(.interpolate)
+          Text(state.title).font(.maxTitle).contentTransition(.interpolate)
           Spacer(minLength: Space.snug)
           if model.showsSwitch {
             Toggle(
@@ -133,7 +133,7 @@ struct PanelView: View {
           }
         }
         .frame(minHeight: 22)
-        Text(model.subtitle).font(.maxLine).foregroundStyle(Design.muted)
+        Text(state.subtitle).font(.maxLine).foregroundStyle(Design.muted)
           .fixedSize(horizontal: false, vertical: true)
       }
     }
@@ -141,7 +141,7 @@ struct PanelView: View {
 
   private var status: some View {
     let diagnosis = model.diagnosis
-    let sending = diagnosis?.capabilities["perm_automation"]?.state
+    let sending = diagnosis?[.permAutomation]
     return Card {
       VStack(spacing: Space.hairline) {
         StatusLine(
@@ -152,14 +152,14 @@ struct PanelView: View {
         StatusLine(
           glyph: .contacts, title: "Contact names",
           detail: diagnosis?.namesReady == true
-            ? (diagnosis?.contacts.status == "limited" ? "Some names" : "Ready")
+            ? (diagnosis?.contacts.status == .limited ? "Some names" : "Ready")
             : (diagnosis?.contacts.authorized == true ? "Needs a check" : "Needs access"),
           good: diagnosis?.namesReady == true, attention: diagnosis?.namesReady == false)
         StatusLine(
           glyph: .sending, title: "Sending",
-          detail: sending == "supported"
-            ? "Ready" : (sending == "permission-gated" ? "Needs access" : "Not checked"),
-          good: sending == "supported", attention: sending == "permission-gated")
+          detail: sending?.isSupported == true
+            ? "Ready" : (sending?.isPermissionGated == true ? "Needs access" : "Not checked"),
+          good: sending?.isSupported == true, attention: sending?.isPermissionGated == true)
       }
       .padding(.vertical, -Space.rowGap)
     }
@@ -211,16 +211,6 @@ struct PanelView: View {
     .frame(height: Self.footerHeight - 1)
     .overlay(alignment: .top) { Rectangle().fill(Color.primary.opacity(0.07)).frame(height: 1) }
     .padding(.top, 1)
-  }
-
-  private func primaryAction() {
-    if model.diagnosis != nil {
-      model.section = .connection
-    } else if model.stopped {
-      model.perform(.start)
-    } else {
-      Task { await model.refresh() }
-    }
   }
 }
 

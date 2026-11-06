@@ -6,34 +6,24 @@ final class OverviewResponseTests: XCTestCase {
         let fixture = try makeOverviewFixture()
         let resolver = makeOverviewResolver()
 
-        let result = await ListChatsTool.execute(
-            limit: 10,
-            since: nil,
-            isGroup: nil,
-            minParticipants: nil,
-            maxParticipants: nil,
-            sort: "recent",
-            db: fixture.database(),
-            resolver: resolver
-        )
+        let response = try await ListChatsTool.execute(limit: 10, db: fixture.database(), resolver: resolver)
 
-        switch result {
-        case .failure(let error):
-            XCTFail("Unexpected list_chats failure: \(error)")
-        case .success(let response):
-            let namedChat = try XCTUnwrap(response.chats.first(where: { $0.id == "chat100" }))
-            XCTAssertEqual(namedChat.name, "Weekend Plans")
-            XCTAssertEqual(namedChat.participantCount, 6)
-            XCTAssertEqual(namedChat.participantsPreview, ["Dana Lee", "Alice Smith", "Evan Stone", "+3 more"])
-            XCTAssertEqual(namedChat.lastMessage?.text, "Count me in")
+        let namedChat = try XCTUnwrap(response.chats.first(where: { $0.id == "chat100" }))
+        let chatJSON = try FormatUtils.encodeJSON(namedChat)
+        XCTAssertFalse(chatJSON.contains("\"identity\""))
+        XCTAssertFalse(chatJSON.contains("\"participants\""))
+        XCTAssertTrue(chatJSON.contains("\"last_message\""))
+        XCTAssertEqual(namedChat.name, "Weekend Plans")
+        XCTAssertEqual(namedChat.participantCount, 6)
+        XCTAssertEqual(namedChat.participantsPreview, ["Dana Lee", "Alice Smith", "Evan Stone", "+3 more"])
+        XCTAssertEqual(namedChat.lastMessage?.text, "Count me in")
 
-            let unnamedChat = try XCTUnwrap(response.chats.first(where: { $0.id == "chat200" }))
-            XCTAssertEqual(unnamedChat.participantsPreview, ["Bob Brown", "Casey Jones", "Faith Young", "+2 more"])
-            XCTAssertEqual(unnamedChat.participantCount, 5)
+        let unnamedChat = try XCTUnwrap(response.chats.first(where: { $0.id == "chat200" }))
+        XCTAssertEqual(unnamedChat.participantsPreview, ["Bob Brown", "Casey Jones", "Faith Young", "+2 more"])
+        XCTAssertEqual(unnamedChat.participantCount, 5)
 
-            let selfLatestChat = try XCTUnwrap(response.chats.first(where: { $0.id == "chat700" }))
-            XCTAssertEqual(selfLatestChat.lastMessage?.from, "Me")
-        }
+        let selfLatestChat = try XCTUnwrap(response.chats.first(where: { $0.id == "chat700" }))
+        XCTAssertEqual(selfLatestChat.lastMessage?.from, "Me")
     }
 
     func testGetActiveConversationsUsesLeanOverviewShapeAndReadableLastMessage() async throws {
@@ -43,13 +33,17 @@ final class OverviewResponseTests: XCTestCase {
         let result = try await GetActiveConversations.execute(
             hours: 48,
             minExchanges: 1,
-            isGroup: nil,
             limit: 10,
             database: fixture.database(),
             resolver: resolver
         )
 
         let attachmentConversation = try XCTUnwrap(result.conversations.first(where: { $0.id == "chat600" }))
+        let encoded = try FormatUtils.encodeJSON(attachmentConversation)
+        XCTAssertFalse(encoded.contains("\"participants\""))
+        XCTAssertTrue(encoded.contains("\"participants_preview\""))
+        XCTAssertTrue(encoded.contains("\"last_message\""))
+        XCTAssertTrue(encoded.contains("\"activity\""))
         let attachmentPreview = try XCTUnwrap(attachmentConversation.lastMessage)
         XCTAssertEqual(attachmentPreview.from, "Jules Hart")
         XCTAssertEqual(attachmentPreview.text, "[2 Photos]")
@@ -71,7 +65,7 @@ final class OverviewResponseTests: XCTestCase {
         let resolver = makeOverviewResolver()
 
         let tool = ListAttachments(db: fixture.database(), resolver: resolver)
-        let result = await tool.execute(
+        let result = try await tool.execute(
             chatId: nil,
             fromPerson: nil,
             type: "any",
@@ -81,33 +75,29 @@ final class OverviewResponseTests: XCTestCase {
             sort: "recent_first"
         )
 
-        switch result {
-        case .failure(let error):
-            XCTFail("Unexpected list_attachments failure: \(error)")
-        case .success(let response):
-            let sameType = try XCTUnwrap(response.messages.first(where: { $0.messageId == "msg_503" }))
-            XCTAssertEqual(sameType.chat.id, "chat100")
-            XCTAssertEqual(sameType.chat.name, "Weekend Plans")
-            XCTAssertNil(sameType.messagePreview)
-            XCTAssertEqual(sameType.sharedSummary, "[2 Photos]")
-            XCTAssertEqual(sameType.attachments.count, 2)
+        let response = result
+        let sameType = try XCTUnwrap(response.messages.first(where: { $0.messageId == "msg_503" }))
+        XCTAssertEqual(sameType.chat.id, "chat100")
+        XCTAssertEqual(sameType.chat.name, "Weekend Plans")
+        XCTAssertNil(sameType.messagePreview)
+        XCTAssertEqual(sameType.sharedSummary, "[2 Photos]")
+        XCTAssertEqual(sameType.attachments.count, 2)
 
-            let mixed = try XCTUnwrap(response.messages.first(where: { $0.messageId == "msg_552" }))
-            XCTAssertEqual(mixed.chat.id, "chat200")
-            XCTAssertNil(mixed.messagePreview)
-            XCTAssertEqual(mixed.sharedSummary, "[Photo, PDF]")
-            XCTAssertEqual(mixed.attachments.count, 2)
+        let mixed = try XCTUnwrap(response.messages.first(where: { $0.messageId == "msg_552" }))
+        XCTAssertEqual(mixed.chat.id, "chat200")
+        XCTAssertNil(mixed.messagePreview)
+        XCTAssertEqual(mixed.sharedSummary, "[Photo, PDF]")
+        XCTAssertEqual(mixed.attachments.count, 2)
 
-            let textWins = try XCTUnwrap(response.messages.first(where: { $0.messageId == "msg_553" }))
-            XCTAssertEqual(textWins.messagePreview, "Deck attached for review")
-            XCTAssertEqual(textWins.sharedSummary, "[PDF]")
-            XCTAssertEqual(textWins.attachments.count, 1)
+        let textWins = try XCTUnwrap(response.messages.first(where: { $0.messageId == "msg_553" }))
+        XCTAssertEqual(textWins.messagePreview, "Deck attached for review")
+        XCTAssertEqual(textWins.sharedSummary, "[PDF]")
+        XCTAssertEqual(textWins.attachments.count, 1)
 
-            let syntheticText = try XCTUnwrap(response.messages.first(where: { $0.messageId == "msg_554" }))
-            XCTAssertNil(syntheticText.messagePreview)
-            XCTAssertEqual(syntheticText.sharedSummary, "[2 Photos]")
-            XCTAssertEqual(syntheticText.attachments.count, 2)
-        }
+        let syntheticText = try XCTUnwrap(response.messages.first(where: { $0.messageId == "msg_554" }))
+        XCTAssertNil(syntheticText.messagePreview)
+        XCTAssertEqual(syntheticText.sharedSummary, "[2 Photos]")
+        XCTAssertEqual(syntheticText.attachments.count, 2)
     }
 
     func testGetUnreadUsesSharedChatIdentityNamingForUnnamedDirectChats() async throws {

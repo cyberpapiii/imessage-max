@@ -1,13 +1,5 @@
-// Sources/iMessageMax/Tools/ListAttachments.swift
 import Foundation
 import MCP
-
-/// Sort options for attachments
-enum AttachmentSort: String {
-    case recentFirst = "recent_first"
-    case oldestFirst = "oldest_first"
-    case largestFirst = "largest_first"
-}
 
 struct ListAttachmentsResponse: Codable {
     let messages: [SharedMessageItem]
@@ -16,29 +8,20 @@ struct ListAttachmentsResponse: Codable {
     let cursor: String?
 }
 
-/// Error result
-struct ListAttachmentsError: LocalizedError, Codable {
-    let error: String
-    let message: String
-
-    var errorDescription: String? {
-        message
-    }
-}
-
-/// List attachments tool implementation
 final class ListAttachments {
+    static let limit = IntArgument(name: "limit", defaultValue: 50, range: 1...100)
+
     private let db: Database
     private let resolver: ContactResolver
 
-    init(db: Database = Database(), resolver: ContactResolver = ContactResolver()) {
+    init(db: Database, resolver: ContactResolver) {
         self.db = db
         self.resolver = resolver
     }
 
     // MARK: - Tool Registration
 
-    static func register(on server: Server, db: Database, resolver: ContactResolver) {
+    static func definition(db: Database, resolver: ContactResolver) -> ToolDefinition {
         let inputSchema: Value = .object([
             "type": "object",
             "properties": .object([
@@ -65,7 +48,7 @@ final class ListAttachments {
                 ]),
                 "limit": .object([
                     "type": "integer",
-                    "description": "Max results (default 50, max 100)",
+                    "description": "Max results (\(Self.limit.defaultAndMax))",
                 ]),
                 "sort": .object([
                     "type": "string",
@@ -80,7 +63,7 @@ final class ListAttachments {
             "additionalProperties": false,
         ])
 
-        server.registerTool(
+        return ToolDefinition(
             name: "list_attachments",
             description: "Browse shared items grouped by message. Returns chat ids for follow-up tool calls and chat names for user-facing summaries. When explaining results to the user, refer to chats by name, not by id. Good for discovering the message where photos, videos, audio, PDFs, or documents were sent before fetching a specific attachment.",
             inputSchema: inputSchema,
@@ -98,12 +81,12 @@ final class ListAttachments {
             let type = arguments?["type"]?.stringValue
             let since = arguments?["since"]?.stringValue
             let before = arguments?["before"]?.stringValue
-            let limit = arguments?["limit"]?.intValue ?? 50
+            let limit = Self.limit.read(arguments)
             let sort = arguments?["sort"]?.stringValue ?? "recent_first"
             let cursor = arguments?["cursor"]?.stringValue
 
             let tool = ListAttachments(db: db, resolver: resolver)
-            let result = await tool.execute(
+            let result = try await tool.execute(
                 chatId: chatId,
                 fromPerson: fromPerson,
                 type: type,
@@ -114,423 +97,44 @@ final class ListAttachments {
                 cursor: cursor
             )
 
-            switch result {
-            case .success(let response):
-                return [.plainText(try FormatUtils.encodeJSON(response))]
-            case .failure(let error):
-                throw ToolError(content: [.plainText(try FormatUtils.encodeJSON(error))])
-            }
+            return [.plainText(try FormatUtils.encodeJSON(result))]
         }
     }
 
-    /// List attachments with filters
-    /// - Parameters:
-    ///   - chatId: Filter to specific chat (e.g., "chat123" or "123")
-    ///   - fromPerson: Filter by sender handle (or "me")
-    ///   - type: Filter by type: "image", "video", "audio", "pdf", "document", "any"
-    ///   - since: Lower time bound (ISO, relative like "24h", or natural like "yesterday")
-    ///   - before: Upper time bound
-    ///   - limit: Max results (default 50, max 100)
-    ///   - sort: "recent_first" (default), "oldest_first", "largest_first"
     func execute(
         chatId: String? = nil,
         fromPerson: String? = nil,
         type: String? = nil,
         since: String? = nil,
         before: String? = nil,
-        limit: Int = 50,
+        limit: Int = ListAttachments.limit.defaultValue,
         sort: String = "recent_first",
         cursor: String? = nil
-    ) async -> Result<ListAttachmentsResponse, ListAttachmentsError> {
-        // Validate and constrain inputs
-        let effectiveLimit = max(1, min(limit, 100))
+    ) async throws -> ListAttachmentsResponse {
+        let effectiveLimit = Self.limit.clamp(limit)
         let effectiveSort = AttachmentSort(rawValue: sort) ?? .recentFirst
 
-        // Validate type filter
-        let validTypes = Set(["image", "video", "audio", "pdf", "document", "any"])
-        let typeFilter: String? = if let t = type, validTypes.contains(t) { t } else { nil }
+        let numericChatId = try chatId.map { try ChatIdentifier.resolve($0, db: db) }
 
-        // Initialize contact resolver
-        do {
-            try await resolver.initialize()
-        } catch {
-            // Continue without contact resolution
-        }
-
-        do {
-            let numericChatId: Int64?
-            if let chatId {
-                guard let cid = ChatIdentifier.parseRowId(chatId) else {
-                    return .failure(ListAttachmentsError(
-                        error: "invalid_id",
-                        message: "Invalid chat ID format: \(chatId)"
-                    ))
-                }
-                numericChatId = cid
-            } else {
-                numericChatId = nil
-            }
-
-            let timelineCursor = cursor.flatMap(TimelineCursor.decode)
-            let (sharedMessages, hasMore, nextCursor) = try await browseSharedMessages(
-                chatId: numericChatId,
-                fromPerson: fromPerson,
-                typeFilter: typeFilter,
-                since: since,
-                before: before,
-                limit: effectiveLimit,
-                sort: effectiveSort,
-                cursor: timelineCursor
-            )
-
-            return .success(ListAttachmentsResponse(
-                messages: sharedMessages,
-                total: sharedMessages.count,
-                more: hasMore,
-                cursor: nextCursor
-            ))
-
-        } catch let error as DatabaseError {
-            let mapped = ToolErrorMapping.map(error, context: "list_attachments")
-            return .failure(ListAttachmentsError(error: mapped.code, message: mapped.message))
-        } catch {
-            return .failure(ListAttachmentsError(
-                error: "internal_error",
-                message: ClientErrorMessages.sanitized(error)
-            ))
-        }
-    }
-
-    // MARK: - Private Helpers
-
-    private struct SharedMessageRow {
-        let msgId: Int64
-        let text: String?
-        let attributedBody: Data?
-        let date: Int64?
-        let isFromMe: Bool
-        let senderHandle: String?
-        let chatId: Int64
-        let chatName: String?
-    }
-
-    func browseSharedMessages(
-        chatId: Int64?,
-        fromPerson: String?,
-        typeFilter: String?,
-        since: String?,
-        before: String?,
-        limit: Int,
-        sort: AttachmentSort,
-        cursor: TimelineCursor?
-    ) async throws -> (messages: [SharedMessageItem], more: Bool, cursor: String?) {
-        let supportsCursor = sort != .largestFirst
-        let fetchLimit = supportsCursor ? limit + 1 : limit
-        let (sql, params) = buildMessageQuery(
-            chatId: chatId,
-            fromPerson: fromPerson,
-            typeFilter: typeFilter,
+        let timelineCursor = cursor.flatMap(TimelineCursor.decode)
+        let (sharedMessages, hasMore, nextCursor) = try await SharedMessages.page(
+            db: db,
+            resolver: resolver,
+            chatId: numericChatId,
+            sender: await SenderFilter.resolve(fromPerson, resolver: resolver),
+            typeFilter: type,
             since: since,
             before: before,
-            limit: fetchLimit,
-            sort: sort,
-            cursor: supportsCursor ? cursor : nil
+            limit: effectiveLimit,
+            sort: effectiveSort,
+            cursor: timelineCursor
         )
 
-        let messageRows = try db.query(sql, params: params) { row in
-            SharedMessageRow(
-                msgId: row.int(0),
-                text: row.string(1),
-                attributedBody: row.blob(2),
-                date: row.optionalInt(3),
-                isFromMe: row.int(4) == 1,
-                senderHandle: row.string(5),
-                chatId: row.int(6),
-                chatName: row.string(7)
-            )
-        }
-
-        let hasMore = supportsCursor && messageRows.count > limit
-        let pageRows = Array(messageRows.prefix(limit))
-
-        // One lookup for the whole page. Asking per message opened a fresh
-        // SQLite connection for each of the twenty rows a default page holds.
-        let attachmentsByMessage = try attachmentsForMessages(
-            messageIds: pageRows.map(\.msgId),
-            typeFilter: typeFilter
+        return ListAttachmentsResponse(
+            messages: sharedMessages,
+            total: sharedMessages.count,
+            more: hasMore,
+            cursor: nextCursor
         )
-
-        var chatNameCache: [Int64: String] = [:]
-        var results: [SharedMessageItem] = []
-
-        for row in pageRows {
-            let attachments = attachmentsByMessage[row.msgId] ?? []
-            guard !attachments.isEmpty else { continue }
-
-            let senderName: String
-            if row.isFromMe {
-                senderName = "Me"
-            } else if let handle = row.senderHandle {
-                senderName = await IdentityDisplayFormatter.displayName(handle: handle, resolver: resolver)
-            } else {
-                senderName = "Unknown"
-            }
-
-            let chatReference = ChatReference(
-                id: "chat\(row.chatId)",
-                name: try await resolveChatName(
-                    chatId: row.chatId,
-                    explicitName: row.chatName,
-                    cache: &chatNameCache
-                )
-            )
-
-            let attachmentTypes = attachments.map(\.type)
-            let date = AppleTime.toDate(row.date)
-            let messagePreview = SummaryPreviewFormatter.formattedTextPreview(
-                text: row.text,
-                attributedBody: row.attributedBody,
-                maxLength: 80
-            )
-
-            results.append(
-                SharedMessageItem(
-                    messageId: "msg_\(row.msgId)",
-                    chat: chatReference,
-                    from: senderName,
-                    messagePreview: messagePreview,
-                    sharedSummary: SummaryPreviewFormatter.sharedSummary(for: attachmentTypes),
-                    ts: TimeUtils.formatISO(date),
-                    ago: TimeUtils.formatCompactRelative(date),
-                    attachments: attachments.map { attachment in
-                        SharedAttachmentSummary(
-                            id: "att\(attachment.id)",
-                            type: attachment.type.rawValue,
-                            name: attachment.name,
-                            available: attachment.available,
-                            sizeHuman: attachment.sizeHuman
-                        )
-                    }
-                )
-            )
-        }
-
-        let nextCursor: String?
-        if hasMore, let last = pageRows.last {
-            nextCursor = TimelineCursor.encode(date: last.date, messageId: last.msgId)
-        } else {
-            nextCursor = nil
-        }
-
-        return (results, nextCursor != nil, nextCursor)
     }
-
-    private func buildMessageQuery(
-        chatId: Int64?,
-        fromPerson: String?,
-        typeFilter: String?,
-        since: String?,
-        before: String?,
-        limit: Int,
-        sort: AttachmentSort,
-        cursor: TimelineCursor?
-    ) -> (String, [Any]) {
-        let typeClause = AttachmentType.sqlPredicate(for: typeFilter, alias: "a")
-            .map { " AND (\($0))" } ?? ""
-
-        // The two sort families want different shapes. largest_first has to
-        // rank every attachment message before it knows which page to return,
-        // so it reads the attachment tables in one pass and collapses the rows
-        // that join produces with GROUP BY m.ROWID. The date sorts can walk
-        // message_idx_date and stop at LIMIT, but only if nothing forces a
-        // GROUP BY first, so they resolve the chat and the attachments with
-        // subqueries that keep the result one row per message on their own.
-        let ranksBySize = sort == .largestFirst
-        let query = QueryBuilder()
-
-        if ranksBySize {
-            query
-                .select(
-                    "m.ROWID as msg_id",
-                    "m.text",
-                    "m.attributedBody",
-                    "m.date",
-                    "m.is_from_me",
-                    "h.id as sender_handle",
-                    "c.ROWID as chat_id",
-                    "c.display_name as chat_name",
-                    "MAX(COALESCE(a.total_bytes, 0)) as max_attachment_size"
-                )
-                .from("message m")
-                .join("chat_message_join cmj ON m.ROWID = cmj.message_id")
-                .join("chat c ON cmj.chat_id = c.ROWID")
-                .leftJoin("handle h ON m.handle_id = h.ROWID")
-                .join("message_attachment_join maj ON m.ROWID = maj.message_id")
-                .join("attachment a ON maj.attachment_id = a.ROWID")
-                .where("m.associated_message_type = 0")
-                .where("COALESCE(a.hide_attachment, 0) = 0")
-            if let chatId {
-                query.where("c.ROWID = ?", chatId)
-            }
-            if let pred = AttachmentType.sqlPredicate(for: typeFilter, alias: "a") {
-                query.where("(\(pred))")
-            }
-            query.groupBy("m.ROWID")
-        } else {
-            let sizeSelect = """
-                (SELECT MAX(COALESCE(a.total_bytes, 0))
-                 FROM message_attachment_join maj
-                 JOIN attachment a ON maj.attachment_id = a.ROWID
-                 WHERE maj.message_id = m.ROWID AND COALESCE(a.hide_attachment, 0) = 0\(typeClause)) as max_attachment_size
-                """
-            // A message can belong to more than one chat, so picking the chat
-            // with a subquery keeps the result one row per message without the
-            // GROUP BY that joining chat_message_join would require.
-            var chatPick = "SELECT cmj.chat_id FROM chat_message_join cmj"
-                + " WHERE cmj.message_id = m.ROWID"
-            var chatPickParams: [Any] = []
-            if let chatId {
-                chatPick += " AND cmj.chat_id = ?"
-                chatPickParams.append(chatId)
-            }
-            chatPick += " ORDER BY cmj.chat_id LIMIT 1"
-
-            query
-                .select(
-                    "m.ROWID as msg_id",
-                    "m.text",
-                    "m.attributedBody",
-                    "m.date",
-                    "m.is_from_me",
-                    "h.id as sender_handle",
-                    "c.ROWID as chat_id",
-                    "c.display_name as chat_name",
-                    sizeSelect
-                )
-                .from("message m")
-                .join("chat c ON c.ROWID = (\(chatPick))", params: chatPickParams)
-                .leftJoin("handle h ON m.handle_id = h.ROWID")
-                .where("m.associated_message_type = 0")
-                .where("""
-                    EXISTS (SELECT 1
-                            FROM message_attachment_join maj
-                            JOIN attachment a ON maj.attachment_id = a.ROWID
-                            WHERE maj.message_id = m.ROWID AND COALESCE(a.hide_attachment, 0) = 0\(typeClause))
-                    """)
-        }
-
-        if let fromPerson {
-            if fromPerson.lowercased() == "me" {
-                query.where("m.is_from_me = 1")
-            } else {
-                query.where("h.id LIKE ? ESCAPE '\\'", "%\(QueryBuilder.escapeLike(fromPerson))%")
-            }
-        }
-
-        if let since, let sinceTs = AppleTime.parse(since) {
-            query.where("m.date >= ?", sinceTs)
-        }
-
-        if let before, let beforeTs = AppleTime.parse(before) {
-            query.where("m.date <= ?", beforeTs)
-        }
-
-        if let cursor {
-            switch sort {
-            case .recentFirst:
-                query.where(cursor.olderThanSQL, params: cursor.olderThanParams)
-            case .oldestFirst:
-                query.where(cursor.newerThanSQL, params: cursor.newerThanParams)
-            case .largestFirst:
-                break
-            }
-        }
-
-        switch sort {
-        case .recentFirst:
-            query.orderBy("m.date DESC", "m.ROWID DESC")
-        case .oldestFirst:
-            query.orderBy("m.date ASC", "m.ROWID ASC")
-        case .largestFirst:
-            query.orderBy("max_attachment_size DESC", "m.date DESC", "m.ROWID DESC")
-        }
-
-        query.limit(limit)
-        return query.build()
-    }
-
-    typealias AttachmentSummary = (
-        id: Int64, type: AttachmentType, name: String?, available: Bool, sizeHuman: String?
-    )
-
-    func attachmentsForMessages(
-        messageIds: [Int64],
-        typeFilter: String?,
-        allowedRoots: [String] = AttachmentPathPolicy.defaultRoots
-    ) throws -> [Int64: [AttachmentSummary]] {
-        guard !messageIds.isEmpty else { return [:] }
-
-        let placeholders = messageIds.map { _ in "?" }.joined(separator: ", ")
-        let query = QueryBuilder()
-            .select("maj.message_id", "a.ROWID", "a.filename", "a.mime_type", "a.uti", "a.total_bytes")
-            .from("attachment a")
-            .join("message_attachment_join maj ON a.ROWID = maj.attachment_id")
-            .where("maj.message_id IN (\(placeholders))", params: messageIds.map { $0 as Any })
-            .where("COALESCE(a.hide_attachment, 0) = 0")
-        if let predicate = AttachmentType.sqlPredicate(for: typeFilter, alias: "a") {
-            query.where("(\(predicate))")
-        }
-        query.orderBy("maj.message_id ASC", "a.ROWID ASC")
-        let (sql, params) = query.build()
-
-        var byMessage: [Int64: [AttachmentSummary]] = [:]
-        _ = try db.query(sql, params: params) { row in
-            let path = row.string(2)
-            // Route through policy: paths outside allowed roots are treated as unavailable,
-            // identical to a missing file. List output stays total (no error thrown).
-            let validatedPath = path.flatMap { AttachmentPathPolicy.validatedPath($0, allowedRoots: allowedRoots) }
-            let available = validatedPath.map { FileManager.default.fileExists(atPath: $0) } ?? false
-            let name = path.map { ($0 as NSString).lastPathComponent }
-            let bytes = row.optionalInt(5).map { Int($0) }
-            byMessage[row.int(0), default: []].append((
-                id: row.int(1),
-                type: AttachmentType.from(mimeType: row.string(3), uti: row.string(4)),
-                name: name,
-                available: available,
-                sizeHuman: bytes.map { FormatUtils.fileSize($0) }
-            ))
-        }
-        return byMessage
-    }
-
-    func resolveChatName(
-        chatId: Int64,
-        explicitName: String?,
-        cache: inout [Int64: String]
-    ) async throws -> String {
-        if let cached = cache[chatId] {
-            return cached
-        }
-
-        let trimmed = explicitName?.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let trimmed, !trimmed.isEmpty {
-            cache[chatId] = trimmed
-            return trimmed
-        }
-
-        let rows = try await ChatSummaryQueries.participants(
-            db: db,
-            chatId: chatId,
-            resolver: resolver
-        )
-        let name = ChatIdentity.from(
-            chatId: chatId,
-            guid: nil,
-            explicitName: explicitName,
-            rows: rows
-        ).displayName
-        cache[chatId] = name
-        return name
-    }
-
 }

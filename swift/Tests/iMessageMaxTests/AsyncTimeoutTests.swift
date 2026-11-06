@@ -3,9 +3,9 @@ import XCTest
 
 final class AsyncTimeoutTests: XCTestCase {
 
-    /// A task that is already cancelled when it enters sleep must still return.
-    /// At 61e75d9 this hangs: the cancellation handler runs before the
-    /// continuation is armed and marks the gate resumed with nothing to resume.
+    /// A task that is already cancelled when it enters sleep must still
+    /// return, though its cancellation handler runs before the continuation
+    /// is armed.
     func testSleepReturnsWhenTaskIsCancelledBeforeEntry() {
         let finished = expectation(description: "sleep returns after pre-cancellation")
         let task = Task.detached {
@@ -21,27 +21,27 @@ final class AsyncTimeoutTests: XCTestCase {
     /// Cancellation after arming returns promptly (well before the 30 s timer).
     func testSleepReturnsPromptlyWhenCancelledAfterEntry() async {
         let start = ContinuousClock.now
-        let task = Task { await AsyncTimeout.sleep(.seconds(30)) }
-        try? await Task.sleep(for: .milliseconds(50))
+        let gate = AsyncTimeout.ResumeGate()
+        let task = Task { await AsyncTimeout.sleep(.seconds(30), gate: gate) }
+        await waitForTimer(gate)
         task.cancel()
         await task.value
         XCTAssertLessThan(ContinuousClock.now - start, .seconds(2))
     }
 
     /// A task cancelled before entering sleep must not leave a timer on the
-    /// global queue: at 639529e arm() resumes but sleep() still calls
-    /// asyncAfter, and the item is retained until its deadline.
+    /// global queue, retained until its deadline.
     func testPreCancelledSleepDoesNotEnqueueTimer() {
-        AsyncTimeout.enqueuedTimersForTesting = 0
+        let gate = AsyncTimeout.ResumeGate()
         let finished = expectation(description: "sleep returns")
         let task = Task.detached {
             while !Task.isCancelled { await Task.yield() }
-            await AsyncTimeout.sleep(.seconds(300))
+            await AsyncTimeout.sleep(.seconds(300), gate: gate)
             finished.fulfill()
         }
         task.cancel()
         wait(for: [finished], timeout: 2)
-        XCTAssertEqual(AsyncTimeout.enqueuedTimersForTesting, 0)
+        XCTAssertFalse(gate.startedTimer)
     }
 
     /// The normal path: an uncancelled sleep returns after its duration.
@@ -53,9 +53,8 @@ final class AsyncTimeoutTests: XCTestCase {
         XCTAssertLessThan(elapsed, .seconds(2))
     }
 
-    /// Every sleep must free its gate once it returns. At 33e20cb the gate
-    /// held the work item and the work item captured the gate, so each
-    /// sleep leaked a gate, a work item and a continuation canary.
+    /// Every sleep must free its gate once it returns; a gate and its work
+    /// item holding each other would leak both per sleep.
     func testGateIsReleasedAfterSleepCompletes() async {
         let box = WeakBox()
         do {
@@ -77,12 +76,20 @@ final class AsyncTimeoutTests: XCTestCase {
             let gate = AsyncTimeout.ResumeGate()
             box.value = gate
             task = Task { await AsyncTimeout.sleep(.seconds(300), gate: gate) }
+            await waitForTimer(gate)
         }
-        try? await Task.sleep(for: .milliseconds(50))
         task.cancel()
         await task.value
         await waitForRelease(box)
         XCTAssertNil(box.value, "cancelled sleep kept its ResumeGate until the deadline")
+    }
+
+    /// Returns once the sleep holding `gate` has armed its timer, so a
+    /// cancel that follows is a cancel after entry.
+    private func waitForTimer(_ gate: AsyncTimeout.ResumeGate) async {
+        while !gate.startedTimer {
+            await Task.yield()
+        }
     }
 
     private final class WeakBox: @unchecked Sendable {

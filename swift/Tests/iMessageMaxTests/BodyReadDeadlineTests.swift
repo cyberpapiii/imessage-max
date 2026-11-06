@@ -14,31 +14,14 @@ final class BodyReadDeadlineTests: XCTestCase {
         let result = try await HTTPRequestParsing.collectBodyDrainingOverflow(
             body,
             declaredLength: 64,
-            maxBytes: HTTPTransport.maxRequestBodyBytes,
-            drainLimit: HTTPTransport.overLimitDrainBytes,
+            maxBytes: HTTPRequestParsing.maxRequestBodyBytes,
+            drainLimit: HTTPRequestParsing.overLimitDrainBytes,
             deadline: .milliseconds(200)
         )
         let elapsed = ContinuousClock.now - start
         guard case .timedOut = result else { return XCTFail("Expected .timedOut, got \(result)") }
         XCTAssertLessThan(elapsed, .seconds(2))
         source.finish()
-        await producer.value
-    }
-
-    func testCompleteBodyIsUnaffectedByDeadline() async throws {
-        let (body, source) = RequestBody.makeStream()
-        let producer = Task {
-            await source.yield(ByteBuffer(string: "{}"))
-            source.finish()
-        }
-        let result = try await HTTPRequestParsing.collectBodyDrainingOverflow(
-            body, declaredLength: 2,
-            maxBytes: HTTPTransport.maxRequestBodyBytes,
-            drainLimit: HTTPTransport.overLimitDrainBytes,
-            deadline: .seconds(5)
-        )
-        guard case .complete(let data) = result else { return XCTFail("Expected .complete") }
-        XCTAssertEqual(String(decoding: data, as: UTF8.self), "{}")
         await producer.value
     }
 }

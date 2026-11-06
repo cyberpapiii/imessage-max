@@ -1,200 +1,156 @@
 import Foundation
 import Hummingbird
 import HTTPTypes
+import IMessageMaxContract
 import Logging
 import MCP
 import NIOCore
 import ServiceLifecycle
 import UnixSignals
 
-enum MCPProtocolVersion {
-    static let latest = "2025-11-25"
-    static let defaultAssumed = "2025-03-26"
-    static let supported: Set<String> = [latest, "2025-06-18", defaultAssumed, "2024-11-05"]
-    static let requiresHeaderAfterInitialize: Set<String> = [latest, "2025-06-18"]
-}
+/// MCP Streamable HTTP server (Hummingbird): POST for both eras, GET-SSE and
+/// DELETE for legacy sessions, each session with its own SDK Server.
+actor HTTPTransport {
+    /// Production uses the defaults; tests shrink them. The only place these
+    /// values are written: `SessionManager` and the SSE types take them from
+    /// here.
+    struct Configuration: Sendable {
+        var requestTimeout: Duration = .seconds(300)
+        var bodyReadDeadline: Duration = .seconds(30)
+        var channelIdleTimeout: Duration = .seconds(60)
+        /// Concurrent-session cap. A session costs about half a kilobyte of
+        /// resident memory (measured across 100 live sessions), so the cap is
+        /// a guard against runaway clients rather than a resource limit; 100
+        /// turned a fleet of agents that each open their own session into
+        /// 503s within seconds.
+        var maxSessions = 512
+        /// Idle span after which a session may be reclaimed to admit a new
+        /// client once `maxSessions` is reached.
+        var reclaimableIdle: TimeInterval = 300
+        /// Expired-session sweep period. Tests shrink it so a leftover sweep
+        /// task cannot pin a `swift test --parallel` worker for five minutes.
+        var cleanupInterval: Duration = .seconds(300)
+        /// Idle TTL before a session is reaped.
+        var sessionTimeout: TimeInterval = 3600
+        /// SSE heartbeat spacing. It also keeps a listen-only client's
+        /// session from looking idle.
+        var sseKeepAliveInterval: Duration = .seconds(30)
+        /// Builds each legacy session's SDK Server.
+        var makeServer: @Sendable (ToolCatalog) async -> Server = { await Version.makeServer(catalog: $0) }
+    }
 
-/// MCP Streamable HTTP transport (Hummingbird): per-session Servers, POST/GET-SSE/DELETE, `Mcp-Session-Id`.
-public actor HTTPTransport: Transport {
-    /// The host to listen on
-    public let host: String
+    let host: String
+    let port: Int
 
-    /// The port to listen on
-    public let port: Int
-
-    /// Logger instance for transport-related events
-    public nonisolated let logger: Logger
-
-    // State
-    private var isConnected = false
+    private let configuration: Configuration
     private let sessionManager: SessionManager
     private let sseManager: SSEConnectionManager
-    private let database: Database
-    private let resolver: ContactResolver
+    private let catalog: ToolCatalog
     private let setupPermissions: SetupPermissionService
-
-    // Request correlation: maps JSON-RPC id to continuation for response
+    /// Maps (session, JSON-RPC id) to the POST waiting for the SDK's answer.
     private let pendingRequests: PendingRequestRegistry
+    /// Legacy `tools/call`s answered here rather than by the session's SDK
+    /// Server, by (session, JSON-RPC id), for `notifications/cancelled`.
+    private let inFlightToolCalls = InFlightRequests<PendingRequestRegistry.Key>()
+    private var isConnected = false
     private var routingConfigured = false
-    private let requestTimeout: Duration
-    private let bodyReadDeadline: Duration
-    private let channelIdleTimeout: Duration
-
-    /// Background task running the Hummingbird server
     private var serverTask: Task<Void, Error>?
     private var serviceGroup: ServiceGroup?
 
-    /// Creates a new HTTP server transport
-    ///
-    /// - Parameters:
-    ///   - host: The host to listen on (default: "127.0.0.1")
-    ///   - port: The port to listen on (default: 8080)
-    ///   - database: Database instance for tool access
-    ///   - resolver: Contact resolver for tool access
-    ///   - logger: Optional logger instance for transport events
-    ///   - maxSessions: concurrent-session cap, forwarded to `SessionManager`.
-    ///     Production uses the default; tests lower it to reach the 503 path.
-    ///   - sessionTimeout, sseKeepAliveInterval: production uses the defaults;
-    ///     tests shrink them to watch a session outlive its timeout.
-    init(
-        host: String = "127.0.0.1",
-        port: Int = 8080,
-        database: Database,
-        resolver: ContactResolver,
-        logger: Logger? = nil,
-        requestTimeout: Duration = .seconds(300),
-        bodyReadDeadline: Duration = .seconds(30),
-        channelIdleTimeout: Duration = .seconds(60),
-        maxSessions: Int = 512,
-        cleanupInterval: Duration = .seconds(300),
-        sessionTimeout: TimeInterval = 3600,
-        sseKeepAliveInterval: Duration = .seconds(30),
-        setupPermissions: SetupPermissionService? = nil
-    ) {
-        self.host = host
-        self.port = port
-        self.requestTimeout = requestTimeout
-        self.bodyReadDeadline = bodyReadDeadline
-        self.channelIdleTimeout = channelIdleTimeout
-        self.pendingRequests = PendingRequestRegistry(timeout: requestTimeout)
-        self.database = database
-        self.resolver = resolver
-        self.setupPermissions = setupPermissions ?? SetupPermissionService(resolver: resolver)
-        self.logger =
-            logger
-            ?? Logger(
-                label: "mcp.transport.http.server",
-                factory: { _ in SwiftLogNoOpLogHandler() }
-            )
-        self.sessionManager = SessionManager(
-            database: database,
-            resolver: resolver,
-            sessionTimeout: sessionTimeout,
-            maxSessions: maxSessions,
-            cleanupInterval: cleanupInterval
-        )
-        self.sseManager = SSEConnectionManager(keepAliveInterval: sseKeepAliveInterval)
-    }
-
-    /// Establishes the HTTP server connection
-    ///
-    /// This starts listening for incoming HTTP connections on the specified host and port.
-    ///
-    /// - Throws: Error if the server cannot be started
-    public func connect() async throws {
-        try await connect(gracefulShutdownSignals: [.sigterm, .sigint])
-    }
-
-    /// Tests pass no signals so the test process keeps its own handlers.
-    func connect(gracefulShutdownSignals: [UnixSignal]) async throws {
-        guard !isConnected else { return }
-
-        await configureRoutingIfNeeded()
-        await ensureToolCatalogRegistered()
-
-        let app = buildApplication()
-
-        logger.info("Starting HTTP transport on \(host):\(port)")
-
-        isConnected = true
-
-        // ServiceGroup shuts services down last-first, so the stream closer
-        // runs before the server starts waiting for open requests to finish.
-        var configuration = ServiceGroupConfiguration(
-            services: [app, SSEShutdownService(transport: self)],
-            gracefulShutdownSignals: gracefulShutdownSignals,
-            logger: logger
-        )
-        configuration.maximumGracefulShutdownDuration = Self.maximumGracefulShutdownDuration
-        let group = ServiceGroup(configuration: configuration)
-        self.serviceGroup = group
-
-        // Start the server in a background task
-        self.serverTask = Task {
-            try await group.run()
-        }
-    }
+    /// Hummingbird and ServiceLifecycle require a Logger. Diagnostics go
+    /// through `Log`, so theirs stays silent.
+    private static let silentLogger = Logger(label: "imessage-max.http", factory: { _ in SwiftLogNoOpLogHandler() })
 
     /// Bounds a SIGTERM drain. It stays under launchd's default 20 s
     /// ExitTimeOut, so the service exits on its own instead of by SIGKILL.
     static let maximumGracefulShutdownDuration: Duration = .seconds(15)
 
-    /// Ends every open SSE stream. An SSE GET never finishes on its own, and
-    /// graceful shutdown waits for open requests, so without this a single
-    /// connected client kept the process alive until launchd's SIGKILL.
-    fileprivate func closeAllSSEStreams() async {
-        for sessionId in await sessionManager.activeSessionIds() {
-            await sseManager.terminateSession(sessionId: sessionId)
+    init(
+        host: String = ServiceDefaults.host,
+        port: Int = ServiceDefaults.port,
+        catalog: ToolCatalog,
+        setupPermissions: SetupPermissionService,
+        configuration: Configuration = .init()
+    ) {
+        self.host = host
+        self.port = port
+        self.configuration = configuration
+        self.catalog = catalog
+        self.setupPermissions = setupPermissions
+        self.pendingRequests = PendingRequestRegistry(timeout: configuration.requestTimeout)
+        self.sessionManager = SessionManager(catalog: catalog, configuration: configuration)
+        self.sseManager = SSEConnectionManager(keepAliveInterval: configuration.sseKeepAliveInterval)
+    }
+
+    /// Starts listening. SIGTERM and SIGINT trigger a graceful shutdown;
+    /// tests pass no signals so the test process keeps its own handlers.
+    func connect(gracefulShutdownSignals: [UnixSignal] = [.sigterm, .sigint]) async throws {
+        guard !isConnected else { return }
+
+        let app = await application()
+
+        // ServiceGroup shuts services down last-first, so the stream closer
+        // runs before the server starts waiting for open requests to finish.
+        var groupConfiguration = ServiceGroupConfiguration(
+            services: [app, SSEShutdownService(transport: self)],
+            gracefulShutdownSignals: gracefulShutdownSignals,
+            logger: Self.silentLogger
+        )
+        groupConfiguration.maximumGracefulShutdownDuration = Self.maximumGracefulShutdownDuration
+        let group = ServiceGroup(configuration: groupConfiguration)
+        serviceGroup = group
+        serverTask = Task {
+            try await group.run()
         }
     }
 
-    /// What SIGTERM does, without the signal.
-    func triggerGracefulShutdownForTesting() async {
-        await serviceGroup?.triggerGracefulShutdown()
-    }
-
-    func makeApplicationForTesting() async -> some ApplicationProtocol {
-        await configureRoutingIfNeeded()
-        await ensureToolCatalogRegistered()
-        isConnected = true
-        return buildApplication()
-    }
-
-    /// Populates the global tool registry at startup so the stateless modern
-    /// lane can serve `tools/list`/`tools/call` before (or without) any
-    /// legacy session ever being created.
-    private func ensureToolCatalogRegistered() async {
-        guard ToolHandlerRegistry.shared.getTools().isEmpty else { return }
-        let server = Server(
-            name: Version.name,
-            version: Version.current,
-            title: Version.title,
-            instructions: Version.instructions,
-            capabilities: Version.serverCapabilities
-        )
-        await ToolRegistry.registerAll(on: server, db: database, resolver: resolver)
-    }
-
-    func registerMethodHandlerForTesting<M: MCP.Method>(
-        sessionId: String,
-        _ method: M.Type,
-        handler: @escaping @Sendable (M.Parameters) async throws -> M.Result
-    ) async -> Bool {
-        await sessionManager.registerMethodHandlerForTesting(
-            sessionId: sessionId,
-            method,
-            handler: handler
-        )
-    }
-
-    /// Blocks until the server terminates, propagating any errors.
-    ///
-    /// Call this from main.swift after `connect()`. If the Hummingbird server
-    /// crashes or encounters an error, it propagates here, so the process
-    /// exits and launchd can restart it.
-    public func waitForTermination() async throws {
+    /// Blocks until the server terminates, propagating any errors, so a
+    /// crashed server exits the process and launchd restarts it.
+    func waitForTermination() async throws {
         guard let task = serverTask else { return }
         try await task.value
+    }
+
+    /// Does what SIGTERM does, waits for the server to exit, then ends every
+    /// session (which closes its streams and fails its waiting requests).
+    func shutdown() async {
+        await serviceGroup?.triggerGracefulShutdown()
+        _ = try? await serverTask?.value
+        isConnected = false
+        for sessionId in await sessionManager.activeSessionIds() {
+            await sessionManager.terminateSession(sessionId: sessionId)
+        }
+        // A POST that stored its entry as its session ended.
+        await pendingRequests.removeAll()
+    }
+
+    /// The router-backed application, with session routing wired up.
+    /// `connect` serves it; tests drive it in-process.
+    func application() async -> some ApplicationProtocol {
+        await configureRoutingIfNeeded()
+        isConnected = true
+
+        let router = Router(context: BasicRequestContext.self)
+        router.add(middleware: OriginValidationMiddleware(boundHost: host))
+        router.post("/") { request, _ in
+            try await self.handlePost(request: request)
+        }
+        router.post(RouterPath(SetupPermissionRoute.path)) { request, _ in
+            try await self.handleSetupPermission(request: request)
+        }
+        router.get("/") { request, _ in
+            await self.handleGet(request: request)
+        }
+        router.delete("/") { request, _ in
+            await self.handleDelete(request: request)
+        }
+
+        return Application(
+            router: router,
+            server: .http1(configuration: .init(idleTimeout: .nanoseconds(Int64(AsyncTimeout.nanoseconds(for: configuration.channelIdleTimeout))))),
+            configuration: .init(address: .hostname(host, port: port)),
+            logger: Self.silentLogger
+        )
     }
 
     @discardableResult
@@ -207,251 +163,180 @@ public actor HTTPTransport: Transport {
         )
     }
 
-    /// Handles POST requests with JSON-RPC messages
-    func handlePost(
-        request: Request,
-        context: some Hummingbird.RequestContext
-    ) async throws -> Response {
+    /// Ends every open SSE stream, and any opened after. An SSE GET never
+    /// finishes on its own, and graceful shutdown waits for open requests,
+    /// so one left open holds the process until the shutdown cap.
+    fileprivate func closeAllSSEStreams() async {
+        await sseManager.closeAll()
+    }
+
+    // MARK: - POST
+
+    private func handlePost(request: Request) async throws -> Response {
         guard let contentType = request.headers[.contentType],
             contentType.contains("application/json")
         else {
-            return errorResponse(
-                status: .unsupportedMediaType,
-                message: "Invalid Content-Type, expected application/json"
-            )
+            return errorResponse(.unsupportedMediaType, "Invalid Content-Type, expected application/json")
         }
 
         // Streamable HTTP clients advertise both response shapes because a
         // request can complete as JSON or as an SSE stream.
         guard let accept = request.headers[.accept],
-            acceptsStreamableHTTP(accept)
+            HTTPRequestParsing.acceptsStreamableHTTP(accept)
         else {
-            return errorResponse(
-                status: .notAcceptable,
-                message: "Invalid Accept header, expected application/json and text/event-stream"
-            )
+            return errorResponse(.notAcceptable, "Invalid Accept header, expected application/json and text/event-stream")
         }
 
         let requestData: Data
-        switch try await Self.collectBodyDrainingOverflow(
+        switch try await HTTPRequestParsing.collectBodyDrainingOverflow(
             request.body,
             declaredLength: request.headers[.contentLength].flatMap(Int.init),
-            maxBytes: Self.maxRequestBodyBytes,
-            drainLimit: Self.overLimitDrainBytes,
-            deadline: bodyReadDeadline
+            maxBytes: HTTPRequestParsing.maxRequestBodyBytes,
+            drainLimit: HTTPRequestParsing.overLimitDrainBytes,
+            deadline: configuration.bodyReadDeadline
         ) {
         case .complete(let data):
             requestData = data
         case .tooLarge:
-            // Same observable shape as the old `collect(upTo:)` throw that
-            // Hummingbird converted to 413: empty body, Content-Length: 0.
+            // An empty 413, the shape Hummingbird gives an oversized body.
             return Response(status: .contentTooLarge)
         case .timedOut:
-            return errorResponse(status: .requestTimeout, message: "Request body read timed out")
+            return errorResponse(.requestTimeout, "Request body read timed out")
         }
 
-        let jsonString = String(data: requestData, encoding: .utf8) ?? ""
-        if jsonString.trimmingCharacters(in: .whitespaces).hasPrefix("[") {
-            return errorResponse(
-                status: .badRequest,
-                message: "Batch requests are not supported",
-                code: -32600
-            )
-        }
-
-        guard let json = try? JSONSerialization.jsonObject(with: requestData) as? [String: Any]
-        else {
-            return errorResponse(
-                status: .badRequest,
-                message: "Invalid JSON"
-            )
-        }
-
-        let messageType = detectMessageType(json)
-        let isInitialize = (json["method"] as? String) == "initialize"
-
-        // Era selection (dual-era server, MCP 2026-07-28 backward-compat
-        // model): an `initialize` request selects legacy session semantics;
-        // modern per-request `_meta` (or `server/discover`) selects the
-        // stateless 2026-07-28 lane. Only the BODY selects the era. Real
-        // legacy clients (plug) send Mcp-Method/MCP-Protocol-Version headers
-        // on session traffic too, so header presence must not reroute them.
-        if !isInitialize, ModernDispatcher.isModernMessage(json) {
-            return await handleModernPost(
-                request: request,
-                requestData: requestData,
-                json: json,
-                messageType: messageType
-            )
-        }
-
-        let requestedProtocolVersion = isInitialize
-            ? parseInitializeProtocolVersion(from: json)
-            : nil
-
-        // Validate client's protocol version header. The header is required on
-        // subsequent HTTP requests for sessions negotiated at 2025-06-18+.
-        if let versionError = await validateProtocolVersionHeader(
-            request: request,
-            isInitialize: isInitialize
-        ) {
-            return versionError
-        }
-
-        var sessionId: String
-        var responseHeaders = HTTPFields()
-        responseHeaders[.contentType] = "application/json"
-
-        if isInitialize {
-            // Create new session with its own Server instance. Capacity
-            // refusal and startup failure are distinct: the first is
-            // retryable (503), the second is an internal fault (500).
-            let creation: SessionCreationResult = await sessionManager.createSession(
-                protocolVersion: requestedProtocolVersion ?? MCPProtocolVersion.latest
-            )
-            switch creation {
-            case .created(let session):
-                sessionId = session.id
-                responseHeaders[.mcpSessionId] = sessionId
-                logger.info("Created new session with dedicated Server: \(sessionId)")
-                Log.info("era=legacy transport=http version=\(requestedProtocolVersion ?? MCPProtocolVersion.latest) method=initialize session=\(sessionId.prefix(8))")
-            case .atCapacity:
-                return errorResponse(
-                    status: .serviceUnavailable,
-                    message: """
-                        Session capacity reached. Reuse an existing session, terminate unused \
-                        sessions with DELETE and their Mcp-Session-Id, or retry after idle \
-                        sessions expire.
-                        """
-                )
-            case .startFailed:
-                return errorResponse(
-                    status: .internalServerError,
-                    message: "Failed to start session. Check the server log."
-                )
-            }
-        } else {
-            // Validate existing session
-            guard let requestSessionId = request.headers[.mcpSessionId] else {
-                return errorResponse(
-                    status: .badRequest,
-                    message: "Missing Mcp-Session-Id header"
-                )
-            }
-
-            // Return 404 for invalid/expired sessions (MCP spec compliant)
-            // This tells client to re-initialize with a fresh session
-            guard await sessionManager.validate(sessionId: requestSessionId) != nil else {
-                return errorResponse(
-                    status: .notFound,
-                    message: "Invalid or expired session. Please re-initialize."
-                )
-            }
-
-            sessionId = requestSessionId
-            await sessionManager.touch(sessionId: sessionId)
-            responseHeaders[.mcpSessionId] = sessionId
-            let method = (json["method"] as? String)
-                ?? (messageType == .notification ? "notification" : "response")
-            let version = request.headers[.mcpProtocolVersion] ?? "legacy"
-            // A tools/call gets its own line, with outcome and duration.
-            if method != "tools/call" {
-                Log.info("era=legacy transport=http version=\(ModernDispatcher.sanitizedLogField(version)) method=\(ModernDispatcher.sanitizedLogField(method)) session=\(sessionId.prefix(8))")
-            }
-        }
-
-        // A `tools/call` needs nothing that the session's own Server holds:
-        // handlers live in the process-wide registry and the result fields are
-        // identical in both eras. Answering it here skips routing the request
-        // into the SDK, which re-encodes the whole response through Codable
-        // `Value` on the way out. That round-trip cost about 9 ms of the 26 ms
-        // a 12 kB list_chats reply took on this lane. Anything malformed falls
-        // through to the SDK, which owns the error wording.
-        if messageType == .request,
-            (json["method"] as? String) == "tools/call",
-            let params = json["params"] as? [String: Any],
-            let toolName = params["name"] as? String
-        {
-            return await legacyToolCallResponse(
-                id: json["id"] ?? NSNull(),
-                name: toolName,
-                arguments: ToolCallDispatch.decodeArguments(params["arguments"]),
-                sessionId: sessionId,
-                headers: responseHeaders
-            )
-        }
-
-        // Handle based on message type
-        switch messageType {
-        case .request:
-            // Route to session's Server and wait for response
-            let jsonRpcId = Self.parseJsonRpcId(from: json)
-
-            do {
-                let responseData = try await withCheckedThrowingContinuation {
-                    (continuation: CheckedContinuation<Data, Error>) in
-                    Task {
-                        let stored = await self.pendingRequests.store(
-                            sessionId: sessionId,
-                            id: jsonRpcId,
-                            continuation: continuation
-                        )
-
-                        guard stored else {
-                            continuation.resume(
-                                throwing: MCPError.serverError(
-                                    code: -32600,
-                                    message: "Duplicate in-flight JSON-RPC request id: \(jsonRpcId)"
-                                )
-                            )
-                            return
-                        }
-
-                        let routed = await self.sessionManager.routeMessage(
-                            sessionId: sessionId,
-                            data: requestData
-                        )
-                        if !routed {
-                            if let pending = await self.pendingRequests.remove(
-                                sessionId: sessionId,
-                                id: jsonRpcId
-                            ) {
-                                pending.resume(throwing: MCPError.connectionClosed)
-                            }
-                        }
-                    }
-                }
-
-                return Response(
-                    status: .ok,
-                    headers: responseHeaders,
-                    body: .init(byteBuffer: ByteBuffer(data: responseData))
-                )
-            } catch {
-                Log.error("Request handling failed: \(error)")
-                return errorResponse(
-                    status: .internalServerError,
-                    message: ClientErrorMessages.internalError
-                )
-            }
-
-        case .notification, .response:
-            // Route to session's Server, no response expected
-            let routed = await sessionManager.routeMessage(sessionId: sessionId, data: requestData)
-            if !routed {
-                return errorResponse(
-                    status: .notFound,
-                    message: "Session no longer valid"
-                )
-            }
-            return Response(
-                status: .accepted,
-                headers: responseHeaders
-            )
-
+        switch JSONRPCMessage.parse(requestData) {
+        case .batch:
+            return errorResponse(.badRequest, "Batch requests are not supported")
+        case .invalid:
+            return errorResponse(.badRequest, "Invalid JSON")
+        case .message(let message) where message.era == .modern:
+            return await handleModernPost(request: request, message: message)
+        case .message(let message):
+            return await handleLegacyPost(request: request, message: message, requestData: requestData)
         }
     }
 
+    private func handleLegacyPost(request: Request, message: JSONRPCMessage, requestData: Data) async -> Response {
+        if let versionError = await validateProtocolVersionHeader(request: request, isInitialize: message.isInitialize) {
+            return versionError
+        }
+
+        let sessionId: String
+        var responseHeaders = HTTPFields()
+        responseHeaders[.contentType] = "application/json"
+
+        if message.isInitialize {
+            // Capacity refusal is retryable (503); startup failure is an
+            // internal fault (500).
+            let version = LegacyProtocol.negotiate(message.params?["protocolVersion"] as? String)
+            switch await sessionManager.createSession(protocolVersion: version) {
+            case .created(let session):
+                sessionId = session.id
+                responseHeaders[.mcpSessionId] = sessionId
+                EraLog.legacy(message, transport: "http", version: version, session: sessionId)
+            case .atCapacity:
+                return errorResponse(
+                    .serviceUnavailable,
+                    """
+                    Session capacity reached. Reuse an existing session, terminate unused \
+                    sessions with DELETE and their Mcp-Session-Id, or retry after idle \
+                    sessions expire.
+                    """
+                )
+            case .startFailed:
+                return errorResponse(.internalServerError, "Failed to start session. Check the server log.")
+            }
+        } else {
+            guard let requestSessionId = request.headers[.mcpSessionId] else {
+                return errorResponse(.badRequest, "Missing Mcp-Session-Id header")
+            }
+            // 404 tells the client to re-initialize (spec).
+            guard await sessionManager.validate(sessionId: requestSessionId) else {
+                return errorResponse(.notFound, "Invalid or expired session. Please re-initialize.")
+            }
+            sessionId = requestSessionId
+            responseHeaders[.mcpSessionId] = sessionId
+            EraLog.legacy(
+                message,
+                transport: "http",
+                version: request.headers[.mcpProtocolVersion] ?? "legacy",
+                session: sessionId
+            )
+        }
+
+        switch message.kind {
+        case .request:
+            // An id that is not a JSON scalar can never be matched to its
+            // answer: the client's error (400), on either route below.
+            guard let requestId = message.requestKey else {
+                return errorResponse(.badRequest, "Invalid Request: id must be a string, a number, or null")
+            }
+            let key = PendingRequestRegistry.Key(sessionId: sessionId, requestId: requestId)
+            // A `tools/call` needs nothing that the session's own Server holds:
+            // handlers live in the catalog and the result fields are identical in
+            // both eras. Answering it here skips routing the request into the SDK,
+            // which re-encodes the whole response through Codable `Value` on the
+            // way out. That round-trip cost about 9 ms of the 26 ms a 12 kB
+            // list_chats reply took on this lane. A call without a string name or
+            // with non-object arguments falls through to the SDK, which owns the
+            // error wording for malformed params.
+            if message.method == "tools/call", let toolName = message.toolName, !message.hasMalformedToolArguments {
+                return await legacyToolCallResponse(message: message, name: toolName, key: key, headers: responseHeaders)
+            }
+            return await forwardRequest(requestData, message: message, key: key, headers: responseHeaders)
+        case .notification, .response:
+            // The SDK cancels the requests it holds; the calls answered here
+            // it never saw, so cancel those directly.
+            if let cancelled = message.cancelledRequestKey {
+                inFlightToolCalls.cancel(PendingRequestRegistry.Key(sessionId: sessionId, requestId: cancelled))
+            }
+            guard await sessionManager.routeMessage(sessionId: sessionId, data: requestData) else {
+                return errorResponse(.notFound, "Session no longer valid")
+            }
+            return Response(status: .accepted, headers: responseHeaders)
+        }
+    }
+
+    /// A request reusing the id of one still in flight on its session, on
+    /// either route, is the client's error: 400 with the id.
+    private func idInUseResponse(_ message: JSONRPCMessage) -> Response {
+        errorResponse(
+            .badRequest,
+            "Invalid Request: id is already in use by a request in flight on this session",
+            id: JSONRPC.fallbackId(for: message.id)
+        )
+    }
+
+    /// Routes a request to the session's Server and waits for its answer.
+    /// A reused id is the client's error (400); a timeout or a session that
+    /// ends first is ours (500).
+    private func forwardRequest(
+        _ requestData: Data, message: JSONRPCMessage, key: PendingRequestRegistry.Key, headers: HTTPFields
+    ) async -> Response {
+        guard !inFlightToolCalls.isInFlight(key) else { return idInUseResponse(message) }
+        let sessionId = key.sessionId, id = key.requestId
+        do {
+            let responseData = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, Error>) in
+                Task {
+                    guard await self.pendingRequests.store(sessionId: sessionId, id: id, continuation: continuation) else {
+                        continuation.resume(throwing: DuplicateRequestId())
+                        return
+                    }
+                    let routed = await self.sessionManager.routeMessage(sessionId: sessionId, data: requestData)
+                    if !routed, let pending = await self.pendingRequests.remove(sessionId: sessionId, id: id)
+                    {
+                        pending.resume(throwing: MCPError.connectionClosed)
+                    }
+                }
+            }
+            return Response(status: .ok, headers: headers, body: .init(byteBuffer: ByteBuffer(data: responseData)))
+        } catch is DuplicateRequestId {
+            return idInUseResponse(message)
+        } catch {
+            Log.error("Request handling failed: \(error)")
+            return errorResponse(.internalServerError, ClientErrorMessages.internalError)
+        }
+    }
 
     /// Legacy-era `tools/call`, answered without the session's Server.
     ///
@@ -459,116 +344,70 @@ public actor HTTPTransport: Transport {
     /// always, `structuredContent` only for a single JSON-object text block,
     /// `isError` only when the tool failed, and an unknown tool as a
     /// method-not-found error rather than a result.
+    ///
+    /// The call runs in its own task, listed in `inFlightToolCalls`, so a
+    /// `notifications/cancelled` for its id cancels it the way the SDK cancels
+    /// a stdio call: the tool stops and the reply is its cancelled result.
     private func legacyToolCallResponse(
-        id: Any,
-        name: String,
-        arguments: [String: Value]?,
-        sessionId: String,
-        headers: HTTPFields
+        message: JSONRPCMessage, name: String, key: PendingRequestRegistry.Key, headers: HTTPFields
     ) async -> Response {
-        let outcome = await ToolCallDispatch.perform(
-            name: name,
-            arguments: arguments,
-            lane: .legacyHTTP(session: sessionId)
-        )
+        let id = message.id ?? NSNull()
+        let arguments = message.toolArguments
+        let catalog = self.catalog
+        let sessionId = key.sessionId
+        guard await !pendingRequests.isPending(sessionId: sessionId, id: key.requestId),
+            let call = inFlightToolCalls.startUnlessInFlight(key, {
+                await ToolCallDispatch.execute(name: name, arguments: arguments, lane: .legacyHTTP(session: sessionId), catalog: catalog)
+            })
+        else {
+            return idInUseResponse(message)
+        }
+        let execution = await inFlightToolCalls.finish(call)
 
-        let envelope: [String: Any]
-        switch outcome {
+        let body: Data
+        switch execution {
         case .unknownTool:
-            let detail = "Unknown tool: \(name)"
-            envelope = [
-                "jsonrpc": "2.0",
-                "id": id,
-                "error": [
-                    "code": -32601,
-                    "message": "Method not found: \(detail)",
-                    "data": ["detail": detail],
-                ],
-            ]
-        case .completed(let outcome):
-            envelope = [
-                "jsonrpc": "2.0",
-                "id": id,
-                "result": ToolCallDispatch.resultJSON(outcome),
-            ]
+            body = JSONRPC.error(id: id, ToolCallDispatch.unknownToolError(name))
+        case .completed(let content, let isError):
+            do {
+                body = try JSONRPC.success(id: id, result: ToolCallDispatch.resultJSON(content: content, isError: isError))
+            } catch {
+                Log.error("legacy tools/call serialization failed for \(name)")
+                return errorResponse(.internalServerError, ClientErrorMessages.internalError)
+            }
         }
-
-        guard let data = try? JSONSerialization.data(withJSONObject: envelope) else {
-            Log.error("legacy tools/call serialization failed for \(name)")
-            return errorResponse(
-                status: .internalServerError,
-                message: ClientErrorMessages.internalError
-            )
-        }
-
-        return Response(
-            status: .ok,
-            headers: headers,
-            body: .init(byteBuffer: ByteBuffer(data: data))
-        )
+        return Response(status: .ok, headers: headers, body: .init(byteBuffer: ByteBuffer(data: body)))
     }
 
-    // MARK: - Modern era (2026-07-28)
-
-    private func handleModernPost(
-        request: Request,
-        requestData: Data,
-        json: [String: Any],
-        messageType: JSONRPCMessageType
-    ) async -> Response {
-        switch messageType {
-        case .response:
-            // Modern clients MUST NOT POST JSON-RPC responses.
-            return modernResponse(
-                ModernDispatcher.errorResult(
-                    id: nil,
-                    code: ModernDispatcher.ErrorCode.invalidRequest,
-                    message: "JSON-RPC responses are not accepted",
-                    httpStatus: 400
-                )
-            )
-        case .notification:
-            // Header requirements for notification POSTs are undefined in
-            // this revision; accept with no body.
+    private func handleModernPost(request: Request, message: JSONRPCMessage) async -> Response {
+        // Header requirements for notification POSTs are undefined in this
+        // revision; accept with no body.
+        guard message.kind == .request else {
             return Response(status: .accepted)
-        case .request:
-            break
         }
-
-        if let mismatch = validateModernHeaders(request: request, json: json) {
-            return modernResponse(mismatch)
+        if let mismatch = Self.headerMismatch(request: request, message: message) {
+            return Self.response(for: .error(mismatch, .headerMismatch))
         }
-
-        let result = await ModernDispatcher.handle(requestData, transport: "http")
-        return modernResponse(result)
+        return Self.response(for: await ModernDispatcher.handle(message, transport: "http", catalog: catalog))
     }
 
     /// Enforces the required Streamable HTTP request-metadata headers
     /// (`MCP-Protocol-Version`, `Mcp-Method`, `Mcp-Name`) and their
-    /// header/body consistency. Returns a HeaderMismatch (-32020) outcome on
-    /// failure, per spec section "Server Validation".
-    private nonisolated func validateModernHeaders(
-        request: Request,
-        json: [String: Any]
-    ) -> ModernDispatchResult? {
-        let id = json["id"]
-        let method = json["method"] as? String ?? ""
-        let params = json["params"] as? [String: Any]
-        let bodyVersion = ModernDispatcher.requestedProtocolVersion(in: json)
+    /// header/body consistency, per the spec's "Server Validation" section.
+    /// The spec names `resources/read` and `prompts/get` too; they are checked
+    /// even though they then answer method-not-found.
+    /// Returns the HeaderMismatch error envelope, or nil when valid.
+    private static func headerMismatch(request: Request, message: JSONRPCMessage) -> Data? {
+        let method = message.method ?? ""
 
-        func mismatch(_ message: String) -> ModernDispatchResult {
-            ModernDispatcher.errorResult(
-                id: id,
-                code: ModernDispatcher.ErrorCode.headerMismatch,
-                message: message,
-                httpStatus: 400
-            )
+        func mismatch(_ text: String) -> Data {
+            JSONRPC.error(id: message.id, code: .headerMismatch, message: text)
         }
 
         guard let headerVersion = request.headers[.mcpProtocolVersion] else {
             return mismatch("Missing required MCP-Protocol-Version header")
         }
-        if let bodyVersion, bodyVersion != headerVersion {
+        if let bodyVersion = message.modernProtocolVersion, bodyVersion != headerVersion {
             return mismatch(
                 "Header mismatch: MCP-Protocol-Version header value '\(headerVersion)' does not match body value '\(bodyVersion)'"
             )
@@ -578,68 +417,56 @@ public actor HTTPTransport: Transport {
             return mismatch("Missing required Mcp-Method header")
         }
         guard headerMethod == method else {
-            return mismatch(
-                "Header mismatch: Mcp-Method header value '\(headerMethod)' does not match body value '\(method)'"
-            )
+            return mismatch("Header mismatch: Mcp-Method header value '\(headerMethod)' does not match body value '\(method)'")
         }
 
         if ["tools/call", "resources/read", "prompts/get"].contains(method) {
             guard let rawName = request.headers[.mcpName] else {
                 return mismatch("Missing required Mcp-Name header")
             }
-            let headerName = ModernDispatcher.decodeBase64Sentinel(rawName)
-            let bodyName = (params?["name"] as? String) ?? (params?["uri"] as? String) ?? ""
+            let headerName = HTTPRequestParsing.decodeBase64Sentinel(rawName)
+            let bodyName = message.toolName ?? (message.params?["uri"] as? String) ?? ""
             guard headerName == bodyName else {
-                return mismatch(
-                    "Header mismatch: Mcp-Name header value '\(headerName)' does not match body value '\(bodyName)'"
-                )
+                return mismatch("Header mismatch: Mcp-Name header value '\(headerName)' does not match body value '\(bodyName)'")
             }
         }
 
         return nil
     }
 
-    private nonisolated func modernResponse(_ result: ModernDispatchResult) -> Response {
-        let status = HTTPResponse.Status(code: result.httpStatus)
-        guard let data = result.data else {
-            return Response(status: status)
+    /// The Streamable HTTP status the spec gives each modern outcome.
+    static func status(for reply: ModernReply) -> HTTPResponse.Status {
+        switch reply {
+        case .accepted: .accepted
+        case .result: .ok
+        case .error(_, .methodNotFound): .notFound
+        case .error: .badRequest
+        }
+    }
+
+    private static func response(for reply: ModernReply) -> Response {
+        guard let body = reply.body else {
+            return Response(status: status(for: reply))
         }
         return Response(
-            status: status,
+            status: status(for: reply),
             headers: [.contentType: "application/json"],
-            body: .init(byteBuffer: ByteBuffer(data: data))
+            body: .init(byteBuffer: ByteBuffer(data: body))
         )
     }
 
-    /// Handles GET requests for SSE streaming
-    func handleGet(
-        request: Request,
-        context: some Hummingbird.RequestContext
-    ) async throws -> Response {
-        guard let accept = request.headers[.accept],
-            accept.contains("text/event-stream")
-        else {
-            return errorResponse(
-                status: .notAcceptable,
-                message: "Invalid Accept header, expected text/event-stream"
-            )
-        }
+    // MARK: - GET (SSE) and DELETE
 
+    func handleGet(request: Request) async -> Response {
+        guard let accept = request.headers[.accept], accept.contains("text/event-stream") else {
+            return errorResponse(.notAcceptable, "Invalid Accept header, expected text/event-stream")
+        }
         guard let sessionId = request.headers[.mcpSessionId] else {
-            return errorResponse(
-                status: .badRequest,
-                message: "Missing Mcp-Session-Id header"
-            )
+            return errorResponse(.badRequest, "Missing Mcp-Session-Id header")
         }
-
-        guard await sessionManager.validate(sessionId: sessionId) != nil else {
-            return errorResponse(
-                status: .notFound,
-                message: "Invalid or expired session. Please re-initialize."
-            )
+        guard await sessionManager.validate(sessionId: sessionId) else {
+            return errorResponse(.notFound, "Invalid or expired session. Please re-initialize.")
         }
-
-        await sessionManager.touch(sessionId: sessionId)
 
         var responseHeaders = HTTPFields()
         responseHeaders[.contentType] = "text/event-stream"
@@ -648,167 +475,121 @@ public actor HTTPTransport: Transport {
         responseHeaders[.mcpSessionId] = sessionId
 
         let connectionInfo = SSEConnectionInfo(sessionId: sessionId)
-
         let channel = await sseManager.register(info: connectionInfo)
         let connectionId = connectionInfo.id
         let sseManager = self.sseManager
         let sessionManager = self.sessionManager
-        let logger = self.logger
-
-        logger.debug("SSE connection established: \(connectionId) for session: \(sessionId)")
+        // A session terminated between the check above and the register
+        // already closed its streams, so this one would never be closed.
+        guard await sessionManager.validate(sessionId: sessionId) else {
+            await sseManager.unregister(connectionId: connectionId)
+            return errorResponse(.notFound, "Invalid or expired session. Please re-initialize.")
+        }
 
         return Response(
             status: .ok,
             headers: responseHeaders,
             body: .init { writer in
-                // Stream events from channel (includes keep-alives)
+                // The stream includes keep-alives. A write error means the
+                // client went away.
                 do {
                     for await event in channel.stream {
                         try await writer.write(ByteBuffer(string: event))
                         // An open stream is a live client, even one that only
-                        // listens. Keep-alives land every 30s, so its session
-                        // never looks idle to expiry or reclaim.
+                        // listens. Keep-alives land every
+                        // `sseKeepAliveInterval`, so its session never looks
+                        // idle to expiry or reclaim.
                         await sessionManager.touch(sessionId: sessionId)
                     }
                     // Hummingbird only ends the response on finish. Without
                     // it a server-side close left the client's stream open.
                     try await writer.finish(nil)
-                } catch {
-                    logger.debug("SSE stream error: \(error)")
-                }
-
+                } catch {}
                 await sseManager.unregister(connectionId: connectionId)
-                logger.debug("SSE connection closed: \(connectionId)")
             }
         )
     }
 
-    /// Handles DELETE requests for session termination
-    func handleDelete(
-        request: Request,
-        context: some Hummingbird.RequestContext
-    ) async throws -> Response {
-        // Validate session
+    private func handleDelete(request: Request) async -> Response {
         guard let sessionId = request.headers[.mcpSessionId] else {
-            return errorResponse(
-                status: .badRequest,
-                message: "Missing Mcp-Session-Id header"
-            )
+            return errorResponse(.badRequest, "Missing Mcp-Session-Id header")
+        }
+        guard await sessionManager.validate(sessionId: sessionId) else {
+            return errorResponse(.notFound, "Invalid or expired session")
         }
 
-        guard await sessionManager.validate(sessionId: sessionId) != nil else {
-            return errorResponse(
-                status: .notFound,
-                message: "Invalid or expired session"
-            )
-        }
-
-        // Terminate the session: cancel its task, stop the SDK Server
-        // (2s bound), and drop it from the table. SSE is closed separately.
+        // Stops the session's SDK Server (2 s bound), drops it from the
+        // table, and through the termination handler closes its SSE streams
+        // and fails its waiting requests.
         await sessionManager.terminateSession(sessionId: sessionId)
-        await sseManager.terminateSession(sessionId: sessionId)
-
-        // Clean up any pending requests for this session
-        await pendingRequests.cleanup(for: sessionId)
-
-        logger.info("Session terminated: \(sessionId)")
-
         return Response(status: .noContent)
     }
 
-    /// Handles responses from per-session Server instances
-    private func handleServerResponse(sessionId: String, data: Data) async {
+    /// Answers from a session's Server: the reply to a waiting POST, or else
+    /// a server-initiated message for the session's SSE streams. Internal so
+    /// tests can inject a server-initiated message.
+    func handleServerResponse(sessionId: String, data: Data) async {
         guard isConnected else { return }
 
-        // Parse the response to get the JSON-RPC id
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            logger.warning("Failed to parse server response as JSON")
+        guard case .message(let message) = JSONRPCMessage.parse(data) else {
+            Log.warning("session \(sessionId.prefix(8)) Server sent a non-object message; dropped")
             return
         }
 
-        let jsonRpcId = Self.parseJsonRpcId(from: json)
-
-        // Check if this matches a pending request. Route through the helper so
-        // the timeout work item is cancelled. Removing the entry directly left
-        // an armed 300s timer plus a wakeup Task behind for every served
-        // request, which is exactly the stray-wakeup churn this runtime is
-        // documented to be sensitive to.
-        if let pending = await pendingRequests.remove(sessionId: sessionId, id: jsonRpcId) {
+        // Only a response answers a POST. A server-initiated request carries
+        // an id from the Server's own sequence, which can equal a waiting
+        // client id. Removing through the registry also cancels the timer.
+        if message.kind == .response, let key = message.requestKey,
+            let pending = await pendingRequests.remove(sessionId: sessionId, id: key)
+        {
             pending.resume(returning: data)
-            logger.trace("Routed response for request: \(jsonRpcId)")
         } else {
-            // Broadcast via SSE to session's connections
             let event = SSEEvent(
                 id: UUID().uuidString,
                 event: "message",
                 data: String(data: data, encoding: .utf8) ?? ""
             )
-
-            let formattedEvent = event.formatted()
-            await sseManager.broadcast(sessionId: sessionId, event: formattedEvent)
-
-            logger.trace("Broadcast SSE message to session: \(sessionId)")
+            await sseManager.broadcast(sessionId: sessionId, event: event.formatted())
         }
     }
 
-    /// Disconnects the HTTP server
-    ///
-    /// This stops accepting new connections and closes existing ones.
-    public func disconnect() async {
-        guard isConnected else { return }
-        isConnected = false
+    // MARK: - Setup permission route
 
-        // Cancel server task
-        serverTask?.cancel()
-        serverTask = nil
-
-        // Terminate all sessions
-        for sessionId in await sessionManager.activeSessionIds() {
-            await sessionManager.terminateSession(sessionId: sessionId)
+    private func handleSetupPermission(request: Request) async throws -> Response {
+        guard HostBindingPolicy.isLoopback(host) else { return Response(status: .notFound) }
+        // Browser requests are never setup requests, including loopback origins.
+        // The explicit header forces a browser preflight; no CORS is offered.
+        guard request.headers[.origin] == nil,
+              request.headers[.setupRequest] == SetupPermissionRoute.headerValue else {
+            return Response(status: .forbidden)
         }
-
-        await pendingRequests.removeAll()
-
-        logger.info("HTTP transport disconnected")
+        guard request.headers[.contentType]?.lowercased() == "application/json" else {
+            return Response(status: .unsupportedMediaType)
+        }
+        let data: Data
+        switch try await HTTPRequestParsing.collectBodyDrainingOverflow(request.body,
+            declaredLength: request.headers[.contentLength].flatMap(Int.init),
+            maxBytes: SetupPermissionRoute.maxRequestBytes, drainLimit: 1024, deadline: .seconds(5)) {
+        case .complete(let body): data = body
+        case .tooLarge: return Response(status: .contentTooLarge)
+        case .timedOut: return Response(status: .requestTimeout)
+        }
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: String],
+              json.count == 1, let name = json[SetupPermissionRoute.bodyKey],
+              let permission = SetupPermission(rawValue: name) else {
+            return Response(status: .badRequest)
+        }
+        do {
+            let result = try await setupPermissions.request(permission)
+            let body = try JSONEncoder().encode(result)
+            return Response(status: .ok, headers: [.contentType: "application/json", .cacheControl: "no-store"],
+                body: .init(byteBuffer: .init(bytes: body)))
+        } catch SetupPermissionService.RequestError.alreadyRequesting {
+            return Response(status: .conflict)
+        }
     }
 
-    /// Sends a response message (Transport protocol requirement - not used in per-session model)
-    public func send(_ data: Data) async throws {
-        // In per-session model, responses route through handleServerResponse
-        // This method exists for Transport protocol compliance
-        logger.warning("send() called directly on HTTPTransport - should use per-session routing")
-    }
-
-    /// Receives messages (Transport protocol requirement - not used in per-session model)
-    public func receive() -> AsyncThrowingStream<Data, Swift.Error> {
-        // In per-session model, each session has its own receive stream
-        // Return empty stream for Transport protocol compliance
-        return AsyncThrowingStream { $0.finish() }
-    }
-
-    // MARK: - Request body collection
-
-    static var maxRequestBodyBytes: Int { HTTPRequestParsing.maxRequestBodyBytes }
-    static var overLimitDrainBytes: Int { HTTPRequestParsing.overLimitDrainBytes }
-    typealias BodyCollection = HTTPRequestParsing.BodyCollection
-
-    nonisolated static func collectBodyDrainingOverflow(
-        _ body: RequestBody,
-        declaredLength: Int?,
-        maxBytes: Int,
-        drainLimit: Int,
-        deadline: Duration
-    ) async throws -> BodyCollection {
-        try await HTTPRequestParsing.collectBodyDrainingOverflow(
-            body,
-            declaredLength: declaredLength,
-            maxBytes: maxBytes,
-            drainLimit: drainLimit,
-            deadline: deadline
-        )
-    }
-
-    // MARK: - Private Helpers
+    // MARK: - Helpers
 
     private func configureRoutingIfNeeded() async {
         guard !routingConfigured else { return }
@@ -825,241 +606,54 @@ public actor HTTPTransport: Transport {
         routingConfigured = true
     }
 
-    private func buildApplication() -> some ApplicationProtocol {
-        let router = Router(context: BasicRequestContext.self)
-
-        router.add(middleware: OriginValidationMiddleware())
-
-        router.post("/") { request, context in
-            try await self.handlePost(request: request, context: context)
-        }
-        router.post("/setup/permissions") { request, context in
-            try await self.handleSetupPermission(request: request)
-        }
-        router.get("/") { request, context in
-            try await self.handleGet(request: request, context: context)
-        }
-        router.delete("/") { request, context in
-            try await self.handleDelete(request: request, context: context)
-        }
-
-        return Application(
-            router: router,
-            server: .http1(configuration: .init(idleTimeout: Self.nioTimeAmount(channelIdleTimeout))),
-            configuration: .init(
-                address: .hostname(host, port: port)
-            ),
-            logger: logger
-        )
-    }
-
-    private func handleSetupPermission(request: Request) async throws -> Response {
-        guard HostBindingPolicy.isLoopback(host) else { return Response(status: .notFound) }
-        // Browser requests are never setup requests, including loopback origins.
-        // The explicit header forces a browser preflight; no CORS is offered.
-        guard request.headers[HTTPField.Name("Origin")!] == nil,
-              request.headers[HTTPField.Name("X-iMessage-Max-Setup")!] == "permission-request-v1" else {
-            return Response(status: .forbidden)
-        }
-        guard request.headers[.contentType]?.lowercased() == "application/json" else {
-            return Response(status: .unsupportedMediaType)
-        }
-        let data: Data
-        switch try await Self.collectBodyDrainingOverflow(request.body,
-            declaredLength: request.headers[.contentLength].flatMap(Int.init),
-            maxBytes: 256, drainLimit: 1024, deadline: .seconds(5)) {
-        case .complete(let body): data = body
-        case .tooLarge: return Response(status: .contentTooLarge)
-        case .timedOut: return Response(status: .requestTimeout)
-        }
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: String],
-              json.count == 1, let name = json["permission"], let permission = SetupPermission(rawValue: name) else {
-            return Response(status: .badRequest)
-        }
-        do {
-            let result = try await setupPermissions.request(permission)
-            let body = try JSONEncoder().encode(result)
-            return Response(status: .ok, headers: [.contentType: "application/json", .cacheControl: "no-store"],
-                body: .init(byteBuffer: .init(bytes: body)))
-        } catch SetupPermissionService.RequestError.alreadyRequesting {
-            return Response(status: .conflict)
-        }
-    }
-
-    private nonisolated func acceptsStreamableHTTP(_ accept: String) -> Bool {
-        HTTPRequestParsing.acceptsStreamableHTTP(accept)
-    }
-
-    private func validateProtocolVersionHeader(
-        request: Request,
-        isInitialize: Bool
-    ) async -> Response? {
+    private func validateProtocolVersionHeader(request: Request, isInitialize: Bool) async -> Response? {
         let versionHeader = request.headers[.mcpProtocolVersion]
 
-        if let versionHeader {
-            guard MCPProtocolVersion.supported.contains(versionHeader) else {
-                return errorResponse(
-                    status: .badRequest,
-                    // Only reachable with arbitrary client input, so the clamp
-                    // is load-bearing here: keep a garbage header from bloating
-                    // the response and the log. Serialization already makes any
-                    // content safe.
-                    message: "Unsupported protocol version: \(String(versionHeader.prefix(64)))",
-                    code: -32600
-                )
-            }
+        if let versionHeader, !LegacyProtocol.supported.contains(versionHeader) {
+            // Only reachable with arbitrary client input, so the clamp is
+            // load-bearing: keep a garbage header from bloating the response
+            // and the log.
+            return errorResponse(.badRequest, "Unsupported protocol version: \(String(versionHeader.prefix(64)))")
         }
 
-        guard !isInitialize else { return nil }
-
-        guard let sessionId = request.headers[.mcpSessionId],
-            let negotiated = await sessionManager.protocolVersion(for: sessionId)
+        guard !isInitialize,
+            let sessionId = request.headers[.mcpSessionId],
+            let negotiated = await sessionManager.protocolVersion(for: sessionId),
+            LegacyProtocol.requiresHeaderAfterInitialize(negotiated)
         else {
             return nil
         }
 
-        if MCPProtocolVersion.requiresHeaderAfterInitialize.contains(negotiated) {
-            guard let versionHeader else {
-                return errorResponse(
-                    status: .badRequest,
-                    message: "Missing MCP-Protocol-Version header for negotiated protocol version \(negotiated)",
-                    code: -32600
-                )
-            }
-
-            guard versionHeader == negotiated else {
-                return errorResponse(
-                    status: .badRequest,
-                    message: "MCP-Protocol-Version header \(versionHeader) does not match negotiated version \(negotiated)",
-                    code: -32600
-                )
-            }
+        guard let versionHeader else {
+            return errorResponse(.badRequest, "Missing MCP-Protocol-Version header for negotiated protocol version \(negotiated)")
         }
-
+        guard versionHeader == negotiated else {
+            return errorResponse(
+                .badRequest,
+                "MCP-Protocol-Version header \(versionHeader) does not match negotiated version \(negotiated)"
+            )
+        }
         return nil
     }
 
-    private nonisolated func parseInitializeProtocolVersion(from json: [String: Any]) -> String? {
-        guard let params = json["params"] as? [String: Any],
-            let version = params["protocolVersion"] as? String,
-            MCPProtocolVersion.supported.contains(version)
-        else {
-            return nil
-        }
-        return version
-    }
-
-    /// Detects the type of JSON-RPC message
-    private nonisolated func detectMessageType(_ json: [String: Any]) -> JSONRPCMessageType {
-        if json["method"] != nil && json["id"] != nil {
-            return .request
-        } else if json["method"] != nil {
-            return .notification
-        } else if json["result"] != nil || json["error"] != nil {
-            return .response
-        }
-        return .notification  // Default fallback
-    }
-
-    /// Canonicalizes the JSON-RPC id to a collision-free string form.
-    /// Type-tagged so `1` and `"1"` (both legal, distinct ids) never collide.
-    /// Total: never traps, whatever the client sends.
-    ///
-    /// The previous form forced a Double id through a non-failable Int
-    /// conversion, which trapped on any id outside Int's range.
-    /// `{"id": 1e300}` on an unauthenticated POST aborted the whole
-    /// launchd service.
-    ///
-    /// Branch order matters: `["id": 1]` bridges to NSNumber, and on Apple
-    /// platforms both `as? Int` and `as? Double` succeed for integral
-    /// NSNumbers, so Int must be tested first to keep `1` in the `i:` space.
-    nonisolated static func parseJsonRpcId(from json: [String: Any]) -> String {
-        guard let id = json["id"] else {
-            return "u:\(UUID().uuidString)"  // No id, so generate a unique key
-        }
-        if let stringId = id as? String {
-            return "s:\(stringId)"
-        }
-        if let intId = id as? Int {
-            return "i:\(intId)"
-        }
-        if let doubleId = id as? Double {
-            if let exact = Int(exactly: doubleId) {
-                return "i:\(exact)"  // 2.0 and 2 are the same JSON number
-            }
-            return "d:\(doubleId)"  // fractional or out-of-Int-range; no trap
-        }
-        if id is NSNull {
-            return "n:null"
-        }
-        return "u:\(UUID().uuidString)"
-    }
-
-    /// Converts a `Duration` through `AsyncTimeout.dispatchInterval` so the
-    /// channel idle timeout uses the same saturation as every other Dispatch
-    /// deadline in the service.
-    private nonisolated static func nioTimeAmount(_ duration: Duration) -> TimeAmount {
-        switch AsyncTimeout.dispatchInterval(for: duration) {
-        case .nanoseconds(let ns):
-            return .nanoseconds(Int64(ns))
-        case .microseconds(let us):
-            return .microseconds(Int64(us))
-        case .milliseconds(let ms):
-            return .milliseconds(Int64(ms))
-        case .seconds(let s):
-            return .seconds(Int64(s))
-        case .never:
-            return .seconds(60)
-        @unknown default:
-            return .seconds(60)
-        }
-    }
-
-    /// Creates a JSON-RPC error response
-    private nonisolated func errorResponse(status: HTTPResponse.Status, message: String, code: Int = -32600) -> Response
-    {
-        // Serialize rather than interpolate. The old form escaped only `"`,
-        // so a client-controlled message containing a backslash or a control
-        // character produced malformed, injectable JSON.
-        let object: [String: Any] = [
-            "jsonrpc": "2.0",
-            "error": ["code": code, "message": message],
-            "id": NSNull(),
-        ]
-        let data = (try? JSONSerialization.data(withJSONObject: object))
-            ?? Data(#"{"jsonrpc":"2.0","error":{"code":-32603,"message":"Internal error"},"id":null}"#.utf8)
-        return Response(
+    /// A transport-level failure: the HTTP status carries the meaning, the
+    /// body is a JSON-RPC error, with a null id unless the request's is known.
+    private nonisolated func errorResponse(
+        _ status: HTTPResponse.Status,
+        _ message: String,
+        code: JSONRPCErrorCode = .invalidRequest,
+        id: Any? = nil
+    ) -> Response {
+        Response(
             status: status,
             headers: [.contentType: "application/json"],
-            body: .init(byteBuffer: ByteBuffer(bytes: data))
+            body: .init(byteBuffer: ByteBuffer(data: JSONRPC.error(id: id, code: code, message: message)))
         )
     }
 }
 
-// MARK: - Supporting Types
-
-/// Types of JSON-RPC messages
-private enum JSONRPCMessageType {
-    case request
-    case notification
-    case response
-}
-
-// MARK: - HTTPField.Name Extensions
-
-extension HTTPField.Name {
-    static let mcpSessionId = HTTPField.Name("Mcp-Session-Id")!
-    static let connection = HTTPField.Name("Connection")!
-
-    /// MCP protocol version header
-    static let mcpProtocolVersion = HTTPField.Name("MCP-Protocol-Version")!
-
-    /// Mcp-Method request-metadata header (2026-07-28)
-    static let mcpMethod = HTTPField.Name("Mcp-Method")!
-
-    /// Mcp-Name request-metadata header (2026-07-28)
-    static let mcpName = HTTPField.Name("Mcp-Name")!
-}
+/// A request reused the id of one still waiting on the same session.
+private struct DuplicateRequestId: Error {}
 
 /// Waits for graceful shutdown, then closes the transport's SSE streams.
 private struct SSEShutdownService: Service {

@@ -24,13 +24,7 @@ enum ClientErrorMessages {
         guard let dbError = error as? DatabaseError else {
             return error.localizedDescription
         }
-        Log.error("database error: \(dbError.localizedDescription)")
-        switch dbError {
-        case .permissionDenied: return permissionDenied
-        case .notFound: return databaseNotFound
-        case .queryFailed, .invalidData: return internalError
-        case .cancelled: return cancelled
-        }
+        return dbError.clientMessage(context: "database error")
     }
 
     /// Client-safe rendering of an error that may embed internal filesystem
@@ -45,5 +39,21 @@ enum ClientErrorMessages {
     static func internalDetail(_ error: Error, context: String) -> String {
         Log.error("\(context): \(error.localizedDescription)")
         return "\(context) failed. Check the server log for details."
+    }
+}
+
+extension DatabaseError {
+    /// Fixed guidance for the client. The description, which carries
+    /// filesystem paths, goes to the log under `context`.
+    func clientMessage(context: String) -> String {
+        let message: String
+        switch self {
+        case .cancelled: return ClientErrorMessages.cancelled
+        case .notFound: message = ClientErrorMessages.databaseNotFound
+        case .permissionDenied: message = ClientErrorMessages.permissionDenied
+        case .queryFailed, .invalidData: message = ClientErrorMessages.internalError
+        }
+        Log.error("\(context): \(localizedDescription)")
+        return message
     }
 }

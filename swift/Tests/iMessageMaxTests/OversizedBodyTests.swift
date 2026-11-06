@@ -6,21 +6,20 @@ import NIOCore
 @testable import iMessageMax
 
 /// Oversized POST bodies must return 413 and leave the request body fully
-/// consumed. The old `collect(upTo:)` path threw with megabytes unread; for
-/// `Connection: close` clients (Python urllib default) Hummingbird's HTTP1
-/// loop then blocked on channel close with reads back-pressured off, leaking
-/// one server FD per oversized request.
+/// consumed. A body left with megabytes unread blocks Hummingbird's HTTP1
+/// loop on channel close for `Connection: close` clients (Python urllib's
+/// default), leaking one server FD per oversized request.
 final class OversizedBodyTests: XCTestCase {
-    private let maxBytes = HTTPTransport.maxRequestBodyBytes
-    private let drainLimit = HTTPTransport.overLimitDrainBytes
+    private let maxBytes = HTTPRequestParsing.maxRequestBodyBytes
+    private let drainLimit = HTTPRequestParsing.overLimitDrainBytes
 
-    /// The core regression: on overflow the helper keeps consuming the body
-    /// stream to the end. If it stops early, the producer below suspends on
-    /// back-pressure and this test hangs rather than passes.
+    /// On overflow the helper keeps consuming the body stream to the end. If
+    /// it stops early, the producer below suspends on back-pressure and this
+    /// test hangs rather than passes.
     func testOverflowDrainsRemainingBody() async throws {
         let (body, source) = RequestBody.makeStream()
         let chunk = ByteBuffer(repeating: 0x78, count: 64 * 1024)
-        let chunkCount = 24  // 1.5 MB total, the confirmed reproducing size
+        let chunkCount = 24  // 1.5 MB total, enough to stall an undrained body
 
         let producer = Task {
             for _ in 0..<chunkCount {
@@ -29,7 +28,7 @@ final class OversizedBodyTests: XCTestCase {
             source.finish()
         }
 
-        let result = try await HTTPTransport.collectBodyDrainingOverflow(
+        let result = try await HTTPRequestParsing.collectBodyDrainingOverflow(
             body,
             declaredLength: chunk.readableBytes * chunkCount,
             maxBytes: maxBytes,
@@ -57,7 +56,7 @@ final class OversizedBodyTests: XCTestCase {
             source.finish()
         }
 
-        let result = try await HTTPTransport.collectBodyDrainingOverflow(
+        let result = try await HTTPRequestParsing.collectBodyDrainingOverflow(
             body,
             declaredLength: 4096,
             maxBytes: maxBytes,
@@ -78,7 +77,7 @@ final class OversizedBodyTests: XCTestCase {
         let (body, source) = RequestBody.makeStream()
         defer { source.finish() }
 
-        let result = try await HTTPTransport.collectBodyDrainingOverflow(
+        let result = try await HTTPRequestParsing.collectBodyDrainingOverflow(
             body,
             declaredLength: drainLimit + 1,
             maxBytes: maxBytes,
@@ -91,30 +90,13 @@ final class OversizedBodyTests: XCTestCase {
         }
     }
 
-    /// Observable contract unchanged: oversized POST returns HTTP 413 with an
-    /// empty body, exactly like the old Hummingbird-converted throw.
+    /// An oversized POST answers HTTP 413 with an empty body.
     func testOversizedPostReturns413WithEmptyBody() async throws {
-        let transport = HTTPTransport(
-            host: "127.0.0.1",
-            port: 0,
-            database: Database(),
-            resolver: ContactResolver(seedCache: [:]),
-            requestTimeout: .seconds(5),
-            cleanupInterval: .milliseconds(20)
-        )
-        let app = await transport.makeApplicationForTesting()
+        let app = await makeTestTransport().application()
 
         try await app.test(TestingSetup.router) { client in
-            let oversized = ByteBuffer(repeating: 0x7A, count: HTTPTransport.maxRequestBodyBytes + 1)
-            let response = try await client.executeRequest(
-                uri: "/",
-                method: HTTPRequest.Method.post,
-                headers: [
-                    .contentType: "application/json",
-                    .accept: "application/json, text/event-stream",
-                ],
-                body: oversized
-            )
+            let oversized = ByteBuffer(repeating: 0x7A, count: HTTPRequestParsing.maxRequestBodyBytes + 1)
+            let response = try await client.executeRequest(uri: "/", method: .post, headers: jsonHeaders(), body: oversized)
 
             XCTAssertEqual(response.head.status, .contentTooLarge)
             XCTAssertEqual(response.body.readableBytes, 0)

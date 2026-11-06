@@ -3,8 +3,7 @@ import XCTest
 
 /// Pins the byte-for-byte output of `FormatUtils.encodeJSON`: important keys
 /// first (in `orderedKeys` order), the rest alphabetically, minimal escaping
-/// (`/`, U+2028 and non-ASCII pass through raw). Captured at commit 61e75d9.
-/// Any change to this literal is a change to every tool response's shape and
+/// (`/`, U+2028 and non-ASCII pass through raw). Any change to this literal is a change to every tool response's shape and
 /// must be deliberate.
 final class FormatUtilsTests: XCTestCase {
     private struct GoldenAttachment: Encodable {
@@ -87,18 +86,5 @@ final class FormatUtilsTests: XCTestCase {
         XCTAssertEqual(output, Self.expected)
         // The literal above must itself be valid JSON, or the pin is meaningless.
         XCTAssertNoThrow(try JSONSerialization.jsonObject(with: Data(output.utf8)))
-    }
-
-    func testEncodeJSONObjectMatchesEncodableOrdering() throws {
-        let object: [String: Any] = [
-            "zebra": "z",
-            "id": 7,
-            "text": "t/\"\\",
-            "nested": ["ts": "now", "aardvark": [1, 2.5, true, NSNull()]],
-        ]
-        XCTAssertEqual(
-            try FormatUtils.encodeJSONObject(object),
-            "{\"id\":7,\"text\":\"t/\\\"\\\\\",\"nested\":{\"ts\":\"now\",\"aardvark\":[1,2.5,true,null]},\"zebra\":\"z\"}"
-        )
     }
 }

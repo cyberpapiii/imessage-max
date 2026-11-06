@@ -1,5 +1,5 @@
-// Sources/iMessageMax/Database/Database.swift
 import Foundation
+import IMessageMaxContract
 import SQLite3
 import Synchronization
 
@@ -20,12 +20,6 @@ final class Database: @unchecked Sendable {
         self.schemaCache = Mutex(nil)
     }
 
-    /// Test-only: skip the probe and use `schema` as the answer.
-    init(path: String, schemaOverride: SchemaCapabilities) {
-        self.path = path
-        self.schemaCache = Mutex(schemaOverride)
-    }
-
     /// The probed schema, cached after the first successful open. A failed
     /// open throws and caches nothing, so the next call probes again.
     func schema() throws -> SchemaCapabilities {
@@ -39,40 +33,41 @@ final class Database: @unchecked Sendable {
 
     // MARK: - Access Check
 
-    static func checkAccess(path: String = defaultPath) -> (ok: Bool, status: String) {
-        let fm = FileManager.default
-
-        guard fm.fileExists(atPath: path) else {
-            return (false, "database_not_found")
+    /// Opens `path` the way every query does. A missing file is
+    /// `database_not_found`; anything else that stops the open is
+    /// `permission_denied` (without Full Disk Access the file is unreadable).
+    static func checkAccess(path: String = defaultPath) -> (ok: Bool, status: DatabaseStatus) {
+        // SQLite can open a file it cannot read, so check readability first.
+        if FileManager.default.fileExists(atPath: path), !FileManager.default.isReadableFile(atPath: path) {
+            return (false, .permissionDenied)
         }
-
-        guard fm.isReadableFile(atPath: path) else {
-            return (false, "permission_denied")
-        }
-
-        var db: OpaquePointer?
-        let result = sqlite3_open_v2(
-            "file:\(path)?mode=ro",
-            &db,
-            SQLITE_OPEN_READONLY | SQLITE_OPEN_URI,
-            nil
-        )
-
-        if let db = db {
-            sqlite3_close(db)
-        }
-
-        if result == SQLITE_OK {
-            return (true, "accessible")
-        } else {
-            return (false, "permission_denied")
+        do {
+            sqlite3_close(try Database(path: path).openReadOnly())
+            return (true, .accessible)
+        } catch DatabaseError.notFound {
+            return (false, .databaseNotFound)
+        } catch {
+            return (false, .permissionDenied)
         }
     }
 
     // MARK: - Query Execution
 
-    /// Opt-in query counter for tests. Incremented at the start of `query` when non-nil.
-    nonisolated(unsafe) static var queryCountForTesting: Int?
+    /// Opt-in query counter for tests: nil (off), or the number of `query`
+    /// calls since it was set. Locked, so concurrent queries count exactly.
+    static var queryCountForTesting: Int? {
+        get { queryCounter.withLock { $0 } }
+        set { queryCounter.withLock { $0 = newValue } }
+    }
+    private static let queryCounter = Mutex<Int?>(nil)
+
+    /// Opt-in plan recorder for tests: nil (off), or the EXPLAIN QUERY PLAN
+    /// detail lines of each `query` since it was set, in call order.
+    static var queryPlansForTesting: [[String]]? {
+        get { queryPlans.withLock { $0 } }
+        set { queryPlans.withLock { $0 = newValue } }
+    }
+    private static let queryPlans = Mutex<[[String]]?>(nil)
 
     /// In-flight read connections so a cancelled `tools/call` can
     /// `sqlite3_interrupt` them instead of leaving a full-scan running.
@@ -103,21 +98,13 @@ final class Database: @unchecked Sendable {
         }
     }
 
-    /// Test-only: interrupts every open query in the process.
-    static func interruptActiveQueries() {
-        let queries = activeQueries.withLock { Array($0.values) }
-        for query in queries {
-            query.interrupt()
-        }
-    }
-
     func query<T>(
         _ sql: String,
         params: [Any] = [],
         map: (SQLiteRow) throws -> T
     ) throws -> [T] {
-        if Database.queryCountForTesting != nil {
-            Database.queryCountForTesting! += 1
+        Self.queryCounter.withLock { count in
+            if let current = count { count = current + 1 }
         }
 
         if Task.isCancelled {
@@ -131,6 +118,11 @@ final class Database: @unchecked Sendable {
         defer {
             Self.activeQueries.withLock { _ = $0.removeValue(forKey: id) }
             sqlite3_close(conn)
+        }
+
+        if Self.queryPlansForTesting != nil {
+            let plan = try explain(conn, sql: sql, params: params)
+            Self.queryPlans.withLock { $0?.append(plan) }
         }
 
         let stmt = try prepare(conn, sql: sql, params: params)
@@ -172,8 +164,7 @@ final class Database: @unchecked Sendable {
 
         guard result == SQLITE_OK, let db = db else {
             // SQLite allocates a connection handle even when open fails and
-            // requires sqlite3_close to free it. Skipping this leaked ~1.5 KiB
-            // per failed open on the permission_denied path.
+            // requires sqlite3_close to free it.
             if let db = db {
                 sqlite3_close(db)
             }
@@ -191,6 +182,16 @@ final class Database: @unchecked Sendable {
         }
 
         return db
+    }
+
+    private func explain(_ conn: OpaquePointer, sql: String, params: [Any]) throws -> [String] {
+        let stmt = try prepare(conn, sql: "EXPLAIN QUERY PLAN " + sql, params: params)
+        defer { sqlite3_finalize(stmt) }
+        var lines: [String] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            lines.append(SQLiteRow(stmt).string(3) ?? "")
+        }
+        return lines
     }
 
     private func prepare(

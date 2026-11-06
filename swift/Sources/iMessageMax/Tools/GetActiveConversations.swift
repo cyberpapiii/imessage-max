@@ -1,8 +1,7 @@
-// Sources/iMessageMax/Tools/GetActiveConversations.swift
 import Foundation
 import MCP
 
-struct ActiveConversationsResult: Codable {
+struct ActiveConversationsResult: Encodable {
     let conversations: [ActiveConversation]
     let total: Int
     let windowHours: Int
@@ -18,29 +17,21 @@ struct ActiveConversationsResult: Codable {
     }
 }
 
-struct ActiveConversation: Codable {
-    let id: String
-    let name: String
-    let group: Bool?
-    let participantCount: Int
-    let participantsPreview: [String]
+typealias ActiveConversation = ChatListing<ActiveConversationDetails>
+
+struct ActiveConversationDetails: Encodable {
     let lastMessage: LastMessageSummary?
     let awaitingReply: Bool
     let activity: ConversationActivity
 
     enum CodingKeys: String, CodingKey {
-        case id
-        case name
-        case group
-        case participantCount = "participant_count"
-        case participantsPreview = "participants_preview"
         case lastMessage = "last_message"
         case awaitingReply = "awaiting_reply"
         case activity
     }
 }
 
-struct ConversationActivity: Codable {
+struct ConversationActivity: Encodable {
     let exchanges: Int
     let myMsgs: Int
     let theirMsgs: Int
@@ -58,25 +49,24 @@ struct ConversationActivity: Codable {
     }
 }
 
-struct ActiveConversationsError: Codable {
-    let error: String
-    let message: String
-}
-
 enum GetActiveConversations {
+    static let hours = IntArgument(name: "hours", defaultValue: 24, range: 1...168)
+    static let minExchanges = IntArgument(name: "min_exchanges", defaultValue: 2, range: 1...100)
+    static let limit = IntArgument(name: "limit", defaultValue: 10, range: 1...50)
+
     // MARK: - Tool Registration
 
-    static func register(on server: Server, db: Database, resolver: ContactResolver) {
+    static func definition(db: Database, resolver: ContactResolver) -> ToolDefinition {
         let inputSchema: Value = .object([
             "type": "object",
             "properties": .object([
                 "hours": .object([
                     "type": "integer",
-                    "description": "Time window to consider for recent activity (default 24, max 168 = 1 week)",
+                    "description": "Time window to consider for recent activity (\(hours.defaultAndMax) = 1 week)",
                 ]),
                 "min_exchanges": .object([
                     "type": "integer",
-                    "description": "Minimum back-and-forth exchanges to qualify as active (default 2)",
+                    "description": "Minimum back-and-forth exchanges to qualify as active (default \(minExchanges.defaultValue))",
                 ]),
                 "is_group": .object([
                     "type": "boolean",
@@ -84,13 +74,13 @@ enum GetActiveConversations {
                 ]),
                 "limit": .object([
                     "type": "integer",
-                    "description": "Max recent active conversations to return (default 10, max 50)",
+                    "description": "Max recent active conversations to return (\(limit.defaultAndMax))",
                 ]),
             ]),
             "additionalProperties": false,
         ])
 
-        server.registerTool(
+        return ToolDefinition(
             name: "get_active_conversations",
             description: "Find conversations with recent bidirectional activity. Returns chat ids for follow-up tool calls and chat names for user-facing summaries. When explaining results to the user, refer to chats by name, not by id. Use it to find threads that deserve attention first. It is not a complete recent overview across all chats; use list_chats for that.",
             inputSchema: inputSchema,
@@ -103,66 +93,52 @@ enum GetActiveConversations {
                 openWorldHint: false
             )
         ) { arguments in
-            let hours = arguments?["hours"]?.intValue ?? 24
-            let minExchanges = arguments?["min_exchanges"]?.intValue ?? 2
+            let hours = Self.hours.read(arguments)
+            let minExchanges = Self.minExchanges.read(arguments)
             let isGroup = arguments?["is_group"]?.boolValue
-            let limit = arguments?["limit"]?.intValue ?? 10
+            let limit = Self.limit.read(arguments)
 
-            do {
-                let result = try await execute(
-                    hours: hours,
-                    minExchanges: minExchanges,
-                    isGroup: isGroup,
-                    limit: limit,
-                    database: db,
-                    resolver: resolver
-                )
-
-                return [.plainText(try FormatUtils.encodeJSON(result))]
-            } catch let error as DatabaseError {
-                let mapped = ToolErrorMapping.map(error, context: "get_active_conversations")
-                let payload = ActiveConversationsError(error: mapped.code, message: mapped.message)
-                throw ToolError(content: [.plainText(try FormatUtils.encodeJSON(payload))])
-            } catch {
-                let payload = ActiveConversationsError(
-                    error: "internal_error",
-                    message: ClientErrorMessages.sanitized(error)
-                )
-                throw ToolError(content: [.plainText(try FormatUtils.encodeJSON(payload))])
-            }
+            let result = try await execute(
+                hours: hours,
+                minExchanges: minExchanges,
+                isGroup: isGroup,
+                limit: limit,
+                database: db,
+                resolver: resolver
+            )
+            return [.plainText(try FormatUtils.encodeJSON(result))]
         }
     }
 
     static func execute(
-        hours: Int = 24,
-        minExchanges: Int = 2,
+        hours: Int = GetActiveConversations.hours.defaultValue,
+        minExchanges: Int = GetActiveConversations.minExchanges.defaultValue,
         isGroup: Bool? = nil,
-        limit: Int = 10,
-        database: Database = Database(),
+        limit: Int = GetActiveConversations.limit.defaultValue,
+        database: Database,
         resolver: ContactResolver
     ) async throws -> ActiveConversationsResult {
-        let clampedHours = max(1, min(hours, 168))  // 1 hour to 1 week
-        let clampedMinExchanges = max(1, min(minExchanges, 100))
-        let clampedLimit = max(1, min(limit, 50))
+        let clampedHours = Self.hours.clamp(hours)
+        let clampedMinExchanges = Self.minExchanges.clamp(minExchanges)
+        let clampedLimit = Self.limit.clamp(limit)
 
         let now = Date()
-        let windowStart = now.addingTimeInterval(-Double(clampedHours) * 3600)
+        let windowStart = now.addingTimeInterval(-Double(clampedHours) * Seconds.hour)
         let windowStartApple = AppleTime.fromDate(windowStart)
 
-        try await resolver.initialize()
-
+        let conversational = SQLFragments.conversational()
+        // No include_filtered: hidden chats are always left out.
+        let scope = ChatScope(named: nil, includeFiltered: false)
         let query = QueryBuilder()
             .select(
                 "c.ROWID as chat_id",
                 "c.display_name",
-                """
-                (SELECT COUNT(DISTINCT chj.handle_id) FROM chat_handle_join chj
-                 WHERE chj.chat_id = c.ROWID) as participant_count
-                """,
-                "SUM(CASE WHEN m.is_from_me = 1 THEN 1 ELSE 0 END) as my_count",
-                "SUM(CASE WHEN m.is_from_me = 0 THEN 1 ELSE 0 END) as their_count",
-                "MAX(CASE WHEN m.is_from_me = 1 THEN m.date ELSE NULL END) as last_from_me",
-                "MAX(CASE WHEN m.is_from_me = 0 THEN m.date ELSE NULL END) as last_from_them",
+                "\(SQLFragments.participantCount()) as participant_count",
+                // Group events (renames, joins, leaves) are no one's turn.
+                "SUM(CASE WHEN m.is_from_me = 1 AND \(conversational) THEN 1 ELSE 0 END) as my_count",
+                "SUM(CASE WHEN m.is_from_me = 0 AND \(conversational) THEN 1 ELSE 0 END) as their_count",
+                "MAX(CASE WHEN m.is_from_me = 1 AND \(conversational) THEN m.date ELSE NULL END) as last_from_me",
+                "MAX(CASE WHEN m.is_from_me = 0 AND \(conversational) THEN m.date ELSE NULL END) as last_from_them",
                 "MIN(m.date) as first_in_window",
                 "MAX(m.date) as last_in_window"
             )
@@ -170,22 +146,25 @@ enum GetActiveConversations {
             .join("chat_message_join cmj ON c.ROWID = cmj.chat_id")
             .join("message m ON cmj.message_id = m.ROWID")
             .where("m.date >= ?", windowStartApple)
-            .where("m.associated_message_type = 0")
+            .where(SQLFragments.notReaction())
+            .where(scope.shownPredicate() ?? "1")
             .groupBy("c.ROWID")
-            .having("my_count >= 1 AND their_count >= 1")
+            // An exchange needs a message each way, so the qualifying count
+            // is the smaller side; minExchanges is at least 1.
+            .having("my_count >= ? AND their_count >= ?", clampedMinExchanges, clampedMinExchanges)
         if let filterGroup = isGroup {
-            query.having(filterGroup ? "participant_count > 1" : "participant_count <= 1")
+            query.having(filterGroup
+                ? SQLFragments.isGroup(count: "participant_count")
+                : SQLFragments.isDirect(count: "participant_count"))
         }
-        // Fetch more than limit to account for filtering
-        let fetchLimit = clampedLimit * 3
-        query.orderBy("last_in_window DESC").limit(fetchLimit)
+        // One row past the page says whether more chats qualify.
+        query.orderBy("last_in_window DESC", "c.ROWID DESC").limit(clampedLimit + 1)
         let (sql, params) = query.build()
 
         let chatRows = try database.query(sql, params: params) { row -> ChatActivityRow in
             ChatActivityRow(
                 chatId: row.int(0),
                 displayName: row.string(1),
-                participantCount: Int(row.int(2)),
                 myCount: Int(row.int(3)),
                 theirCount: Int(row.int(4)),
                 lastFromMe: row.optionalInt(5),
@@ -195,114 +174,48 @@ enum GetActiveConversations {
             )
         }
 
-        // Pre-filter: same inclusion logic as the original loop (min-exchanges
-        // filter, then cap at clampedLimit) so the batched queries cover
-        // exactly the chats that will appear in the response.
-        var includedRows: [ChatActivityRow] = []
-        for row in chatRows {
-            guard includedRows.count < clampedLimit else { break }
-            guard min(row.myCount, row.theirCount) >= clampedMinExchanges else { continue }
-            includedRows.append(row)
-        }
+        let includedRows = Array(chatRows.prefix(clampedLimit))
 
-        // Batch-fetch participants and last previews for all included chats.
-        let chatIds = includedRows.map(\.chatId)
-        let participantsByChat = try await ChatSummaryQueries.participantsByChat(
+        // last_in_window is the newest qualifying date the activity query
+        // already computed, which is exactly the message the preview wants.
+        let page = try await ChatPage.build(
+            includedRows.map { ChatPage.Chat(id: $0.chatId, explicitName: $0.displayName, newestDate: $0.lastInWindow) },
+            lastMessages: ChatPage.LastMessageOptions(
+                sinceApple: windowStartApple,
+                previewMaxLength: 80,
+                unknownSenderLabel: "Unknown",
+                agoFallback: nil
+            ),
             db: database,
-            chatIds: chatIds,
             resolver: resolver
         )
-        // last_in_window is the newest qualifying date the activity query
-        // already computed for each chat, which is exactly the message this
-        // preview is looking for.
-        var newestInWindow: [Int64: Int64] = [:]
-        for row in includedRows {
-            if let last = row.lastInWindow {
-                newestInWindow[row.chatId] = last
-            }
-        }
-        let lastMessagesByChat = try await ChatSummaryQueries.lastMessagesByChat(
-            db: database,
-            chatIds: chatIds,
-            resolver: resolver,
-            sinceApple: windowStartApple,
-            previewMaxLength: 80,
-            unknownSenderLabel: "Unknown",
-            agoFallback: nil,
-            newestDates: newestInWindow
-        )
-        let recentSenderChatIds = includedRows.compactMap { row -> Int64? in
-            let trimmed = row.displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
-            let isNamed = trimmed?.isEmpty == false
-            let count = (participantsByChat[row.chatId] ?? []).count
-            return (isNamed && count > 4) ? row.chatId : nil
-        }
-        let recentSendersByChat = try ChatSummaryQueries.recentSendersByChat(
-            db: database,
-            chatIds: recentSenderChatIds
-        )
 
-        var conversations: [ActiveConversation] = []
-
-        for row in includedRows {
-            let exchanges = min(row.myCount, row.theirCount)
-
-            let participantRows = participantsByChat[row.chatId] ?? []
-
-            let identity = ChatIdentity(
-                mcpId: "chat\(row.chatId)",
-                guid: nil,
-                explicitName: row.displayName,
-                participants: participantRows.map {
-                    ChatIdentity.makeParticipant(handle: $0.handle, contactName: $0.name)
-                }
+        let conversations = includedRows.compactMap { row -> ActiveConversation? in
+            guard let entry = page[row.chatId] else { return nil }
+            let iso = { (date: Int64?) in date.flatMap(AppleTime.toDate).flatMap(TimeUtils.formatISO) }
+            return ActiveConversation(
+                chat: entry.summary,
+                details: ActiveConversationDetails(
+                    lastMessage: entry.lastMessage?.info,
+                    awaitingReply: entry.lastMessage?.awaitingReply ?? false,
+                    activity: ConversationActivity(
+                        exchanges: min(row.myCount, row.theirCount),
+                        myMsgs: row.myCount,
+                        theirMsgs: row.theirCount,
+                        lastFromMe: iso(row.lastFromMe),
+                        lastFromThem: iso(row.lastFromThem),
+                        started: iso(row.firstInWindow)
+                    )
+                )
             )
-
-            let awaitingReply: Bool
-            if let lastFromThem = row.lastFromThem, let lastFromMe = row.lastFromMe {
-                awaitingReply = lastFromThem > lastFromMe
-            } else if row.lastFromThem != nil && row.lastFromMe == nil {
-                awaitingReply = true
-            } else {
-                awaitingReply = false
-            }
-
-            let activity = ConversationActivity(
-                exchanges: exchanges,
-                myMsgs: row.myCount,
-                theirMsgs: row.theirCount,
-                lastFromMe: row.lastFromMe.flatMap(AppleTime.toDate).flatMap(TimeUtils.formatISO),
-                lastFromThem: row.lastFromThem.flatMap(AppleTime.toDate).flatMap(TimeUtils.formatISO),
-                started: row.firstInWindow.flatMap(AppleTime.toDate).flatMap(TimeUtils.formatISO)
-            )
-
-            let lastPreview = lastMessagesByChat[row.chatId]?.info
-
-            let conversation = ActiveConversation(
-                id: identity.mcpId,
-                name: identity.displayName,
-                group: identity.participantCount > 1 ? true : nil,
-                participantCount: identity.participantCount,
-                participantsPreview: try ChatSummaryBuilder.participantsPreview(
-                    db: database,
-                    chatId: row.chatId,
-                    identity: identity,
-                    recentSenders: recentSendersByChat[row.chatId]
-                ),
-                lastMessage: lastPreview,
-                awaitingReply: awaitingReply,
-                activity: activity
-            )
-
-            conversations.append(conversation)
         }
 
         return ActiveConversationsResult(
             conversations: conversations,
             total: conversations.count,
             windowHours: clampedHours,
-            // Cursor pagination not implemented; never advertise more pages.
-            more: false,
+            // No cursor: more says raising limit would show more chats.
+            more: chatRows.count > clampedLimit,
             cursor: nil
         )
     }
@@ -312,7 +225,6 @@ enum GetActiveConversations {
     private struct ChatActivityRow {
         let chatId: Int64
         let displayName: String?
-        let participantCount: Int
         let myCount: Int
         let theirCount: Int
         let lastFromMe: Int64?

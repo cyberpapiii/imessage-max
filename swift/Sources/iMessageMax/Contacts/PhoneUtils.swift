@@ -1,4 +1,3 @@
-// Sources/iMessageMax/Contacts/PhoneUtils.swift
 import Foundation
 
 enum PhoneUtils {

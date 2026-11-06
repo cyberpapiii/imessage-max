@@ -5,13 +5,13 @@ import MCP
 final class GetContextToolTests: XCTestCase {
     func testMessageIdReturnsBeforeAndAfterInDateOrder() async throws {
         let fixture = try makeGetMessagesFixture()
-        let result = await GetContext.execute(
+        let result = await capture { try await GetContext.execute(
             messageId: "msg_202",
             before: 5,
             after: 5,
             database: fixture.database(),
             resolver: makeSeededResolver()
-        )
+        ) }
 
         let response = try unwrapSuccess(result)
         XCTAssertEqual(response.message.id, "msg_202")
@@ -19,13 +19,57 @@ final class GetContextToolTests: XCTestCase {
         XCTAssertEqual(response.after.map(\.id), ["msg_203"])
     }
 
+    func testMessagesSharingTheAnchorTimestampStayInTheWindow() async throws {
+        let fixture = try ToolTestDatabase(name: "context-same-timestamp")
+        try fixture.insertHandle(rowId: 1, handle: "+15550000001")
+        try fixture.insertChat(rowId: 1, guid: "twin-chat", displayName: "Twins")
+        try fixture.joinChatHandle(chatId: 1, handleId: 1)
+        let rows: [(id: Int, date: Int64)] = [(1, 100), (2, 200), (3, 200), (4, 200), (5, 300)]
+        for row in rows {
+            try fixture.insertMessage(rowId: row.id, guid: "g\(row.id)", text: "m\(row.id)", date: row.date, isFromMe: false, handleId: 1)
+            try fixture.joinChatMessage(chatId: 1, messageId: row.id)
+        }
+
+        let response = try unwrapSuccess(await capture { try await GetContext.execute(
+            messageId: "msg_3",
+            database: fixture.database(),
+            resolver: makeSeededResolver()
+        ) })
+        XCTAssertEqual(response.before.map(\.id), ["msg_1", "msg_2"])
+        XCTAssertEqual(response.after.map(\.id), ["msg_4", "msg_5"])
+    }
+
+    func testPeopleLeaveOutSendersOfUnmappedAssociatedTypes() async throws {
+        let fixture = try ToolTestDatabase(name: "context-type-4000")
+        try fixture.insertHandle(rowId: 1, handle: "+15550000001")
+        try fixture.insertHandle(rowId: 2, handle: "+15550000002")
+        try fixture.insertChat(rowId: 1, guid: "type-4000-chat", displayName: "Polls")
+        try fixture.joinChatHandle(chatId: 1, handleId: 1)
+        try fixture.joinChatHandle(chatId: 1, handleId: 2)
+        try fixture.insertMessage(rowId: 1, guid: "g1", text: "anchor", date: 100, isFromMe: false, handleId: 1)
+        try fixture.joinChatMessage(chatId: 1, messageId: 1)
+        try fixture.insertMessage(
+            rowId: 2, guid: "g2", text: nil, date: 200, isFromMe: false, handleId: 2,
+            associatedMessageType: 4000, associatedMessageGuid: "p:0/g1"
+        )
+        try fixture.joinChatMessage(chatId: 1, messageId: 2)
+
+        let response = try unwrapSuccess(await capture { try await GetContext.execute(
+            messageId: "msg_1",
+            database: fixture.database(),
+            resolver: makeSeededResolver()
+        ) })
+        XCTAssertEqual(Set(response.people.keys), ["alice"])
+        XCTAssertNil(response.message.reactions)
+    }
+
     func testBeforeAndAfterDefaultsAreFiveAndTen() async throws {
         let fixture = try makeLongChatFixture(messageCount: 40)
-        let result = await GetContext.execute(
+        let result = await capture { try await GetContext.execute(
             messageId: "msg_1020",
             database: fixture.database(),
             resolver: makeSeededResolver()
-        )
+        ) }
 
         let response = try unwrapSuccess(result)
         XCTAssertEqual(response.before.count, 5)
@@ -36,31 +80,31 @@ final class GetContextToolTests: XCTestCase {
 
     func testBeforeAndAfterClampToFifty() async throws {
         let fixture = try makeLongChatFixture(messageCount: 150)
-        let clamped = await GetContext.execute(
+        let clamped = await capture { try await GetContext.execute(
             messageId: "msg_1075",
             before: 500,
             after: 500,
             database: fixture.database(),
             resolver: makeSeededResolver()
-        )
+        ) }
         let clampedResponse = try unwrapSuccess(clamped)
         XCTAssertEqual(clampedResponse.before.count, 50)
         XCTAssertEqual(clampedResponse.after.count, 50)
 
-        let negative = await GetContext.execute(
+        let negative = await capture { try await GetContext.execute(
             messageId: "msg_1075",
             before: -3,
             after: -3,
             database: fixture.database(),
             resolver: makeSeededResolver()
-        )
+        ) }
         let negativeResponse = try unwrapSuccess(negative)
         XCTAssertTrue(negativeResponse.before.isEmpty)
         XCTAssertTrue(negativeResponse.after.isEmpty)
     }
 
     func testMissingArgumentsIsInvalidParams() async throws {
-        let missingBoth = await GetContext.execute()
+        let missingBoth = await capture { try await GetContext.execute(database: Database(), resolver: ContactResolver(seedCache: [:])) }
         try assertFailure(
             missingBoth,
             error: "invalid_params",
@@ -69,7 +113,7 @@ final class GetContextToolTests: XCTestCase {
 
         // First guard fires when contains is set and chat_id is not:
         // chatId == nil makes (chatId == nil || contains == nil) true.
-        let containsOnly = await GetContext.execute(contains: "x")
+        let containsOnly = await capture { try await GetContext.execute(contains: "x", database: Database(), resolver: ContactResolver(seedCache: [:])) }
         try assertFailure(
             containsOnly,
             error: "invalid_params",
@@ -77,7 +121,7 @@ final class GetContextToolTests: XCTestCase {
         )
 
         // Second string is reachable only when message_id is also present.
-        let containsWithMessageId = await GetContext.execute(messageId: "msg_1", contains: "x")
+        let containsWithMessageId = await capture { try await GetContext.execute(messageId: "msg_1", contains: "x", database: Database(), resolver: ContactResolver(seedCache: [:])) }
         try assertFailure(
             containsWithMessageId,
             error: "invalid_params",
@@ -86,17 +130,17 @@ final class GetContextToolTests: XCTestCase {
     }
 
     func testInvalidMessageIdIsInvalidId() async throws {
-        let result = await GetContext.execute(messageId: "nope")
+        let result = await capture { try await GetContext.execute(messageId: "nope", database: Database(), resolver: ContactResolver(seedCache: [:])) }
         try assertFailure(result, error: "invalid_id")
     }
 
     func testUnknownMessageIdIsNotFound() async throws {
         let fixture = try makeGetMessagesFixture()
-        let result = await GetContext.execute(
+        let result = await capture { try await GetContext.execute(
             messageId: "msg_999999",
             database: fixture.database(),
             resolver: makeSeededResolver()
-        )
+        ) }
         try assertFailure(
             result,
             error: "not_found",
@@ -104,19 +148,20 @@ final class GetContextToolTests: XCTestCase {
         )
     }
 
-    func testInvalidChatIdWithContainsIsInvalidId() async throws {
-        let result = await GetContext.execute(chatId: "chat_abc", contains: "x")
-        try assertFailure(result, error: "invalid_id")
+    func testUnresolvableChatIdWithContainsIsChatNotFound() async throws {
+        let fixture = try makeGetMessagesFixture()
+        let result = await capture { try await GetContext.execute(chatId: "chat_abc", contains: "x", database: fixture.database(), resolver: ContactResolver(seedCache: [:])) }
+        try assertFailure(result, error: "chat_not_found")
     }
 
     func testContainsFindsNewestMatchWithinWindow() async throws {
         let fixture = try makeGetMessagesFixture()
-        let result = await GetContext.execute(
+        let result = await capture { try await GetContext.execute(
             chatId: "chat20",
             contains: "VOLCANO",
             database: fixture.database(),
             resolver: makeSeededResolver()
-        )
+        ) }
 
         let response = try unwrapSuccess(result)
         XCTAssertEqual(response.message.id, "msg_201")
@@ -139,12 +184,12 @@ final class GetContextToolTests: XCTestCase {
         )
         try fixture.joinChatMessage(chatId: 50, messageId: 2000)
 
-        let result = await GetContext.execute(
+        let result = await capture { try await GetContext.execute(
             chatId: "chat50",
             contains: "hidden",
             database: fixture.database(),
             resolver: makeSeededResolver()
-        )
+        ) }
         let response = try unwrapSuccess(result)
         XCTAssertEqual(response.message.id, "msg_2000")
     }
@@ -153,12 +198,12 @@ final class GetContextToolTests: XCTestCase {
         let fixture = try makeLongChatFixture(messageCount: 600)
         try fixture.execute("UPDATE message SET text = 'needle in the old part' WHERE ROWID = 1010")
 
-        let result = await GetContext.execute(
+        let result = await capture { try await GetContext.execute(
             chatId: "chat50",
             contains: "needle",
             database: fixture.database(),
             resolver: makeSeededResolver()
-        )
+        ) }
         guard case .success(let response) = result else {
             return XCTFail("Expected get_context success")
         }
@@ -167,12 +212,12 @@ final class GetContextToolTests: XCTestCase {
 
     func testContainsMissReturnsNotFoundWithinCap() async throws {
         let fixture = try makeLongChatFixture(messageCount: 50)
-        let result = await GetContext.execute(
+        let result = await capture { try await GetContext.execute(
             chatId: "chat50",
             contains: "zzz-never",
             database: fixture.database(),
             resolver: makeSeededResolver()
-        )
+        ) }
         try assertFailure(result, error: "not_found")
     }
 
@@ -181,50 +226,43 @@ final class GetContextToolTests: XCTestCase {
         try fixture.execute("UPDATE message SET text = '100% done' WHERE ROWID = 1005")
         try fixture.execute("UPDATE message SET text = 'a_b' WHERE ROWID = 1008")
 
-        let percent = await GetContext.execute(
+        let percent = await capture { try await GetContext.execute(
             chatId: "chat50",
             contains: "%",
             database: fixture.database(),
             resolver: makeSeededResolver()
-        )
+        ) }
         XCTAssertEqual(try unwrapSuccess(percent).message.id, "msg_1005")
 
-        let underscore = await GetContext.execute(
+        let underscore = await capture { try await GetContext.execute(
             chatId: "chat50",
             contains: "_",
             database: fixture.database(),
             resolver: makeSeededResolver()
-        )
+        ) }
         XCTAssertEqual(try unwrapSuccess(underscore).message.id, "msg_1008")
 
-        let noWildcard = await GetContext.execute(
+        let noWildcard = await capture { try await GetContext.execute(
             chatId: "chat50",
             contains: "x_y",
             database: fixture.database(),
             resolver: makeSeededResolver()
-        )
+        ) }
         try assertFailure(noWildcard, error: "not_found")
     }
 
     func testContainsMissBeyondCapIsNotFoundInWindow() async throws {
         let fixture = try makeLongChatFixture(messageCount: 5100)
-        // Cap counts post-prefilter candidates. Plain-text misses exhaust in
-        // one page; attributedBody-only rows are always admitted, which is
-        // how a chat actually hits the 5000 cap.
-        try fixture.execute("UPDATE message SET text = NULL, attributedBody = X'01'")
-        let result = await GetContext.execute(
+        // Cap counts post-prefilter candidates: blobs holding the term's
+        // bytes pass the SQL prefilter but decode to no text.
+        try fixture.execute("UPDATE message SET text = NULL, attributedBody = CAST('zzz-never' AS BLOB)")
+        let result = await capture { try await GetContext.execute(
             chatId: "chat50",
             contains: "zzz-never",
             database: fixture.database(),
             resolver: makeSeededResolver()
-        )
-        guard case .failure(let err) = result else {
-            return XCTFail("Expected not_found_in_window")
-        }
-        XCTAssertTrue(
-            err.error == "not_found_in_window" && err.message.contains("5000"),
-            "got \(err.error): \(err.message)"
-        )
+        ) }
+        try assertFailure(result, error: "not_found_in_window", messageContains: "5000")
     }
 
     func testMissingReplyAndEditColumnsDegradeContext() async throws {
@@ -232,17 +270,50 @@ final class GetContextToolTests: XCTestCase {
         try fixture.execute("ALTER TABLE message DROP COLUMN thread_originator_guid")
         try fixture.execute("ALTER TABLE message DROP COLUMN date_edited")
         try fixture.execute("ALTER TABLE message DROP COLUMN associated_message_emoji")
-        let result = await GetContext.execute(
+        let result = await capture { try await GetContext.execute(
             messageId: "msg_202",
             before: 5,
             after: 5,
             database: fixture.database(),
             resolver: makeSeededResolver()
-        )
+        ) }
         let response = try unwrapSuccess(result)
         XCTAssertEqual(response.message.id, "msg_202")
         XCTAssertEqual(response.before.map(\.id), ["msg_200", "msg_201"])
         XCTAssertEqual(response.after.map(\.id), ["msg_203"])
+    }
+
+    // MARK: - Text and chat resolution
+
+    func testContainsFindsBlobTextBehindMoreThanTheScanCapOfBlobRows() async throws {
+        let fixture = try blobTextFixture(fillerCount: 5_200)
+        let context = try await callTool("get_context", ["chat_id": "chat1", "contains": "lisbon"], database: fixture.database())
+        let message = try XCTUnwrap(context["message"] as? [String: Any], "\(context)")
+        XCTAssertEqual(message["id"] as? String, "msg_1")
+    }
+
+    /// A message joined to two chats belongs to the lower-numbered one, in
+    /// get_context and in list_attachments under either sort.
+    func testContextAndListAttachmentsNameTheMessagesHomeChat() async throws {
+        let fixture = try ToolTestDatabase(name: "home-chat")
+        try fixture.insertHandle(rowId: 1, handle: "+15550000001")
+        // The higher chat id is inserted first, so an unordered pick lands on it.
+        try fixture.insertChat(rowId: 9, guid: "SMS;-;+15550000001", serviceName: "SMS")
+        try fixture.insertChat(rowId: 3, guid: "iMessage;-;+15550000001")
+        try fixture.insertMessage(rowId: 1, guid: "g1", text: "\u{FFFC}", date: 700_000_000_000_000_000, isFromMe: false, handleId: 1)
+        try fixture.joinChatMessage(chatId: 9, messageId: 1)
+        try fixture.joinChatMessage(chatId: 3, messageId: 1)
+        try fixture.insertAttachment(rowId: 1, filename: "/nonexistent/a.pdf", mimeType: "application/pdf", uti: "com.adobe.pdf")
+        try fixture.joinMessageAttachment(messageId: 1, attachmentId: 1)
+
+        let context = try await callTool("get_context", ["message_id": "msg_1"], database: fixture.database())
+        XCTAssertEqual((context["chat"] as? [String: Any])?["id"] as? String, "chat3")
+
+        for sort in ["recent_first", "largest_first"] {
+            let listed = try await callTool("list_attachments", ["sort": .string(sort)], database: fixture.database())
+            let chat = try decodeJSONArray(listed["messages"]).first?["chat"] as? [String: Any]
+            XCTAssertEqual(chat?["id"] as? String, "chat3", sort)
+        }
     }
 }
 
@@ -275,17 +346,9 @@ private func makeLongChatFixture(messageCount: Int) throws -> ToolTestDatabase {
 
 /// Builds: <prefix junk> + marker + 5 filler bytes + length field + payload.
 /// Copied from MessageTextExtractorTests / SearchRecallTests.
-private func typedstreamBlob(marker: String = "NSString", lengthField: [UInt8], payload: [UInt8]) -> Data {
-    var bytes: [UInt8] = [0x04, 0x0B]
-    bytes += Array(marker.utf8)
-    bytes += [0x01, 0x94, 0x84, 0x01, 0x2B]
-    bytes += lengthField
-    bytes += payload
-    return Data(bytes)
-}
 
 private func unwrapSuccess(
-    _ result: Result<GetContextResponse, GetContextError>,
+    _ result: Result<GetContextResponse, ToolFailure>,
     file: StaticString = #filePath,
     line: UInt = #line
 ) throws -> GetContextResponse {
@@ -297,17 +360,19 @@ private func unwrapSuccess(
 }
 
 private func assertFailure(
-    _ result: Result<GetContextResponse, GetContextError>,
+    _ result: Result<GetContextResponse, ToolFailure>,
     error: String,
     message: String? = nil,
     messageContains: String? = nil,
     file: StaticString = #filePath,
     line: UInt = #line
 ) throws {
-    guard case .failure(let err) = result else {
+    guard case .failure(let failure) = result else {
         XCTFail("Expected failure \(error)", file: file, line: line)
         throw NSError(domain: "GetContextToolTests", code: 2)
     }
+    let body = try decodeJSONDictionary(from: failure.content)
+    let err = (error: body["error"] as? String ?? "", message: body["message"] as? String ?? "")
     XCTAssertEqual(err.error, error, file: file, line: line)
     if let message {
         XCTAssertEqual(err.message, message, file: file, line: line)
@@ -319,5 +384,15 @@ private func assertFailure(
             file: file,
             line: line
         )
+    }
+}
+
+private func capture(_ call: () async throws -> GetContextResponse) async -> Result<GetContextResponse, ToolFailure> {
+    do {
+        return .success(try await call())
+    } catch let failure as ToolFailure {
+        return .failure(failure)
+    } catch {
+        return .failure(ToolFailure(error, tool: "get_context"))
     }
 }

@@ -15,15 +15,10 @@ struct GetChatDetailsResponse: Codable {
     }
 }
 
-struct GetChatDetailsError: Codable {
-    let error: String
-    let message: String
-}
-
 enum GetChatDetailsTool {
     static let name = "get_chat_details"
 
-    static func register(on server: Server, db: Database, resolver: ContactResolver) {
+    static func definition(db: Database, resolver: ContactResolver) -> ToolDefinition {
         let inputSchema: Value = .object([
             "type": "object",
             "properties": .object([
@@ -41,7 +36,7 @@ enum GetChatDetailsTool {
             "additionalProperties": false,
         ])
 
-        server.registerTool(
+        return ToolDefinition(
             name: name,
             description: "Get factual details for a known chat. Useful when you already have chat_id and need exact participants, handles, thread state, and recent shared-item context without reading the full conversation. Use chat.id for follow-up tool calls only; when explaining results to the user, refer to chat.name or participant names, not the id.",
             inputSchema: inputSchema,
@@ -64,180 +59,60 @@ enum GetChatDetailsTool {
         resolver: ContactResolver
     ) async throws -> [Tool.Content] {
         guard let chatId = arguments?["chat_id"]?.stringValue else {
-            let error = GetChatDetailsError(error: "validation_error", message: "chat_id is required")
-            throw ToolError(content: [.plainText(try FormatUtils.encodeJSON(error))])
+            throw ToolFailure("validation_error", "chat_id is required")
         }
         let includeShared = arguments?["include_shared_summary"]?.boolValue ?? true
 
-        try? await resolver.initialize()
-
-        do {
-            guard let numericChatId = ChatIdentifier.parseRowId(chatId) else {
-                throw try chatNotFound(chatId)
-            }
-            guard let chatRow = try loadChatRow(chatId: numericChatId, database: database) else {
-                throw try chatNotFound(chatId)
-            }
-            let participants = try await loadParticipants(chatId: numericChatId, resolver: resolver, database: database)
-            let identity = ChatIdentity(
-                mcpId: "chat\(numericChatId)",
-                guid: chatRow.guid,
-                explicitName: chatRow.displayName,
-                participants: participants
-            )
-            let chatSummary = try ChatSummaryBuilder.buildSummary(
-                db: database,
-                chatId: numericChatId,
-                identity: identity
-            )
-
-            let lastMessageResult = try await loadLastMessage(chatId: numericChatId, resolver: resolver, database: database)
-            let state = try loadState(
-                chatId: numericChatId,
-                lastMessageAwaitingReply: lastMessageResult.awaitingReply,
-                database: database
-            )
-
-            let shared: [SharedMessageItem]?
-            if includeShared {
-                let page = try await ListAttachments(db: database, resolver: resolver).browseSharedMessages(
-                    chatId: numericChatId,
-                    fromPerson: nil,
-                    typeFilter: nil,
-                    since: nil,
-                    before: nil,
-                    limit: 5,
-                    sort: .recentFirst,
-                    cursor: nil
-                )
-                shared = page.messages
-            } else {
-                shared = nil
-            }
-
-            let response = GetChatDetailsResponse(
-                chat: chatSummary,
-                participants: IdentityDisplayFormatter.participants(identity.participants),
-                identity: ChatDetailsIdentity(
-                    guid: identity.guid,
-                    explicitName: identity.explicitName,
-                    isNamed: identity.isNamed,
-                    aliases: identity.aliases
-                ),
-                state: state,
-                lastMessage: lastMessageResult.summary,
-                shared: shared
-            )
-
-            return [.plainText(try FormatUtils.encodeJSON(response))]
-        } catch let error as ToolError {
-            throw error
-        } catch let error as DatabaseError {
-            let mapped = ToolErrorMapping.map(error, context: "get_chat_details")
-            let payload = GetChatDetailsError(error: mapped.code, message: mapped.message)
-            throw ToolError(content: [.plainText(try FormatUtils.encodeJSON(payload))])
-        } catch {
-            let payload = GetChatDetailsError(error: "internal_error", message: ClientErrorMessages.sanitized(error))
-            throw ToolError(content: [.plainText(try FormatUtils.encodeJSON(payload))])
-        }
-    }
-
-    private struct ChatRow {
-        let guid: String?
-        let displayName: String?
-    }
-
-    private struct LastMessageResult {
-        let summary: LastMessageSummary?
-        let awaitingReply: Bool?
-    }
-
-    private static func chatNotFound(_ chatId: String) throws -> ToolError {
-        let error = GetChatDetailsError(error: "chat_not_found", message: ClientErrorMessages.chatNotFound(chatId))
-        return ToolError(content: [.plainText(try FormatUtils.encodeJSON(error))])
-    }
-
-    private static func loadChatRow(chatId: Int64, database: Database) throws -> ChatRow? {
-        let rows: [ChatRow] = try database.query(
-            "SELECT guid, display_name FROM chat WHERE ROWID = ?",
-            params: [chatId]
-        ) { row in
-            ChatRow(guid: row.string(0), displayName: row.string(1))
-        }
-        return rows.first
-    }
-
-    private static func loadParticipants(
-        chatId: Int64,
-        resolver: ContactResolver,
-        database: Database
-    ) async throws -> [ChatIdentity.Participant] {
-        let rows = try await ChatSummaryQueries.participants(
+        let chat = try ChatIdentifier.resolveChat(chatId, db: database)
+        let numericChatId = chat.id
+        let page = try await ChatPage.build(
+            [ChatPage.Chat(id: numericChatId, guid: chat.guid, explicitName: chat.displayName)],
+            lastMessages: ChatPage.LastMessageOptions(previewMaxLength: 80, unknownSenderLabel: "Unknown", agoFallback: nil),
             db: database,
-            chatId: chatId,
             resolver: resolver
         )
-        return rows.map {
-            ChatIdentity.makeParticipant(handle: $0.handle, contactName: $0.name)
-        }
-    }
-
-    private static func loadLastMessage(
-        chatId: Int64,
-        resolver: ContactResolver,
-        database: Database
-    ) async throws -> LastMessageResult {
-        let rows = try database.query(
-            """
-            SELECT m.ROWID, m.text, m.attributedBody, m.date, m.is_from_me, h.id
-            FROM message m
-            JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
-            LEFT JOIN handle h ON m.handle_id = h.ROWID
-            WHERE cmj.chat_id = ?
-            AND m.associated_message_type = 0
-            ORDER BY m.date DESC
-            LIMIT 1
-            """,
-            params: [chatId]
-        ) { row in
-            (
-                messageId: row.int(0),
-                text: row.string(1),
-                attributedBody: row.blob(2),
-                date: row.optionalInt(3),
-                isFromMe: row.int(4) == 1,
-                senderHandle: row.string(5)
-            )
-        }
-
-        guard let row = rows.first else {
-            return LastMessageResult(summary: nil, awaitingReply: nil)
-        }
-
-        let from: String
-        if row.isFromMe {
-            from = "Me"
-        } else if let handle = row.senderHandle {
-            from = await IdentityDisplayFormatter.displayName(handle: handle, resolver: resolver)
-        } else {
-            from = "Unknown"
-        }
-
-        let date = AppleTime.toDate(row.date)
-        let summary = LastMessageSummary(
-            from: from,
-            text: try MessagePreviewResolver.messageSummary(
-                db: database,
-                messageId: row.messageId,
-                text: row.text,
-                attributedBody: row.attributedBody,
-                maxLength: 80
-            ),
-            ago: TimeUtils.formatCompactRelative(date),
-            ts: TimeUtils.formatISO(date)
+        guard let entry = page[numericChatId] else { throw ToolFailure.chatNotFound(chatId) }
+        let identity = entry.identity
+        let state = try loadState(
+            chatId: numericChatId,
+            lastMessageAwaitingReply: entry.lastMessage?.awaitingReply,
+            database: database
         )
 
-        return LastMessageResult(summary: summary, awaitingReply: !row.isFromMe)
+        let shared: [SharedMessageItem]?
+        if includeShared {
+            let page = try await SharedMessages.page(
+                db: database,
+                resolver: resolver,
+                chatId: numericChatId,
+                sender: nil,
+                typeFilter: nil,
+                since: nil,
+                before: nil,
+                limit: 5,
+                sort: .recentFirst,
+                cursor: nil
+            )
+            shared = page.messages
+        } else {
+            shared = nil
+        }
+
+        let response = GetChatDetailsResponse(
+            chat: entry.summary,
+            participants: IdentityDisplayFormatter.participants(identity.participants),
+            identity: ChatDetailsIdentity(
+                guid: identity.guid,
+                explicitName: identity.explicitName,
+                isNamed: identity.isNamed,
+                aliases: identity.aliases
+            ),
+            state: state,
+            lastMessage: entry.lastMessage?.info,
+            shared: shared
+        )
+
+        return [.plainText(try FormatUtils.encodeJSON(response))]
     }
 
     private static func loadState(
@@ -248,13 +123,13 @@ enum GetChatDetailsTool {
         let activityRows = try database.query(
             """
             SELECT
-                COUNT(CASE WHEN m.is_read = 0 AND m.is_from_me = 0 THEN 1 END) as unread_count,
+                COUNT(CASE WHEN \(SQLFragments.unreadInbound()) THEN 1 END) as unread_count,
                 MIN(m.date) as first_activity,
                 MAX(m.date) as last_activity
             FROM message m
             JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
             WHERE cmj.chat_id = ?
-            AND m.associated_message_type = 0
+            AND \(SQLFragments.notReaction())
             """,
             params: [chatId]
         ) { row in

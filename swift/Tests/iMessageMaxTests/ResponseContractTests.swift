@@ -1,53 +1,9 @@
 import XCTest
 import MCP
+import IMessageMaxContract
 @testable import iMessageMax
 
 final class ResponseContractTests: XCTestCase {
-    func testListChatsUsesLeanOverviewShape() async throws {
-        let fixture = try makeOverviewFixture()
-        let resolver = makeOverviewResolver()
-
-        let result = await ListChatsTool.execute(
-            limit: 5,
-            db: fixture.database(),
-            resolver: resolver
-        )
-
-        guard case .success(let response) = result else {
-            return XCTFail("Expected list_chats success")
-        }
-
-        guard let first = response.chats.first else {
-            return XCTFail("Expected chat")
-        }
-        let chatJSON = try FormatUtils.encodeJSON(first)
-        XCTAssertFalse(chatJSON.contains("\"identity\""))
-        XCTAssertFalse(chatJSON.contains("\"participants\""))
-        XCTAssertTrue(chatJSON.contains("\"last_message\""))
-    }
-
-    func testGetActiveConversationsUsesLeanOverviewShape() async throws {
-        let fixture = try makeOverviewFixture()
-        let resolver = makeOverviewResolver()
-
-        let result = try await GetActiveConversations.execute(
-            hours: 48,
-            minExchanges: 1,
-            limit: 5,
-            database: fixture.database(),
-            resolver: resolver
-        )
-
-        guard let conversation = result.conversations.first else {
-            return XCTFail("Expected conversation")
-        }
-        let encoded = try FormatUtils.encodeJSON(conversation)
-        XCTAssertFalse(encoded.contains("\"participants\""))
-        XCTAssertTrue(encoded.contains("\"participants_preview\""))
-        XCTAssertTrue(encoded.contains("\"last_message\""))
-        XCTAssertTrue(encoded.contains("\"activity\""))
-    }
-
     func testGetUnreadDefaultsToChatSummariesAndSupportsMessagesMode() async throws {
         let fixture = try makeOverviewFixture()
         let tool = GetUnread(database: fixture.database(), contactResolver: makeOverviewResolver())
@@ -78,10 +34,8 @@ final class ResponseContractTests: XCTestCase {
         let resolver = makeOverviewResolver()
         let tool = ListAttachments(db: fixture.database(), resolver: resolver)
 
-        let result = await tool.execute(type: "image", limit: 5)
-        guard case .success(let response) = result else {
-            return XCTFail("Expected list_attachments success")
-        }
+        let result = try await tool.execute(type: "image", limit: 5)
+        let response = result
 
         guard let first = response.messages.first else {
             return XCTFail("Expected shared message row")
@@ -116,15 +70,13 @@ final class ResponseContractTests: XCTestCase {
 
     func testGetContextUsesMessageFieldNotTarget() async throws {
         let fixture = try makeGetMessagesFixture()
-        let result = await GetContext.execute(
+        let result = try await GetContext.execute(
             messageId: "msg_200",
             database: fixture.database(),
             resolver: makeSeededResolver()
         )
 
-        guard case .success(let response) = result else {
-            return XCTFail("Expected get_context success")
-        }
+        let response = result
 
         let encoded = try decodeJSONDictionary(from: try FormatUtils.encodeJSON(response))
         XCTAssertNotNil(encoded["message"])
@@ -133,15 +85,13 @@ final class ResponseContractTests: XCTestCase {
 
     func testGetContextGeneratesHumanChatNameForUnnamedChats() async throws {
         let fixture = try makeGetMessagesFixture()
-        let result = await GetContext.execute(
+        let result = try await GetContext.execute(
             messageId: "msg_200",
             database: fixture.database(),
             resolver: makeSeededResolver()
         )
 
-        guard case .success(let response) = result else {
-            return XCTFail("Expected get_context success")
-        }
+        let response = result
 
         XCTAssertEqual(response.chat.id, "chat20")
         let chatName = try XCTUnwrap(response.chat.name)
@@ -153,7 +103,7 @@ final class ResponseContractTests: XCTestCase {
 
     func testGetContextMirrorsReactionReplyAndEditFields() async throws {
         let fixture = try makeGetMessagesFixture()
-        let result = await GetContext.execute(
+        let result = try await GetContext.execute(
             messageId: "msg_202",
             before: 5,
             after: 5,
@@ -161,9 +111,7 @@ final class ResponseContractTests: XCTestCase {
             resolver: makeSeededResolver()
         )
 
-        guard case .success(let response) = result else {
-            return XCTFail("Expected get_context success")
-        }
+        let response = result
 
         let encoded = try decodeJSONDictionary(from: try FormatUtils.encodeJSON(response))
         let message = try XCTUnwrap(encoded["message"] as? [String: Any])
@@ -183,11 +131,10 @@ final class ResponseContractTests: XCTestCase {
         let fixture = try makeSearchFixture()
         let resolver = makeSeededResolver()
 
-        let response = try await decodeSearchResponse(
+        let response = try await decodeJSONDictionary(from:
             SearchTool.execute(
                 query: "appointment",
                 limit: 10,
-                format: "flat",
                 db: fixture.database(),
                 resolver: resolver
             )
@@ -201,58 +148,5 @@ final class ResponseContractTests: XCTestCase {
         XCTAssertNotNil(first["chat"])
         XCTAssertNil(first["text"])
         XCTAssertNil(response["people"])
-    }
-
-    func testSendResponseUsesNestedChat() throws {
-        let response = SendResponse.sent(
-            deliveredTo: ["Contact A"],
-            chat: ChatReference(id: "chat42", name: "Project Group")
-        )
-
-        let encoded = try decodeJSONDictionary(from: try FormatUtils.encodeJSON(response))
-        XCTAssertNotNil(encoded["chat"])
-        XCTAssertNil(encoded["success"])
-        XCTAssertNil(encoded["message_id"])
-        XCTAssertEqual(encoded["disposition"] as? String, "completed")
-        XCTAssertEqual(encoded["retry_safe"] as? Bool, false)
-    }
-
-    func testDiagnoseResultEncodesGroupedSections() throws {
-        let sample = DiagnoseResult(
-            version: "1.2.1",
-            processId: 123,
-            status: "ready",
-            database: .init(accessible: true, status: "ok", path: "/tmp/chat.db", fix: nil),
-            contacts: .init(authorized: true, status: "authorized", loaded: 10, fix: nil),
-            capabilities: [
-                "send_text_dm":    Capability(state: "supported"),
-                "send_text_group": Capability(state: "supported"),
-                "send_file_dm":    Capability(state: "supported"),
-                "send_file_group": Capability(state: "risky-private"),
-                "verified_send":   Capability(state: "supported", detail: "db_reread"),
-                "attachments_read": Capability(state: "supported"),
-                "attachments_offloaded": Capability(state: "supported"),
-                "reply_threading": Capability(state: "unsupported"),
-                "tapbacks":        Capability(state: "unsupported"),
-                "edit_unsend":     Capability(state: "unsupported"),
-                "live_inbox":      Capability(state: "unavailable"),
-                "perm_full_disk":  Capability(state: "supported"),
-                "perm_contacts":   Capability(state: "supported"),
-                "perm_automation": Capability(state: "supported"),
-                "rich_backend":    Capability(state: "unavailable"),
-            ]
-        )
-
-        let encoded = try decodeJSONDictionary(from: try FormatUtils.encodeJSON(sample))
-        XCTAssertNotNil(encoded["database"])
-        XCTAssertNotNil(encoded["contacts"])
-        XCTAssertNotNil(encoded["capabilities"])
-        XCTAssertNil(encoded["database_accessible"])
-        XCTAssertNil(encoded["contacts_authorized"])
-
-        let caps = try XCTUnwrap(encoded["capabilities"] as? [String: Any])
-        let sendDM = try XCTUnwrap(caps["send_text_dm"] as? [String: Any])
-        XCTAssertEqual(sendDM["state"] as? String, "supported")
-        XCTAssertEqual(caps.count, 15)
     }
 }

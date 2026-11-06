@@ -26,32 +26,11 @@ enum UnansweredHeuristics {
         return false
     }
 
-    static func hasReplyWithinWindow(
-        db: Database,
-        chatId: Int64,
-        messageDate: Int64,
-        hours: Int
-    ) throws -> Bool {
-        // Defensive clamp: one year of hours times 3.6e12 stays far inside Int64.
-        let boundedHours = Int64(max(1, min(hours, 24 * 365)))
-        let windowNs = boundedHours * 3_600_000_000_000
-
-        let rows = try db.query("""
-            SELECT 1 FROM message m
-            JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
-            WHERE cmj.chat_id = ?
-            AND m.date > ?
-            AND m.date <= ?
-            AND m.is_from_me = 0
-            AND m.associated_message_type = 0
-            LIMIT 1
-            """,
-            params: [chatId, messageDate, messageDate + windowNs]
-        ) { _ in true }
-
-        return !rows.isEmpty
-    }
-
+    /// Rows that look like questions and got no received reply in their
+    /// chat within `hours` (a reply is a conversational message: a tapback
+    /// or a group event such as a rename answers nothing), at most `limit`, in input order. `hours` is
+    /// already clamped by `IntArgument.unansweredHours`. Replies are checked
+    /// one query per chunk of questions, never one per row.
     static func filterUnanswered<Row>(
         db: Database,
         rows: [Row],
@@ -61,24 +40,43 @@ enum UnansweredHeuristics {
         date: (Row) -> Int64?,
         chatId: (Row) -> Int64
     ) throws -> [Row] {
+        let windowNs = Int64(hours) * 3_600_000_000_000
+        let questions = rows.compactMap { row -> (row: Row, chatId: Int64, date: Int64)? in
+            guard looksLikeQuestion(text(row)), let messageDate = date(row) else { return nil }
+            return (row, chatId(row), messageDate)
+        }
+        let chunkSize = max(limit, 32)
+
         var filtered: [Row] = []
+        var start = 0
+        while start < questions.count && filtered.count < limit {
+            let chunk = questions[start..<min(start + chunkSize, questions.count)]
+            let sql = """
+                WITH q(i, chat_id, d) AS (VALUES \(Array(repeating: "(?, ?, ?)", count: chunk.count).joined(separator: ", ")))
+                SELECT q.i FROM q
+                WHERE EXISTS (
+                  SELECT 1 FROM chat_message_join cmj
+                  JOIN message m ON m.ROWID = cmj.message_id
+                  WHERE cmj.chat_id = q.chat_id
+                    AND m.date > q.d
+                    AND m.date <= q.d + ?
+                    AND m.is_from_me = 0
+                    AND \(SQLFragments.conversational())
+                )
+                """
+            var params: [Any] = []
+            for (offset, question) in chunk.enumerated() {
+                params += [offset, question.chatId, question.date]
+            }
+            params.append(windowNs)
+            let answered = Set(try db.query(sql, params: params) { Int($0.int(0)) })
 
-        for row in rows {
-            guard looksLikeQuestion(text(row)) else { continue }
-            guard let messageDate = date(row) else { continue }
-
-            let hasReply = try hasReplyWithinWindow(
-                db: db,
-                chatId: chatId(row),
-                messageDate: messageDate,
-                hours: hours
-            )
-            if !hasReply {
-                filtered.append(row)
+            for (offset, question) in chunk.enumerated() where !answered.contains(offset) {
+                filtered.append(question.row)
                 if filtered.count >= limit { break }
             }
+            start += chunkSize
         }
-
         return filtered
     }
 }

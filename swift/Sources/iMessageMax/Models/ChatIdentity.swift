@@ -51,10 +51,10 @@ struct ChatIdentity: Codable {
         chatId: Int64,
         guid: String?,
         explicitName: String?,
-        rows: [ChatSummaryQueries.Participant]
+        rows: [ResolvedParticipant]
     ) -> ChatIdentity {
         ChatIdentity(
-            mcpId: "chat\(chatId)",
+            mcpId: ChatIdentifier.format(chatId),
             guid: guid,
             explicitName: explicitName,
             participants: rows.map { makeParticipant(handle: $0.handle, contactName: $0.name) }
@@ -129,4 +129,10 @@ struct ChatIdentity: Codable {
 
         return aliases
     }
+}
+
+/// A chat participant's handle and the contact name it resolved to, if any.
+struct ResolvedParticipant {
+    let handle: String
+    let name: String?
 }

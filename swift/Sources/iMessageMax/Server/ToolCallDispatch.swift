@@ -1,4 +1,3 @@
-// Sources/iMessageMax/Server/ToolCallDispatch.swift
 import Foundation
 import MCP
 
@@ -9,25 +8,19 @@ import MCP
 /// result differs, and each lane keeps its own.
 enum ToolCallDispatch {
 
-    /// A finished call, already rendered as JSON-ready Foundation objects.
-    struct Outcome {
-        let content: [[String: Any]]
-        let structuredContent: Any?
-        let isError: Bool
-    }
-
-    enum Result {
+    /// A finished call. The legacy stdio lane hands it straight to the SDK;
+    /// the other lanes render it with `resultJSON`.
+    enum Execution {
         /// No handler is registered under that name. The eras report this
         /// differently, so the decision stays with the caller.
         case unknownTool
-        case completed(Outcome)
+        case completed(content: [Tool.Content], isError: Bool)
     }
 
-    /// A finished call before rendering. The legacy stdio lane hands this
-    /// straight to the SDK; the HTTP lanes render it with `perform`.
-    enum Execution {
-        case unknownTool
-        case completed(content: [Tool.Content], isError: Bool)
+    /// The legacy-era answer to an unknown tool, on stdio (thrown into the
+    /// SDK) and on HTTP (encoded by `JSONRPC.error(id:_:)`).
+    static func unknownToolError(_ name: String) -> MCPError {
+        .methodNotFound("Unknown tool: \(name)")
     }
 
     /// Where a call came in, for its log line.
@@ -45,28 +38,27 @@ enum ToolCallDispatch {
         }
     }
 
-    /// Test seam: the most recent call log line.
-    nonisolated(unsafe) static var lastCallLogForTesting: String?
-
     /// Runs the handler. Cancelling the calling task interrupts the SQLite
     /// queries this call opened, and only those.
     ///
     /// Logs one line per call with the tool, lane, outcome and duration. It
     /// never logs arguments: they carry message text and phone numbers.
-    static func execute(name: String, arguments: [String: Value]?, lane: Lane) async -> Execution {
+    ///
+    /// Arguments arrive already decoded: the raw `Any` a JSON parse yields is
+    /// not `Sendable`, so it must not cross into the handler's task.
+    static func execute(name: String, arguments: [String: Value]?, lane: Lane, catalog: ToolCatalog) async -> Execution {
         let start = ContinuousClock.now
-        let (execution, outcome) = await run(name: name, arguments: arguments)
+        let (execution, outcome) = await run(name, catalog.handler(named: name), arguments: arguments)
         let elapsed = ContinuousClock.now - start
         let ms = Double(elapsed.components.seconds) * 1000
             + Double(elapsed.components.attoseconds) / 1e15
-        let line = "call tool=\(ModernDispatcher.sanitizedLogField(name)) \(lane.logFields) outcome=\(outcome) ms=\(String(format: "%.1f", ms))"
-        lastCallLogForTesting = line
+        let line = "call tool=\(Log.sanitizedField(name)) \(lane.logFields) outcome=\(outcome) ms=\(String(format: "%.1f", ms))"
         Log.info(line)
         return execution
     }
 
-    private static func run(name: String, arguments: [String: Value]?) async -> (Execution, String) {
-        guard let handler = ToolHandlerRegistry.shared.getHandler(for: name) else {
+    private static func run(_ name: String, _ handler: ToolHandler?, arguments: [String: Value]?) async -> (Execution, String) {
+        guard let handler else {
             return (.unknownTool, "unknown_tool")
         }
 
@@ -80,12 +72,11 @@ enum ToolCallDispatch {
                 }
             }
             return (.completed(content: content, isError: false), "ok")
-        } catch let error as ToolError {
-            return (.completed(content: error.content, isError: true), Task.isCancelled ? "cancelled" : "tool_error")
         } catch {
-            let message = "Error: \(ClientErrorMessages.internalDetail(error, context: "Tool execution"))"
-            let outcome = Task.isCancelled || Self.isCancellation(error) ? "cancelled" : "internal_error"
-            return (.completed(content: [.plainText(message)], isError: true), outcome)
+            let outcome =
+                Task.isCancelled || Self.isCancellation(error) ? "cancelled"
+                : error is ToolFailure ? "tool_error" : "internal_error"
+            return (.completed(content: ToolFailure(error, tool: name).content, isError: true), outcome)
         }
     }
 
@@ -95,29 +86,10 @@ enum ToolCallDispatch {
         return false
     }
 
-    /// Arguments arrive already decoded: the raw `Any` a JSON parse yields is
-    /// not `Sendable`, so it must not cross into the handler's task.
-    static func perform(name: String, arguments: [String: Value]?, lane: Lane) async -> Result {
-        switch await execute(name: name, arguments: arguments, lane: lane) {
-        case .unknownTool:
-            return .unknownTool
-        case .completed(let content, let isError):
-            return .completed(
-                Outcome(
-                    content: contentJSON(content),
-                    structuredContent: isError ? nil : structuredContentJSON(from: content),
-                    isError: isError
-                )
-            )
-        }
-    }
-
     // MARK: - Serialization helpers
 
     static func contentJSON(_ content: [Tool.Content]) -> [[String: Any]] {
-        guard let data = try? JSONEncoder().encode(content),
-            let json = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
-        else {
+        guard let json = JSONRPC.jsonValue(encoding: content) as? [[String: Any]] else {
             // Shape safety still demands an array, but never silently: an
             // empty content array turns a successful tool call into an
             // empty-content success.
@@ -127,13 +99,15 @@ enum ToolCallDispatch {
         return json
     }
 
-    /// A single JSON-object text content doubles as structuredContent.
-    static func structuredContentJSON(from content: [Tool.Content]) -> Any? {
+    /// A single JSON-object text content doubles as structuredContent, on
+    /// every lane. The spec requires an object there, so any other JSON text
+    /// (an array, a bare string) gets none.
+    static func structuredContent(from content: [Tool.Content]) -> [String: Any]? {
         guard content.count == 1,
             case .text(let text, _, _) = content[0],
-            let json = try? JSONSerialization.jsonObject(with: Data(text.utf8))
+            let object = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any]
         else { return nil }
-        return json
+        return object
     }
 
     static func decodeArguments(_ raw: Any?) -> [String: Value]? {
@@ -144,13 +118,14 @@ enum ToolCallDispatch {
         return decoded
     }
 
-    /// The `result` object both eras put their own envelope around.
-    static func resultJSON(_ outcome: Outcome) -> [String: Any] {
-        var result: [String: Any] = ["content": outcome.content]
-        if let structured = outcome.structuredContent {
+    /// The `result` object, as JSON-ready objects, that both eras put their
+    /// own envelope around.
+    static func resultJSON(content: [Tool.Content], isError: Bool) -> [String: Any] {
+        var result: [String: Any] = ["content": contentJSON(content)]
+        if !isError, let structured = structuredContent(from: content) {
             result["structuredContent"] = structured
         }
-        if outcome.isError {
+        if isError {
             result["isError"] = true
         }
         return result

@@ -1,4 +1,5 @@
 import Foundation
+import IMessageMaxContract
 import Testing
 
 @testable import MaxCore
@@ -41,11 +42,11 @@ import Testing
     let data = Data(
       """
       {"version":"1.8.0","process_id":123,"status":"ready",
-      "database":{"accessible":\(messages),"status":"accessible"},
+      "database":{"path":"~/Library/Messages/chat.db","accessible":\(messages),"status":"accessible"},
       "contacts":{"authorized":\(contacts),"status":"\(contacts ? "authorized" : "denied")"},
       "capabilities":{"perm_automation":{"state":"unverified","detail":"messages_not_running"}}}
       """.utf8)
-    let diagnosis = try JSONDecoder().decode(Diagnosis.self, from: data)
+    let diagnosis = try JSONDecoder().decode(DiagnoseResult.self, from: data)
     #expect(diagnosis.needsMessagesForSendingCheck == (messages && contacts))
   }
 }

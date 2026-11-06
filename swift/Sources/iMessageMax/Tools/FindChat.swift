@@ -1,9 +1,10 @@
-// Sources/iMessageMax/Tools/FindChat.swift
 import Foundation
 import MCP
 
 /// Find chats by participants, name, or recent content.
 enum FindChatTool {
+    static let limit = IntArgument(name: "limit", defaultValue: 5, range: 1...50)
+
     static let name = "find_chat"
     static let description = "Find a specific chat by participants, name, or recent content when you already have a targeted conversation in mind. Use returned chat ids for follow-up tool calls; when explaining results to the user, refer to chats by name, not by id."
 
@@ -35,8 +36,8 @@ enum FindChatTool {
             ]),
             "limit": .object([
                 "type": "integer",
-                "description": "Maximum results to return (default 5)",
-                "default": .int(5),
+                "description": "Maximum results to return (default \(limit.defaultValue))",
+                "default": .int(limit.defaultValue),
             ]),
         ]),
         "additionalProperties": false,
@@ -58,37 +59,27 @@ enum FindChatTool {
             self.containsRecent = arguments?["contains_recent"]?.stringValue
             self.isGroup = arguments?["is_group"]?.boolValue
             self.includeFiltered = arguments?["include_filtered"]?.boolValue ?? false
-            self.limit = max(1, min(arguments?["limit"]?.intValue ?? 5, 50))
+            self.limit = FindChatTool.limit.read(arguments)
         }
     }
 
     // MARK: - Response Types
 
-    struct ChatResult: Codable {
-        let id: String
-        let name: String
-        let group: Bool?
-        let participantCount: Int
-        let participantsPreview: [String]
+    typealias ChatResult = ChatListing<ChatResultDetails>
+
+    struct ChatResultDetails: Encodable {
         let lastMessage: LastMessageSummary?
         let participants: [ChatParticipant]
         let match: MatchInfo
         let identity: ChatIdentity
 
         enum CodingKeys: String, CodingKey {
-            case id
-            case name
-            case group
-            case participantCount = "participant_count"
-            case participantsPreview = "participants_preview"
             case lastMessage = "last_message"
-            case participants
-            case match
-            case identity
+            case participants, match, identity
         }
     }
 
-    struct Response: Codable {
+    struct Response: Encodable {
         let chats: [ChatResult]
         let more: Bool
         let filteredHidden: Int?
@@ -97,24 +88,12 @@ enum FindChatTool {
             case chats, more
             case filteredHidden = "filtered_hidden"
         }
-
-        func encode(to encoder: Encoder) throws {
-            var container = encoder.container(keyedBy: CodingKeys.self)
-            try container.encode(chats, forKey: .chats)
-            try container.encode(more, forKey: .more)
-            try container.encodeIfPresent(filteredHidden, forKey: .filteredHidden)
-        }
-    }
-
-    struct ErrorResponse: Codable {
-        let error: String
-        let message: String
     }
 
     // MARK: - Tool Registration
 
-    static func register(on server: Server, database: Database, resolver: ContactResolver) {
-        server.registerTool(
+    static func definition(db database: Database, resolver: ContactResolver) -> ToolDefinition {
+        return ToolDefinition(
             name: name,
             description: description,
             inputSchema: inputSchema,
@@ -141,291 +120,125 @@ enum FindChatTool {
         let params = Parameters(from: arguments)
 
         guard params.participants != nil || params.name != nil || params.containsRecent != nil else {
-            let error = ErrorResponse(
-                error: "validation_error",
-                message: "At least one of participants, name, or contains_recent required"
-            )
-            throw ToolError(content: [.plainText(try FormatUtils.encodeJSON(error))])
+            throw ToolFailure("validation_error", "At least one of participants, name, or contains_recent required")
         }
 
-        // Initialize contacts if available
-        try? await resolver.initialize()
+        // filtered_hidden counts the distinct hidden chats that any path
+        // tried would have matched, not capped by limit: a path that finds
+        // only hidden chats hands over to the next without losing its count.
+        // contains_recent reads only the newest candidate rows (its shown
+        // results do too), so its hidden count covers the same window over
+        // hidden chats.
+        var results: [ChatResult] = []
+        var hiddenMatches: Set<Int64> = []
+        let scope = ChatScope(named: nil, includeFiltered: params.includeFiltered)
+        let shown = scope.shownPredicate() ?? "1"
 
-        do {
-            var results: [ChatResult] = []
-            var filteredHidden: Int? = params.includeFiltered ? nil : 0
-
-            if let participants = params.participants, !participants.isEmpty {
-                let handleGroups = await buildHandleGroups(participants: participants, resolver: resolver)
-                if !handleGroups.isEmpty {
-                let chats = try await findChatsByHandleGroups(
-                    database: database,
-                    handleGroups: handleGroups,
+        if let participants = params.participants, !participants.isEmpty {
+            // A participant who resolves to nobody matches no chat.
+            let match = await ParticipantChats.resolve(participants, resolver: resolver)
+            let chats = try match.chats(
+                db: database,
+                chatPredicate: scope.shownPredicate(),
+                isGroup: params.isGroup,
+                order: .exactSizeFirst,
+                limit: params.limit
+            )
+            results.append(contentsOf: try await buildChatResults(
+                database: database,
+                chats: chats.map { ChatRow(id: $0.id, guid: $0.guid, displayName: $0.displayName) },
+                resolver: resolver,
+                matchType: "participants"
+            ))
+            if scope.hidesChats {
+                hiddenMatches.formUnion(try match.chats(
+                    db: database,
+                    chatPredicate: SQLFragments.hiddenChat(),
                     isGroup: params.isGroup,
-                    includeFiltered: params.includeFiltered,
-                    limit: params.limit,
-                    resolver: resolver
-                )
-                results.append(contentsOf: try await buildChatResults(
-                    database: database,
-                    chats: chats,
-                    resolver: resolver,
-                    matchType: "participants"
-                ))
-                if !params.includeFiltered {
-                    filteredHidden = try countFilteredHiddenByHandleGroups(
-                        database: database,
-                        handleGroups: handleGroups,
-                        isGroup: params.isGroup
-                    )
-                }
-                }
+                    order: .recent,
+                    limit: -1  // SQLite reads a negative LIMIT as no limit.
+                ).map(\.id))
             }
+        }
 
-            if let name = params.name, results.isEmpty {
-                let chats = try await findChatsByName(
+        if let name = params.name, results.isEmpty {
+            let chats = try await findChatsByName(
+                database: database,
+                name: name,
+                limit: params.limit,
+                isGroup: params.isGroup,
+                chatPredicate: shown,
+                resolver: resolver
+            )
+            results.append(contentsOf: try await buildChatResults(
+                database: database,
+                chats: chats,
+                resolver: resolver,
+                matchType: "name"
+            ))
+            if scope.hidesChats {
+                hiddenMatches.formUnion(try await findChatsByName(
                     database: database,
                     name: name,
-                    limit: params.limit,
+                    limit: nil,
                     isGroup: params.isGroup,
-                    includeFiltered: params.includeFiltered,
+                    chatPredicate: SQLFragments.hiddenChat(),
                     resolver: resolver
-                )
-                results.append(contentsOf: try await buildChatResults(
-                    database: database,
-                    chats: chats,
-                    resolver: resolver,
-                    matchType: "name"
-                ))
-                if !params.includeFiltered {
-                    filteredHidden = try countFilteredHiddenByName(
-                        database: database,
-                        name: name,
-                        limit: params.limit,
-                        isGroup: params.isGroup
-                    )
-                }
+                ).map(\.id))
             }
+        }
 
-            if let containsRecent = params.containsRecent, results.isEmpty {
-                let chats = try findChatsByContent(
+        if let containsRecent = params.containsRecent, results.isEmpty {
+            let chats = try findChatsByContent(
+                database: database,
+                content: containsRecent,
+                limit: params.limit,
+                isGroup: params.isGroup,
+                chatPredicate: shown
+            )
+            results.append(contentsOf: try await buildChatResults(
+                database: database,
+                chats: chats,
+                resolver: resolver,
+                matchType: "content"
+            ))
+            if scope.hidesChats {
+                hiddenMatches.formUnion(try findChatsByContent(
                     database: database,
                     content: containsRecent,
                     limit: params.limit,
                     isGroup: params.isGroup,
-                    includeFiltered: params.includeFiltered
-                )
-                results.append(contentsOf: try await buildChatResults(
-                    database: database,
-                    chats: chats,
-                    resolver: resolver,
-                    matchType: "content"
-                ))
-                if !params.includeFiltered {
-                    filteredHidden = try countFilteredHiddenByContent(
-                        database: database,
-                        content: containsRecent,
-                        limit: params.limit,
-                        isGroup: params.isGroup
-                    )
-                }
+                    chatPredicate: SQLFragments.hiddenChat(),
+                    capsChats: false
+                ).map(\.id))
             }
-
-            var seen = Set<String>()
-            var uniqueResults: [ChatResult] = []
-            for result in results {
-                if !seen.contains(result.id) {
-                    seen.insert(result.id)
-                    uniqueResults.append(result)
-                    if uniqueResults.count >= params.limit {
-                        break
-                    }
-                }
-            }
-
-            // No cursor on find_chat; never advertise more pages.
-            let response = Response(
-                chats: uniqueResults,
-                more: false,
-                filteredHidden: filteredHidden
-            )
-
-            return [.plainText(try FormatUtils.encodeJSON(response))]
-
-        } catch let dbError as DatabaseError {
-            let mapped = ToolErrorMapping.map(dbError, context: "find_chat")
-            let error = ErrorResponse(error: mapped.code, message: mapped.message)
-            throw ToolError(content: [.plainText(try FormatUtils.encodeJSON(error))])
-        } catch {
-            let errorResp = ErrorResponse(error: "internal_error", message: ClientErrorMessages.sanitized(error))
-            throw ToolError(content: [.plainText(try FormatUtils.encodeJSON(errorResp))])
         }
+
+        // No cursor on find_chat; never advertise more pages.
+        let response = Response(
+            chats: results,
+            more: false,
+            filteredHidden: scope.filteredHidden { hiddenMatches.count }
+        )
+
+        return [.plainText(try FormatUtils.encodeJSON(response))]
     }
 
     // MARK: - Private Helpers
 
-
-    private static func buildHandleGroups(
-        participants: [String],
-        resolver: ContactResolver
-    ) async -> [[String]] {
-        var handleGroups: [[String]] = []
-
-        for participant in participants {
-            var groupHandles: [String] = []
-
-            if participant.hasPrefix("+") {
-                groupHandles.append(participant)
-            } else {
-                if let normalized = PhoneUtils.normalizeToE164(participant) {
-                    groupHandles.append(normalized)
-                }
-
-                let matches = await resolver.searchByName(participant)
-                for (handle, _) in matches {
-                    if !groupHandles.contains(handle) {
-                        groupHandles.append(handle)
-                    }
-                }
-            }
-
-            if !groupHandles.isEmpty {
-                handleGroups.append(groupHandles)
-            }
-        }
-
-        return handleGroups
-    }
-
-    // The four queries below stay on raw SQL on purpose: they splice
-    // `IN (?, ?, ...)` placeholder lists whose length is data-dependent,
-    // which QueryBuilder does not model. See plans/071.
-    /// SQL fragment filtering chats by handle count before LIMIT (groups > 1, DMs <= 1).
     private static func groupFilterSQL(isGroup: Bool?) -> String {
         guard let isGroup else { return "" }
-        if isGroup {
-            return " AND (SELECT COUNT(*) FROM chat_handle_join chj_g WHERE chj_g.chat_id = c.ROWID) > 1"
-        }
-        return " AND (SELECT COUNT(*) FROM chat_handle_join chj_g WHERE chj_g.chat_id = c.ROWID) <= 1"
+        return " AND " + (isGroup ? SQLFragments.isGroup() : SQLFragments.isDirect())
     }
 
-    /// Shown means `is_filtered = 0` (bitmask). Never `!= 1`.
-    private static func filteredSQL(includeFiltered: Bool) -> String {
-        includeFiltered ? "" : " AND c.is_filtered = 0"
-    }
-
-    private static func filteredHiddenSQL() -> String {
-        " AND c.is_filtered != 0"
-    }
-
-    private static func findChatsByHandleGroups(
-        database: Database,
-        handleGroups: [[String]],
-        isGroup: Bool?,
-        includeFiltered: Bool,
-        limit: Int,
-        resolver: ContactResolver
-    ) async throws -> [ChatRow] {
-        guard !handleGroups.isEmpty else { return [] }
-
-        // Flatten all handles for initial query
-        let allHandles = handleGroups.flatMap { $0 }
-        let placeholders = allHandles.map { _ in "?" }.joined(separator: ", ")
-        let groupSQL = groupFilterSQL(isGroup: isGroup)
-        let filterSQL = filteredSQL(includeFiltered: includeFiltered)
-
-        // Get candidate chats
-        let sql = """
-            SELECT DISTINCT c.ROWID as id, c.guid, c.display_name
-            FROM chat c
-            JOIN chat_handle_join chj ON c.ROWID = chj.chat_id
-            JOIN handle h ON chj.handle_id = h.ROWID
-            WHERE h.id IN (\(placeholders))
-            \(groupSQL)
-            \(filterSQL)
-            ORDER BY c.ROWID DESC
-            LIMIT 500
-            """
-
-        let candidates = try database.query(sql, params: allHandles) { row in
-            ChatRow(
-                id: row.int(0),
-                guid: row.string(1),
-                displayName: row.string(2)
-            )
-        }
-
-        let sorted: [ChatRow]
-        // For single group, filter to those with matching handles
-        if handleGroups.count == 1 {
-            sorted = try enrichAndSortChats(database: database, chats: candidates, targetCount: 2)
-        } else {
-            // For multiple groups, filter to chats that have at least one handle from each group
-            let handlesByChat = try await ChatSummaryQueries.participantsByChat(
-                db: database,
-                chatIds: candidates.map(\.id),
-                resolver: resolver
-            )
-            var matchingChats: [ChatRow] = []
-
-            for chat in candidates {
-                let chatHandles = Set((handlesByChat[chat.id] ?? []).map(\.handle))
-
-                var hasAllGroups = true
-                for group in handleGroups {
-                    if !group.contains(where: { chatHandles.contains($0) }) {
-                        hasAllGroups = false
-                        break
-                    }
-                }
-
-                if hasAllGroups {
-                    matchingChats.append(chat)
-                }
-            }
-
-            let targetCount = handleGroups.count + 1  // participants + me
-            sorted = try enrichAndSortChats(database: database, chats: matchingChats, targetCount: targetCount)
-        }
-
-        return Array(sorted.prefix(limit))
-    }
-
-    private static func enrichAndSortChats(
-        database: Database,
-        chats: [ChatRow],
-        targetCount: Int
-    ) throws -> [ChatRow] {
-        let chatIds = chats.map(\.id)
-        let countsByChat = try ChatSummaryQueries.participantCountsByChat(db: database, chatIds: chatIds)
-        let datesByChat = try ChatSummaryQueries.lastMessageDatesByChat(db: database, chatIds: chatIds)
-
-        var enriched: [(chat: ChatRow, participantCount: Int, lastMessageDate: Int64)] = []
-        for chat in chats {
-            let participantCount = (countsByChat[chat.id] ?? 0) + 1  // +1 for "me"
-            let lastDate = datesByChat[chat.id] ?? 0
-            enriched.append((chat, participantCount, lastDate))
-        }
-
-        // Sort: exact participant match first, then by recency
-        enriched.sort { a, b in
-            let aExact = a.participantCount == targetCount ? 0 : 1
-            let bExact = b.participantCount == targetCount ? 0 : 1
-            if aExact != bExact {
-                return aExact < bExact
-            }
-            return a.lastMessageDate > b.lastMessageDate
-        }
-
-        return enriched.map { $0.chat }
-    }
-
+    /// Chats over `chatPredicate` named `name`, newest first; nil `limit`
+    /// returns every match.
     private static func findChatsByName(
         database: Database,
         name: String,
-        limit: Int,
+        limit: Int?,
         isGroup: Bool?,
-        includeFiltered: Bool,
+        chatPredicate: String,
         resolver: ContactResolver
     ) async throws -> [ChatRow] {
         var chats = try findChatsByDisplayName(
@@ -433,16 +246,16 @@ enum FindChatTool {
             name: name,
             limit: limit,
             isGroup: isGroup,
-            includeFiltered: includeFiltered
+            chatPredicate: chatPredicate
         )
         // Unnamed DMs have no display_name. Match the resolved participant
         // contact with the same word-prefix rule searchByName uses.
-        if chats.count < limit, isGroup != true {
+        if chats.count < limit ?? .max, isGroup != true {
             let unnamed = try await findUnnamedDMsByParticipantName(
                 database: database,
                 name: name,
-                limit: limit - chats.count,
-                includeFiltered: includeFiltered,
+                limit: limit.map { $0 - chats.count },
+                chatPredicate: chatPredicate,
                 resolver: resolver
             )
             var seen = Set(chats.map(\.id))
@@ -456,23 +269,24 @@ enum FindChatTool {
     private static func findChatsByDisplayName(
         database: Database,
         name: String,
-        limit: Int,
+        limit: Int?,
         isGroup: Bool?,
-        includeFiltered: Bool
+        chatPredicate: String
     ) throws -> [ChatRow] {
         let escaped = QueryBuilder.escapeLike(name)
         let groupSQL = groupFilterSQL(isGroup: isGroup)
-        let filterSQL = filteredSQL(includeFiltered: includeFiltered)
         let sql = """
             SELECT c.ROWID as id, c.guid, c.display_name
             FROM chat c
             WHERE c.display_name LIKE ? ESCAPE '\\'
             \(groupSQL)
-            \(filterSQL)
+            AND \(chatPredicate)
+            ORDER BY \(SQLFragments.newestChatFirst())
             LIMIT ?
             """
 
-        return try database.query(sql, params: ["%\(escaped)%", limit]) { row in
+        // SQLite reads a negative LIMIT as no limit.
+        return try database.query(sql, params: ["%\(escaped)%", limit ?? -1]) { row in
             ChatRow(
                 id: row.int(0),
                 guid: row.string(1),
@@ -484,16 +298,15 @@ enum FindChatTool {
     private static func findUnnamedDMsByParticipantName(
         database: Database,
         name: String,
-        limit: Int,
-        includeFiltered: Bool,
+        limit: Int?,
+        chatPredicate: String,
         resolver: ContactResolver
     ) async throws -> [ChatRow] {
         let matches = await resolver.searchByName(name)
-        guard !matches.isEmpty, limit > 0 else { return [] }
+        guard !matches.isEmpty, limit ?? 1 > 0 else { return [] }
 
         let handles = Array(Set(matches.map(\.handle)))
-        let placeholders = handles.map { _ in "?" }.joined(separator: ",")
-        let filterSQL = filteredSQL(includeFiltered: includeFiltered)
+        let placeholders = SQLFragments.placeholders(handles.count)
         let sql = """
             SELECT c.ROWID as id, c.guid, c.display_name
             FROM chat c
@@ -501,12 +314,14 @@ enum FindChatTool {
             JOIN handle h ON h.ROWID = chj.handle_id
             WHERE (c.display_name IS NULL OR TRIM(c.display_name) = '')
               AND h.id IN (\(placeholders))
-              AND (SELECT COUNT(*) FROM chat_handle_join chj_g WHERE chj_g.chat_id = c.ROWID) <= 1
-              \(filterSQL)
+              AND \(SQLFragments.isDirect())
+              AND \(chatPredicate)
+            GROUP BY c.ROWID
+            ORDER BY \(SQLFragments.newestChatFirst())
             LIMIT ?
             """
         var params: [Any] = handles.map { $0 as Any }
-        params.append(limit)
+        params.append(limit ?? -1)
 
         return try database.query(sql, params: params) { row in
             ChatRow(
@@ -517,150 +332,50 @@ enum FindChatTool {
         }
     }
 
+    /// Chats whose newest candidate rows contain `content`, newest first.
+    /// The scan covers the most recent rows that may contain the text, and
+    /// the decoded text decides. `limit` sizes the scan and, when
+    /// `capsChats`, caps the chats returned.
     private static func findChatsByContent(
         database: Database,
         content: String,
         limit: Int,
         isGroup: Bool?,
-        includeFiltered: Bool
+        chatPredicate: String,
+        capsChats: Bool = true
     ) throws -> [ChatRow] {
-        let escaped = QueryBuilder.escapeLike(content)
-        let groupSQL = groupFilterSQL(isGroup: isGroup)
-        let filterSQL = filteredSQL(includeFiltered: includeFiltered)
-        // Over-fetch: attributedBody matches are confirmed in Swift after typedstream extract.
+        let match = SQLFragments.textMayContain(content)
         let fetchLimit = min(max(limit * 10, 50), 200)
         let sql = """
             SELECT c.ROWID as id, c.guid, c.display_name, m.text, m.attributedBody
             FROM chat c
             JOIN chat_message_join cmj ON c.ROWID = cmj.chat_id
             JOIN message m ON cmj.message_id = m.ROWID
-            WHERE m.associated_message_type = 0
-              AND (
-                m.text LIKE ? ESCAPE '\\'
-                OR (m.text IS NULL AND m.attributedBody IS NOT NULL)
-              )
-              \(groupSQL)
-              \(filterSQL)
-            ORDER BY m.date DESC
+            WHERE \(SQLFragments.notReaction())
+              AND \(match.sql)
+              \(groupFilterSQL(isGroup: isGroup))
+              AND \(chatPredicate)
+            ORDER BY m.date DESC, m.ROWID DESC
             LIMIT ?
             """
 
-        let rows = try database.query(sql, params: ["%\(escaped)%", fetchLimit]) { row in
+        let rows = try database.query(sql, params: match.bindings + [fetchLimit]) { row in
             (
-                id: row.int(0),
-                guid: row.string(1),
-                displayName: row.string(2),
-                text: row.string(3),
-                attributedBody: row.blob(4)
+                chat: ChatRow(id: row.int(0), guid: row.string(1), displayName: row.string(2)),
+                text: MessageTextExtractor.extract(text: row.string(3), attributedBody: row.blob(4))
             )
         }
 
         let needle = content.lowercased()
         var seen = Set<Int64>()
         var chats: [ChatRow] = []
-        for row in rows {
-            let extracted = MessageTextExtractor.extract(text: row.text, attributedBody: row.attributedBody)
-            guard let extracted, extracted.lowercased().contains(needle) else { continue }
-            if seen.insert(row.id).inserted {
-                chats.append(ChatRow(id: row.id, guid: row.guid, displayName: row.displayName))
-                if chats.count >= limit { break }
+        for row in rows where row.text?.lowercased().contains(needle) == true {
+            if seen.insert(row.chat.id).inserted {
+                chats.append(row.chat)
+                if capsChats && chats.count >= limit { break }
             }
         }
         return chats
-    }
-
-    private static func countFilteredHiddenByHandleGroups(
-        database: Database,
-        handleGroups: [[String]],
-        isGroup: Bool?
-    ) throws -> Int {
-        let allHandles = handleGroups.flatMap { $0 }
-        guard !allHandles.isEmpty else { return 0 }
-        let placeholders = allHandles.map { _ in "?" }.joined(separator: ", ")
-        let groupSQL = groupFilterSQL(isGroup: isGroup)
-        let sql = """
-            SELECT COUNT(*) FROM (
-                SELECT DISTINCT c.ROWID
-                FROM chat c
-                JOIN chat_handle_join chj ON c.ROWID = chj.chat_id
-                JOIN handle h ON chj.handle_id = h.ROWID
-                WHERE h.id IN (\(placeholders))
-                \(groupSQL)
-                \(filteredHiddenSQL())
-                ORDER BY c.ROWID DESC
-                LIMIT 500
-            )
-            """
-        let rows: [Int] = try database.query(sql, params: allHandles) { row in
-            Int(row.int(0))
-        }
-        return rows.first ?? 0
-    }
-
-    private static func countFilteredHiddenByName(
-        database: Database,
-        name: String,
-        limit: Int,
-        isGroup: Bool?
-    ) throws -> Int {
-        let escaped = QueryBuilder.escapeLike(name)
-        let groupSQL = groupFilterSQL(isGroup: isGroup)
-        let sql = """
-            SELECT COUNT(*) FROM (
-                SELECT c.ROWID
-                FROM chat c
-                WHERE c.display_name LIKE ? ESCAPE '\\'
-                \(groupSQL)
-                \(filteredHiddenSQL())
-                LIMIT ?
-            )
-            """
-        let rows: [Int] = try database.query(sql, params: ["%\(escaped)%", limit]) { row in
-            Int(row.int(0))
-        }
-        return rows.first ?? 0
-    }
-
-    private static func countFilteredHiddenByContent(
-        database: Database,
-        content: String,
-        limit: Int,
-        isGroup: Bool?
-    ) throws -> Int {
-        let escaped = QueryBuilder.escapeLike(content)
-        let groupSQL = groupFilterSQL(isGroup: isGroup)
-        let fetchLimit = min(max(limit * 10, 50), 200)
-        let sql = """
-            SELECT c.ROWID as id, m.text, m.attributedBody
-            FROM chat c
-            JOIN chat_message_join cmj ON c.ROWID = cmj.chat_id
-            JOIN message m ON cmj.message_id = m.ROWID
-            WHERE m.associated_message_type = 0
-              AND (
-                m.text LIKE ? ESCAPE '\\'
-                OR (m.text IS NULL AND m.attributedBody IS NOT NULL)
-              )
-              \(groupSQL)
-              \(filteredHiddenSQL())
-            ORDER BY m.date DESC
-            LIMIT ?
-            """
-        let rows = try database.query(sql, params: ["%\(escaped)%", fetchLimit]) { row in
-            (
-                id: row.int(0),
-                text: row.string(1),
-                attributedBody: row.blob(2)
-            )
-        }
-        let needle = content.lowercased()
-        var seen = Set<Int64>()
-        for row in rows {
-            let extracted = MessageTextExtractor.extract(text: row.text, attributedBody: row.attributedBody)
-            guard let extracted, extracted.lowercased().contains(needle) else { continue }
-            seen.insert(row.id)
-            if seen.count >= limit { break }
-        }
-        return seen.count
     }
 
     private static func buildChatResults(
@@ -669,56 +384,24 @@ enum FindChatTool {
         resolver: ContactResolver,
         matchType: String
     ) async throws -> [ChatResult] {
-        let chatIds = chats.map(\.id)
-        let participantsByChat = try await ChatSummaryQueries.participantsByChat(
+        let page = try await ChatPage.build(
+            chats.map { ChatPage.Chat(id: $0.id, guid: $0.guid, explicitName: $0.displayName) },
+            lastMessages: ChatPage.LastMessageOptions(agoFallback: nil),
             db: database,
-            chatIds: chatIds,
             resolver: resolver
         )
-        let lastByChat = try await ChatSummaryQueries.lastMessagesByChat(
-            db: database,
-            chatIds: chatIds,
-            resolver: resolver,
-            agoFallback: nil
-        )
-        let recentSenderChatIds = chats.compactMap { chat -> Int64? in
-            let trimmed = chat.displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
-            let isNamed = trimmed?.isEmpty == false
-            let count = (participantsByChat[chat.id] ?? []).count
-            return (isNamed && count > 4) ? chat.id : nil
-        }
-        let recentSendersByChat = try ChatSummaryQueries.recentSendersByChat(
-            db: database,
-            chatIds: recentSenderChatIds
-        )
-
-        var results: [ChatResult] = []
-        for chat in chats {
-            let identity = ChatIdentity.from(
-                chatId: chat.id,
-                guid: chat.guid,
-                explicitName: chat.displayName,
-                rows: participantsByChat[chat.id] ?? []
-            )
-
-            results.append(
+        let results = chats.compactMap { chat in
+            page[chat.id].map { entry in
                 ChatResult(
-                    id: identity.mcpId,
-                    name: identity.displayName,
-                    group: identity.participantCount > 1 ? true : nil,
-                    participantCount: identity.participantCount,
-                    participantsPreview: try ChatSummaryBuilder.participantsPreview(
-                        db: database,
-                        chatId: chat.id,
-                        identity: identity,
-                        recentSenders: recentSendersByChat[chat.id]
-                    ),
-                    lastMessage: lastByChat[chat.id]?.info,
-                    participants: IdentityDisplayFormatter.participants(identity.participants),
-                    match: MatchInfo(type: matchType),
-                    identity: identity
+                    chat: entry.summary,
+                    details: ChatResultDetails(
+                        lastMessage: entry.lastMessage?.info,
+                        participants: IdentityDisplayFormatter.participants(entry.identity.participants),
+                        match: MatchInfo(type: matchType),
+                        identity: entry.identity
+                    )
                 )
-            )
+            }
         }
         return results
     }

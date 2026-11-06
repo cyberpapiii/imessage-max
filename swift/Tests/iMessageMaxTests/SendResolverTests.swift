@@ -1,14 +1,12 @@
 import XCTest
-import SQLite3
 @testable import iMessageMax
 
 final class SendResolverTests: XCTestCase {
     func testResolveChatIdReturnsExactChatTarget() async throws {
-        let dbPath = try makeResolverTestDatabase()
-        defer { try? FileManager.default.removeItem(atPath: dbPath) }
+        let fixture = try makeResolverFixture()
 
-        let resolver = SendResolver(db: Database(path: dbPath), resolver: ContactResolver(seedCache: [:]))
-        let result = await resolver.resolve(chatId: "chat10", to: nil)
+        let resolver = SendResolver(db: fixture.database(), resolver: ContactResolver(seedCache: [:]))
+        let result = await resolver.resolve(.chatId("chat10"))
 
         switch result {
         case .failure(let message):
@@ -26,11 +24,10 @@ final class SendResolverTests: XCTestCase {
     }
 
     func testResolvePhoneNumberReturnsParticipantTarget() async throws {
-        let dbPath = try makeResolverTestDatabase()
-        defer { try? FileManager.default.removeItem(atPath: dbPath) }
+        let fixture = try makeResolverFixture()
 
-        let resolver = SendResolver(db: Database(path: dbPath), resolver: ContactResolver(seedCache: [:]))
-        let result = await resolver.resolve(chatId: nil, to: "+15555550123")
+        let resolver = SendResolver(db: fixture.database(), resolver: ContactResolver(seedCache: [:]))
+        let result = await resolver.resolve(.recipient("+15555550123"))
 
         switch result {
         case .failure(let message):
@@ -48,12 +45,11 @@ final class SendResolverTests: XCTestCase {
     }
 
     func testResolveNameSingleMatchReturnsParticipant() async throws {
-        let dbPath = try makeResolverTestDatabase()
-        defer { try? FileManager.default.removeItem(atPath: dbPath) }
+        let fixture = try makeResolverFixture()
 
         let contacts = ContactResolver(seedCache: ["+15555550123": "Nick Jones"])
-        let resolver = SendResolver(db: Database(path: dbPath), resolver: contacts)
-        let result = await resolver.resolve(chatId: nil, to: "Nick")
+        let resolver = SendResolver(db: fixture.database(), resolver: contacts)
+        let result = await resolver.resolve(.recipient("Nick"))
 
         switch result {
         case .failure(let message):
@@ -71,15 +67,14 @@ final class SendResolverTests: XCTestCase {
     }
 
     func testResolveNameMultiMatchReturnsAmbiguousSortedByRecency() async throws {
-        let dbPath = try makeResolverTestDatabase()
-        defer { try? FileManager.default.removeItem(atPath: dbPath) }
+        let fixture = try makeResolverFixture()
 
         let contacts = ContactResolver(seedCache: [
             "+15555550123": "Nick Jones",
             "+15555550124": "Andrew Jones",
         ])
-        let resolver = SendResolver(db: Database(path: dbPath), resolver: contacts)
-        let result = await resolver.resolve(chatId: nil, to: "Jones")
+        let resolver = SendResolver(db: fixture.database(), resolver: contacts)
+        let result = await resolver.resolve(.recipient("Jones"))
 
         switch result {
         case .failure(let message):
@@ -99,12 +94,11 @@ final class SendResolverTests: XCTestCase {
     }
 
     func testResolveShortNumericDestinationFallsThroughToContactLookup() async throws {
-        let dbPath = try makeResolverTestDatabase()
-        defer { try? FileManager.default.removeItem(atPath: dbPath) }
+        let fixture = try makeResolverFixture()
 
         let contacts = ContactResolver(seedCache: ["+15555550123": "Nick Jones"])
-        let resolver = SendResolver(db: Database(path: dbPath), resolver: contacts)
-        let result = await resolver.resolve(chatId: nil, to: "55555")
+        let resolver = SendResolver(db: fixture.database(), resolver: contacts)
+        let result = await resolver.resolve(.recipient("55555"))
 
         guard case .failure(let message) = result else {
             return XCTFail("Expected failure for unmatched short code")
@@ -113,37 +107,27 @@ final class SendResolverTests: XCTestCase {
             message.contains("Invalid phone number format"),
             "Short numeric destination should not die as a phone parse: \(message)"
         )
-        XCTAssertTrue(
-            message.contains("No contact found matching '55555'")
-                || message.contains("Cannot search by name without contacts access"),
-            "Unexpected failure message: \(message)"
-        )
+        XCTAssertEqual(message, "No contact found matching '55555'")
     }
 
     func testResolvePlusPrefixedShortCodeStaysOnPhonePath() async throws {
-        let dbPath = try makeResolverTestDatabase()
-        defer { try? FileManager.default.removeItem(atPath: dbPath) }
+        let fixture = try makeResolverFixture()
 
-        let resolver = SendResolver(db: Database(path: dbPath), resolver: ContactResolver(seedCache: [:]))
-        let result = await resolver.resolve(chatId: nil, to: "+55555")
+        let resolver = SendResolver(db: fixture.database(), resolver: ContactResolver(seedCache: [:]))
+        let result = await resolver.resolve(.recipient("+55555"))
 
         guard case .failure(let message) = result else {
             return XCTFail("Expected failure for + prefixed short code")
         }
-        XCTAssertTrue(
-            message.contains("Invalid phone number format")
-                || message.contains("No conversation found"),
-            "Unexpected failure message: \(message)"
-        )
+        XCTAssertEqual(message, "No conversation found with +55555")
     }
 
     func testResolveDigitOnlyContactName() async throws {
-        let dbPath = try makeResolverTestDatabase()
-        defer { try? FileManager.default.removeItem(atPath: dbPath) }
+        let fixture = try makeResolverFixture()
 
         let contacts = ContactResolver(seedCache: ["+15555550123": "55555"])
-        let resolver = SendResolver(db: Database(path: dbPath), resolver: contacts)
-        let result = await resolver.resolve(chatId: nil, to: "55555")
+        let resolver = SendResolver(db: fixture.database(), resolver: contacts)
+        let result = await resolver.resolve(.recipient("55555"))
 
         switch result {
         case .failure(let message):
@@ -161,96 +145,120 @@ final class SendResolverTests: XCTestCase {
     }
 
     func testResolveNameNoMatchFails() async throws {
-        let dbPath = try makeResolverTestDatabase()
-        defer { try? FileManager.default.removeItem(atPath: dbPath) }
+        let fixture = try makeResolverFixture()
 
         let contacts = ContactResolver(seedCache: ["+15555550123": "Nick Jones"])
-        let resolver = SendResolver(db: Database(path: dbPath), resolver: contacts)
-        let result = await resolver.resolve(chatId: nil, to: "Zelda")
+        let resolver = SendResolver(db: fixture.database(), resolver: contacts)
+        let result = await resolver.resolve(.recipient("Zelda"))
 
         guard case .failure(let message) = result else {
             return XCTFail("Expected failure for unmatched name")
         }
-        // Which of the two appears depends on the machine's real Contacts
-        // authorization. It must pass on both authorized dev machines and
-        // unauthorized CI, so accept either.
-        XCTAssertTrue(
-            message.contains("No contact found matching 'Zelda'")
-                || message.contains("Cannot search by name without contacts access"),
-            "Unexpected failure message: \(message)"
+        XCTAssertEqual(message, "No contact found matching 'Zelda'")
+
+        // Without Contacts access the miss says why, not "no such contact".
+        let denied = SendResolver(
+            db: fixture.database(),
+            resolver: ContactResolver(seedCache: [:], authorization: (false, "denied"))
         )
+        guard case .failure(let deniedMessage) = await denied.resolve(.recipient("Zelda")) else {
+            return XCTFail("Expected failure without Contacts access")
+        }
+        XCTAssertEqual(deniedMessage, "Cannot search by name without contacts access")
     }
 
-    func testNameResolutionUsesOneLastContactQuery() async throws {
-        let fixture = try ToolTestDatabase(name: "send-jo")
-        let names = [
-            "Jo Smith", "Joanna Lee", "John Park", "Jordan Kim",
-            "Joyce Wu", "Joel Ray", "Joseph Ng", "Joy Chen",
-        ]
-        var seed: [String: String] = [:]
-        for (index, name) in names.enumerated() {
-            let handle = "+1555100000\(index)"
-            seed[handle] = name
-            try fixture.insertHandle(rowId: index + 1, handle: handle)
-            try fixture.insertMessage(
-                rowId: index + 1,
-                guid: "jo-msg-\(index)",
-                text: "hi",
-                date: Int64(index + 1) * 1_000,
-                isFromMe: false,
-                handleId: index + 1
-            )
+    /// Last-contact times for an ambiguous name come from one query, not one
+    /// per candidate.
+    func testNameResolutionQueryCountDoesNotGrowWithCandidates() async throws {
+        func queries(candidates: Int) async throws -> Int {
+            let fixture = try ToolTestDatabase(name: "send-jo")
+            var seed: [String: String] = [:]
+            for index in 0..<candidates {
+                let handle = "+1555100000\(index)"
+                seed[handle] = "Jo \(index)"
+                try fixture.insertHandle(rowId: index + 1, handle: handle)
+                try fixture.insertMessage(
+                    rowId: index + 1,
+                    guid: "jo-msg-\(index)",
+                    text: "hi",
+                    date: Int64(index + 1) * 1_000,
+                    isFromMe: false,
+                    handleId: index + 1
+                )
+            }
+            let resolver = SendResolver(db: fixture.database(), resolver: ContactResolver(seedCache: seed))
+            return try await countQueries {
+                guard case .ambiguous(let found) = await resolver.resolve(.recipient("Jo")) else {
+                    return XCTFail("Expected ambiguous name resolution")
+                }
+                XCTAssertEqual(found.count, candidates)
+            }
         }
+        let few = try await queries(candidates: 2)
+        let many = try await queries(candidates: 8)
+        XCTAssertGreaterThan(few, 0)
+        XCTAssertEqual(many, few, "send-by-name ran \(many) queries for 8 candidates, \(few) for 2")
+    }
 
-        let contacts = ContactResolver(seedCache: seed)
-        let resolver = SendResolver(db: fixture.database(), resolver: contacts)
+    /// A carrier short code with a conversation resolves to its handle.
+    func testShortCodeResolvesToItsHandle() async throws {
+        let fixture = try ToolTestDatabase(name: "send-short-code")
+        try fixture.insertHandle(rowId: 9, handle: "12345", service: "SMS")
+        try fixture.insertChat(rowId: 9, guid: "SMS;-;12345")
+        try fixture.joinChatHandle(chatId: 9, handleId: 9)
 
-        Database.queryCountForTesting = 0
-        defer { Database.queryCountForTesting = nil }
-
-        let result = await resolver.resolve(chatId: nil, to: "Jo")
-        guard case .ambiguous(let candidates) = result else {
-            return XCTFail("Expected ambiguous name resolution")
+        let resolver = SendResolver(db: fixture.database(), resolver: ContactResolver(seedCache: [:]))
+        guard case .success(let resolved) = await resolver.resolve(.recipient("12345")) else {
+            return XCTFail("a short code with a conversation should resolve")
         }
-        XCTAssertEqual(candidates.count, 8)
-        let queryCount = try XCTUnwrap(Database.queryCountForTesting)
-        XCTAssertLessThanOrEqual(queryCount, 3, "send-by-name ran \(queryCount) queries")
+        XCTAssertEqual(resolved.target, .participant(handle: "12345", chatId: 9))
+    }
+
+    /// `to` and `chat_id` name the same unnamed 1:1 the way every other tool
+    /// does: by the contact's name.
+    func testChatNameMatchesAcrossEntryPoints() async throws {
+        let fixture = try ToolTestDatabase(name: "send-chat-name")
+        try fixture.insertHandle(rowId: 1, handle: "+15550000001")
+        try fixture.insertChat(rowId: 1, guid: "iMessage;-;+15550000001")
+        try fixture.joinChatHandle(chatId: 1, handleId: 1)
+        let resolver = SendResolver(db: fixture.database(), resolver: makeSeededResolver())
+
+        guard case .success(let byRecipient) = await resolver.resolve(.recipient("+15550000001")),
+              case .success(let byChatId) = await resolver.resolve(.chatId("chat1")) else {
+            return XCTFail("both entry points should resolve")
+        }
+        for resolved in [byRecipient, byChatId] {
+            XCTAssertEqual(resolved.chat?.id, "chat1")
+            XCTAssertEqual(resolved.chat?.name, "Alice Smith")
+        }
+    }
+
+    /// A named chat keeps its explicit name, trimmed, when reached by `to`.
+    func testNamedChatKeepsItsNameViaRecipient() async throws {
+        let fixture = try ToolTestDatabase(name: "send-named-chat")
+        try fixture.insertHandle(rowId: 1, handle: "+15550000001")
+        try fixture.insertChat(rowId: 1, guid: "iMessage;-;named", displayName: "  Alice Work  ")
+        try fixture.joinChatHandle(chatId: 1, handleId: 1)
+        let resolver = SendResolver(db: fixture.database(), resolver: makeSeededResolver())
+
+        guard case .success(let resolved) = await resolver.resolve(.recipient("+15550000001")) else {
+            return XCTFail("should resolve")
+        }
+        XCTAssertEqual(resolved.chat?.name, "Alice Work")
     }
 }
 
-private func makeResolverTestDatabase() throws -> String {
-    let dbURL = FileManager.default.temporaryDirectory
-        .appendingPathComponent("imessage-max-send-resolver-\(UUID().uuidString).sqlite")
-
-    var db: OpaquePointer?
-    guard sqlite3_open(dbURL.path, &db) == SQLITE_OK, let db else {
-        XCTFail("Failed to open temp sqlite database")
-        return dbURL.path
-    }
-    defer { sqlite3_close(db) }
-
-    let statements = [
-        "CREATE TABLE chat (ROWID INTEGER PRIMARY KEY, guid TEXT, display_name TEXT);",
-        "CREATE TABLE handle (ROWID INTEGER PRIMARY KEY, id TEXT, service TEXT);",
-        "CREATE TABLE chat_handle_join (chat_id INTEGER, handle_id INTEGER);",
-        "CREATE TABLE message (ROWID INTEGER PRIMARY KEY, handle_id INTEGER, date INTEGER);",
-        "INSERT INTO handle (ROWID, id) VALUES (1, '+15555550123');",
-        "INSERT INTO handle (ROWID, id) VALUES (2, '+15555550124');",
-        "INSERT INTO chat (ROWID, guid, display_name) VALUES (10, 'any;+;chat-test-guid', NULL);",
-        "INSERT INTO chat_handle_join (chat_id, handle_id) VALUES (10, 1);",
-        "INSERT INTO chat_handle_join (chat_id, handle_id) VALUES (10, 2);",
-        "INSERT INTO chat (ROWID, guid, display_name) VALUES (11, 'any;-;+15555550123', NULL);",
-        "INSERT INTO chat_handle_join (chat_id, handle_id) VALUES (11, 1);",
-        "INSERT INTO message (ROWID, handle_id, date) VALUES (1, 1, 1000);"
-    ]
-
-    for statement in statements {
-        guard sqlite3_exec(db, statement, nil, nil, nil) == SQLITE_OK else {
-            let message = String(cString: sqlite3_errmsg(db))
-            XCTFail("SQLite setup failed: \(message)")
-            break
-        }
-    }
-
-    return dbURL.path
+/// A two-person group (chat 10) and a DM with the first person (chat 11),
+/// who has one message at date 1000.
+private func makeResolverFixture() throws -> ToolTestDatabase {
+    let fixture = try ToolTestDatabase(name: "send-resolver")
+    try fixture.insertHandle(rowId: 1, handle: "+15555550123")
+    try fixture.insertHandle(rowId: 2, handle: "+15555550124")
+    try fixture.insertChat(rowId: 10, guid: "any;+;chat-test-guid")
+    try fixture.joinChatHandle(chatId: 10, handleId: 1)
+    try fixture.joinChatHandle(chatId: 10, handleId: 2)
+    try fixture.insertChat(rowId: 11, guid: "any;-;+15555550123")
+    try fixture.joinChatHandle(chatId: 11, handleId: 1)
+    try fixture.insertMessage(rowId: 1, guid: "resolver-msg-1", date: 1000, isFromMe: false, handleId: 1)
+    return fixture
 }

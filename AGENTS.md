@@ -30,7 +30,7 @@ Other Makefile targets:
 - `make clean` removes debug artifacts and clears logs
 - `make setup-signing` is one-time setup for a persistent code signing identity
 - `make version` checks the five version sites agree; `make release-check` runs everything that must pass before tagging (see `docs/RELEASING.md`)
-- `make install-agent` copies `swift/launchd/local.imessage-max.plist` into `~/Library/LaunchAgents/` (do not hand-write the plist)
+- `make install-agent` renders `swift/launchd/local.imessage-max.plist` (binary path and `~/` log paths filled in) into `~/Library/LaunchAgents/` and loads it (do not hand-write the plist)
 
 The server runs as a launchd service (`local.imessage-max`) on port 8080, configured at `~/Library/LaunchAgents/local.imessage-max.plist`. Install that agent with `make install-agent`. It auto-starts on login and auto-restarts on crash.
 
@@ -42,17 +42,18 @@ Clients reach it through plug (HTTP, `protocol = "legacy"`) at `http://127.0.0.1
 
 ```bash
 cd swift
-swift build -c release
+make build   # a bare `swift build` omits the embedded Info.plist, so Contacts can never be granted
+BIN=.build/arm64-apple-macosx/release/imessage-max
 
 # stdio mode (for Codex Desktop)
-./.build/release/imessage-max
+$BIN
 
 # HTTP mode (for plug, Inspector, etc.)
-./.build/release/imessage-max --http --port 8080
+$BIN --http --port 8080
 
 # one-shot Contacts prompt; re-launches itself disclaimed so the grant is
-# recorded for this executable, not the terminal (needs a `make build` binary)
-./.build/release/imessage-max --request-contacts-access
+# recorded for this executable, not the terminal
+$BIN --request-contacts-access
 ```
 
 ### Running the test suite
@@ -64,6 +65,9 @@ swift test --filter HTTPTransportTests  # one test class
 make test                               # same as `swift test`
 make test FILTER=HTTPTransportTests     # same filter via the Makefile
 ```
+
+The wire contract shared with the companion app has its own tests:
+`cd contract && swift test`.
 
 `swift test --filter` takes a substring of the test class or method name, so
 `--filter LaunchdSafetyTests` runs just that class and
@@ -104,33 +108,44 @@ curl -X POST http://localhost:8080 \
 ### Directory structure
 
 ```
+contract/                       # IMessageMaxContract: diagnose and setup wire types,
+                                # capability keys, status words, defaults (host, port,
+                                # launchd label), CLI flags, protocol version. Imported by
+                                # swift/ and macos/; edit a wire word here, not in either app.
+macos/                          # Companion menu bar app (MaxCore, MaxBrand, iMessageMaxMenu)
 swift/
 ├── Sources/iMessageMax/
 │   ├── iMessageMaxCommand.swift # Entry point
 │   ├── Server/
-│   │   ├── MCPServer.swift     # Server lifecycle (stdio)
+│   │   ├── MCPServer.swift     # Startup for both transports, the stdio server
+│   │   ├── JSONRPC.swift       # Message parse, era rule, error codes, envelopes, era log line
 │   │   ├── HTTPTransport.swift # HTTP Streamable transport (dual-era)
 │   │   ├── ModernProtocol.swift # MCP 2026-07-28 stateless dispatcher
-│   │   ├── DualEraStdioTransport.swift # stdio era router
+│   │   ├── DualEraStdio.swift  # stdio era router
+│   │   ├── LegacyLaneTransport.swift # Transport under every SDK Server; adds server icons
 │   │   ├── SessionManager.swift # Per-session Server instances (legacy)
 │   │   ├── SSEConnection.swift # Server-Sent Events
-│   │   ├── HTTPRequestParsing.swift # Header and body parsing helpers
+│   │   ├── HTTPRequestParsing.swift # Header names, header and body parsing helpers
 │   │   ├── PendingRequestRegistry.swift # Request/response correlation and timeouts
 │   │   ├── MessageWatcher.swift # chat.db watcher for live inbox notifications
-│   │   ├── LiveInboxState.swift # Watcher state reported by diagnose
 │   │   ├── NewMessagesNotification.swift # notifications/imessage/new_messages payload
 │   │   ├── OriginValidationMiddleware.swift
-│   │   ├── ToolRegistry.swift  # Tool registration
+│   │   ├── ToolCatalog.swift   # The tools a process serves, handed to every lane
 │   │   ├── ToolCallDispatch.swift # tools/call routing
+│   │   ├── ToolFailure.swift   # A tool's error answer
+│   │   ├── IntArgument.swift   # An integer argument's default and bounds, for schema text and clamp
 │   │   ├── ServerExtensions.swift # Server helpers
-│   │   ├── IconMetadata.swift  # icon/_meta for tools/list
-│   │   └── Version.swift       # Version.current, the source of truth
-│   ├── Database/               # SQLite wrapper, query builder, schema capability probe
-│   ├── Models/                 # AttachmentType, ChatIdentity, GroupEvent, Reactions, ResponsePrimitives, SendPayload
-│   ├── Tools/                  # 13 MCP tools across 17 files
-│   ├── Contacts/               # CNContactStore resolver, headless access policy
+│   │   ├── SetupPermissionService.swift # Native setup route for permission prompts
+│   │   ├── IconMetadata.swift  # Embedded icons, the serverInfo icon injection
+│   │   └── Version.swift       # Version.current (source of truth), protocol versions, SDK Server factory
+│   ├── Database/               # SQLite wrapper, query builder, SQLFragments (chat.db rules), ChatScope (hidden-chat rule), ChatLookup, schema probe
+│   ├── Models/                 # Identifiers (chat/msg_/att id codecs), ChatIdentity and its naming rules, GroupEvent, Reactions, AttachmentType, ResponsePrimitives
+│   ├── Messages/               # Message row and renderer, people map, context window, sender filter, participant→chat matching, reactions/attachments annotations, shared-content query
+│   ├── Tools/                  # One file per MCP tool (plus GetMessagesInternals, SearchInternals)
+│   ├── Send/                   # send tool: resolver, AppleScript template, file stager, verifier
+│   ├── Contacts/               # CNContactStore resolver (refreshes itself), headless access policy
 │   ├── Enrichment/             # Image processor (thumbnail, vision, full variants)
-│   └── Utilities/              # AppleScript runner, AsyncTimeout, path policies, cursors, Log.swift
+│   └── Utilities/              # ChatPage (chat summaries), AsyncTimeout, path policies, cursors, Log.swift
 ├── Tests/
 ├── launchd/                    # launchd plist template (local.imessage-max)
 └── Package.swift
@@ -153,7 +168,8 @@ The server serves two MCP protocol eras concurrently on both transports
   stdio bundle, and Codex all use it. Do not remove it without verified
   proof that every real client has migrated.
 
-Era selection is body-driven only. Real legacy clients (plug) send
+Era selection is body-driven only (`JSONRPCMessage.era`, the one rule
+both transports use). Real legacy clients (plug) send
 `Mcp-Method` and `MCP-Protocol-Version` headers on legacy session
 traffic, so header presence must never route a request to the modern
 lane. The regression test for this is
@@ -184,10 +200,10 @@ npx @modelcontextprotocol/conformance@0.2.0-alpha.11 server --url http://127.0.0
   --suite active --expected-failures docs/conformance-baseline.yml
 ```
 
-Rollback: the modern lane is additive. Reverting
-`ModernProtocol.swift`, `DualEraStdioTransport.swift`, and the era branch
-in `HTTPTransport.handlePost` / `MCPServer.start` restores the previous
-legacy-only behavior byte-for-byte.
+Rollback: the modern lane is additive, but it is no longer a few
+self-contained files. Removing it means routing every message to the legacy
+lane in `HTTPTransport.handlePost` and `DualEraStdio.start` (and dropping
+`ModernProtocol.swift`); the shared JSON-RPC and startup code stays.
 
 ### HTTP transport architecture
 
@@ -236,7 +252,7 @@ let date = Date(timeIntervalSinceReferenceDate: TimeInterval(appleTimestamp) / 1
 Message text is often stored in `attributedBody` (binary typedstream format) instead of `text` column. Parse by:
 1. Find "NSString" or "NSMutableString" marker
 2. Skip 5 bytes after marker
-3. Read length byte (0x81 = 2-byte length, 0x82 = 3-byte length, else single byte)
+3. Read length byte (0x81 = 2-byte length, 0x82 = 3-byte length, < 0x80 = literal length; any other marker yields no text)
 4. Read UTF-8 text of that length
 
 ## Thirteen core tools
@@ -265,7 +281,7 @@ Sleeping Swift tasks abort intermittently inside the launchd-run service
 (`swift_task_dealloc` / "freed pointer was not the last allocation").
 Use Dispatch timers instead: `AsyncTimeout.sleep` for tool code, or the
 cancellable `DispatchSourceTimer` pattern in
-`HTTPTransport.storePendingRequest` (not `asyncAfter`: a cancelled
+`PendingRequestRegistry.store` (not `asyncAfter`: a cancelled
 asyncAfter work item stays enqueued until its deadline and retains each
 request's timeout timer under load). This crashed production on
 2026-06-11 (send-confirmation timeout path); do not reintroduce.
@@ -315,13 +331,15 @@ Attachments can be offloaded to iCloud. `list_attachments` includes nested attac
 | 2003 | Laughed 😂 |
 | 2004 | Emphasized ‼️ |
 | 2005 | Questioned ❓ |
-| 3000-3005 | Removal of above |
+| 2006 | Custom emoji |
+| 2007 | Sticker |
+| 3000-3007 | Removal of above |
 
 ### Token-efficient response design
 
 - Deduplicate participants (define once, reference by short key)
 - Use ISO timestamps for messages, relative for summaries
-- Short keys: `ts` not `timestamp`, `msgs` not `message_count`
+- Short keys where they are unambiguous (`ts` not `timestamp`)
 - Reactions as compact strings: `["❤️ andrew", "😂 nick"]`
 - Omit obvious fields (no `is_group: false` on 2-person chats)
 

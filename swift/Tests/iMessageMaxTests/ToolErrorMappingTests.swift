@@ -1,36 +1,45 @@
+import MCP
 import XCTest
 @testable import iMessageMax
 
+/// A database error a tool lets escape reaches the client as a JSON error
+/// with a stable code and fixed guidance, never the path or SQLite detail.
 final class ToolErrorMappingTests: XCTestCase {
 
-    func testNotFound() {
-        let mapped = ToolErrorMapping.map(.notFound("/tmp/chat.db"), context: "test")
-        XCTAssertEqual(mapped.code, "database_not_found")
-        XCTAssertEqual(mapped.message, ClientErrorMessages.databaseNotFound)
+    func testDatabaseErrorsBecomeStableCodesWithoutInternalDetail() async throws {
+        let cases: [(DatabaseError, String, String)] = [
+            (.notFound("/Users/me/Library/Messages/chat.db"), "database_not_found", ClientErrorMessages.databaseNotFound),
+            (.permissionDenied("/Users/me/Library/Messages/chat.db"), "permission_denied", ClientErrorMessages.permissionDenied),
+            (.queryFailed("no such table: message"), "query_failed", ClientErrorMessages.internalError),
+            (.invalidData("bad blob at /Users/me/x"), "invalid_data", ClientErrorMessages.internalError),
+        ]
+        for (error, code, message) in cases {
+            let body = try await callFailing(throwing: error)
+            XCTAssertEqual(body["error"] as? String, code)
+            XCTAssertEqual(body["message"] as? String, message)
+            XCTAssertEqual(body.count, 2)
+        }
     }
 
-    func testPermissionDenied() {
-        let mapped = ToolErrorMapping.map(.permissionDenied("/tmp/chat.db"), context: "test")
-        XCTAssertEqual(mapped.code, "permission_denied")
-        XCTAssertEqual(mapped.message, ClientErrorMessages.permissionDenied)
+    func testUnexpectedErrorsDoNotLeakTheirDescription() async throws {
+        struct PathError: LocalizedError {
+            var errorDescription: String? { "cannot open /Users/me/secret" }
+        }
+        let body = try await callFailing(throwing: PathError())
+        XCTAssertEqual(body["error"] as? String, "internal_error")
+        XCTAssertEqual(body["message"] as? String, ClientErrorMessages.internalError)
     }
 
-    func testQueryFailed() {
-        let mapped = ToolErrorMapping.map(.queryFailed("no such table: message"), context: "test")
-        XCTAssertEqual(mapped.code, "query_failed")
-        XCTAssertEqual(mapped.message, ClientErrorMessages.internalError)
-        XCTAssertFalse(mapped.message.contains("message"), "sqlite detail must not reach the client")
-    }
-
-    func testInvalidData() {
-        let mapped = ToolErrorMapping.map(.invalidData("bad blob at /Users/me/x"), context: "test")
-        XCTAssertEqual(mapped.code, "invalid_data")
-        XCTAssertEqual(mapped.message, ClientErrorMessages.internalError)
-    }
-
-    func testCancelled() {
-        let mapped = ToolErrorMapping.map(.cancelled, context: "test")
-        XCTAssertEqual(mapped.code, "cancelled")
-        XCTAssertEqual(mapped.message, ClientErrorMessages.cancelled)
+    private func callFailing(throwing error: any Error) async throws -> [String: Any] {
+        let catalog = ToolCatalog([
+            fakeTool(named: "failing") { _ in throw error }
+        ])
+        guard case .completed(let content, isError: true) = await ToolCallDispatch.execute(
+            name: "failing", arguments: nil, lane: .legacyStdio, catalog: catalog
+        ) else {
+            XCTFail("expected an error result")
+            return [:]
+        }
+        return try decodeJSONDictionary(from: content)
     }
 }

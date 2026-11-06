@@ -21,13 +21,9 @@ final class AppleScriptStagingTests: XCTestCase {
         let outsideFile = outsideDirectory.appendingPathComponent("precious.txt")
         try "do not delete".write(to: outsideFile, atomically: true, encoding: .utf8)
 
-        let forged = AppleScriptRunner.PreparedOutgoingFile(
-            fileURL: outsideFile,
-            trackingName: "precious.txt",
-            existingOutgoingTransferCount: 0
-        )
+        let forged = OutgoingFileStager.StagedFile(fileURL: outsideFile, trackingName: "precious.txt")
 
-        AppleScriptRunner.removeStagedDirectory(for: forged)
+        makeStager().remove(forged)
 
         XCTAssertTrue(
             FileManager.default.fileExists(atPath: outsideDirectory.path),
@@ -40,8 +36,8 @@ final class AppleScriptStagingTests: XCTestCase {
     }
 
     func testSweepRemovesDirectoriesOlderThanCutoff() throws {
-        let root = try requireStagingRoot()
-        let testDir = root.appendingPathComponent(
+        let stager = makeStager()
+        let testDir = stager.root.appendingPathComponent(
             "xctest-\(UUID().uuidString)",
             isDirectory: true
         )
@@ -53,7 +49,7 @@ final class AppleScriptStagingTests: XCTestCase {
             ofItemAtPath: testDir.path
         )
 
-        AppleScriptRunner.cleanupOldStagedFilesIfPossible()
+        stager.sweepExpired()
 
         XCTAssertFalse(
             FileManager.default.fileExists(atPath: testDir.path),
@@ -61,24 +57,52 @@ final class AppleScriptStagingTests: XCTestCase {
         )
     }
 
-    private func requireStagingRoot() throws -> URL {
-        let root = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Pictures", isDirectory: true)
-            .appendingPathComponent("imessage-max-staging", isDirectory: true)
-        do {
-            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-            let probe = root.appendingPathComponent(
-                "xctest-probe-\(UUID().uuidString)",
-                isDirectory: true
+    /// A failed transfer-status query still schedules removal of the staged
+    /// copy, whether the query failed with a SendError or anything else.
+    func testFailedStatusQueryRemovesTheStagedCopy() async throws {
+        struct StatusQueryFailure: Error {}
+        let errors: [any Error] = [SendError.failed("status probe failed"), StatusQueryFailure()]
+        for error in errors {
+            // /private form: the stager refuses a root behind the /var symlink.
+            let tmp = try XCTUnwrap(SecurePath.absoluteLexicalPath(FileManager.default.temporaryDirectory.path))
+            let scratch = URL(fileURLWithPath: tmp, isDirectory: true)
+                .appendingPathComponent("xctest-transfer-\(UUID().uuidString)", isDirectory: true)
+            try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
+            createdPaths.append(scratch)
+            let source = scratch.appendingPathComponent("source.txt")
+            try Data("payload".utf8).write(to: source)
+            let stager = OutgoingFileStager(root: scratch.appendingPathComponent("staging", isDirectory: true))
+            let opened = try stager.openSource(source.path)
+            let staged = try stager.stage(opened)
+            opened.close()
+            XCTAssertTrue(FileManager.default.fileExists(atPath: staged.fileURL.path))
+
+            let result = TransferMonitor.waitForCompletion(
+                of: staged, baseline: 0, stager: stager,
+                statusQuery: { _ in throw error },
+                removalDelay: .zero
             )
-            try FileManager.default.createDirectory(at: probe, withIntermediateDirectories: true)
-            try FileManager.default.removeItem(at: probe)
-            return root
-        } catch {
-            if ProcessInfo.processInfo.environment["CI"] != nil {
-                throw XCTSkip("CI/sandbox cannot write ~/Pictures")
-            }
-            throw error
+
+            guard case .failure(let failure) = result else { return XCTFail("expected failure for \(error)") }
+            XCTAssertEqual(failure.disposition, .mayHaveCompleted)
+            let removed = await waitForRemoval(of: staged.fileURL.deletingLastPathComponent())
+            XCTAssertTrue(removed, "staged copy should be removed after \(error)")
         }
+    }
+
+    /// Polls for up to two seconds for `directory` to disappear.
+    private func waitForRemoval(of directory: URL) async -> Bool {
+        for _ in 0..<100 {
+            if !FileManager.default.fileExists(atPath: directory.path) { return true }
+            await AsyncTimeout.sleep(.milliseconds(20))
+        }
+        return false
+    }
+
+    private func makeStager() -> OutgoingFileStager {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("xctest-imessage-max-staging-\(UUID().uuidString)", isDirectory: true)
+        createdPaths.append(root)
+        return OutgoingFileStager(root: root)
     }
 }

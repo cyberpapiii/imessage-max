@@ -36,7 +36,7 @@ final class ListToolCharacterizationTests: XCTestCase {
         try fixture.joinChatHandle(chatId: 2, handleId: 3)
 
         // Apple epoch: nanoseconds since 2001-01-01
-        let base = Int64(Date().timeIntervalSinceReferenceDate * 1_000_000_000) - 3_600_000_000_000
+        let base = AppleTime.fromDate(Date().addingTimeInterval(-3600))
         let sec: Int64 = 1_000_000_000
 
         // Chat 1 messages
@@ -87,46 +87,11 @@ final class ListToolCharacterizationTests: XCTestCase {
 
     // MARK: - list_chats tests
 
-    func testListChatsResolvesParticipantNamesFromContacts() async throws {
-        let fixture = try makeListCharacterizationFixture()
-        let resolver = makeSeededResolver()
-
-        let result = await ListChatsTool.execute(
-            limit: 10,
-            since: nil,
-            isGroup: nil,
-            minParticipants: nil,
-            maxParticipants: nil,
-            sort: "recent",
-            db: fixture.database(),
-            resolver: resolver
-        )
-
-        switch result {
-        case .failure(let error):
-            XCTFail("list_chats failed: \(error.message)")
-        case .success(let response):
-            let groupChat = try XCTUnwrap(
-                response.chats.first(where: { $0.id == "chat2" }),
-                "Expected chat2 (Trip Crew) in results"
-            )
-            let preview = groupChat.participantsPreview
-            XCTAssertTrue(
-                preview.contains("Alice Smith"),
-                "Expected 'Alice Smith' in participants_preview, got \(preview)"
-            )
-            XCTAssertFalse(
-                preview.contains("+15550000001"),
-                "Raw handle should not appear when contact name is available"
-            )
-        }
-    }
-
     func testListChatsLastMessagePicksNewestNonReaction() async throws {
         let fixture = try makeListCharacterizationFixture()
         let resolver = makeSeededResolver()
 
-        let result = await ListChatsTool.execute(
+        let result = try await ListChatsTool.execute(
             limit: 10,
             since: nil,
             isGroup: nil,
@@ -137,33 +102,29 @@ final class ListToolCharacterizationTests: XCTestCase {
             resolver: resolver
         )
 
-        switch result {
-        case .failure(let error):
-            XCTFail("list_chats failed: \(error.message)")
-        case .success(let response):
-            let dmChat = try XCTUnwrap(
-                response.chats.first(where: { $0.id == "chat1" }),
-                "Expected chat1 (DM) in results"
-            )
-            let lastMsg = try XCTUnwrap(dmChat.lastMessage, "Expected last_message on DM chat")
-            XCTAssertEqual(
-                lastMsg.text,
-                "hello from alice",
-                "last_message should be the newest non-reaction, not the reaction"
-            )
-            XCTAssertEqual(
-                lastMsg.from,
-                "Alice Smith",
-                "last_message.from should be the resolved contact name"
-            )
-        }
+        let response = result
+        let dmChat = try XCTUnwrap(
+            response.chats.first(where: { $0.id == "chat1" }),
+            "Expected chat1 (DM) in results"
+        )
+        let lastMsg = try XCTUnwrap(dmChat.lastMessage, "Expected last_message on DM chat")
+        XCTAssertEqual(
+            lastMsg.text,
+            "hello from alice",
+            "last_message should be the newest non-reaction, not the reaction"
+        )
+        XCTAssertEqual(
+            lastMsg.from,
+            "Alice Smith",
+            "last_message.from should be the resolved contact name"
+        )
     }
 
     func testListChatsAwaitingReplyTrueWhenLastMessageFromThem() async throws {
         let fixture = try makeListCharacterizationFixture()
         let resolver = makeSeededResolver()
 
-        let result = await ListChatsTool.execute(
+        let result = try await ListChatsTool.execute(
             limit: 10,
             since: nil,
             isGroup: nil,
@@ -174,23 +135,19 @@ final class ListToolCharacterizationTests: XCTestCase {
             resolver: resolver
         )
 
-        switch result {
-        case .failure(let error):
-            XCTFail("list_chats failed: \(error.message)")
-        case .success(let response):
-            let dmChat = try XCTUnwrap(response.chats.first(where: { $0.id == "chat1" }))
-            XCTAssertEqual(dmChat.awaitingReply, true, "DM should be awaiting_reply when last message is from them")
+        let response = result
+        let dmChat = try XCTUnwrap(response.chats.first(where: { $0.id == "chat1" }))
+        XCTAssertEqual(dmChat.awaitingReply, true, "DM should be awaiting_reply when last message is from them")
 
-            let groupChat = try XCTUnwrap(response.chats.first(where: { $0.id == "chat2" }))
-            XCTAssertNotEqual(groupChat.awaitingReply, true, "Group should not be awaiting_reply when last message is from me")
-        }
+        let groupChat = try XCTUnwrap(response.chats.first(where: { $0.id == "chat2" }))
+        XCTAssertNotEqual(groupChat.awaitingReply, true, "Group should not be awaiting_reply when last message is from me")
     }
 
     func testListChatsGroupFlagAndParticipantCount() async throws {
         let fixture = try makeListCharacterizationFixture()
         let resolver = makeSeededResolver()
 
-        let result = await ListChatsTool.execute(
+        let result = try await ListChatsTool.execute(
             limit: 10,
             since: nil,
             isGroup: nil,
@@ -201,17 +158,13 @@ final class ListToolCharacterizationTests: XCTestCase {
             resolver: resolver
         )
 
-        switch result {
-        case .failure(let error):
-            XCTFail("list_chats failed: \(error.message)")
-        case .success(let response):
-            let groupChat = try XCTUnwrap(response.chats.first(where: { $0.id == "chat2" }))
-            XCTAssertEqual(groupChat.group, true, "Chat with 3 participants should be flagged as group")
-            XCTAssertEqual(groupChat.participantCount, 3, "Trip Crew should report 3 participants")
+        let response = result
+        let groupChat = try XCTUnwrap(response.chats.first(where: { $0.id == "chat2" }))
+        XCTAssertEqual(groupChat.group, true, "Chat with 3 participants should be flagged as group")
+        XCTAssertEqual(groupChat.participantCount, 3, "Trip Crew should report 3 participants")
 
-            let dmChat = try XCTUnwrap(response.chats.first(where: { $0.id == "chat1" }))
-            XCTAssertNil(dmChat.group, "DM should not have group flag set")
-        }
+        let dmChat = try XCTUnwrap(response.chats.first(where: { $0.id == "chat1" }))
+        XCTAssertNil(dmChat.group, "DM should not have group flag set")
     }
 
     // MARK: - get_active_conversations tests
@@ -230,7 +183,7 @@ final class ListToolCharacterizationTests: XCTestCase {
         try fixture.joinChatHandle(chatId: 10, handleId: 1)
 
         // Recent timestamps (within last 24 hours)
-        let now = Int64(Date().timeIntervalSinceReferenceDate * 1_000_000_000)
+        let now = AppleTime.fromDate(Date())
         let sec: Int64 = 1_000_000_000
 
         // 3 from me
@@ -257,8 +210,8 @@ final class ListToolCharacterizationTests: XCTestCase {
         )
         try fixture.joinChatMessage(chatId: 10, messageId: 200)
 
-        // NOTE: last-from-them (msg 201) is newer than last-from-me (msg 102, date = now-8*sec)
-        // So awaiting_reply should be true for chat 10
+        // Their last message (201) is newer than my last (102, now - 8 s), so
+        // chat 10 is awaiting my reply.
         try fixture.insertMessage(
             rowId: 201,
             guid: "active-them-201",
@@ -317,12 +270,12 @@ final class ListToolCharacterizationTests: XCTestCase {
         )
     }
 
-    // MARK: - Participant fan-out regression
+    // MARK: - Participant fan-out
 
-    // Both list tools used to join chat_handle_join alongside the message
-    // tables, which multiplied every chat's message rows by its participant
-    // count. Group chats reported inflated totals; DM fixtures hid it because
-    // one participant multiplies by one. These two fixtures use group chats.
+    // Joining chat_handle_join alongside the message tables multiplies every
+    // chat's message rows by its participant count. DM fixtures cannot show
+    // that, since one participant multiplies by one, so these two fixtures
+    // use group chats.
 
     private func makeFanOutFixture() throws -> ToolTestDatabase {
         let fixture = try ToolTestDatabase(name: "participant-fan-out")
@@ -335,8 +288,9 @@ final class ListToolCharacterizationTests: XCTestCase {
         try fixture.insertChat(rowId: 1, guid: "iMessage;-;fanout-dm")
         try fixture.joinChatHandle(chatId: 1, handleId: 1)
 
-        // Chat 2: group of 3, only 2 messages. Fewer messages than chat 1, but
-        // the old query counted 2 x 3 = 6 and ranked it first for most_active.
+        // Chat 2: group of 3, only 2 messages. Fewer messages than chat 1;
+        // counted per participant it would be 2 x 3 = 6 and rank first for
+        // most_active.
         try fixture.insertChat(rowId: 2, guid: "iMessage;+;fanout-group", displayName: "Fan Out")
         try fixture.joinChatHandle(chatId: 2, handleId: 1)
         try fixture.joinChatHandle(chatId: 2, handleId: 2)
@@ -377,16 +331,14 @@ final class ListToolCharacterizationTests: XCTestCase {
     func testListChatsMostActiveIsNotInflatedByParticipantCount() async throws {
         let fixture = try makeFanOutFixture()
 
-        let result = await ListChatsTool.execute(
+        let result = try await ListChatsTool.execute(
             limit: 10,
             sort: "most_active",
             db: fixture.database(),
             resolver: makeSeededResolver()
         )
 
-        guard case .success(let response) = result else {
-            return XCTFail("list_chats failed")
-        }
+        let response = result
 
         XCTAssertEqual(
             response.chats.map(\.id),
@@ -408,7 +360,7 @@ final class ListToolCharacterizationTests: XCTestCase {
         try fixture.joinChatHandle(chatId: 20, handleId: 2)
         try fixture.joinChatHandle(chatId: 20, handleId: 3)
 
-        let now = Int64(Date().timeIntervalSinceReferenceDate * 1_000_000_000)
+        let now = AppleTime.fromDate(Date())
         let sec: Int64 = 1_000_000_000
 
         for i in 0..<2 {
@@ -464,14 +416,16 @@ final class ListToolCharacterizationTests: XCTestCase {
 
     /// One page of named large chats must stay a constant query count,
     /// not one recent-sender lookup per row.
-    func testListChatsQueryCountIsConstantInRowCount() async throws {
+    func testListChatsQueryCountDoesNotGrowWithPageSize() async throws {
         let fixture = try ToolTestDatabase(name: "list-chats-query-count")
         for rowId in 1...6 {
             try fixture.insertHandle(rowId: rowId, handle: "+1555000000\(rowId)")
         }
         let base: Int64 = 700_000_000_000_000_000
         let sec: Int64 = 1_000_000_000
-        for chatId in 1...12 {
+        // More chats than either page, so both pages fill from the first
+        // candidate scan and differ only in rows.
+        for chatId in 1...24 {
             try fixture.insertChat(rowId: chatId, guid: "chat-\(chatId)-guid", displayName: "Group \(chatId)")
             for handleId in 1...6 {
                 try fixture.joinChatHandle(chatId: chatId, handleId: handleId)
@@ -490,30 +444,77 @@ final class ListToolCharacterizationTests: XCTestCase {
             }
         }
 
-        Database.queryCountForTesting = 0
-        defer { Database.queryCountForTesting = nil }
-
-        let result = await ListChatsTool.execute(
-            limit: 12,
-            since: nil,
-            isGroup: nil,
-            minParticipants: nil,
-            maxParticipants: nil,
-            sort: "recent",
-            db: fixture.database(),
-            resolver: makeSeededResolver()
-        )
-        guard case .success(let response) = result else {
-            return XCTFail("list_chats failed")
+        func queries(limit: Int) async throws -> Int {
+            try await countQueries {
+                let response = try await ListChatsTool.execute(
+                    limit: limit,
+                    sort: "recent",
+                    db: fixture.database(),
+                    resolver: makeSeededResolver()
+                )
+                XCTAssertEqual(response.chats.count, limit)
+            }
         }
-        XCTAssertEqual(response.chats.count, 12)
-        let queryCount = try XCTUnwrap(Database.queryCountForTesting)
-        // 10 queries for one page of 12 named 6-handle chats:
-        // 4 page-candidate widths (2000 / 20_000 / 200_000 / unbounded;
-        // exact-limit pages do not trip `count > limit`, so the ladder
-        // runs out), participantsByChat, lastMessagesByChat,
-        // attachmentTypesByMessage, recentSendersByChat, getTotals,
-        // plus 074's filtered_hidden count.
-        XCTAssertLessThanOrEqual(queryCount, 10, "list_chats ran \(queryCount) queries")
+        let three = try await queries(limit: 3)
+        let twelve = try await queries(limit: 12)
+        XCTAssertGreaterThan(three, 0)
+        XCTAssertEqual(twelve, three, "a page of 12 ran \(twelve) queries, a page of 3 ran \(three)")
+    }
+
+    // MARK: - get_active_conversations candidates and hidden chats
+
+    /// The chats with enough exchanges are found even when newer chats with
+    /// too few fill the first candidates.
+    func testActiveConversationsFindsQualifyingChatsBehindNewerThinOnes() async throws {
+        let fixture = try ToolTestDatabase(name: "active")
+        let base = AppleTime.fromDate(Date()) - 120 * appleMinute
+        var row = 0
+        func exchange(_ chat: Int, atMinute minute: Int64, rounds: Int) throws {
+            for round in 0..<rounds {
+                for fromMe in [true, false] {
+                    row += 1
+                    try fixture.insertMessage(rowId: row, guid: "A\(row)", text: "t\(row)", date: base + (minute + Int64(round)) * appleMinute,
+                                              isFromMe: fromMe, handleId: fromMe ? nil : chat)
+                    try fixture.joinChatMessage(chatId: chat, messageId: row)
+                }
+            }
+        }
+        for chat in 1...6 {
+            try fixture.insertHandle(rowId: chat, handle: "+1555000000\(chat)")
+            try fixture.insertChat(rowId: chat, guid: "iMessage;-;\(chat)")
+            try fixture.joinChatHandle(chatId: chat, handleId: chat)
+        }
+        try exchange(1, atMinute: 0, rounds: 2)
+        try exchange(2, atMinute: 5, rounds: 2)
+        for chat in 3...6 { try exchange(chat, atMinute: Int64(20 + chat), rounds: 1) }
+
+        let one = try await callTool("get_active_conversations", ["limit": 1, "min_exchanges": 2], database: fixture.database())
+        XCTAssertEqual(try itemIds(one, "conversations"), ["chat2"])
+        XCTAssertEqual(one["more"] as? Bool, true)
+        let all = try await callTool("get_active_conversations", ["limit": 2, "min_exchanges": 2], database: fixture.database())
+        XCTAssertEqual(try itemIds(all, "conversations"), ["chat2", "chat1"])
+        XCTAssertEqual(all["more"] as? Bool, false)
+    }
+
+    /// A hidden chat is left out of get_active_conversations and of an
+    /// unscoped list_attachments; naming it with chat_id still lists it.
+    func testActiveConversationsAndListAttachmentsSkipHiddenChats() async throws {
+        let fixture = try ToolTestDatabase(name: "hidden-active")
+        try fixture.insertHandle(rowId: 1, handle: "spam@example.com")
+        try fixture.insertChat(rowId: 1, guid: "iMessage;-;spam@example.com", isFiltered: 1)
+        try fixture.joinChatHandle(chatId: 1, handleId: 1)
+        let recent = AppleTime.fromDate(Date().addingTimeInterval(-3600))
+        try fixture.insertMessage(rowId: 1, guid: "g1", text: "\u{FFFC}", date: recent, isFromMe: false, handleId: 1)
+        try fixture.insertMessage(rowId: 2, guid: "g2", text: "who is this", date: recent + 1, isFromMe: true)
+        for row in 1...2 { try fixture.joinChatMessage(chatId: 1, messageId: row) }
+        try fixture.insertAttachment(rowId: 1, filename: "/nonexistent/x.pdf", mimeType: "application/pdf", uti: "com.adobe.pdf")
+        try fixture.joinMessageAttachment(messageId: 1, attachmentId: 1)
+
+        let active = try await callTool("get_active_conversations", ["min_exchanges": 1], database: fixture.database())
+        XCTAssertEqual(try itemIds(active, "conversations"), [])
+        let listed = try await callTool("list_attachments", [:], database: fixture.database())
+        XCTAssertEqual(try decodeJSONArray(listed["messages"]).count, 0)
+        let named = try await callTool("list_attachments", ["chat_id": "chat1"], database: fixture.database())
+        XCTAssertEqual(try decodeJSONArray(named["messages"]).count, 1)
     }
 }

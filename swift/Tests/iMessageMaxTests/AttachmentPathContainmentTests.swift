@@ -71,14 +71,10 @@ final class AttachmentPathContainmentTests: XCTestCase {
         let outside = base.appendingPathComponent("outside.txt")
         let symlink = root.appendingPathComponent("link.txt")
 
-        do {
-            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-            try Data("outside".utf8).write(to: outside)
-            try FileManager.default.createSymbolicLink(at: symlink, withDestinationURL: outside)
-        } catch {
-            throw XCTSkip("Could not create symlink (sandboxing may prevent it): \(error)")
-        }
         defer { try? FileManager.default.removeItem(at: base) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try Data("outside".utf8).write(to: outside)
+        try FileManager.default.createSymbolicLink(at: symlink, withDestinationURL: outside)
 
         let result = AttachmentPathPolicy.validatedPath(symlink.path, allowedRoots: [root.path])
         XCTAssertNil(result, "Symlink inside root pointing outside should be rejected after resolution")
@@ -106,23 +102,15 @@ final class AttachmentPathContainmentTests: XCTestCase {
             uti: "public.jpeg"
         )
 
-        let tool = GetAttachment(db: fixtureDB.database())
-        let result = await tool.execute(
-            attachmentId: "att99",
-            variant: "vision",
-            allowedRoots: [allowedRoot.path]
-        )
-
-        switch result {
-        case .success:
-            XCTFail("Expected attachment_path_invalid error for out-of-root path")
-        case .error(let type, let message, _):
-            XCTAssertEqual(type, "attachment_path_invalid")
-            XCTAssertFalse(
-                message.contains(outsideFile.path),
-                "Error message must not contain the attacker-supplied file path"
-            )
+        let tool = GetAttachment(db: fixtureDB.database(), resolver: ContactResolver(seedCache: [:]))
+        let body = try await toolFailureBody {
+            try await tool.execute(attachmentId: "att99", variant: "vision", allowedRoots: [allowedRoot.path])
         }
+        XCTAssertEqual(body["error"] as? String, "attachment_path_invalid")
+        XCTAssertFalse(
+            (body["message"] as? String ?? "").contains(outsideFile.path),
+            "Error message must not contain the attacker-supplied file path"
+        )
     }
 
     func testGetMessagesDoesNotProbeOutOfRootPaths() async throws {

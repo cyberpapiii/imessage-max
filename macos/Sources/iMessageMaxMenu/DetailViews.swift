@@ -1,3 +1,4 @@
+import IMessageMaxContract
 import MaxCore
 import ServiceManagement
 import SwiftUI
@@ -12,7 +13,7 @@ struct SetupStep: View {
       if let diagnosis = model.diagnosis {
         switch diagnosis.readiness {
         case .messages:
-          if diagnosis.database.status == "permission_denied" {
+          if diagnosis.database.status == .permissionDenied {
             heading("Let Messages in")
             line(
               "In Full Disk Access, click + and add the iMessage Max helper shown in Finder. Then come back and restart it."
@@ -38,11 +39,7 @@ struct SetupStep: View {
         case .contacts:
           if diagnosis.contacts.authorized {
             heading("Names need another look")
-            line(
-              diagnosis.contacts.status == "skipped_ci"
-                ? "Contact loading is disabled in the service environment. Remove its CI setting, then restart iMessage Max."
-                : "Contacts access is allowed, but the names did not load. Restart iMessage Max and check again."
-            )
+            line("Contacts access is allowed, but the names did not load. Restart iMessage Max and check again.")
             buttons {
               Button("Restart and check") { model.perform(.restart) }
                 .buttonStyle(MaxButtonStyle(primary: true)).disabled(model.busy != nil)
@@ -54,7 +51,7 @@ struct SetupStep: View {
               "Allow Contacts so your assistants can recognize people. This does not change your contacts."
             )
             buttons {
-              if ["denied", "restricted"].contains(diagnosis.contacts.status) {
+              if [.denied, .restricted].contains(diagnosis.contacts.status) {
                 Button("Open Contacts Settings") { model.openSettings("Privacy_Contacts") }
                   .buttonStyle(MaxButtonStyle(primary: true))
               } else {
@@ -72,7 +69,7 @@ struct SetupStep: View {
               : "Allow iMessage Max to work with Messages. Your assistant sends only when you ask. Setup sends no message."
           )
           buttons {
-            if diagnosis.capabilities["perm_automation"]?.state == "permission-gated" {
+            if diagnosis[.permAutomation]?.isPermissionGated == true {
               Button("Open Automation Settings") { model.openSettings("Privacy_Automation") }
                 .buttonStyle(MaxButtonStyle(primary: true))
             } else {
@@ -192,9 +189,7 @@ struct ConnectionView: View {
 struct DetailsView: View {
   let model: AppModel
   var body: some View {
-    let inbox =
-      model.diagnosis?.capabilities["live_inbox"]?.state == "supported"
-      ? "Available" : "Not available"
+    let inbox = model.diagnosis?[.liveInbox]?.isSupported == true ? "Available" : "Not available"
     VStack(alignment: .leading, spacing: Space.regular) {
       Card {
         VStack(spacing: Space.tight) {

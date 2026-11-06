@@ -1,47 +1,33 @@
 import Foundation
+import IMessageMaxContract
 
-public struct Diagnosis: Codable, Sendable, Equatable {
-  public struct Database: Codable, Sendable, Equatable {
-    public let accessible: Bool
-    public let status: String
-  }
-  public struct Contacts: Codable, Sendable, Equatable {
-    public let authorized: Bool
-    public let status: String
-  }
-  public struct Capability: Codable, Sendable, Equatable {
-    public let state: String
-    public let detail: String?
-  }
-  public let version: String
-  public let processID: Int32
-  public let status: String
-  public let database: Database
-  public let contacts: Contacts
-  public let capabilities: [String: Capability]
-
-  enum CodingKeys: String, CodingKey {
-    case version, status, database, contacts, capabilities
-    case processID = "process_id"
-  }
-
+/// The companion's reading of the server's `diagnose` reply. Its "ready"
+/// includes sending, which the server's top-level status does not.
+extension DiagnoseResult {
   public var readiness: Readiness {
     if !database.accessible { return .messages }
     if !namesReady { return .contacts }
-    if capabilities["perm_automation"]?.state != "supported"
-      || capabilities["send_text_dm"]?.state != "supported"
-    {
+    if self[.permAutomation]?.isSupported != true || self[.sendTextDM]?.isSupported != true {
       return .sending
     }
     return .ready
   }
 
   public var namesReady: Bool {
-    contacts.authorized && ["authorized", "limited"].contains(contacts.status)
+    contacts.authorized && PermissionStatus.namesAvailable.contains(contacts.status)
+  }
+
+  /// Whether the service already holds `permission`, so asking again is moot.
+  public func grants(_ permission: SetupPermission) -> Bool {
+    switch permission {
+    case .automation: self[.permAutomation]?.isSupported == true
+    case .contacts: namesReady
+    }
   }
 
   public var needsMessagesForSendingCheck: Bool {
-    readiness == .sending && capabilities["perm_automation"]?.detail == "messages_not_running"
+    readiness == .sending
+      && self[.permAutomation]?.detail == PermissionStatus.messagesNotRunning.rawValue
   }
 }
 

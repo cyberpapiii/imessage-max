@@ -1,5 +1,4 @@
 import Foundation
-import Logging
 import MCP
 
 enum IconMetadata {
@@ -16,14 +15,6 @@ enum IconMetadata {
 
         var icon: Icon {
             Icon(src: dataURI, mimeType: mimeType, sizes: [size])
-        }
-
-        var json: [String: Any] {
-            [
-                "src": dataURI,
-                "mimeType": mimeType,
-                "sizes": [size],
-            ]
         }
     }
 
@@ -51,71 +42,28 @@ enum IconMetadata {
         compactToolIcons.map(\.icon)
     }
 
+    /// `icons` as JSON, the one encoding both eras send. Constant, so built once.
+    nonisolated(unsafe) static let serverIconsJSON: [[String: Any]] =
+        JSONRPC.jsonValue(encoding: icons) as? [[String: Any]] ?? []
+
+    /// Adds `serverInfo.icons` to the SDK's `initialize` result. The pinned
+    /// SDK's Server cannot carry icons, and only revisions from
+    /// `LegacyProtocol.serverIconsSince` on define the field.
     static func injectServerIcons(into data: Data) -> Data {
         guard data.contains(serverInfoMarker),
               var object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               var result = object["result"] as? [String: Any],
-              result["protocolVersion"] as? String == MCPProtocolVersion.latest,
+              let version = result["protocolVersion"] as? String,
+              LegacyProtocol.definesServerIcons(version),
               var serverInfo = result["serverInfo"] as? [String: Any],
               serverInfo["icons"] == nil else {
             return data
         }
 
-        serverInfo["icons"] = serverIcons.map(\.json)
+        serverInfo["icons"] = serverIconsJSON
         result["serverInfo"] = serverInfo
         object["result"] = result
 
         return (try? JSONSerialization.data(withJSONObject: object)) ?? data
-    }
-}
-
-actor IconMetadataTransport: Transport {
-    private let base: any Transport
-    private let messageStream: AsyncThrowingStream<Data, Error>
-    private let continuation: AsyncThrowingStream<Data, Error>.Continuation
-    private var receiveTask: Task<Void, Never>?
-    nonisolated let logger: Logger
-
-    init(base: any Transport) {
-        self.base = base
-        self.logger = Logger(
-            label: "mcp.transport.icon-metadata",
-            factory: { _ in SwiftLogNoOpLogHandler() }
-        )
-
-        var continuation: AsyncThrowingStream<Data, Error>.Continuation!
-        self.messageStream = AsyncThrowingStream<Data, Error> { streamContinuation in
-            continuation = streamContinuation
-        }
-        self.continuation = continuation
-    }
-
-    func connect() async throws {
-        try await base.connect()
-        let upstream = await base.receive()
-        receiveTask = Task {
-            do {
-                for try await data in upstream {
-                    continuation.yield(data)
-                }
-                continuation.finish()
-            } catch {
-                continuation.finish(throwing: error)
-            }
-        }
-    }
-
-    func disconnect() async {
-        receiveTask?.cancel()
-        await base.disconnect()
-        continuation.finish()
-    }
-
-    func send(_ data: Data) async throws {
-        try await base.send(IconMetadata.injectServerIcons(into: data))
-    }
-
-    func receive() -> AsyncThrowingStream<Data, Error> {
-        messageStream
     }
 }
