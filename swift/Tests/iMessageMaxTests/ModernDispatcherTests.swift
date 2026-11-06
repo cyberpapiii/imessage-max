@@ -226,13 +226,9 @@ final class ModernDispatcherTests: XCTestCase {
 
     private func registerFakeTool(
         named name: String,
-        handler: @escaping @Sendable ([String: Value]?) async throws -> [Tool.Content] = { _ in
-            [.plainText("ok")]
-        }
+        handler: @escaping @Sendable ([String: Value]?) async throws -> [Tool.Content] = { _ in [.plainText("ok")] }
     ) {
-        definitions.append(
-            ToolDefinition(name: name, description: "test tool", inputSchema: InputSchema.object(properties: [:]), handler: handler)
-        )
+        definitions.append(fakeTool(named: name, handler: handler))
     }
 
     private func modernMeta(protocolVersion: String = "2026-07-28") -> [String: Any] {

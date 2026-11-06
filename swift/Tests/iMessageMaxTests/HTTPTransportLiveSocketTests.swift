@@ -121,8 +121,7 @@ final class HTTPTransportLiveSocketTests: XCTestCase {
     }
 
     /// Ending a session must end its SSE response, not just stop writing to
-    /// it. At 5b17dd8 the body closure returned without `writer.finish`, so
-    /// the client never saw the last chunk and the stream hung open.
+    /// it: the client sees the last chunk and the stream closes.
     func testDeletingSessionEndsItsSSEResponse() async throws {
         try await withLiveTransport(channelIdleTimeout: .seconds(5)) { _, port in
             let session = try initializeSession(port: port)
@@ -164,10 +163,8 @@ final class HTTPTransportLiveSocketTests: XCTestCase {
     }
 
     /// SIGTERM must finish promptly while a client holds an SSE stream open.
-    /// At 5b17dd8 the server's graceful shutdown waited for every open
-    /// request, and an SSE GET never ends on its own, so the service never
-    /// exited: under launchd each restart waited out ExitTimeOut and ended
-    /// in SIGKILL.
+    /// An SSE GET never ends on its own, so a shutdown that waits for every
+    /// open request never exits, and launchd ends it with SIGKILL.
     func testGracefulShutdownClosesOpenSSEStreams() async throws {
         try await withLiveTransport(channelIdleTimeout: .seconds(5)) { transport, port in
             let session = try initializeSession(port: port)
@@ -189,10 +186,9 @@ final class HTTPTransportLiveSocketTests: XCTestCase {
         }
     }
 
-    /// An open SSE GET is a live client even when it sends no requests.
-    /// At 35f5d37 only requests refreshed a session, so a client that just
-    /// listened for new-message notifications lost its session, and its
-    /// stream, one session timeout (an hour) after its last call.
+    /// An open SSE GET is a live client even when it sends no requests: a
+    /// client that only listens for new-message notifications keeps its
+    /// session, and its stream, past the session timeout.
     func testOpenSSEStreamKeepsItsSessionAlive() async throws {
         try await withLiveTransport(
             channelIdleTimeout: .seconds(5),
@@ -234,19 +230,11 @@ final class HTTPTransportLiveSocketTests: XCTestCase {
         body: (HTTPTransport, Int) async throws -> Void
     ) async throws {
         let port = try freeLoopbackPort()
-        let transport = HTTPTransport(
-            host: "127.0.0.1",
-            port: port,
-            catalog: makeTestCatalog(),
-            setupPermissions: makeTestSetupPermissions(),
-            configuration: .init(
-                requestTimeout: .seconds(5),
-                channelIdleTimeout: channelIdleTimeout,
-                cleanupInterval: .milliseconds(20),
-                sessionTimeout: sessionTimeout,
-                sseKeepAliveInterval: sseKeepAliveInterval
-            )
-        )
+        var configuration = HTTPTransport.Configuration.test
+        configuration.channelIdleTimeout = channelIdleTimeout
+        configuration.sessionTimeout = sessionTimeout
+        configuration.sseKeepAliveInterval = sseKeepAliveInterval
+        let transport = makeTestTransport(port: port, configuration: configuration)
         try await transport.connect(gracefulShutdownSignals: [])
         do {
             try await waitUntilListening(port: port)
@@ -297,9 +285,7 @@ private func initializeSession(port: Int) throws -> String {
     let fd = try connectLoopback(port: port)
     defer { close(fd) }
     setRecvTimeout(fd, seconds: 2)
-    let body = """
-        {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"tests","version":"1.0"}}}
-        """
+    let body = initializeBody()
     let post = """
         POST / HTTP/1.1\r\n\
         Host: 127.0.0.1\r\n\

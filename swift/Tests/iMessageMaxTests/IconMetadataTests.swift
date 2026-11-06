@@ -20,6 +20,15 @@ final class IconMetadataTests: XCTestCase {
         }
     }
 
+    func testInjectServerIconsAddsIconsForARevisionNewerThanTheLatest() throws {
+        let response = Data(
+            #"{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2026-03-01","serverInfo":{"name":"x","version":"1"},"capabilities":{}}}"#.utf8
+        )
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: IconMetadata.injectServerIcons(into: response)) as? [String: Any])
+        let serverInfo = try XCTUnwrap((object["result"] as? [String: Any])?["serverInfo"] as? [String: Any])
+        XCTAssertNotNil(serverInfo["icons"])
+    }
+
     func testEmbeddedIconsArePNGsMatchingDeclaredSizes() throws {
         let icons = try XCTUnwrap(IconMetadata.icons)
         XCTAssertEqual(icons.map { $0.sizes?.first }, ["64x64", "32x32", "16x16"])

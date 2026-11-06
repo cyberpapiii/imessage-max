@@ -3,9 +3,9 @@ import XCTest
 
 final class AsyncTimeoutTests: XCTestCase {
 
-    /// A task that is already cancelled when it enters sleep must still return.
-    /// At 61e75d9 this hangs: the cancellation handler runs before the
-    /// continuation is armed and marks the gate resumed with nothing to resume.
+    /// A task that is already cancelled when it enters sleep must still
+    /// return, though its cancellation handler runs before the continuation
+    /// is armed.
     func testSleepReturnsWhenTaskIsCancelledBeforeEntry() {
         let finished = expectation(description: "sleep returns after pre-cancellation")
         let task = Task.detached {
@@ -30,8 +30,7 @@ final class AsyncTimeoutTests: XCTestCase {
     }
 
     /// A task cancelled before entering sleep must not leave a timer on the
-    /// global queue: at 639529e arm() resumes but sleep() still calls
-    /// asyncAfter, and the item is retained until its deadline.
+    /// global queue, retained until its deadline.
     func testPreCancelledSleepDoesNotEnqueueTimer() {
         let gate = AsyncTimeout.ResumeGate()
         let finished = expectation(description: "sleep returns")
@@ -54,9 +53,8 @@ final class AsyncTimeoutTests: XCTestCase {
         XCTAssertLessThan(elapsed, .seconds(2))
     }
 
-    /// Every sleep must free its gate once it returns. At 33e20cb the gate
-    /// held the work item and the work item captured the gate, so each
-    /// sleep leaked a gate, a work item and a continuation canary.
+    /// Every sleep must free its gate once it returns; a gate and its work
+    /// item holding each other would leak both per sleep.
     func testGateIsReleasedAfterSleepCompletes() async {
         let box = WeakBox()
         do {

@@ -61,6 +61,15 @@ final class SetupPermissionTests: XCTestCase {
         }
     }
 
+    func testSetupReplyCarriesTheResolverWord() async throws {
+        let service = SetupPermissionService(
+            resolver: ContactResolver(seedCache: [:], authorization: (false, .denied))
+        )
+        let reply = try await service.request(.contacts)
+        XCTAssertEqual(reply.status, .denied)
+        XCTAssertFalse(reply.authorized)
+    }
+
     func testNoSetupOnExternalListener() async throws {
         let app = await setupTestTransport(host: "0.0.0.0").application()
         try await app.test(TestingSetup.router) { client in

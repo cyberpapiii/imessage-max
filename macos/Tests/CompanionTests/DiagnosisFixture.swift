@@ -1,0 +1,1 @@
+../MaxCoreTests/DiagnosisFixture.swift

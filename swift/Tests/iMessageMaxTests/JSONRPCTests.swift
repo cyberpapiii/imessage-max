@@ -1,5 +1,6 @@
 import XCTest
 import IMessageMaxContract
+import MCP
 @testable import iMessageMax
 
 /// The shared JSON-RPC layer: one parse, one era rule, one error envelope,
@@ -35,8 +36,8 @@ final class JSONRPCTests: XCTestCase {
         XCTAssertEqual(JSONRPCMessage(["method": "tools/list", "id": 1]).era, .legacy)
     }
 
-    /// The Origin/Host rejections were hand-written strings in this exact
-    /// order; the shared builder keeps their bytes.
+    /// The Origin/Host rejections depend on these exact bytes, keys in this
+    /// order.
     func testErrorEnvelopeHasFixedLayout() {
         XCTAssertEqual(
             String(decoding: JSONRPC.error(id: nil, code: .invalidRequest, message: "Origin not allowed"), as: UTF8.self),
@@ -86,6 +87,27 @@ final class JSONRPCTests: XCTestCase {
         XCTAssertEqual(LegacyProtocol.negotiate("1999-01-01"), LegacyProtocol.latest)
         XCTAssertEqual(LegacyProtocol.negotiate(nil), LegacyProtocol.latest)
         XCTAssertEqual(LegacyProtocol.latest, "2025-11-25")
+    }
+
+    func testVersionGatesFollowRevisionDates() {
+        XCTAssertFalse(LegacyProtocol.requiresHeaderAfterInitialize("2025-03-26"))
+        XCTAssertTrue(LegacyProtocol.requiresHeaderAfterInitialize("2025-06-18"))
+        XCTAssertTrue(LegacyProtocol.requiresHeaderAfterInitialize("2025-11-25"))
+        XCTAssertTrue(LegacyProtocol.requiresHeaderAfterInitialize("2026-03-01"))
+
+        XCTAssertFalse(LegacyProtocol.definesServerIcons("2025-06-18"))
+        XCTAssertTrue(LegacyProtocol.definesServerIcons("2025-11-25"))
+        XCTAssertTrue(LegacyProtocol.definesServerIcons("2026-03-01"))
+    }
+
+    func testMCPErrorEnvelopeMatchesTheSDKEncoding() throws {
+        let data = JSONRPC.error(id: 1, MCPError.invalidParams("bad"))
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let error = try XCTUnwrap(json["error"] as? [String: Any])
+        XCTAssertEqual(error["code"] as? Int, -32602)
+        XCTAssertEqual(error["message"] as? String, "Invalid params: bad")
+        XCTAssertEqual((error["data"] as? [String: Any])?["detail"] as? String, "bad")
+        XCTAssertEqual(json["id"] as? Int, 1)
     }
 
     private func captureLog(_ body: () -> Void) -> [String] {

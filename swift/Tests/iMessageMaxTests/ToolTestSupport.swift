@@ -375,6 +375,155 @@ func countQueries(_ body: () async throws -> Void) async rethrows -> Int {
     return Database.queryCountForTesting ?? 0
 }
 
+/// The `id` of every item in `json[key]`.
+func itemIds(_ json: [String: Any], _ key: String, file: StaticString = #filePath, line: UInt = #line) throws -> [String] {
+    try decodeJSONArray(json[key], file: file, line: line).compactMap { $0["id"] as? String }
+}
+
+/// Follows a tool's cursors until it stops returning one, collecting the
+/// `id` of every item under `resultsKey`. Stops after 20 pages.
+func collectPages(
+    _ name: String,
+    _ arguments: [String: Value],
+    resultsKey: String,
+    database: Database,
+    file: StaticString = #filePath, line: UInt = #line
+) async throws -> (ids: [String], pages: Int) {
+    var ids: [String] = []
+    var cursor: String?
+    var pages = 0
+    repeat {
+        var pageArguments = arguments
+        if let cursor { pageArguments["cursor"] = .string(cursor) }
+        let page = try await callTool(name, pageArguments, database: database, file: file, line: line)
+        ids += try decodeJSONArray(page[resultsKey], file: file, line: line).compactMap { $0["id"] as? String }
+        cursor = page["cursor"] as? String
+        XCTAssertEqual(page["more"] as? Bool, cursor != nil, "more must agree with the cursor", file: file, line: line)
+        pages += 1
+    } while cursor != nil && pages < 20
+    return (ids, pages)
+}
+
+// MARK: - Shared tool fixtures
+
+/// Apple-epoch nanoseconds `offset` whole days after 2020-01-06T10:40:00Z,
+/// which is 600,000,000 seconds after the Apple epoch.
+func fixtureDay(_ offset: Int) -> Int64 {
+    (600_000_000 + Int64(offset) * 86_400) * 1_000_000_000
+}
+
+/// One minute in Apple-epoch nanoseconds.
+let appleMinute: Int64 = 60_000_000_000
+
+/// Three chats, "Zebra Club 1" to "Zebra Club 3", with `is_filtered` 0, 1
+/// and 36. Chat N holds one unread "zebra N" (msg_N) from +1555000000N,
+/// newer as N grows.
+func filteredChatsFixture() throws -> ToolTestDatabase {
+    let fixture = try ToolTestDatabase(name: "filtered-chats")
+    let now = AppleTime.fromDate(Date())
+    for (index, isFiltered) in [0, 1, 36].enumerated() {
+        let chat = index + 1
+        try fixture.insertHandle(rowId: chat, handle: "+1555000000\(chat)")
+        try fixture.insertChat(rowId: chat, guid: "filtered-\(chat)", displayName: "Zebra Club \(chat)", isFiltered: isFiltered)
+        try fixture.joinChatHandle(chatId: chat, handleId: chat)
+        try fixture.insertMessage(
+            rowId: chat, guid: "filtered-msg-\(chat)", text: "zebra \(chat)",
+            date: now + Int64(chat) * 1_000_000_000, isFromMe: false, handleId: chat
+        )
+        try fixture.joinChatMessage(chatId: chat, messageId: chat)
+    }
+    return fixture
+}
+
+/// Chat 1 with +15550000001: one attributedBody-only row (msg_1) holding
+/// "off to Lisbon", then `fillerCount` newer attributedBody-only rows.
+func blobTextFixture(fillerCount: Int) throws -> ToolTestDatabase {
+    let fixture = try ToolTestDatabase(name: "blob-text")
+    try fixture.insertHandle(rowId: 1, handle: "+15550000001")
+    try fixture.insertChat(rowId: 1, guid: "iMessage;-;+15550000001")
+    try fixture.joinChatHandle(chatId: 1, handleId: 1)
+    let base = AppleTime.fromDate(Date()) - Int64(fillerCount + 10) * appleMinute
+    try fixture.execute("BEGIN")
+    try fixture.insertMessage(
+        rowId: 1, guid: "HIT", date: base, isFromMe: false, handleId: 1,
+        attributedBody: typedstreamBlob(payload: Array("off to Lisbon".utf8))
+    )
+    try fixture.joinChatMessage(chatId: 1, messageId: 1)
+    for row in 2...(fillerCount + 1) {
+        try fixture.insertMessage(
+            rowId: row, guid: "F\(row)", date: base + Int64(row) * appleMinute, isFromMe: false, handleId: 1,
+            attributedBody: typedstreamBlob(payload: Array("filler \(row)".utf8))
+        )
+        try fixture.joinChatMessage(chatId: 1, messageId: row)
+    }
+    try fixture.execute("COMMIT")
+    return fixture
+}
+
+/// Contacts for `participantsFixture`.
+let aliceAndBob = ["+15550000001": "Alice Smith", "+15550000002": "Bob Brown"]
+
+/// Chats 1-12: DMs with Alice (+15550000001), newest last. Chat 20: Alice
+/// and Bob, older than all of them. Chat 30: a DM with pat@example.com,
+/// the newest.
+func participantsFixture() throws -> ToolTestDatabase {
+    let fixture = try ToolTestDatabase(name: "participants")
+    try fixture.insertHandle(rowId: 1, handle: "+15550000001")
+    try fixture.insertHandle(rowId: 2, handle: "+15550000002")
+    try fixture.insertHandle(rowId: 3, handle: "pat@example.com")
+    let base = AppleTime.fromDate(Date()) - 100 * appleMinute
+    var row = 0
+    func say(_ chat: Int, atMinute minute: Int64, handle: Int) throws {
+        row += 1
+        try fixture.insertMessage(rowId: row, guid: "P\(row)", text: "hello \(row)", date: base + minute * appleMinute, isFromMe: false, handleId: handle)
+        try fixture.joinChatMessage(chatId: chat, messageId: row)
+    }
+    try fixture.insertChat(rowId: 20, guid: "iMessage;+;alice-bob")
+    try fixture.joinChatHandle(chatId: 20, handleId: 1)
+    try fixture.joinChatHandle(chatId: 20, handleId: 2)
+    try say(20, atMinute: 0, handle: 2)
+    for chat in 1...12 {
+        try fixture.insertChat(rowId: chat, guid: "iMessage;-;alice\(chat)")
+        try fixture.joinChatHandle(chatId: chat, handleId: 1)
+        try say(chat, atMinute: Int64(chat), handle: 1)
+    }
+    try fixture.insertChat(rowId: 30, guid: "iMessage;-;pat@example.com")
+    try fixture.joinChatHandle(chatId: 30, handleId: 3)
+    try say(30, atMinute: 50, handle: 3)
+    return fixture
+}
+
+/// Chat 1 is shown and says "volcano trip"; chat 2 is hidden and says
+/// "volcano photos" and "volcano again?"; chat 3 is hidden with no match.
+/// Every message is from me.
+func hiddenMatchesFixture() throws -> ToolTestDatabase {
+    let fixture = try ToolTestDatabase(name: "hidden-matches")
+    let base = AppleTime.fromDate(Date()) - 60 * appleMinute
+    let texts = [1: ["volcano trip"], 2: ["volcano photos", "volcano again?"], 3: ["nothing here", "still nothing"]]
+    var row = 0
+    for chat in 1...3 {
+        try fixture.insertHandle(rowId: chat, handle: "+1555000000\(chat)")
+        try fixture.insertChat(rowId: chat, guid: "iMessage;-;\(chat)", isFiltered: chat == 1 ? 0 : 1)
+        try fixture.joinChatHandle(chatId: chat, handleId: chat)
+        for text in texts[chat] ?? [] {
+            row += 1
+            try fixture.insertMessage(rowId: row, guid: "H\(row)", text: text, date: base + Int64(row) * appleMinute, isFromMe: true)
+            try fixture.joinChatMessage(chatId: chat, messageId: row)
+        }
+    }
+    return fixture
+}
+
+/// Chat 1, "iMessage;-;+15550000001", with handle 1 (+15550000001) joined
+/// and no messages.
+func directChatFixture(name: String = "direct-chat") throws -> ToolTestDatabase {
+    let fixture = try ToolTestDatabase(name: name)
+    try fixture.insertHandle(rowId: 1, handle: "+15550000001")
+    try fixture.insertChat(rowId: 1, guid: "iMessage;-;+15550000001")
+    try fixture.joinChatHandle(chatId: 1, handleId: 1)
+    return fixture
+}
+
 // MARK: - HTTP bodies
 
 func decodeJSONString(from buffer: ByteBuffer) throws -> String {

@@ -3,8 +3,8 @@ import MCP
 import XCTest
 @testable import iMessageMax
 
-/// Regression coverage for the still-open product items closed after the thermos sweep:
-/// mime `has:` filters, FindChat group/content, most_active.
+/// `has:` filters by attachment mime type, find_chat by group and content,
+/// and list_chats' most_active sort.
 final class ProductOpenItemsTests: XCTestCase {
 
     // MARK: - has:images mime filter

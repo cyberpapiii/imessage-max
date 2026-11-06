@@ -12,7 +12,7 @@ final class ParticipantCountTests: XCTestCase {
         try f.joinChatHandle(chatId: 1, handleId: 1)
         try f.joinChatHandle(chatId: 1, handleId: 1)
         try f.joinChatHandle(chatId: 1, handleId: 2)
-        let date = Int64(Date().timeIntervalSinceReferenceDate * 1_000_000_000)
+        let date = AppleTime.fromDate(Date())
         try f.insertMessage(rowId: 1, guid: "m1", text: "hi", date: date, isFromMe: false, handleId: 1)
         try f.joinChatMessage(chatId: 1, messageId: 1)
         return f

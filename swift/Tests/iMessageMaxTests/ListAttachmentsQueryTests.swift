@@ -1,3 +1,4 @@
+import MCP
 import XCTest
 @testable import iMessageMax
 
@@ -11,12 +12,6 @@ import XCTest
 final class ListAttachmentsQueryTests: XCTestCase {
 
     // MARK: - Fixture
-
-    /// Apple epoch nanoseconds for midnight, `offset` days after 2020-01-01.
-    private static func day(_ offset: Int) -> Int64 {
-        let base: Int64 = 600_000_000  // 2020-01-05T00:00:00Z in Apple seconds
-        return (base + Int64(offset) * 86_400) * 1_000_000_000
-    }
 
     /// Chats 1 and 2 hold the bulk of the data. Message 105 is deliberately
     /// joined to both chats, which is rare in a real chat.db but does occur.
@@ -35,12 +30,12 @@ final class ListAttachmentsQueryTests: XCTestCase {
         // ISO-8601 string, which has no sub-second precision.
         // (messageId, chatId, date, isFromMe, handleId)
         let messages: [(Int, Int, Int64, Bool, Int?)] = [
-            (101, 1, Self.day(1), false, 1),
-            (102, 1, Self.day(2), true, nil),
-            (103, 2, Self.day(3), false, 2),
-            (104, 2, Self.day(4), false, 2),
-            (105, 1, Self.day(5), true, nil),
-            (106, 1, Self.day(6), false, 1),
+            (101, 1, fixtureDay(1), false, 1),
+            (102, 1, fixtureDay(2), true, nil),
+            (103, 2, fixtureDay(3), false, 2),
+            (104, 2, fixtureDay(4), false, 2),
+            (105, 1, fixtureDay(5), true, nil),
+            (106, 1, fixtureDay(6), false, 1),
         ]
         for (id, chat, date, fromMe, handle) in messages {
             try fixture.insertMessage(
@@ -78,7 +73,7 @@ final class ListAttachmentsQueryTests: XCTestCase {
         }
 
         // A message with no attachment must never appear in the results.
-        try fixture.insertMessage(rowId: 150, guid: "msg-150", text: "no attachment", date: Self.day(7), isFromMe: false, handleId: 1)
+        try fixture.insertMessage(rowId: 150, guid: "msg-150", text: "no attachment", date: fixtureDay(7), isFromMe: false, handleId: 1)
         try fixture.joinChatMessage(chatId: 1, messageId: 150)
 
         // A reaction carrying an attachment must never appear either.
@@ -86,7 +81,7 @@ final class ListAttachmentsQueryTests: XCTestCase {
             rowId: 151,
             guid: "msg-151",
             text: "liked",
-            date: Self.day(8),
+            date: fixtureDay(8),
             isFromMe: false,
             handleId: 1,
             associatedMessageType: 2000
@@ -141,8 +136,8 @@ final class ListAttachmentsQueryTests: XCTestCase {
     }
 
     func testLargestFirstRanksByTheMessagesBiggestAttachment() async throws {
-        // msg_103 carries a 300-byte and a 700-byte attachment, so it ranks on
-        // 700, above the 900-byte msg_102? No: 900 > 700, so msg_102 leads.
+        // msg_103 carries a 300-byte and a 700-byte attachment and ranks on
+        // 700, below the 900-byte msg_102.
         let response = try await run(try makeFixture(), sort: "largest_first")
         XCTAssertEqual(ids(response), ["msg_102", "msg_103", "msg_104", "msg_106", "msg_105", "msg_101"])
     }
@@ -184,8 +179,8 @@ final class ListAttachmentsQueryTests: XCTestCase {
 
     func testTimeBoundsAreInclusive() async throws {
         let fixture = try makeFixture()
-        let since = try XCTUnwrap(AppleTime.toDate(Self.day(3))).ISO8601Format()
-        let before = try XCTUnwrap(AppleTime.toDate(Self.day(5))).ISO8601Format()
+        let since = try XCTUnwrap(AppleTime.toDate(fixtureDay(3))).ISO8601Format()
+        let before = try XCTUnwrap(AppleTime.toDate(fixtureDay(5))).ISO8601Format()
 
         let windowed = try await run(fixture, since: since, before: before)
         XCTAssertEqual(ids(windowed), ["msg_105", "msg_104", "msg_103"])
@@ -220,5 +215,36 @@ final class ListAttachmentsQueryTests: XCTestCase {
         XCTAssertEqual(ids(response), ["msg_106", "msg_105", "msg_104"])
         XCTAssertTrue(response.more)
         XCTAssertNotNil(response.cursor)
+    }
+
+    // MARK: - Type classification
+
+    /// The SQL type filter puts each attachment in the same kind the
+    /// response labels it with.
+    func testTypeFilterAgreesWithTheKindEachAttachmentIsLabelled() throws {
+        let fixture = try ToolTestDatabase(name: "attachment-kinds")
+        let samples: [(mime: String?, uti: String?, kind: String)] = [
+            ("image/heic", "public.heic", "image"),
+            (nil, "public.png", "image"),
+            ("video/quicktime", "com.apple.quicktime-movie", "video"),
+            ("audio/x-m4a", nil, "audio"),
+            ("application/pdf", "com.adobe.pdf", "pdf"),
+            ("application/msword", nil, "document"),
+            ("text/plain", "public.plain-text", "other"),
+        ]
+        for (index, sample) in samples.enumerated() {
+            XCTAssertEqual(AttachmentType.from(mimeType: sample.mime, uti: sample.uti).rawValue, sample.kind, "\(sample)")
+            try fixture.execute("""
+                INSERT INTO attachment (ROWID, mime_type, uti) VALUES (\(index + 1), \(sample.mime.map { "'\($0)'" } ?? "NULL"), \(sample.uti.map { "'\($0)'" } ?? "NULL"))
+                """)
+        }
+        for kind in ["image", "video", "audio", "pdf", "document"] {
+            let predicate = try XCTUnwrap(AttachmentType.sqlPredicate(for: kind, alias: "a"))
+            let matched: [Int64] = try fixture.database().query("SELECT a.ROWID FROM attachment a WHERE \(predicate) ORDER BY 1") { $0.int(0) }
+            let expected = samples.enumerated().filter { $0.element.kind == kind }.map { Int64($0.offset + 1) }
+            XCTAssertEqual(matched, expected, kind)
+        }
+        XCTAssertNil(AttachmentType.sqlPredicate(for: "any"))
+        XCTAssertNil(AttachmentType.sqlPredicate(for: "other"))
     }
 }

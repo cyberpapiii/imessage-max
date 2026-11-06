@@ -41,6 +41,26 @@ final class AttachmentStagingSecurityTests: XCTestCase {
         return try FileManager.default.contentsOfDirectory(atPath: root.path).count
     }
 
+    /// A symlinked staging root is refused before anything follows the link,
+    /// so the link's target keeps its permissions.
+    func testSymlinkedStagingRootIsRefusedBeforeItIsChmodded() throws {
+        let target = scratch.appendingPathComponent("target", isDirectory: true)
+        try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o755])
+        let root = scratch.appendingPathComponent("root", isDirectory: true)
+        try symlink(root, to: target)
+        let sourceFile = scratch.appendingPathComponent("payload.txt")
+        try Data("payload".utf8).write(to: sourceFile)
+
+        let linkedStager = OutgoingFileStager(root: root)
+        let source = try linkedStager.openSource(sourceFile.path)
+        defer { source.close() }
+        XCTAssertThrowsError(try linkedStager.stage(source)) { error in
+            guard case SendError.invalidParams = error else { return XCTFail("\(error)") }
+        }
+        let permissions = try FileManager.default.attributesOfItem(atPath: target.path)[.posixPermissions] as? Int
+        XCTAssertEqual(permissions, 0o755, "the link's target must not be re-permissioned")
+    }
+
     func testAliasPrefixesNormalizeToPrivate() {
         XCTAssertEqual(SecurePath.absoluteLexicalPath("/tmp/x.png"), "/private/tmp/x.png")
         XCTAssertEqual(SecurePath.absoluteLexicalPath("/var/folders/a/b.png"), "/private/var/folders/a/b.png")

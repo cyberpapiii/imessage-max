@@ -282,6 +282,39 @@ final class GetContextToolTests: XCTestCase {
         XCTAssertEqual(response.before.map(\.id), ["msg_200", "msg_201"])
         XCTAssertEqual(response.after.map(\.id), ["msg_203"])
     }
+
+    // MARK: - Text and chat resolution
+
+    func testContainsFindsBlobTextBehindMoreThanTheScanCapOfBlobRows() async throws {
+        let fixture = try blobTextFixture(fillerCount: 5_200)
+        let context = try await callTool("get_context", ["chat_id": "chat1", "contains": "lisbon"], database: fixture.database())
+        let message = try XCTUnwrap(context["message"] as? [String: Any], "\(context)")
+        XCTAssertEqual(message["id"] as? String, "msg_1")
+    }
+
+    /// A message joined to two chats belongs to the lower-numbered one, in
+    /// get_context and in list_attachments under either sort.
+    func testContextAndListAttachmentsNameTheMessagesHomeChat() async throws {
+        let fixture = try ToolTestDatabase(name: "home-chat")
+        try fixture.insertHandle(rowId: 1, handle: "+15550000001")
+        // The higher chat id is inserted first, so an unordered pick lands on it.
+        try fixture.insertChat(rowId: 9, guid: "SMS;-;+15550000001", serviceName: "SMS")
+        try fixture.insertChat(rowId: 3, guid: "iMessage;-;+15550000001")
+        try fixture.insertMessage(rowId: 1, guid: "g1", text: "\u{FFFC}", date: 700_000_000_000_000_000, isFromMe: false, handleId: 1)
+        try fixture.joinChatMessage(chatId: 9, messageId: 1)
+        try fixture.joinChatMessage(chatId: 3, messageId: 1)
+        try fixture.insertAttachment(rowId: 1, filename: "/nonexistent/a.pdf", mimeType: "application/pdf", uti: "com.adobe.pdf")
+        try fixture.joinMessageAttachment(messageId: 1, attachmentId: 1)
+
+        let context = try await callTool("get_context", ["message_id": "msg_1"], database: fixture.database())
+        XCTAssertEqual((context["chat"] as? [String: Any])?["id"] as? String, "chat3")
+
+        for sort in ["recent_first", "largest_first"] {
+            let listed = try await callTool("list_attachments", ["sort": .string(sort)], database: fixture.database())
+            let chat = try decodeJSONArray(listed["messages"]).first?["chat"] as? [String: Any]
+            XCTAssertEqual(chat?["id"] as? String, "chat3", sort)
+        }
+    }
 }
 
 private func makeLongChatFixture(messageCount: Int) throws -> ToolTestDatabase {

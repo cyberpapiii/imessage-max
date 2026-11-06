@@ -38,8 +38,8 @@ final class DatabaseErrorHandlingTests: XCTestCase {
     func testExtraParameterFailsBindInsteadOfRunning() throws {
         let fixture = try ToolTestDatabase()
         let db = fixture.database()
-        // One placeholder-less statement, one param: sqlite3_bind_int64 returns
-        // SQLITE_RANGE. At 639529e the code ignores it and returns one row.
+        // One placeholder-less statement, one param: sqlite3_bind_int64
+        // returns SQLITE_RANGE, which must fail the query, not be ignored.
         XCTAssertThrowsError(
             try db.query("SELECT 1", params: [1]) { _ in 0 }
         ) { error in
@@ -58,6 +58,15 @@ final class DatabaseErrorHandlingTests: XCTestCase {
 
         let falseRows = try db.query("SELECT 1 WHERE ? = 1", params: [false]) { _ in 0 }
         XCTAssertEqual(falseRows.count, 0, "false should bind as 0 and not match WHERE ? = 1")
+    }
+
+    // MARK: - Access check
+
+    func testCheckAccessOnAReadableDatabaseIsAccessible() throws {
+        let fixture = try ToolTestDatabase(name: "check-access")
+        let access = Database.checkAccess(path: fixture.path)
+        XCTAssertEqual(access.status, .accessible)
+        XCTAssertTrue(access.ok)
     }
 
     // MARK: - Missing database
@@ -139,9 +148,8 @@ final class DatabaseErrorHandlingTests: XCTestCase {
         )
     }
 
-    // MARK: - Recovery without restart (plan 082)
+    // MARK: - Recovery without restart
 
-    /// 2026-09-01: the launchd service ran 14 h with permission_denied.
     /// The Database itself must never cache a failed open; once the file
     /// becomes readable the same instance must serve the next query.
     func testPermissionDeniedIsRetriedOnTheNextQuery() throws {

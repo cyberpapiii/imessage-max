@@ -15,6 +15,13 @@ final class StructuredContentValueTests: XCTestCase {
         XCTAssertEqual(built, decoded, "Mismatch for \(json)", file: file, line: line)
     }
 
+    func testStructuredContentIsOnlyEverAnObject() {
+        XCTAssertNotNil(ToolCallDispatch.structuredContent(from: [.plainText(#"{"a":1}"#)]))
+        XCTAssertNil(ToolCallDispatch.structuredContent(from: [.plainText("[1,2]")]))
+        XCTAssertNil(ToolCallDispatch.structuredContent(from: [.plainText(#""text""#)]))
+        XCTAssertNil(ToolCallDispatch.structuredContent(from: [.plainText("{}"), .plainText("{}")]))
+    }
+
     func testScalarsMatchTheDecoder() throws {
         for json in [
             "{\"v\":null}",

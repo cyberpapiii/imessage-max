@@ -3,8 +3,7 @@ import MCP
 @testable import iMessageMax
 
 /// Every `tools/call` leaves one stderr line with the tool, lane, outcome and
-/// duration, and never its arguments. Before this there was no record of how
-/// long a call took or how it ended, only an era line saying one arrived.
+/// duration, and never its arguments.
 final class CallLogTests: XCTestCase {
     private var definitions: [ToolDefinition] = []
 
@@ -65,6 +64,6 @@ final class CallLogTests: XCTestCase {
         _ name: String,
         handler: @escaping @Sendable ([String: Value]?) async throws -> [Tool.Content]
     ) {
-        definitions.append(ToolDefinition(name: name, description: "test", inputSchema: InputSchema.object(properties: [:]), handler: handler))
+        definitions.append(fakeTool(named: name, handler: handler))
     }
 }

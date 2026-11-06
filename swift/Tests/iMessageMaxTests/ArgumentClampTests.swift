@@ -3,10 +3,10 @@ import MCP
 import XCTest
 @testable import iMessageMax
 
-/// Regression tests for plan 042. Each method feeds a tool the argument that
-/// used to trap the whole launchd service (Int64 overflow in a multiply or a
-/// Date conversion, or `prefix` on a negative count) and asserts the call
-/// returns a normal, decodable response instead.
+/// Each method feeds a tool an argument that could trap the whole launchd
+/// service (Int64 overflow in a multiply or a Date conversion, or `prefix`
+/// on a negative count) and asserts the call returns a normal, decodable
+/// response instead.
 final class ArgumentClampTests: XCTestCase {
 
     // MARK: - Fixture

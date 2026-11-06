@@ -114,8 +114,8 @@ final class MessageWatcherTests: XCTestCase {
     }
 
     /// chat.db unreadable at startup must not switch live notifications off
-    /// for the life of the process. At f005283 start() threw, the caller
-    /// logged it, and nothing ever tried again.
+    /// for the life of the process: the watcher keeps trying until it can
+    /// read the database.
     func testStartsWatchingOnceTheDatabaseBecomesReadable() async throws {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("watcher-late-\(UUID().uuidString)")
@@ -151,9 +151,9 @@ final class MessageWatcherTests: XCTestCase {
         XCTAssertEqual(collected.withLock { $0 }, [4])
     }
 
-    /// A replaced chat.db (restore, reset, re-sync) restarts ROWIDs low.
-    /// At f005283 the watcher kept the old maximum and stayed silent until
-    /// new rows passed it.
+    /// A replaced chat.db (restore, reset, re-sync) restarts ROWIDs low. The
+    /// watcher resets its maximum rather than staying silent until new rows
+    /// pass the old one.
     func testResetsWhenTheDatabaseIsReplaced() async throws {
         let fixture = try makeWalFixture()
         try fixture.insertMessage(rowId: 20, guid: "old-20", text: "old", date: 1, isFromMe: false, handleId: 1)

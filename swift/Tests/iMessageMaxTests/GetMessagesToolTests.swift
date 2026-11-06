@@ -92,7 +92,7 @@ final class GetMessagesToolTests: XCTestCase {
         try fixture.insertHandle(rowId: 1, handle: "+15550000001")
         try fixture.insertChat(rowId: 1, guid: "iMessage;-;+15550000001")
         try fixture.joinChatHandle(chatId: 1, handleId: 1)
-        let base = Int64(Date().timeIntervalSinceReferenceDate * 1_000_000_000) - 3_600_000_000_000
+        let base = AppleTime.fromDate(Date().addingTimeInterval(-3600))
         for (rowId, words) in [(1, "Volcano trip on Friday"), (2, "nothing to see")] {
             try fixture.insertMessage(
                 rowId: rowId, guid: "g\(rowId)", date: base + Int64(rowId), isFromMe: false, handleId: 1,
@@ -381,7 +381,7 @@ final class GetMessagesToolTests: XCTestCase {
         XCTAssertNotNil(attachments.first?["id"] as? String)
     }
 
-    // Plan 049: the GUID-substring fallback binds the caller's text into a
+    // The GUID-substring fallback binds the caller's text into a
     // LIKE pattern. Without escaping, "%" (or "_", or "") matches every chat
     // and hands back the first row's messages.
     func testChatIdWildcardDoesNotMatchEveryChat() async throws {
@@ -505,7 +505,7 @@ final class GetMessagesToolTests: XCTestCase {
             rowId: 1,
             guid: "explicit-filtered-msg",
             text: "still visible",
-            date: Int64(Date().timeIntervalSinceReferenceDate * 1_000_000_000),
+            date: AppleTime.fromDate(Date()),
             isFromMe: false,
             handleId: 1
         )
@@ -536,6 +536,72 @@ final class GetMessagesToolTests: XCTestCase {
             XCTAssertNil(message["reply_count"])
             XCTAssertNil(message["edited"])
         }
+    }
+
+    // MARK: - Paging and participants
+
+    func testUnansweredPagesPastNonQuestions() async throws {
+        let fixture = try directChatFixture(name: "unanswered-paging")
+        let base = AppleTime.fromDate(Date()) - 1_000 * appleMinute
+        try fixture.insertMessage(rowId: 1, guid: "Q", text: "are you coming?", date: base, isFromMe: true)
+        try fixture.joinChatMessage(chatId: 1, messageId: 1)
+        for row in 2...5 {
+            try fixture.insertMessage(rowId: row, guid: "N\(row)", text: "note \(row)", date: base + Int64(row) * appleMinute, isFromMe: true)
+            try fixture.joinChatMessage(chatId: 1, messageId: row)
+        }
+
+        let found = try await collectPages(
+            "get_messages", ["chat_id": "chat1", "unanswered": true, "limit": 1], resultsKey: "messages", database: fixture.database()
+        )
+        XCTAssertEqual(found.ids, ["msg_1"])
+    }
+
+    func testParticipantsFindTheOnlyChatWithEveryoneBehindTenNewerCandidates() async throws {
+        let fixture = try participantsFixture()
+        let page = try await callTool(
+            "get_messages", ["participants": ["Alice", "Bob"]], database: fixture.database(),
+            resolver: ContactResolver(seedCache: aliceAndBob)
+        )
+        XCTAssertEqual((page["chat"] as? [String: Any])?["id"] as? String, "chat20")
+    }
+
+    func testAnUnresolvedParticipantIsAnError() async throws {
+        let fixture = try participantsFixture()
+        let body = try await callTool(
+            "get_messages", ["participants": ["Alice", "Bob", "Nobody Known"]], database: fixture.database(),
+            resolver: ContactResolver(seedCache: aliceAndBob)
+        )
+        XCTAssertEqual(body["error"] as? String, "invalid_participants")
+        XCTAssertTrue((body["message"] as? String ?? "").contains("Nobody Known"), "\(body)")
+    }
+
+    func testParticipantsAcceptAnEmailInAnyCase() async throws {
+        let fixture = try participantsFixture()
+        let page = try await callTool("get_messages", ["participants": ["Pat@Example.com"]], database: fixture.database())
+        XCTAssertEqual((page["chat"] as? [String: Any])?["id"] as? String, "chat30")
+    }
+
+    /// unanswered counts a message as a question when it ends with an asking
+    /// phrase, in any case and with trailing spaces, even without "?".
+    func testUnansweredTreatsAskingPhraseEndingsAsQuestions() async throws {
+        let fixture = try directChatFixture(name: "unanswered-phrases")
+        let texts = [
+            "send me the address, lmk",
+            "pick it up on the way, can you",
+            "Let Me Know  ",
+            "here's the draft, thoughts",
+            "grab milk please",
+            "sounds good",
+            "see you at six",
+        ]
+        let base = AppleTime.fromDate(Date()) - 600 * appleMinute
+        for (index, text) in texts.enumerated() {
+            try fixture.insertMessage(rowId: index + 1, guid: "q\(index)", text: text, date: base + Int64(index) * 60 * appleMinute, isFromMe: true)
+            try fixture.joinChatMessage(chatId: 1, messageId: index + 1)
+        }
+
+        let json = try await callTool("get_messages", ["chat_id": "chat1", "unanswered": true], database: fixture.database())
+        XCTAssertEqual(Set(try itemIds(json, "messages")), ["msg_1", "msg_2", "msg_3", "msg_4", "msg_5"])
     }
 }
 
