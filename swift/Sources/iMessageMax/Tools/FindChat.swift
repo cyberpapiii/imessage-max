@@ -123,10 +123,14 @@ enum FindChatTool {
             throw ToolFailure("validation_error", "At least one of participants, name, or contains_recent required")
         }
 
-        // filtered_hidden counts the hidden chats the path that answered
-        // would have matched, uncapped by limit.
+        // filtered_hidden counts the distinct hidden chats that any path
+        // tried would have matched, not capped by limit: a path that finds
+        // only hidden chats hands over to the next without losing its count.
+        // contains_recent reads only the newest candidate rows (its shown
+        // results do too), so its hidden count covers the same window over
+        // hidden chats.
         var results: [ChatResult] = []
-        var filteredHidden: Int? = params.includeFiltered ? nil : 0
+        var hiddenMatches: Set<Int64> = []
         let shown = params.includeFiltered ? "1" : SQLFragments.shownChat()
 
         if let participants = params.participants, !participants.isEmpty {
@@ -146,7 +150,13 @@ enum FindChatTool {
                 matchType: "participants"
             ))
             if !params.includeFiltered {
-                filteredHidden = try match.count(db: database, chatPredicate: SQLFragments.hiddenChat(), isGroup: params.isGroup)
+                hiddenMatches.formUnion(try match.chats(
+                    db: database,
+                    chatPredicate: SQLFragments.hiddenChat(),
+                    isGroup: params.isGroup,
+                    order: .recent,
+                    limit: -1  // SQLite reads a negative LIMIT as no limit.
+                ).map(\.id))
             }
         }
 
@@ -166,14 +176,14 @@ enum FindChatTool {
                 matchType: "name"
             ))
             if !params.includeFiltered {
-                filteredHidden = try await findChatsByName(
+                hiddenMatches.formUnion(try await findChatsByName(
                     database: database,
                     name: name,
                     limit: nil,
                     isGroup: params.isGroup,
                     chatPredicate: SQLFragments.hiddenChat(),
                     resolver: resolver
-                ).count
+                ).map(\.id))
             }
         }
 
@@ -192,14 +202,14 @@ enum FindChatTool {
                 matchType: "content"
             ))
             if !params.includeFiltered {
-                filteredHidden = try findChatsByContent(
+                hiddenMatches.formUnion(try findChatsByContent(
                     database: database,
                     content: containsRecent,
                     limit: params.limit,
                     isGroup: params.isGroup,
                     chatPredicate: SQLFragments.hiddenChat(),
                     capsChats: false
-                ).count
+                ).map(\.id))
             }
         }
 
@@ -207,7 +217,7 @@ enum FindChatTool {
         let response = Response(
             chats: results,
             more: false,
-            filteredHidden: filteredHidden
+            filteredHidden: params.includeFiltered ? nil : hiddenMatches.count
         )
 
         return [.plainText(try FormatUtils.encodeJSON(response))]

@@ -74,16 +74,6 @@ struct ParticipantChats {
         }
     }
 
-    /// How many chats match.
-    func count(db: Database, chatPredicate: String? = nil, isGroup: Bool? = nil) throws -> Int {
-        guard !matchesNothing else { return 0 }
-        let (filter, params) = whereClause(chatPredicate: chatPredicate, isGroup: isGroup)
-        let rows: [Int] = try db.query("SELECT COUNT(*) FROM chat c WHERE \(filter)", params: params) {
-            Int($0.int(0))
-        }
-        return rows.first ?? 0
-    }
-
     private func whereClause(chatPredicate: String?, isGroup: Bool?) -> (String, [Any]) {
         var clauses: [String] = []
         var params: [Any] = []
