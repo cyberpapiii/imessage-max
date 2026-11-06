@@ -125,6 +125,18 @@ enum SQLFragments {
             """
     }
 
+    /// The predicate for a `has` argument, nil for an unknown value (no
+    /// filter). Takes search's singular and get_messages' plural spellings.
+    static func has(_ value: String?, _ alias: String = "m") -> String? {
+        switch value {
+        case "link", "links": hasLink(alias)
+        case "attachment", "attachments": hasAttachment(ofType: nil, alias)
+        case "image", "images": hasAttachment(ofType: "image", alias)
+        case "video", "videos": hasAttachment(ofType: "video", alias)
+        default: nil
+        }
+    }
+
     /// Rows whose text might contain `term`. Recent macOS stores most text
     /// only in the attributedBody typedstream, so the blob is searched too:
     /// instr is case-sensitive, hence lower, titled and upper forms. The blob

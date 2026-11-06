@@ -78,12 +78,8 @@ extension GetMessagesTool {
             query.where(match.sql, params: match.bindings)
         }
 
-        // search's singular spellings are accepted too.
-        switch has {
-        case "links", "link": query.where(SQLFragments.hasLink())
-        case "attachments", "attachment": query.where(SQLFragments.hasAttachment())
-        case "images", "image": query.where(SQLFragments.hasAttachment(ofType: "image"))
-        default: break
+        if let has = SQLFragments.has(has) {
+            query.where(has)
         }
 
         query.orderBy("m.date DESC", "m.ROWID DESC")
