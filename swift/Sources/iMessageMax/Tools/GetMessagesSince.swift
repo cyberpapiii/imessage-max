@@ -59,18 +59,18 @@ actor GetMessagesSinceTool {
         return ToolDefinition(
             name: "get_messages_since",
             description: """
-                Messages across all chats with ROWID greater than since_rowid, in arrival order. \
-                Pass the returned next_rowid back as since_rowid to page or poll. next_rowid may be \
-                larger than the last returned message's rowid because consumed rows \
-                (reactions, filtered chats, orphans) advance it. Omit since_rowid to get \
-                only the current cursor. Cursors are only valid against this Mac's chat.db.
+                Get messages across all chats with a ROWID greater than since_rowid, in arrival order. \
+                To page or poll, pass the returned next_rowid back as since_rowid. next_rowid can be \
+                larger than the last returned message's rowid, because rows that are read but not \
+                returned (reactions, filtered chats, orphans) still advance it. Omit since_rowid to \
+                get only the current cursor. A cursor is valid only against this Mac's chat.db.
                 """,
             inputSchema: InputSchema.object(
                 properties: [
                     "since_rowid": .integer(description: "Exclusive ROWID cursor. Omit or pass -1 to return the current cursor only."),
                     "chat_id": .string(description: "Restrict to one chat (chat123 or 123)"),
                     "limit": .integer(description: "Maximum messages to return (\(limit.defaultAndMax))"),
-                    "include_filtered": .boolean(description: "Include junk / unknown-sender chats (default false)"),
+                    "include_filtered": .boolean(description: "Include chats Messages.app has filtered as junk or unknown senders (default false)"),
                     "include_reactions": .boolean(description: "Attach reaction strings to returned messages (default true)"),
                 ]
             ),

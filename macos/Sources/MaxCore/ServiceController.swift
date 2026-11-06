@@ -94,9 +94,9 @@ public actor ServiceController: ServiceControlling {
       if inspection.loaded { try await launchctl(["bootout", target]) }
     case .start, .restart:
       if action == .start && inspection.loaded && inspection.diagnosis != nil { return }
-      // Follow make restart's unload/load sequence. A kickstart can leave
-      // this agent in its 30-second crash throttle after shutdown, which
-      // makes a successful command look like a broken service.
+      // Use the same unload and load sequence as `make restart`. A kickstart
+      // can leave this agent in its 30-second crash throttle after shutdown.
+      // A successful command then looks like a broken service.
       if inspection.loaded { try await launchctl(["bootout", target]) }
       if !config.isInstalled { try await install(config) }
       guard FileManager.default.isExecutableFile(atPath: config.binary.path) else {
@@ -146,7 +146,7 @@ public actor ServiceController: ServiceControlling {
     let signature = try await ProcessRunner.run(
       "/usr/bin/codesign", arguments: ["--verify", bundledHelper.path])
     guard signature.exitCode == 0 else {
-      throw CoreError.commandFailed("The server helper's signature could not be verified.")
+      throw CoreError.commandFailed("macOS could not verify the server helper's signature.")
     }
     try fm.createDirectory(
       at: config.binary.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -154,8 +154,8 @@ public actor ServiceController: ServiceControlling {
       at: config.plist.deletingLastPathComponent(), withIntermediateDirectories: true)
     try fm.createDirectory(
       at: home.appendingPathComponent("Library/Logs"), withIntermediateDirectories: true)
-    // Preserve an existing helper's path and signature. Installation is
-    // idempotent and never replaces a running or privacy-authorized binary.
+    // Keep an existing helper's path and signature. Installing is idempotent,
+    // and it never replaces a running or privacy-authorized binary.
     if !fm.fileExists(atPath: config.binary.path) {
       try fm.copyItem(at: bundledHelper, to: config.binary)
     }

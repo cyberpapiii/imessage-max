@@ -291,7 +291,7 @@ enum MenuBarArtwork {
         bytesPerRow: 0, bitsPerPixel: 0)!
       bitmap.size = NSSize(width: points, height: points)
       let context = NSGraphicsContext(bitmapImageRep: bitmap)!.cgContext
-      // bitmap.size already establishes the representation's backing scale.
+      // bitmap.size already sets the representation's backing scale.
       context.translateBy(x: 0, y: points)
       context.scaleBy(x: 1, y: -1)
       draw(mood, in: context)

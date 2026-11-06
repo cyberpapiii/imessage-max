@@ -120,7 +120,7 @@ final class AttachmentStagingSecurityTests: XCTestCase {
         let varFile = scratch.appendingPathComponent("a.png")
         try "VAR".data(using: .utf8)!.write(to: varFile)
 
-        // The /var alias form, as NSTemporaryDirectory hands it out.
+        // The /var alias form, as NSTemporaryDirectory returns it.
         let viaVarAlias = varFile.path.hasPrefix("/private/var/")
             ? String(varFile.path.dropFirst("/private".count))
             : varFile.path

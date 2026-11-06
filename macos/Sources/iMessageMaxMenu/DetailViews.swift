@@ -20,7 +20,7 @@ struct SetupStep: View {
               Button("Open Settings") { model.openSettings("Privacy_AllFiles") }
                 .buttonStyle(MaxButtonStyle(primary: true))
               Button("Show helper") { model.revealHelper() }
-              Button("I’ve allowed access — restart") { model.perform(.restart) }
+              Button("Restart after allowing") { model.perform(.restart) }
                 .disabled(model.busy != nil)
             }
           } else {
@@ -36,8 +36,8 @@ struct SetupStep: View {
           }
         case .contacts:
           if diagnosis.contacts.authorized {
-            heading("Names need another look")
-            line("Contacts access is allowed, but the names did not load. Restart iMessage Max and check again.")
+            heading("Names did not load")
+            line("Contacts access is allowed. Restart iMessage Max and check again.")
             buttons {
               Button("Restart and check") { model.perform(.restart) }
                 .buttonStyle(MaxButtonStyle(primary: true)).disabled(model.busy != nil)
@@ -97,7 +97,7 @@ struct SetupStep: View {
   }
 
   private var recheck: some View {
-    Button("I’ve allowed access — check again") { Task { await model.refresh() } }
+    Button("Check again after allowing") { Task { await model.refresh() } }
       .disabled(model.busy != nil || model.checking)
   }
 }
@@ -201,7 +201,7 @@ struct DetailsView: View {
         CopyButton(title: "Copy diagnostic report") {
           model.copy(
             model.diagnosticReport,
-            acknowledgement: "Report copied. No messages or contact details included.")
+            acknowledgement: "Report copied. It has no messages or contact details.")
         }
         Button {
           model.openLogs()

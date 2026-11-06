@@ -1,6 +1,6 @@
 # AGENTS.md
 
-This file provides guidance to coding agents (Claude Code, Codex) and contributors.
+This file is guidance for coding agents (Claude Code, Codex) and contributors.
 
 ## Project overview
 
@@ -19,23 +19,23 @@ make install    # builds, signs, restarts the launchd service, verifies health
 
 `make install` replaces the live service that every MCP client uses through plug. Run it when a change needs to reach that service, for example to check behaviour on real data. Code-only work verified by tests does not need it. Before installing, copy the current release binary to a scratch folder so `make restart` can bring it back.
 
-It signs the binary, which is what keeps Full Disk Access from being revoked on every rebuild.
+It signs the binary. The stable signature keeps macOS from revoking Full Disk Access on every rebuild.
 
 Other Makefile targets:
 - `make test` runs the full test suite (`FILTER=ClassOrMethod` for a subset)
 - `make status` checks process, version, signature, health
 - `make logs` tails the stderr log
-- `make restart` restarts the service. Use it, not `launchctl kill`: the plist's `KeepAlive` has `SuccessfulExit` false, so launchd does not relaunch after a clean SIGTERM
+- `make restart` restarts the service. Use it, not `launchctl kill`. The plist's `KeepAlive` has `SuccessfulExit` false, so launchd does not relaunch after a clean SIGTERM
 - `make clean` removes debug artifacts and clears logs
-- `make setup-signing` is one-time setup for a persistent code signing identity
-- `make version` checks the five version sites agree; `make release-check` runs everything that must pass before tagging (see `docs/RELEASING.md`)
+- `make setup-signing` creates a persistent code signing identity, once per machine
+- `make version` checks that the five version sites agree, and `make release-check` runs everything that must pass before tagging (see `docs/RELEASING.md`)
 - `make install-agent` renders `swift/launchd/local.imessage-max.plist` (binary path and `~/` log paths filled in) into `~/Library/LaunchAgents/` and loads it (do not hand-write the plist)
 
-The server runs as a launchd service (`local.imessage-max`) on port 8080. It auto-starts on login and auto-restarts on crash.
+The server runs as a launchd service (`local.imessage-max`) on port 8080. It starts at login and restarts after a crash.
 
-Clients reach it through plug (HTTP, `protocol = "legacy"`) at `http://127.0.0.1:8080`. After restarting the service, clients may need to reconnect (e.g. `/mcp` in Codex).
+Clients reach it through plug (HTTP, `protocol = "legacy"`) at `http://127.0.0.1:8080`. After restarting the service, clients may need to reconnect (for example with `/mcp` in Codex).
 
-`make build` passes `--build-system native` so the binary stays at `.build/arm64-apple-macosx/release/imessage-max`. Full Disk Access is granted by path, and that is the path the grant names. Swift 6.4's default build system writes elsewhere, so a bare `swift build -c release` binary is not the one launchd runs, and it cannot read chat.db.
+`make build` passes `--build-system native` so the binary stays at `.build/arm64-apple-macosx/release/imessage-max`. macOS grants Full Disk Access by path, and the grant names that path. Swift 6.4's default build system writes elsewhere, so a bare `swift build -c release` binary is not the one launchd runs, and it cannot read chat.db.
 
 ### Manual build and run (without Makefile)
 
@@ -116,17 +116,18 @@ The server serves two MCP protocol eras concurrently on both transports
 - Modern era (MCP 2026-07-28, stateless). `ModernDispatcher`
   (`ModernProtocol.swift`) answers requests that carry the reserved
   `_meta` key `io.modelcontextprotocol/protocolVersion`, plus
-  `server/discover`, the modern probe method. No initialize, no sessions.
-  Implemented at the repo level because no Swift SDK release targets
-  2026-07-28 yet; the pinned swift-sdk still drives the legacy lane only.
+  `server/discover`, the modern probe method. This era has no initialize
+  and no sessions. The repo implements it itself because no Swift SDK
+  release targets 2026-07-28 yet. The pinned swift-sdk still drives only
+  the legacy lane.
 - Legacy era (dated revisions through 2025-11-25, session-based).
   `initialize` and all session traffic pass to the SDK `Server` unchanged.
-  This lane is load-bearing: plug (HTTP, `protocol = "legacy"`), the mcpb
-  stdio bundle, and Codex all use it. Do not remove it without verified
-  proof that every real client has migrated.
+  Plug (HTTP, `protocol = "legacy"`), the mcpb stdio bundle and Codex
+  all use this lane. Do not remove it without verified proof that every
+  real client has migrated.
 
-Era selection is body-driven only (`JSONRPCMessage.era`, the one rule
-both transports use). Real legacy clients (plug) send
+Only the request body selects the era (`JSONRPCMessage.era`, the one
+rule both transports use). Real legacy clients (plug) send
 `Mcp-Method` and `MCP-Protocol-Version` headers on legacy session
 traffic, so header presence must never route a request to the modern
 lane. The regression test for this is
@@ -141,14 +142,14 @@ plus `session=` on legacy HTTP). Neither carries arguments or
 credentials. Every stderr line starts with an ISO 8601 UTC timestamp,
 and startup logs a `Started version=... pid=... transport=...` line.
 
-Not implemented, by design (rationale in
+These features are not implemented, by design (rationale in
 `plans/018-mcp-2026-07-28-dual-era.md`): prompts, resources, completion,
 logging capability, subscriptions/listen, MRTR (input-required results),
 requestState, Tasks, MCP Apps, OAuth (loopback-only posture), and
 `x-mcp-header` tool annotations.
 
-Conformance (official suite @0.2.0-alpha.11, both eras) runs with a documented
-expected-failures baseline. The suite is pinned to that alpha tag because it tracks the 2026-07-28 draft the modern lane implements; npm `latest` (0.1.16) does not.
+The official conformance suite (@0.2.0-alpha.11) runs against both eras with a
+documented expected-failures baseline. The suite is pinned to that alpha tag because it tracks the 2026-07-28 draft the modern lane implements; npm `latest` (0.1.16) does not.
 
 ```bash
 npx @modelcontextprotocol/conformance@0.2.0-alpha.11 server --url http://127.0.0.1:8080 \
@@ -157,10 +158,10 @@ npx @modelcontextprotocol/conformance@0.2.0-alpha.11 server --url http://127.0.0
   --suite active --expected-failures docs/conformance-baseline.yml
 ```
 
-Rollback: the modern lane is additive, but it is no longer a few
-self-contained files. Removing it means routing every message to the legacy
-lane in `HTTPTransport.handlePost` and `DualEraStdio.start` (and dropping
-`ModernProtocol.swift`); the shared JSON-RPC and startup code stays.
+To roll back the modern lane, route every message to the legacy lane in
+`HTTPTransport.handlePost` and `DualEraStdio.start`, and drop
+`ModernProtocol.swift`. The lane is additive, but it is no longer a few
+self-contained files. The shared JSON-RPC and startup code stays.
 
 ## Critical implementation details
 
@@ -168,41 +169,41 @@ lane in `HTTPTransport.handlePost` and `DualEraStdio.start` (and dropping
 
 Sleeping Swift tasks abort intermittently inside the launchd-run service
 (`swift_task_dealloc` / "freed pointer was not the last allocation").
-Use Dispatch timers instead: `AsyncTimeout.sleep` for tool code, or the
-cancellable `DispatchSourceTimer` pattern in
-`PendingRequestRegistry.store` (not `asyncAfter`: a cancelled
-asyncAfter work item stays enqueued until its deadline and retains each
-request's timeout timer under load). This crashed production on
-2026-06-11 (send-confirmation timeout path); do not reintroduce.
-`LaunchdSafetyTests` enforces it.
+Use Dispatch timers instead. Use `AsyncTimeout.sleep` in tool code, or
+the cancellable `DispatchSourceTimer` pattern in
+`PendingRequestRegistry.store`. Do not use `asyncAfter` for a timer that
+can be cancelled. A cancelled asyncAfter work item stays enqueued until
+its deadline, and under load it retains each request's timeout timer. `Task.sleep` crashed production on
+2026-06-11 in the send-confirmation timeout path. Do not reintroduce it.
+`LaunchdSafetyTests` enforces this rule.
 
 ### Send contract (no confirmation gate)
 
 The `send` tool is agent-native (plan 017):
 
 - An exact destination sends immediately, then verifies against chat.db.
-  Result is `confirmed`, `uncertain`, `mismatch`, `failed_delivery`,
+  The result is `confirmed`, `uncertain`, `mismatch`, `failed_delivery`,
   `partial_failure`, or `sent`.
 - An ambiguous destination returns status `ambiguous` and sends nothing.
   Invalid input returns status `failed` and sends nothing.
-- The `confirm` parameter is deprecated and inert: accepted for
-  compatibility, ignored.
+- The `confirm` parameter is deprecated and has no effect. The server
+  accepts it for compatibility and ignores it.
 - File transfers keep the bounded Messages.app observation states
   (`pending_confirmation` while a transfer hasn't completed).
 
-Interactive human-confirmation popups (MCP elicitation) and server-side send
-gating are intentionally not part of the send path: authorization happens in
-the user's conversation with the agent and in harness-level tool approval,
-and a send tool must return synchronously. Do not reintroduce either without
+The send path deliberately has no interactive human-confirmation popups (MCP
+elicitation) and no server-side send gating. Authorization happens in the
+user's conversation with the agent and in harness-level tool approval, and a
+send tool must return synchronously. Do not reintroduce either without
 operator sign-off and proof of a working elicitation round trip for the
 current session.
 
 The full status vocabulary that agents read is the `send` tool description in
-`Send/SendTool.swift`; `CONCEPTS.md` defines the terms.
+`Send/SendTool.swift`. `CONCEPTS.md` defines the terms.
 
 ### Image handling
 
-Images are returned using MCP's native image content type (not base64 in JSON text) to avoid token bloat. Use the `.plainText`/`.plainImage` helpers defined in `Server/ServerExtensions.swift` (annotations-free wrappers over the SDK's content cases):
+Tools return images as MCP's native image content type, not as base64 in JSON text, to keep token counts down. Use the `.plainText`/`.plainImage` helpers defined in `Server/ServerExtensions.swift` (annotations-free wrappers over the SDK's content cases):
 ```swift
 return [
     .plainText(try FormatUtils.encodeJSON(metadata)),
@@ -221,7 +222,7 @@ return [
 ## Required macOS permissions
 
 - Full Disk Access, for ~/Library/Messages/chat.db
-- Contacts, for AddressBook resolution (granted via `--request-contacts-access`; headless starts never prompt). MCP clients such as Claude desktop launch the server disclaimed, so only a grant held by the imessage-max executable itself counts; a Contacts switch for Terminal or the client app does not. A bare `swift build` omits the embedded Info.plist and macOS then cannot grant Contacts at all; diagnose reports `missing_usage_description`
+- Contacts, for AddressBook resolution (granted with `--request-contacts-access`, because headless starts never prompt). MCP clients such as Claude desktop launch the server disclaimed, so only a grant held by the imessage-max executable itself counts. A Contacts switch for Terminal or the client app does not count. A bare `swift build` omits the embedded Info.plist, macOS then cannot grant Contacts at all, and diagnose reports `missing_usage_description`
 - Automation, for Messages.app (sending only)
 
 ## Maintainer notes

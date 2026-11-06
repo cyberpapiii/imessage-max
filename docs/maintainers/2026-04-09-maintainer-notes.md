@@ -1,30 +1,30 @@
 # Maintainer notes, 2026-04-09
 
-This note captures a few design choices that are correct for the current project shape, but easy to second-guess later if the context gets lost.
+This note records a few design choices that are right for the project as it is today but easy to second-guess later without the context.
 
-## 1. The Tool Catalog Is Immutable
+## 1. The tool catalog is immutable
 
-`ToolCatalog` (`swift/Sources/iMessageMax/Server/ToolCatalog.swift`) is built once at startup and handed to every lane: legacy stdio, legacy HTTP sessions, and the modern dispatcher. It is `@unchecked Sendable` because it holds only `let` properties after `init`.
+The server builds `ToolCatalog` (`swift/Sources/iMessageMax/Server/ToolCatalog.swift`) once at startup and hands it to every lane: legacy stdio, legacy HTTP sessions, and the modern dispatcher. It is `@unchecked Sendable` because it holds only `let` properties after `init`.
 
 What to remember:
-- add a tool by adding a `ToolDefinition` to the catalog's list; nothing registers tools later
-- two tools with the same name stop the process at startup instead of silently advertising one that never runs
+- to add a tool, add a `ToolDefinition` to the catalog's list; nothing registers tools later
+- two tools with the same name stop the process at startup, so the server never advertises a tool that never runs
 
-## 2. Some Split Files Needed Slightly Wider Access
+## 2. Some split files needed slightly wider access
 
-`GetMessages.swift` and `Search.swift` were split so the main files hold the public flow and the helper-heavy code lives in `GetMessagesInternals.swift` and `SearchInternals.swift`.
+`GetMessages.swift` and `Search.swift` were split. The main files hold the public flow, and the helper code lives in `GetMessagesInternals.swift` and `SearchInternals.swift`.
 
 Why:
 - the original files had become too dense to review and test comfortably
-- the split keeps the outside behavior the same while making the internals easier to work in
+- the split keeps the outside behavior the same and makes the internals easier to work in
 
 What to remember:
-- `db`, `resolver`, and `sessionGapNanoseconds` are no longer private-only because the extracted helper files need them
-- this is a tradeoff in service of maintainability, not a signal that these should become general-purpose shared APIs
+- `db`, `resolver`, and `sessionGapNanoseconds` are no longer private, because the extracted helper files need them
+- this is a tradeoff for maintainability, not a sign that they should become general-purpose shared APIs
 
-## 3. Database `@unchecked Sendable` Is Intentional
+## 3. Database `@unchecked Sendable` is intentional
 
-`Database` stays lightweight and uses connection-per-query access.
+`Database` is a small type that opens one connection per query.
 
 Why this is acceptable here:
 - the object only stores the database path
@@ -32,33 +32,33 @@ Why this is acceptable here:
 - there is no shared mutable connection state
 
 What to remember:
-- this design is a good fit for the current MCP workload
+- this design fits the current MCP workload
 - if the server ever moves toward heavy concurrent query traffic, revisit the database access model before optimizing elsewhere
 
-## 4. `make install` Is Intentionally Opinionated
+## 4. `make install` is intentionally opinionated
 
-The install flow now does more than just build:
+The install flow does more than build:
 - signs the binary
 - restarts the launchd service
 - verifies that the running server matches the new build
 - checks that the running server can read chat.db, and prints the `open -R` command for the Full Disk Access fix when it cannot
 
 Why:
-- this project lives in the messy reality of macOS permissions and local services
-- a "smart" install command saves time and prevents stale-server confusion
+- this project has to deal with macOS permissions and local services
+- an install command that does these checks saves time and avoids confusion from a stale server
 
 What to remember:
 - the longer verification loop is deliberate
-- if this ever starts feeling too heavy, prefer adding a lighter alternate target rather than weakening the safe default
+- if this ever feels too heavy, add a lighter separate target instead of weakening the safe default
 
-## 5. Search And Message Retrieval Now Depend On Fixture-Based Tests
+## 5. Search and message retrieval depend on fixture-based tests
 
-The higher-risk tool behavior is now covered with temporary SQLite databases and seeded resolver data in the test target.
+Tests for the higher-risk tool behavior use temporary SQLite databases and seeded resolver data in the test target.
 
 Why:
-- it proves behavior without touching the real Messages database
-- it keeps tests stable and repeatable
+- they prove behavior without touching the real Messages database
+- they keep tests stable and repeatable
 
 What to remember:
 - when changing `search` or `get_messages`, update the fixtures and behavior tests together
-- if a change only "works" against the live database and cannot be expressed in the fixture harness, that is a warning sign worth slowing down for
+- if a change only "works" against the live database and the fixture tests cannot express it, slow down and find out why

@@ -59,7 +59,7 @@ struct GetAttachment {
 
         return ToolDefinition(
             name: "get_attachment",
-            description: "Get image content by attachment ID. Returns the image at the specified resolution variant: vision (1568px, best for AI analysis), thumb (400px, quick preview), or full (original).",
+            description: "Get an image by attachment ID. Returns the image at the requested resolution variant: vision (1568px, best for AI analysis), thumb (400px, quick preview), or full (original size).",
             inputSchema: inputSchema,
             annotations: Tool.Annotations(
                 title: "Get Attachment",
@@ -135,7 +135,7 @@ struct GetAttachment {
         if !FileManager.default.fileExists(atPath: expandedPath) {
             if let downloaded = await tryDownloadFromiCloud(url: fileURL) {
                 if !downloaded {
-                    throw ToolFailure(code: "attachment_offloaded", body: AttachmentFailure(error: "attachment_offloaded", message: "Attachment is stored in iCloud and download was triggered. Try again in a few seconds.", filename: fileURL.lastPathComponent))
+                    throw ToolFailure(code: "attachment_offloaded", body: AttachmentFailure(error: "attachment_offloaded", message: "The attachment is stored in iCloud, and a download has started. Try again in a few seconds.", filename: fileURL.lastPathComponent))
                 }
             } else {
                 throw ToolFailure("attachment_offloaded", "Attachment has been offloaded from this Mac. Open the conversation in Messages.app to download it from iCloud, then try again.")
@@ -174,7 +174,7 @@ struct GetAttachment {
             throw ToolFailure(code: "unsupported_type", body: AttachmentFailure(error: "unsupported_type", message: "Video attachments are not yet supported with the new variant system. Use list_attachments to see video metadata.", type: attType, filename: displayName, size: attachment.totalBytes))
 
         case .audio, .pdf, .document, .other:
-            throw ToolFailure(code: "unsupported_type", body: AttachmentFailure(error: "unsupported_type", message: "Attachment type '\(attType)' not supported. Only images are supported.", type: attType, filename: displayName, size: attachment.totalBytes))
+            throw ToolFailure(code: "unsupported_type", body: AttachmentFailure(error: "unsupported_type", message: "Attachment type '\(attType)' is not supported. Only images are supported.", type: attType, filename: displayName, size: attachment.totalBytes))
         }
     }
 

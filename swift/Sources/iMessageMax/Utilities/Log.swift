@@ -1,7 +1,7 @@
 import Foundation
 import Synchronization
 
-/// stderr diagnostics. stdout is the MCP stdio channel and must stay clean.
+/// Writes diagnostics to stderr. stdout is the MCP stdio channel and must stay clean.
 enum Log {
     enum Level: String { case info = "INFO", warning = "WARN", error = "ERROR" }
 

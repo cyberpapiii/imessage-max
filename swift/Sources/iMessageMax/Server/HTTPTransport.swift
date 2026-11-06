@@ -412,8 +412,8 @@ actor HTTPTransport {
                         try await writer.write(ByteBuffer(string: event))
                         await sessionManager.touch(sessionId: sessionId)
                     }
-                    // Hummingbird only ends the response on finish. Without
-                    // it a server-side close left the client's stream open.
+                    // Hummingbird ends the response only on finish. Without
+                    // this call, a server-side close left the client's stream open.
                     try await writer.finish(nil)
                 } catch {}
                 await sseManager.unregister(connectionId: connectionId)
@@ -458,7 +458,7 @@ actor HTTPTransport {
     private func handleSetupPermission(request: Request) async throws -> Response {
         guard HostBindingPolicy.isLoopback(host) else { return Response(status: .notFound) }
         // Browser requests are never setup requests, including loopback origins.
-        // The explicit header forces a browser preflight; no CORS is offered.
+        // The explicit header forces a browser preflight, and the server offers no CORS.
         guard request.headers[.origin] == nil,
               request.headers[.setupRequest] == SetupPermissionRoute.headerValue else {
             return Response(status: .forbidden)

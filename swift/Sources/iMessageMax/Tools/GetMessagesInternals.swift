@@ -34,7 +34,7 @@ extension GetMessagesTool {
                     participantCount: chat.participantCount
                 )
             },
-            suggestion: "Please specify chat_id to target the exact conversation."
+            suggestion: "Specify chat_id to target the exact conversation."
         ))
     }
 

@@ -190,7 +190,7 @@ final class DualEraStdioTests: XCTestCase {
         let forwarded = try await iterator.next()
         XCTAssertEqual(
             forwarded, notJSON,
-            "unparseable input must pass through untouched; the SDK owns the legacy error shape"
+            "unparseable input must pass through untouched; the SDK produces the legacy error shape"
         )
 
         let sentCount = await base.sentCount()

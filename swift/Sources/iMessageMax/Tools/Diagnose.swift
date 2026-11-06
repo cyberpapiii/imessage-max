@@ -21,22 +21,23 @@ enum DiagnoseTool {
         return ToolDefinition(
             name: DiagnoseResult.toolName,
             description: """
-                Use diagnose before attempting any send, attachment, or live inbox \
-                (push notifications when new messages land; `supported` only in \
-                HTTP mode while the watcher runs) operation. \
+                Call diagnose before you attempt any send, attachment, or live inbox operation. \
+                Live inbox means push notifications when new messages arrive. It is `supported` \
+                only in HTTP mode while the watcher runs. \
                 Check capabilities.<key>.state for each feature you plan to use. \
                 "supported" means the feature is available and probed on this install. \
                 "unsupported" means the feature does not exist. Do not attempt it or offer \
-                it to the user. "permission-gated" means a macOS permission must \
-                be granted before the feature can work; show the fix field to the user. \
+                it to the user. "permission-gated" means the user must grant a macOS permission \
+                before the feature can work. Show the fix field to the user. \
                 "unverified" means diagnose could not determine the state. The feature may \
-                work; try it, but do not promise the user it will. "unavailable" means the \
+                work, so try it, but do not promise the user it will. "unavailable" means the \
                 current backend has no implementation. Do not attempt it and do not tell the \
-                user it is coming. The database.accessible field governs whether \
-                all read tools (get_messages, list_chats, search, etc.) will work. A "needs_setup" \
-                top-level status means at least one required permission is missing; resolve it \
-                before proceeding. Use chat.name in user-facing summaries and chat ids only in \
-                follow-up tool calls. Refer to chats by name when talking to users.
+                user it is coming. The database.accessible field tells you whether \
+                all read tools (get_messages, list_chats, search, and the rest) will work. \
+                A top-level status of "needs_setup" means at least one required permission \
+                is missing. Resolve it before you continue. Use chat.name in user-facing \
+                summaries and use chat ids only in follow-up tool calls. Refer to chats by \
+                name when talking to users.
                 """,
             inputSchema: inputSchema,
             outputSchema: OutputSchema.object,
@@ -92,8 +93,8 @@ enum DiagnoseTool {
             if dbStatus == .permissionDenied {
                 databaseFix = fullDiskAccessFix()
             } else if dbStatus == .databaseNotFound {
-                databaseFix = "iMessage database not found. Ensure iMessage is set up and " +
-                    "has sent/received at least one message."
+                databaseFix = "iMessage database not found. Set up iMessage and make sure it " +
+                    "has sent or received at least one message."
             }
         }
 
@@ -150,14 +151,14 @@ enum DiagnoseTool {
         let sendFileGroup = automationOk
             ? Capability(
                 state: .supported,
-                note: "Group file routing cannot be verified before send; check the delivered_to and chat fields in the response")
+                note: "The server cannot verify group file routing before the send. Check the delivered_to and chat fields in the response.")
             : automation
 
         let verifiedSend: Capability
         if !dbOk {
             verifiedSend = Capability(
                 state: .permissionGated,
-                fix: "Grant Full Disk Access to enable DB re-read verification after sends")
+                fix: "Grant Full Disk Access so the server can re-read the database to verify each send.")
         } else if automationOk {
             verifiedSend = Capability(state: .supported, detail: "db_reread")
         } else {
@@ -170,7 +171,7 @@ enum DiagnoseTool {
         let attachmentsOffloaded = dbOk
             ? Capability(
                 state: .supported,
-                note: "Offloaded files trigger iCloud download; retry get_attachment after a few seconds")
+                note: "Requesting an offloaded file starts an iCloud download. Retry get_attachment after a few seconds.")
             : Capability(state: .permissionGated)
 
         let permFullDisk: Capability

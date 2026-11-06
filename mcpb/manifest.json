@@ -4,7 +4,7 @@
   "display_name": "iMessage Max",
   "version": "1.8.0",
   "description": "Local MCP server for reading, searching, and sending iMessages on macOS.",
-  "long_description": "iMessage Max exposes intent-aligned MCP tools for local iMessage search, conversation inspection, attachment retrieval, unread triage, and Messages.app sending. It requires macOS Messages data access and runs locally.",
+  "long_description": "iMessage Max gives AI agents MCP tools that match what users ask for: search local iMessages, inspect a conversation, fetch attachments, triage unread messages, and send through Messages.app. It runs locally and needs access to the macOS Messages data.",
   "author": {
     "name": "Rob Dezendorf",
     "url": "https://github.com/cyberpapiii"

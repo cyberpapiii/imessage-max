@@ -101,7 +101,7 @@ final class SendResolverTests: XCTestCase {
         }
         XCTAssertFalse(
             message.contains("Invalid phone number format"),
-            "Short numeric destination should not die as a phone parse: \(message)"
+            "A short numeric destination should not fail as a phone number parse: \(message)"
         )
         XCTAssertEqual(message, "No contact found matching '55555'")
     }

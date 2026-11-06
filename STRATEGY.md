@@ -3,7 +3,7 @@ name: iMessage Max
 last_updated: 2026-05-18
 ---
 
-# iMessage Max Strategy
+# iMessage Max strategy
 
 ## Target problem
 
@@ -11,17 +11,17 @@ AI assistants do not have access to the user's personal communication. For Apple
 
 ## Our approach
 
-Be the local foundation for agent access to Messages. Everything stays on the Mac, and the read side keeps the detail Messages actually carries instead of flattening it to plain text. Agents should reason about iMessage the way a person does, in terms of conversations, people, open loops, and shared context, rather than in terms of database tables or AppleScript quirks.
+Be the local foundation for agent access to Messages. Everything stays on the Mac, and the read side keeps the detail Messages carries instead of flattening it to plain text. Agents should reason about iMessage the way a person does, in terms of conversations, people, open loops, and shared context, rather than in terms of database tables or AppleScript quirks.
 
 ## Who it's for
 
-Primary: knowledge workers who already run local agents. They want their agent to read and manage iMessage with the same context they have.
+The primary users are knowledge workers who already run local agents. They want their agent to read and manage iMessage with the same context they have.
 
 ## Key metrics
 
-- Successful delegated workflows: rate of real user intents completed end to end. Catch up, find context, draft a reply, send safely, inspect shared media.
-- Tool calls per intent: average MCP calls for common workflows, against the 3-5 call baseline.
-- Verified send rate: percentage of sends returning `confirmed` rather than `uncertain`, `failed`, or `mismatch`.
+- Successful delegated workflows: the rate of real user intents completed end to end, such as catching up, finding context, drafting a reply, sending safely and inspecting shared media.
+- Tool calls per intent: the average number of MCP calls for common workflows, compared with the 3-5 call baseline.
+- Verified send rate: the percentage of sends that return `confirmed` rather than `uncertain`, `failed`, or `mismatch`.
 - Human correction rate: how often the user has to correct the agent about the person, conversation, context, or action.
 - Time to context: how long an agent takes to answer "what's going on with X?" from Messages.
 

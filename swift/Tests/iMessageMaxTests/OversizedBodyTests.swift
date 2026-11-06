@@ -33,8 +33,8 @@ final class OversizedBodyTests: XCTestCase {
             return XCTFail("Expected .tooLarge, got \(result)")
         }
 
-        // All yields must have been consumed; back-pressure (high watermark 4)
-        // would otherwise keep the producer suspended forever.
+        // Every yield must have been consumed. Otherwise back-pressure (high
+        // watermark 4) would keep the producer suspended forever.
         await producer.value
     }
 

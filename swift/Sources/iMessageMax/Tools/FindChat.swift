@@ -5,7 +5,7 @@ enum FindChatTool {
     static let limit = IntArgument(name: "limit", defaultValue: 5, range: 1...50)
 
     static let name = "find_chat"
-    static let description = "Find a specific chat by participants, name, or recent content when you already have a targeted conversation in mind. Use returned chat ids for follow-up tool calls; when explaining results to the user, refer to chats by name, not by id."
+    static let description = "Find one chat by participants, name, or recent message text when you already know which conversation you want. Use the returned chat ids in follow-up tool calls. When you explain results to the user, refer to chats by name, not by id."
 
 
     static let inputSchema: Value = .object([
@@ -14,15 +14,15 @@ enum FindChatTool {
             "participants": .object([
                 "type": "array",
                 "items": .object(["type": "string"]),
-                "description": "List of participant names or phone numbers to match for a targeted chat lookup",
+                "description": "Participant names or phone numbers to match",
             ]),
             "name": .object([
                 "type": "string",
-                "description": "Chat display name to search for when looking for a specific conversation (fuzzy match)",
+                "description": "Chat display name to search for (fuzzy match)",
             ]),
             "contains_recent": .object([
                 "type": "string",
-                "description": "Text that appears in recent messages for a targeted chat lookup. Scans the most recent 200 rows.",
+                "description": "Text that appears in the chat's recent messages. The lookup scans up to 200 of the most recent matching messages.",
             ]),
             "is_group": .object([
                 "type": "boolean",
@@ -114,7 +114,7 @@ enum FindChatTool {
         let params = Parameters(from: arguments)
 
         guard params.participants != nil || params.name != nil || params.containsRecent != nil else {
-            throw ToolFailure("validation_error", "At least one of participants, name, or contains_recent required")
+            throw ToolFailure("validation_error", "At least one of participants, name, or contains_recent is required")
         }
 
         var results: [ChatResult] = []

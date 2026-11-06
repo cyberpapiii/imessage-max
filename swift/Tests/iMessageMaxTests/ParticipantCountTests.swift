@@ -1,7 +1,7 @@
 import XCTest
 @testable import iMessageMax
 
-/// One person can sit in chat_handle_join twice: a duplicated join row, or an
+/// One person can appear in chat_handle_join twice: a duplicated join row, or an
 /// SMS and an iMessage handle row for the same number. They are one participant.
 final class ParticipantCountTests: XCTestCase {
     private func fixture() throws -> ToolTestDatabase {

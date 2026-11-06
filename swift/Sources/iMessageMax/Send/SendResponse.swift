@@ -113,14 +113,14 @@ struct SendResponse: Encodable, Sendable {
         let followUp = "Use get_messages on \(chat?.id ?? "the intended chat") to confirm."
         return SendResponse(
             .uncertain, disposition: .completed, chat: chat, deliveredTo: deliveredTo,
-            message: "Send accepted by Messages.app but could not be verified in chat.db within the polling window. The message was probably sent. \(followUp)"
+            message: "Messages.app accepted the send, but it did not appear in chat.db within the polling window. The message was probably sent. \(followUp)"
         )
     }
 
     static func mismatch(intendedChat: ChatReference?, actualChatId: Int64, deliveredTo: [String]) -> SendResponse {
         SendResponse(
             .mismatch, disposition: .completed, deliveredTo: deliveredTo,
-            message: "Message was found in a different chat than intended. This is a routing mismatch. Do not treat as confirmed.",
+            message: "The message appeared in a different chat than the intended one. This is a routing mismatch. Do not treat it as confirmed.",
             intendedChat: intendedChat,
             actualChatId: ChatIdentifier.format(actualChatId)
         )
@@ -129,7 +129,7 @@ struct SendResponse: Encodable, Sendable {
     static func failedDelivery(guid: String, errorCode: Int, deliveredTo: [String], chat: ChatReference?) -> SendResponse {
         SendResponse(
             .failedDelivery, disposition: .completed, chat: chat, deliveredTo: deliveredTo,
-            message: "Messages.app accepted the send but chat.db recorded a delivery failure (error \(errorCode)). The message was NOT delivered. Do not tell the user it was sent; check the destination can receive iMessages and consider resending.",
+            message: "Messages.app accepted the send, but chat.db recorded a delivery failure (error \(errorCode)). The message was NOT delivered. Do not tell the user it was sent. Check that the destination can receive iMessages, and consider resending.",
             verifiedMessageGuid: guid
         )
     }
@@ -145,7 +145,7 @@ struct SendResponse: Encodable, Sendable {
     ) -> SendResponse {
         SendResponse(
             .partialFailure, disposition: disposition, chat: chat, deliveredTo: deliveredTo,
-            message: "PARTIAL SEND: \(sentDescriptions.joined(separator: ", ")) already dispatched to Messages.app (not verified) before \(failedDescription) failed. Do NOT resend the already-dispatched payload(s); retry only the failed one.",
+            message: "PARTIAL SEND: the tool dispatched \(sentDescriptions.joined(separator: ", ")) to Messages.app before \(failedDescription) failed, and did not verify them. Do NOT resend the payloads that were already dispatched. Retry only the failed one.",
             error: error
         )
     }

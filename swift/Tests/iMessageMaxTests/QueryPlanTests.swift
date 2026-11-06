@@ -32,9 +32,9 @@ final class QueryPlanTests: XCTestCase {
         XCTAssertEqual(recorded.filter(walksMessages).count, 1, "plans: \(recorded)")
     }
 
-    /// The activity window is read by message date. Given a real chat.db's
-    /// statistics and the hidden-chat predicate, SQLite otherwise starts at
-    /// chats and walks every message.
+    /// The query reads the activity window by message date. Given a real
+    /// chat.db's statistics and the hidden-chat predicate, SQLite otherwise
+    /// starts at chats and walks every message.
     func testActiveConversationsReadsTheWindowByDate() async throws {
         let fixture = try indexedHiddenChatFixture()
         try fixture.execute("""

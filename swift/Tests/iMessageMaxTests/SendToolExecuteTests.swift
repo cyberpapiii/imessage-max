@@ -147,7 +147,7 @@ final class SendToolExecuteTests: XCTestCase {
             let errorMsg = json["error"] as? String
             XCTAssertTrue(
                 errorMsg?.contains("osascript error") == true,
-                "Error field should surface the stub's error message; got \(String(describing: errorMsg))"
+                "Error field should contain the stub's error message; got \(String(describing: errorMsg))"
             )
             XCTAssertEqual(json["disposition"] as? String, "not_started")
             XCTAssertEqual(json["retry_safe"] as? Bool, true)
@@ -294,7 +294,7 @@ final class SendToolExecuteTests: XCTestCase {
 
         let json = try decodeJSONDictionary(from: contents)
         XCTAssertEqual(json["status"] as? String, "confirmed",
-            "Row written to the DM between send and verify must confirm; this exact topology previously produced a false mismatch")
+            "Row written to the DM between send and verify must confirm; this exact setup previously produced a false mismatch")
         XCTAssertEqual(json["verified_message_guid"] as? String, "msg-guid-side-effect")
     }
 
@@ -411,7 +411,7 @@ final class SendToolExecuteTests: XCTestCase {
 
         let json = try decodeJSONDictionary(from: contents)
         XCTAssertEqual(json["status"] as? String, "confirmed",
-            "Long text (>500 chars) without confirm must send immediately")
+            "Long text (over 500 characters) without confirm must send immediately")
         XCTAssertEqual(stub.invocations.count, 1, "Stub should have been invoked exactly once")
     }
 
@@ -492,7 +492,7 @@ final class SendToolExecuteTests: XCTestCase {
             let json = try decodeJSONDictionary(from: contents)
             let label = confirmValue.map { "confirm: \($0)" } ?? "no confirm"
             XCTAssertEqual(json["status"] as? String, "confirmed",
-                "\(label) must be inert; outcome should be identical 'confirmed'")
+                "\(label) must have no effect; the outcome should still be 'confirmed'")
             XCTAssertEqual(stub.invocations.count, 1,
                 "Stub should have been invoked exactly once with \(label)")
         }

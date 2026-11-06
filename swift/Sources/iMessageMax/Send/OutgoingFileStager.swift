@@ -32,19 +32,19 @@ struct OutgoingFileStager: Sendable {
     func openSource(_ filePath: String) throws -> Source {
         let basename = (filePath as NSString).lastPathComponent
         guard let lexical = SecurePath.absoluteLexicalPath(filePath) else {
-            throw SendError.invalidParams("Attachment path for '\(basename)' must be absolute (or start with ~/).")
+            throw SendError.invalidParams("The attachment path for '\(basename)' must be absolute or start with ~/.")
         }
         if SecurePath.hasSymlinkComponent(lexical) {
-            throw SendError.invalidParams("Attachment '\(basename)' is or is behind a symbolic link; pass the real path.")
+            throw SendError.invalidParams("Attachment '\(basename)' is a symbolic link, or a folder in its path is one. Pass the real path.")
         }
         do {
             return Source(path: lexical, handle: try AttachmentSource.openFile(at: lexical))
         } catch AttachmentSource.Failure.symlink {
-            throw SendError.invalidParams("Attachment '\(basename)' is or is behind a symbolic link; pass the real path.")
+            throw SendError.invalidParams("Attachment '\(basename)' is a symbolic link, or a folder in its path is one. Pass the real path.")
         } catch AttachmentSource.Failure.notRegularFile {
             throw SendError.invalidParams("Attachment '\(basename)' must be a regular file.")
         } catch AttachmentSource.Failure.notAbsolute {
-            throw SendError.invalidParams("Attachment path for '\(basename)' must be absolute (or start with ~/).")
+            throw SendError.invalidParams("The attachment path for '\(basename)' must be absolute or start with ~/.")
         } catch {
             throw SendError.fileNotFound(basename)
         }
@@ -53,13 +53,13 @@ struct OutgoingFileStager: Sendable {
     func stage(_ source: Source) throws -> StagedFile {
         let trackingName = source.trackingName
         let ownerOnly: [FileAttributeKey: Any] = [.posixPermissions: 0o700]
-        // Checked before anything is created or chmodded: both follow links,
-        // so a symlinked root would otherwise re-permission its target.
+        // Check this before creating or chmodding anything. Both operations follow
+        // links, so a symlinked root would otherwise change its target's permissions.
         guard !SecurePath.hasSymlinkComponent(root.path) else {
-            throw SendError.invalidParams("Attachment staging directory is behind a symbolic link.")
+            throw SendError.invalidParams("The attachment staging directory, or a folder in its path, is a symbolic link.")
         }
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true, attributes: ownerOnly)
-        try FileManager.default.setAttributes(ownerOnly, ofItemAtPath: root.path)   // pre-existing 0755 roots
+        try FileManager.default.setAttributes(ownerOnly, ofItemAtPath: root.path)   // fixes a root that already exists with 0755
 
         let stagedDirectory = root.appendingPathComponent(UUID().uuidString, isDirectory: true)
         let stagedURL = stagedDirectory.appendingPathComponent(trackingName, isDirectory: false)

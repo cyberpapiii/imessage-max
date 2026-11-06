@@ -1,7 +1,7 @@
-// Modern-era (MCP 2026-07-28) dispatcher. The pinned swift-sdk speaks the
-// legacy initialize/session protocol only, so the stateless per-request era
-// is implemented here, independent of transport. Era selection is
-// `JSONRPCMessage.era`; HTTP header validation stays in HTTPTransport.
+// Modern-era (MCP 2026-07-28) dispatcher. The pinned swift-sdk supports only
+// the legacy initialize/session protocol, so this file implements the
+// stateless per-request era, independent of transport. `JSONRPCMessage.era`
+// selects the era, and HTTP header validation stays in HTTPTransport.
 import Foundation
 import IMessageMaxContract
 import MCP

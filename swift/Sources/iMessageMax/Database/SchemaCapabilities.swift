@@ -35,9 +35,9 @@ struct SchemaCapabilities: Sendable, Equatable {
         self.present = present
     }
 
-    /// Probe an open connection. Throws `DatabaseError.queryFailed` if a
-    /// PRAGMA cannot be prepared (a missing table reads as an empty set,
-    /// not an error, so every flag for that table is false).
+    /// Probes an open connection. Throws `DatabaseError.queryFailed` if a
+    /// PRAGMA cannot be prepared. A missing table reads as an empty set, not
+    /// an error, so every flag for that table is false.
     init(probing conn: OpaquePointer) throws {
         var columnsByTable: [String: Set<String>] = [:]
         for table in Set(Column.allCases.map(\.table)) {

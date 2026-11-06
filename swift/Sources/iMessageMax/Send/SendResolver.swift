@@ -44,7 +44,7 @@ struct SendResolver: Sendable {
             }
 
             guard let guid = identity.guid, !guid.isEmpty else {
-                return .failure("Chat has no guid and cannot be targeted exactly: \(chatId)")
+                return .failure("The chat has no guid, so the tool cannot target it exactly: \(chatId)")
             }
 
             guard !identity.participants.isEmpty else {

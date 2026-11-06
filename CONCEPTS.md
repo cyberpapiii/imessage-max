@@ -1,37 +1,37 @@
 # Concepts
 
-Shared domain vocabulary for this project: entities, named processes, and status concepts that mean something specific here. It started with the core terms and grows as the ce-compound and ce-compound-refresh processes turn up new ones. Direct edits are fine. This is a glossary, not a spec and not a place to park loose notes.
+This file defines the terms that mean something specific in this project: entities, named processes and statuses. It started with the core terms. The ce-compound and ce-compound-refresh processes add new terms as they find them, and direct edits are fine. It is a glossary. Do not use it as a spec or as a place for loose notes.
 
 ## Sending
 
-- **Agent-native send contract**: The send tool's behavioral contract. An exact destination sends immediately, an ambiguous one is refused, and the result is verified after the send. There is no server-side confirmation gate and no interactive step. Refusal keys on ambiguity (which the server can detect), not riskiness (which is a judgment that belongs to the user's conversation with the agent and the client's tool-approval step).
+- **Agent-native send contract**: The rules the send tool follows. It sends to an exact destination immediately, refuses an ambiguous one, and verifies the result after the send. There is no server-side confirmation gate and no interactive step. The tool refuses on ambiguity, which the server can detect. It does not refuse on risk, because judging risk belongs to the user's conversation with the agent and to the client's tool-approval step.
 
-- **Verified send**: Post-send verification where the server re-reads the Messages database to prove what actually happened to a sent message, instead of trusting that an accepted send succeeded.
+- **Verified send**: After a send, the server re-reads the Messages database to prove what happened to the message. It does not assume that an accepted send succeeded.
 
-- **Exact destination**: A send target that resolves to exactly one conversation: a known chat id, or a participant lookup with a single match. Anything else is ambiguous and refused rather than guessed.
+- **Exact destination**: A send target that resolves to exactly one conversation: a known chat id, or a participant lookup with a single match. The server treats anything else as ambiguous and refuses it instead of guessing.
 
 ## Send statuses
 
-- **confirmed**: The outbound row was found in chat.db within the verification window with no error; the strongest success state, carrying the verified message id as evidence. It is not a delivery receipt.
+- **confirmed**: The server found the outbound row in chat.db within the verification window, with no error. This is the strongest success state, and it carries the verified message id as evidence. It is not a delivery receipt.
 
-- **uncertain**: Transport accepted the send but verification could not find the message within the polling window; follow up by reading the conversation rather than retrying.
+- **uncertain**: The transport accepted the send, but verification could not find the message within the polling window. Follow up by reading the conversation instead of retrying.
 
-- **mismatch**: Verification found the message in a different conversation than intended; never treated as success.
-- **failed_delivery**: Verification found the sent message recorded with a delivery error; the message did not deliver. Treated as a failure, with the message id and error code as evidence.
-- **partial_failure**: A send carrying several payloads dispatched some of them before a later one failed; the message lists which were dispatched and which failed. Never blind-retry the whole call. Retry only the failed payload.
+- **mismatch**: Verification found the message in a different conversation than the intended one. Never treat it as success.
+- **failed_delivery**: Verification found the sent message with a delivery error recorded, so the message was not delivered. This is a failure, and the result carries the message id and error code as evidence.
+- **partial_failure**: A send with several payloads dispatched some of them before a later one failed. The message lists which payloads were dispatched and which failed. Never retry the whole call blind. Retry only the failed payload.
 
-- **sent**: Transport accepted the send but verification was unavailable, so delivery is unproven.
+- **sent**: The transport accepted the send, but verification was unavailable, so delivery is unproven.
 
-- **pending_confirmation**: A file attachment send was accepted but the file transfer had not finished within the polling window; a normal attachment-only waiting state, not a failure and not a request to retry.
+- **pending_confirmation**: Messages accepted a file attachment send, but the file transfer had not finished within the polling window. This is a normal waiting state for attachments only. It is not a failure and not a request to retry.
 
-- **ambiguous**: The destination could not be resolved to exactly one conversation, so nothing was sent.
+- **ambiguous**: The server could not resolve the destination to exactly one conversation, so it sent nothing.
 
-- **failed**: Invalid input or the send could not be dispatched; nothing was verified because nothing reliable was sent.
+- **failed**: The input was invalid, or the send could not be dispatched. Nothing was verified, because nothing reliable was sent.
 
-- **disposition**: How far the transport got: `completed` (Messages returned from `send`), `not_started` (failure before the Apple event), or `may_have_completed` (failure after, or we cannot tell). Orthogonal to `status`.
+- **disposition**: How far the transport got: `completed` (Messages returned from `send`), `not_started` (failure before the Apple event), or `may_have_completed` (failure after the Apple event, or the server cannot tell). It is independent of `status`.
 
-- **retry_safe**: `true` only when a retry cannot duplicate a message: nothing reached Messages, or chat.db recorded a delivery failure. `false` means do not resend blindly.
+- **retry_safe**: `true` only when a retry cannot duplicate a message, because nothing reached Messages or chat.db recorded a delivery failure. `false` means do not resend blind.
 
 ## Diagnostics
 
-- **Capability contract**: The fixed set of state-based capability keys the diagnose tool reports, each describing what the install can actually do right now (supported, permission-gated, degraded, unverified, unsupported, unavailable) rather than a binary healthy/unhealthy verdict. When a capability cannot be probed, for example when the target application is not running, it reports "unverified" instead of guessing. The keys and state words live in `contract/Sources/IMessageMaxContract/`, shared by the server and the companion app.
+- **Capability contract**: The fixed set of capability keys that the diagnose tool reports. Each key gives a state for what the install can do right now (supported, permission-gated, degraded, unverified, unsupported, unavailable), instead of a single healthy or unhealthy verdict. When the server cannot probe a capability, for example because the target application is not running, the key reports "unverified" instead of guessing. The keys and state words live in `contract/Sources/IMessageMaxContract/`, which the server and the companion app share.

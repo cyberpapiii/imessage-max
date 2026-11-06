@@ -3,8 +3,8 @@ import XCTest
 @testable import iMessageMax
 
 /// `--request-contacts-access` must be attributed to imessage-max itself, not
-/// to the terminal it was typed into: macOS records a TCC grant against the
-/// *responsible* process, and an MCP client like Claude desktop launches the
+/// to the terminal it was typed into. macOS records a TCC grant against the
+/// *responsible* process. An MCP client like Claude desktop launches the
 /// server disclaimed, so a grant that landed on Terminal is invisible to it.
 final class ResponsibilityDisclaimTests: XCTestCase {
     private func responsiblePID(ofChildSpawnedWith disclaim: Bool) throws -> (child: pid_t, responsible: pid_t) {

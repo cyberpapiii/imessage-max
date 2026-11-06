@@ -3,8 +3,8 @@ import Foundation
 /// A tapback's `associated_message_type`. Removing a tapback writes a new
 /// row whose type is the tapback's plus 1000 (3000-3007).
 ///
-/// Live chat.db also has types 4000 and 4001. Their meaning is not
-/// established, so they are neither tapbacks nor removals here.
+/// Live chat.db also has types 4000 and 4001. Their meaning is unknown, so
+/// this code treats them as neither tapbacks nor removals.
 enum ReactionType: Int, CaseIterable {
     case loved = 2000
     case liked = 2001

@@ -1,9 +1,9 @@
 # iMessage Max
 
-MCP server for iMessage, written in Swift and run natively on macOS.
+An MCP server for iMessage, written in Swift. It runs natively on macOS.
 
-This is the source of truth for the current project and its active
-install/update workflow.
+This directory is the source of truth for the current project and its
+install and update workflow.
 
 ## Building
 
@@ -25,13 +25,13 @@ make setup-signing   # one-time: create persistent signing identity
 make install         # build, sign, restart launchd service, verify health
 ```
 
-Why it exists:
+The workflow exists so that:
 - the release binary path stays stable
 - the binary is signed with a persistent local identity, so Full Disk Access
   survives rebuilds
 - the launchd-managed HTTP service restarts automatically
 
-Useful targets:
+Other targets:
 
 ```bash
 make status
@@ -52,7 +52,7 @@ default HTTP port is `8080`.
 
 ### Core components
 
-The file-by-file map lives in the repository `AGENTS.md` (Directory structure), so it is kept in one place.
+The directory map is in the repository's `AGENTS.md`, under "Where things live", so it stays in one place.
 
 ### Dependencies
 
@@ -79,18 +79,19 @@ The file-by-file map lives in the repository `AGENTS.md` (Directory structure), 
 
 ### HTTP mode
 
-Implements MCP Streamable HTTP transport. Legacy sessions (specs through
-2025-11-25) and the stateless 2026-07-28 era share one endpoint, with:
+HTTP mode implements the MCP Streamable HTTP transport. Legacy sessions, for
+spec revisions through 2025-11-25, and the stateless 2026-07-28 era share one
+endpoint. In HTTP mode:
 
-- Per-session Server instances, so each client gets isolated state and can
-  reconnect cleanly
-- Sessions time out after 1 hour and are cleaned up automatically
-- Server-Sent Events carry server-to-client messages
-- Origin validation blocks DNS rebinding; localhost only by default
-- Request bodies must arrive within 30 seconds; a stalled upload gets HTTP 408 with a JSON-RPC error body, and connections idle for 60 seconds are closed
-- JSON-shaped tools return both legacy text content and MCP `structuredContent`
+- Each session gets its own Server instance, so each client has isolated state
+  and can reconnect cleanly.
+- Sessions time out after 1 hour, and the server then removes them.
+- Server-Sent Events carry server-to-client messages.
+- Origin validation blocks DNS rebinding. By default, only localhost is allowed.
+- Request bodies must arrive within 30 seconds. A stalled upload gets HTTP 408 with a JSON-RPC error body, and the server closes connections that are idle for 60 seconds.
+- JSON-shaped tools return both legacy text content and MCP `structuredContent`.
 - Latest-protocol initialize responses include PNG `serverInfo.icons`, and tools
-  carry compact PNG icon metadata
+  carry compact PNG icon metadata.
 
 ```bash
 ./imessage-max --http --port 8080
@@ -116,29 +117,31 @@ curl -X POST http://localhost:8080 \
 ### CLI options
 
 ```
-USAGE: imessage-max [--http] [--host <host>] [--port <port>] [--allow-external-bind]
-                    [--contacts-policy <auto|request|skip>] [--request-contacts-access]
-                    [--request-messages-access]
+USAGE: imessage-max [--http] [--host <host>] [--port <port>] [--allow-external-bind] [--contacts-policy <contacts-policy>] [--request-contacts-access] [--request-messages-access]
 
 OPTIONS:
   --http                  Run with HTTP transport instead of stdio
   --host <host>           Host for HTTP transport (default: 127.0.0.1)
   --port <port>           Port for HTTP transport (default: 8080)
-  --allow-external-bind   Allow a non-loopback host (exposes iMessage data to
-                          the network; no authentication is provided)
-  --contacts-policy <p>   When Contacts access is undetermined: auto (prompt
-                          only from a terminal), request, or skip.
-                          IMESSAGE_MAX_CONTACTS_POLICY=request|skip applies
-                          when auto.
+  --allow-external-bind   Allow binding the HTTP transport to a non-loopback
+                          host (this exposes iMessage data to the network, and
+                          the server provides no authentication)
+  --contacts-policy <contacts-policy>
+                          What to do when Contacts authorization is not yet
+                          determined: auto (prompt only if stdin is a
+                          terminal), request, or skip. With auto, the server
+                          honours IMESSAGE_MAX_CONTACTS_POLICY=request|skip.
+                          (values: auto, request, skip; default: auto)
   --request-contacts-access
                           Ask macOS for Contacts access once, print the
-                          status, and exit. Run it from a terminal.
+                          resulting status, and exit. Run this from a terminal;
+                          the server never prompts when it has no terminal.
   --request-messages-access
                           Ask macOS for Automation access to Messages once,
-                          without sending a message, print the status, and
-                          exit.
-  --version               Show the version
-  -h, --help              Show help
+                          without sending a message, print the resulting
+                          status, and exit.
+  --version               Show the version.
+  -h, --help              Show help information.
 ```
 
 ## Testing
@@ -162,7 +165,7 @@ attachments, and live MCP checks, use:
 
 ## Recommended tool workflows
 
-Tools work best combined into short flows shaped around one question:
+The tools work best in short flows, each built around one question.
 
 Use `chat_id` values such as `chat123` as internal handles for follow-up tool calls and exact sends. In user-facing summaries, refer to conversations by returned chat names, group names, or participant-derived labels.
 
@@ -179,9 +182,9 @@ Use `chat_id` values such as `chat123` as internal handles for follow-up tool ca
 
 ## Performance
 
-- One compiled binary, no interpreter to start
+- The server is one compiled binary, so there is no interpreter to start
 - Image resizing runs on the GPU through Core Image
-- Ships self-contained for local installs and Homebrew
+- The binary is self-contained for both local installs and Homebrew
 
 ## License
 

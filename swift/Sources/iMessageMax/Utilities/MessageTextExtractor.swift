@@ -11,12 +11,13 @@ enum MessageTextExtractor {
         return raw?.replacingOccurrences(of: "\u{FFFC}", with: photoPlaceholder)
     }
 
-    /// Parse Apple typedstream: find "NSString"/"NSMutableString", skip 5 bytes,
-    /// read the length (0x81 = 2-byte, 0x82 = 3-byte, < 0x80 = literal
-    /// single byte), then UTF-8 text of that length.
+    /// Parses an Apple typedstream. It finds "NSString" or "NSMutableString",
+    /// skips 5 bytes, and reads the length. A 0x81 byte means a 2-byte length
+    /// follows, 0x82 means a 3-byte length follows, and a byte below 0x80 is
+    /// the length itself. It then reads that many bytes as UTF-8 text.
     static func extractFromTypedstream(_ data: Data) -> String? {
-        // Re-base: callers may pass a Data slice whose indices don't start
-        // at 0; all math below assumes zero-based absolute indexing.
+        // Re-base the data. Callers may pass a Data slice whose indices don't
+        // start at 0, and all the math below assumes zero-based absolute indexing.
         let data = data.startIndex == 0 ? data : Data(data)
 
         guard let nsStringRange = data.range(of: Data("NSString".utf8)) ??

@@ -22,9 +22,9 @@ enum Osascript {
         do {
             try process.run()
 
-            // Drain pipes concurrently with the exit wait. Reading only after
-            // exit deadlocks when the child fills a ~64KB pipe buffer: the
-            // child blocks on write, never exits, and the wait times out.
+            // Drain both pipes while waiting for exit. If the reads wait until
+            // exit, a child that fills the ~64KB pipe buffer blocks on write and
+            // never exits, so the wait times out.
             final class DrainedOutput: @unchecked Sendable {
                 var stdout = Data()
                 var stderr = Data()
@@ -69,7 +69,7 @@ enum Osascript {
         }
     }
 
-    /// AppleScript spells "can’t" and friends with U+2019.
+    /// AppleScript writes "can’t" and other contractions with U+2019.
     static func normalizingApostrophes(_ text: String) -> String {
         text.replacingOccurrences(of: "\u{2019}", with: "'")
     }

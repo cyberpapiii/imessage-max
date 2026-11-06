@@ -3,16 +3,17 @@ import Foundation
 
 /// Spawns a process that macOS treats as responsible for itself.
 ///
-/// TCC records a grant against the *responsible* process. Run from Terminal,
-/// imessage-max's Contacts request is attributed to Terminal, so the grant
-/// lands there; Claude desktop then launches the server through its
-/// `disclaimer` helper, the server is its own responsible process, and it
-/// finds no grant (`not_determined`). Re-spawning disclaimed makes the
-/// request, the prompt, and the grant all belong to imessage-max.
+/// TCC records a grant against the *responsible* process. When imessage-max
+/// runs from Terminal, macOS attributes its Contacts request to Terminal, so
+/// Terminal gets the grant. Claude desktop launches the server through its
+/// `disclaimer` helper, which makes the server its own responsible process.
+/// That process finds no grant (`not_determined`). When imessage-max
+/// re-spawns itself disclaimed, the request, the prompt and the grant all
+/// belong to imessage-max.
 ///
-/// The two responsibility calls are private libsystem API (the same ones
-/// Claude's disclaimer helper and Chromium use), looked up at runtime so a
-/// missing symbol is an error rather than a link failure.
+/// The two responsibility calls are private libsystem API, the same ones that
+/// Claude's disclaimer helper and Chromium use. This code looks them up at
+/// runtime, so a missing symbol is an error rather than a link failure.
 enum ResponsibilityDisclaim {
     enum Failure: Error, CustomStringConvertible {
         case symbolMissing(String)

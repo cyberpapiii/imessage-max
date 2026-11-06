@@ -24,9 +24,9 @@ func bump(_ centre: Double, _ width: Double, _ x: Double) -> Double {
   return exp(-t * t)
 }
 
-// Everything is drawn on a 1024 canvas with a top-left origin. The tile sits on
-// the standard macOS icon grid, 824 points inside 1024, leaving room for its
-// own shadow.
+// This script draws everything on a 1024 canvas with a top-left origin. The
+// tile follows the standard macOS icon grid: 824 points inside 1024, which
+// leaves room for its own shadow.
 let tile = CGPath(
   roundedRect: CGRect(x: 100, y: 100, width: 824, height: 824), cornerWidth: 186,
   cornerHeight: 186, transform: nil)

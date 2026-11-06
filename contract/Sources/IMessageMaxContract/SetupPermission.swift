@@ -1,14 +1,14 @@
 import Foundation
 
 /// A permission the companion may ask the running service to request.
-/// The request has to come from the service process: TCC records the grant
-/// for whichever process asks.
+/// The request has to come from the service process, because TCC records
+/// the grant for whichever process asks.
 public enum SetupPermission: String, Codable, Sendable, CaseIterable {
   case contacts, automation
 }
 
-/// `POST /setup/permissions`: the native-only route through which the
-/// companion asks the service to put up a macOS permission prompt.
+/// `POST /setup/permissions` is the native-only route that the companion uses
+/// to ask the service to show a macOS permission prompt.
 public enum SetupPermissionRoute {
   public static let pathComponents = ["setup", "permissions"]
   public static let path = "/" + pathComponents.joined(separator: "/")
@@ -22,7 +22,8 @@ public enum SetupPermissionRoute {
   public static let maxRequestBytes = 256
   /// The companion refuses a larger reply.
   public static let maxReplyBytes = 4096
-  /// No such route: an older server, or one bound to a non-loopback host.
+  /// The route does not exist. The server is older, or it is bound to a
+  /// non-loopback host.
   public static let notOfferedStatus = 404
   /// Another permission request is still open.
   public static let busyStatus = 409

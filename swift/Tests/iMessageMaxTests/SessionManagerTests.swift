@@ -77,7 +77,7 @@ final class SessionManagerTests: XCTestCase {
             )
             XCTFail("Server.stop() should drop the transport so notify fails")
         } catch {
-            // Expected: swift-sdk Server.stop() nils `connection`, so send throws.
+            // Expected. swift-sdk Server.stop() sets `connection` to nil, so send throws.
         }
 
         let count = await manager.sessionCount

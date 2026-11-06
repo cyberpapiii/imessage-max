@@ -101,8 +101,8 @@ public enum MaxFace {
       .concatenating(CGAffineTransform(translationX: rect.minX, y: rect.minY))
   }
 
-  /// The round bubble is built once: its corner rounding is too costly to
-  /// redo on every frame of an animation. CGPath is immutable.
+  /// This builds the round bubble once, because its corner rounding costs too
+  /// much to redo on every frame of an animation. CGPath is immutable.
   nonisolated(unsafe) private static let roundBody = MessageMark.round(
     in: CGRect(x: 0, y: 0, width: 24, height: 24))
 

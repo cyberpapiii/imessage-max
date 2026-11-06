@@ -1,8 +1,8 @@
 import Foundation
 
-/// Every dynamic value (handle, chat guid, message text, file path) travels
-/// through `argv`: `system attribute` corrupts non-ASCII input from the
-/// environment, so argv is what keeps Unicode intact end to end.
+/// Every dynamic value (handle, chat guid, message text, file path) reaches
+/// the script through `argv`. Reading it from the environment with
+/// `system attribute` corrupts non-ASCII input, and argv keeps Unicode intact.
 enum SendScript {
     enum TargetKind { case participant, chat }
     enum PayloadKind { case text, file }

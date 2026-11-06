@@ -66,7 +66,7 @@ final class AppleScriptRunnerValidationTests: XCTestCase {
     /// Verbatim stderr from a real failed send: a chat-route send to an
     /// `any;-;` service chat. AppleScript spells "can’t" with the typographic
     /// apostrophe; it must still classify as `.chatNotFound` rather than
-    /// reach the client whole.
+    /// reach the client as raw stderr.
     func testCurlyApostropheStderrClassifiesAsMissingTarget() {
         let stderr = "186:202: execution error: messages got an error: "
             + "can\u{2019}t get chat id \"any;-;+15555550123\". (-1728)"

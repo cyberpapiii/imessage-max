@@ -24,7 +24,7 @@ struct Notice: Equatable {
   var tone = Tone.good
 
   static let resting = Notice(text: "Resting until you start it again.")
-  static let connected = Notice(text: "Connected. You’re back in business.")
+  static let connected = Notice(text: "Connected. iMessage Max is running.")
   static let setupUnfinished = Notice(
     text: "Setup isn’t finished yet. Check the step below.", tone: .neutral)
   static let noLog = Notice(text: "No service log yet. Start iMessage Max first.")
@@ -79,18 +79,18 @@ struct PanelState: Equatable {
     if busy != nil { return "We’ll check that everything worked." }
     return switch phase {
     case .connected(.messages, _): "Give iMessage Max access to Messages on this Mac."
-    case .connected(.contacts, _): "Messages are available. Contacts make names familiar."
+    case .connected(.contacts, _): "Messages are available. Allow Contacts to show names."
     case .connected(.sending, let opensMessages):
       opensMessages
         ? "Open Messages so we can check sending. Your assistants can already read messages."
         : "Your assistants can read messages. Let’s check sending access."
-    case .connected(.ready, _): "Your messages. Your assistants. All on this Mac."
+    case .connected(.ready, _): "Your assistants can now use Messages on this Mac."
     case .stopped(let installed):
       installed
         ? "Start whenever you need your assistants again."
         : "A small helper connects your assistants to Messages."
     case .checking, .disconnected:
-      "Your messages stay on this Mac. We’ll help with the connection."
+      "Your messages stay on this Mac. Let’s check the connection."
     }
   }
 

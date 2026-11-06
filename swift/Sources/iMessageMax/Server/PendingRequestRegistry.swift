@@ -32,11 +32,11 @@ actor PendingRequestRegistry {
         // service, sleeping unstructured Swift tasks have repeatedly aborted in
         // swift_task_dealloc when they wake around the timeout boundary.
         //
-        // Use a cancellable DispatchSourceTimer, not asyncAfter: a cancelled
+        // Use a cancellable DispatchSourceTimer, not asyncAfter. A cancelled
         // asyncAfter work item stays enqueued (timer source, group, blocks,
-        // ~0.65 KiB) until its deadline, so every served request retained its
-        // 300 s timer and sustained load carried tens of MB of dead timers.
-        // Cancelling a timer source releases it immediately.
+        // about 0.65 KiB) until its deadline. Every served request retained
+        // its 300 s timer, and sustained load carried tens of MB of dead
+        // timers. Cancelling a timer source releases it immediately.
         let timer = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
         timer.setEventHandler { [weak self] in
             Task { [weak self] in

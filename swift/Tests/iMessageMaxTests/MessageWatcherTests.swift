@@ -89,7 +89,7 @@ final class MessageWatcherTests: XCTestCase {
         let before = try XCTUnwrap(walInode())
         let seeded = await waitUntil { collected.withLock { $0.contains(6) } }
         XCTAssertTrue(seeded, "watcher did not observe ROWID 6")
-        // Leaving WAL mode needs the watcher's reads out of the way.
+        // Leaving WAL mode has to wait for the watcher's reads to finish.
         try fixture.execute("PRAGMA busy_timeout=2000;")
 
         try fixture.execute("PRAGMA journal_mode=DELETE;")
@@ -102,7 +102,7 @@ final class MessageWatcherTests: XCTestCase {
         XCTAssertTrue(reported, "insert after rotation was not reported")
 
         // The new -wal already exists, so this write raises no directory
-        // event: only a source registered on the new file sees it.
+        // event. Only a source registered on the new file sees it.
         try fixture.insertMessage(rowId: 8, guid: "w-8", text: "later", date: 3, isFromMe: false, handleId: 1)
         let followed = await waitUntil { collected.withLock { $0.contains(8) } }
         XCTAssertTrue(followed, "watcher did not follow the rotated -wal")
@@ -134,7 +134,7 @@ final class MessageWatcherTests: XCTestCase {
         try fixture.execute("PRAGMA journal_mode=DELETE;")
         try FileManager.default.copyItem(atPath: fixture.path, toPath: path)
         watcher.pollNow()
-        XCTAssertEqual(collected.withLock { $0 }, [], "the first read only seeds")
+        XCTAssertEqual(collected.withLock { $0 }, [], "the first read only seeds the watcher and reports nothing")
         XCTAssertTrue(watcher.isLive)
 
         let late = try ToolTestDatabase(attachingTo: path)
