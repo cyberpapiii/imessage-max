@@ -123,8 +123,11 @@ enum FindChatTool {
             throw ToolFailure("validation_error", "At least one of participants, name, or contains_recent required")
         }
 
+        // filtered_hidden counts the hidden chats the path that answered
+        // would have matched, uncapped by limit.
         var results: [ChatResult] = []
         var filteredHidden: Int? = params.includeFiltered ? nil : 0
+        let shown = params.includeFiltered ? "1" : SQLFragments.shownChat()
 
         if let participants = params.participants, !participants.isEmpty {
             // A participant who resolves to nobody matches no chat.
@@ -153,7 +156,7 @@ enum FindChatTool {
                 name: name,
                 limit: params.limit,
                 isGroup: params.isGroup,
-                includeFiltered: params.includeFiltered,
+                chatPredicate: shown,
                 resolver: resolver
             )
             results.append(contentsOf: try await buildChatResults(
@@ -163,12 +166,14 @@ enum FindChatTool {
                 matchType: "name"
             ))
             if !params.includeFiltered {
-                filteredHidden = try countFilteredHiddenByName(
+                filteredHidden = try await findChatsByName(
                     database: database,
                     name: name,
-                    limit: params.limit,
-                    isGroup: params.isGroup
-                )
+                    limit: nil,
+                    isGroup: params.isGroup,
+                    chatPredicate: SQLFragments.hiddenChat(),
+                    resolver: resolver
+                ).count
             }
         }
 
@@ -178,7 +183,7 @@ enum FindChatTool {
                 content: containsRecent,
                 limit: params.limit,
                 isGroup: params.isGroup,
-                chatPredicate: params.includeFiltered ? "1" : SQLFragments.shownChat()
+                chatPredicate: shown
             )
             results.append(contentsOf: try await buildChatResults(
                 database: database,
@@ -192,26 +197,15 @@ enum FindChatTool {
                     content: containsRecent,
                     limit: params.limit,
                     isGroup: params.isGroup,
-                    chatPredicate: SQLFragments.hiddenChat()
+                    chatPredicate: SQLFragments.hiddenChat(),
+                    capsChats: false
                 ).count
-            }
-        }
-
-        var seen = Set<String>()
-        var uniqueResults: [ChatResult] = []
-        for result in results {
-            if !seen.contains(result.chat.id) {
-                seen.insert(result.chat.id)
-                uniqueResults.append(result)
-                if uniqueResults.count >= params.limit {
-                    break
-                }
             }
         }
 
         // No cursor on find_chat; never advertise more pages.
         let response = Response(
-            chats: uniqueResults,
+            chats: results,
             more: false,
             filteredHidden: filteredHidden
         )
@@ -221,26 +215,19 @@ enum FindChatTool {
 
     // MARK: - Private Helpers
 
-    /// SQL fragment filtering chats by handle count before LIMIT (groups > 1, DMs <= 1).
     private static func groupFilterSQL(isGroup: Bool?) -> String {
         guard let isGroup else { return "" }
         return " AND " + (isGroup ? SQLFragments.isGroup() : SQLFragments.isDirect())
     }
 
-    private static func filteredSQL(includeFiltered: Bool) -> String {
-        includeFiltered ? "" : " AND \(SQLFragments.shownChat())"
-    }
-
-    private static func filteredHiddenSQL() -> String {
-        " AND \(SQLFragments.hiddenChat())"
-    }
-
+    /// Chats over `chatPredicate` named `name`, newest first; nil `limit`
+    /// returns every match.
     private static func findChatsByName(
         database: Database,
         name: String,
-        limit: Int,
+        limit: Int?,
         isGroup: Bool?,
-        includeFiltered: Bool,
+        chatPredicate: String,
         resolver: ContactResolver
     ) async throws -> [ChatRow] {
         var chats = try findChatsByDisplayName(
@@ -248,16 +235,16 @@ enum FindChatTool {
             name: name,
             limit: limit,
             isGroup: isGroup,
-            includeFiltered: includeFiltered
+            chatPredicate: chatPredicate
         )
         // Unnamed DMs have no display_name. Match the resolved participant
         // contact with the same word-prefix rule searchByName uses.
-        if chats.count < limit, isGroup != true {
+        if chats.count < limit ?? .max, isGroup != true {
             let unnamed = try await findUnnamedDMsByParticipantName(
                 database: database,
                 name: name,
-                limit: limit - chats.count,
-                includeFiltered: includeFiltered,
+                limit: limit.map { $0 - chats.count },
+                chatPredicate: chatPredicate,
                 resolver: resolver
             )
             var seen = Set(chats.map(\.id))
@@ -271,24 +258,24 @@ enum FindChatTool {
     private static func findChatsByDisplayName(
         database: Database,
         name: String,
-        limit: Int,
+        limit: Int?,
         isGroup: Bool?,
-        includeFiltered: Bool
+        chatPredicate: String
     ) throws -> [ChatRow] {
         let escaped = QueryBuilder.escapeLike(name)
         let groupSQL = groupFilterSQL(isGroup: isGroup)
-        let filterSQL = filteredSQL(includeFiltered: includeFiltered)
         let sql = """
             SELECT c.ROWID as id, c.guid, c.display_name
             FROM chat c
             WHERE c.display_name LIKE ? ESCAPE '\\'
             \(groupSQL)
-            \(filterSQL)
+            AND \(chatPredicate)
             ORDER BY \(SQLFragments.newestChatFirst())
             LIMIT ?
             """
 
-        return try database.query(sql, params: ["%\(escaped)%", limit]) { row in
+        // SQLite reads a negative LIMIT as no limit.
+        return try database.query(sql, params: ["%\(escaped)%", limit ?? -1]) { row in
             ChatRow(
                 id: row.int(0),
                 guid: row.string(1),
@@ -300,16 +287,15 @@ enum FindChatTool {
     private static func findUnnamedDMsByParticipantName(
         database: Database,
         name: String,
-        limit: Int,
-        includeFiltered: Bool,
+        limit: Int?,
+        chatPredicate: String,
         resolver: ContactResolver
     ) async throws -> [ChatRow] {
         let matches = await resolver.searchByName(name)
-        guard !matches.isEmpty, limit > 0 else { return [] }
+        guard !matches.isEmpty, limit ?? 1 > 0 else { return [] }
 
         let handles = Array(Set(matches.map(\.handle)))
         let placeholders = SQLFragments.placeholders(handles.count)
-        let filterSQL = filteredSQL(includeFiltered: includeFiltered)
         let sql = """
             SELECT c.ROWID as id, c.guid, c.display_name
             FROM chat c
@@ -318,13 +304,13 @@ enum FindChatTool {
             WHERE (c.display_name IS NULL OR TRIM(c.display_name) = '')
               AND h.id IN (\(placeholders))
               AND \(SQLFragments.isDirect())
-              \(filterSQL)
+              AND \(chatPredicate)
             GROUP BY c.ROWID
             ORDER BY \(SQLFragments.newestChatFirst())
             LIMIT ?
             """
         var params: [Any] = handles.map { $0 as Any }
-        params.append(limit)
+        params.append(limit ?? -1)
 
         return try database.query(sql, params: params) { row in
             ChatRow(
@@ -337,13 +323,15 @@ enum FindChatTool {
 
     /// Chats whose newest candidate rows contain `content`, newest first.
     /// The scan covers the most recent rows that may contain the text, and
-    /// the decoded text decides.
+    /// the decoded text decides. `limit` sizes the scan and, when
+    /// `capsChats`, caps the chats returned.
     private static func findChatsByContent(
         database: Database,
         content: String,
         limit: Int,
         isGroup: Bool?,
-        chatPredicate: String
+        chatPredicate: String,
+        capsChats: Bool = true
     ) throws -> [ChatRow] {
         let match = SQLFragments.textMayContain(content)
         let fetchLimit = min(max(limit * 10, 50), 200)
@@ -373,34 +361,10 @@ enum FindChatTool {
         for row in rows where row.text?.lowercased().contains(needle) == true {
             if seen.insert(row.chat.id).inserted {
                 chats.append(row.chat)
-                if chats.count >= limit { break }
+                if capsChats && chats.count >= limit { break }
             }
         }
         return chats
-    }
-
-    private static func countFilteredHiddenByName(
-        database: Database,
-        name: String,
-        limit: Int,
-        isGroup: Bool?
-    ) throws -> Int {
-        let escaped = QueryBuilder.escapeLike(name)
-        let groupSQL = groupFilterSQL(isGroup: isGroup)
-        let sql = """
-            SELECT COUNT(*) FROM (
-                SELECT c.ROWID
-                FROM chat c
-                WHERE c.display_name LIKE ? ESCAPE '\\'
-                \(groupSQL)
-                \(filteredHiddenSQL())
-                LIMIT ?
-            )
-            """
-        let rows: [Int] = try database.query(sql, params: ["%\(escaped)%", limit]) { row in
-            Int(row.int(0))
-        }
-        return rows.first ?? 0
     }
 
     private static func buildChatResults(

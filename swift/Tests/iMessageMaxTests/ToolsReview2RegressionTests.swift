@@ -340,4 +340,29 @@ final class ToolsReview2RegressionTests: XCTestCase {
             XCTAssertTrue(error is DatabaseError, "\(error)")
         }
     }
+
+    // MARK: - find_chat filtered_hidden means one thing
+
+    func testFindChatCountsEveryHiddenChatThatWouldHaveMatched() async throws {
+        let f = try ToolTestDatabase(name: "find-hidden")
+        for h in 1...4 { try f.insertHandle(rowId: h, handle: "+1555000000\(h)") }
+        try f.insertChat(rowId: 1, guid: "iMessage;+;shown", displayName: "Spam Fans")
+        try f.insertChat(rowId: 2, guid: "iMessage;+;h1", displayName: "Spam Club 1", isFiltered: 1)
+        try f.insertChat(rowId: 3, guid: "iMessage;+;h2", displayName: "Spam Club 2", isFiltered: 1)
+        try f.insertChat(rowId: 4, guid: "iMessage;-;+15550000004", isFiltered: 1)
+        for (chat, handles) in [(1, [1, 2]), (2, [1, 3]), (3, [2, 3]), (4, [4])] {
+            for h in handles { try f.joinChatHandle(chatId: chat, handleId: h) }
+            try f.insertMessage(rowId: chat, guid: "g\(chat)", text: "zebra crossing", date: base + Int64(chat), isFromMe: false, handleId: handles[0])
+            try f.joinChatMessage(chatId: chat, messageId: chat)
+        }
+        let resolver = ContactResolver(seedCache: ["+15550000004": "Spam Bot"])
+
+        let byName = try await callTool("find_chat", ["name": "Spam", "limit": 1], database: f.database(), resolver: resolver)
+        XCTAssertEqual(try decodeJSONArray(byName["chats"]).count, 1)
+        XCTAssertEqual(byName["filtered_hidden"] as? Int, 3, "two named groups and the unnamed DM")
+
+        let byContent = try await callTool("find_chat", ["contains_recent": "zebra", "limit": 1], database: f.database(), resolver: resolver)
+        XCTAssertEqual(try decodeJSONArray(byContent["chats"]).count, 1)
+        XCTAssertEqual(byContent["filtered_hidden"] as? Int, 3)
+    }
 }
