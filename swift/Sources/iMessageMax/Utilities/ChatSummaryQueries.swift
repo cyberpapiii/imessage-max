@@ -4,11 +4,6 @@ import Foundation
 /// all requested chat IDs at once instead of one query per chat.
 enum ChatSummaryQueries {
 
-    struct Participant {
-        let handle: String
-        let name: String?
-    }
-
     struct LastMessage {
         let info: LastMessageSummary
         let awaitingReply: Bool
@@ -25,7 +20,7 @@ enum ChatSummaryQueries {
         db: Database,
         chatIds: [Int64],
         resolver: ContactResolver
-    ) async throws -> [Int64: [Participant]] {
+    ) async throws -> [Int64: [ResolvedParticipant]] {
         guard !chatIds.isEmpty else { return [:] }
 
         let placeholders = SQLFragments.placeholders(chatIds.count)
@@ -55,12 +50,12 @@ enum ChatSummaryQueries {
         // same handle can be joined to one chat more than once (iCloud sync
         // merges, SMS and iMessage handles that normalize to the same string).
         // DISTINCT above collapses those to one row per handle.
-        var result: [Int64: [Participant]] = [:]
+        var result: [Int64: [ResolvedParticipant]] = [:]
         for chatId in chatIds {
             result[chatId] = []
         }
         for row in rows {
-            result[row.chatId, default: []].append(Participant(handle: row.handle, name: resolvedNames[row.handle]))
+            result[row.chatId, default: []].append(ResolvedParticipant(handle: row.handle, name: resolvedNames[row.handle]))
         }
 
         return result
@@ -71,7 +66,7 @@ enum ChatSummaryQueries {
         db: Database,
         chatId: Int64,
         resolver: ContactResolver
-    ) async throws -> [Participant] {
+    ) async throws -> [ResolvedParticipant] {
         try await participantsByChat(db: db, chatIds: [chatId], resolver: resolver)[chatId] ?? []
     }
 

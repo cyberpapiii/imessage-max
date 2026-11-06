@@ -29,6 +29,8 @@ struct ToolFailure: Error {
         switch error {
         case let failure as ToolFailure:
             self = failure
+        case let notFound as ChatLookup.NotFound:
+            self = .chatNotFound(notFound.chatId)
         case let dbError as DatabaseError:
             self.init(dbError.clientCode, dbError.clientMessage(context: tool))
         default:
