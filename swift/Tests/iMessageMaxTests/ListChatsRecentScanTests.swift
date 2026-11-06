@@ -3,18 +3,12 @@ import XCTest
 
 /// Characterization tests for the recent sort's bounded candidate scan.
 ///
-/// The recent sort no longer aggregates every message in the database. It
-/// groups a date-ordered prefix of the newest messages into candidate chats and
-/// widens that prefix only when the page comes back short. These tests pin the
-/// behavior that has to survive that shortcut: the same ordering, no chat lost
-/// because it fell outside the prefix, and no chat repeated across pages.
+/// The recent sort groups a date-ordered prefix of the newest messages into
+/// candidate chats, rather than aggregating every message, and widens that
+/// prefix only when the page comes back short. These tests pin what the
+/// shortcut has to keep: the same ordering, no chat lost because it fell
+/// outside the prefix, and no chat repeated across pages.
 final class ListChatsRecentScanTests: XCTestCase {
-
-    /// Apple epoch nanoseconds for midnight, `offset` days after 2020-01-05.
-    private static func day(_ offset: Int) -> Int64 {
-        let base: Int64 = 600_000_000  // 2020-01-05T00:00:00Z in Apple seconds
-        return (base + Int64(offset) * 86_400) * 1_000_000_000
-    }
 
     private func ids(_ response: ListChatsResponse) -> [String] {
         response.chats.map(\.id)
@@ -49,7 +43,7 @@ final class ListChatsRecentScanTests: XCTestCase {
                 rowId: messageId,
                 guid: "msg-\(messageId)",
                 text: "hello",
-                date: Self.day(index),
+                date: fixtureDay(index),
                 isFromMe: false,
                 handleId: 1
             )
@@ -80,7 +74,7 @@ final class ListChatsRecentScanTests: XCTestCase {
                 rowId: messageId,
                 guid: "msg-\(messageId)",
                 text: "group",
-                date: Self.day(0) + Int64(messageId),
+                date: fixtureDay(0) + Int64(messageId),
                 isFromMe: false,
                 handleId: 2
             )
@@ -91,7 +85,7 @@ final class ListChatsRecentScanTests: XCTestCase {
                 rowId: messageId,
                 guid: "msg-\(messageId)",
                 text: "dm",
-                date: Self.day(1) + Int64(messageId),
+                date: fixtureDay(1) + Int64(messageId),
                 isFromMe: false,
                 handleId: 1
             )
@@ -115,13 +109,13 @@ final class ListChatsRecentScanTests: XCTestCase {
         }
 
         let messages: [(Int, Int, Int64)] = [
-            (1, 10, Self.day(9)),   // newest overall
-            (2, 10, Self.day(1)),   // older than every other chat's newest
-            (3, 11, Self.day(5)),
-            (4, 12, Self.day(3)),
+            (1, 10, fixtureDay(9)),   // newest overall
+            (2, 10, fixtureDay(1)),   // older than every other chat's newest
+            (3, 11, fixtureDay(5)),
+            (4, 12, fixtureDay(3)),
             // Older than the straddling chat's old message, so the page that
             // would repeat chat10 still comes back full and is never widened.
-            (5, 13, Self.day(0)),
+            (5, 13, fixtureDay(0)),
         ]
         for (messageId, chatId, date) in messages {
             try fixture.insertMessage(

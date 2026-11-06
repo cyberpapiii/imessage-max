@@ -36,7 +36,7 @@ final class ListToolCharacterizationTests: XCTestCase {
         try fixture.joinChatHandle(chatId: 2, handleId: 3)
 
         // Apple epoch: nanoseconds since 2001-01-01
-        let base = Int64(Date().timeIntervalSinceReferenceDate * 1_000_000_000) - 3_600_000_000_000
+        let base = AppleTime.fromDate(Date().addingTimeInterval(-3600))
         let sec: Int64 = 1_000_000_000
 
         // Chat 1 messages
@@ -183,7 +183,7 @@ final class ListToolCharacterizationTests: XCTestCase {
         try fixture.joinChatHandle(chatId: 10, handleId: 1)
 
         // Recent timestamps (within last 24 hours)
-        let now = Int64(Date().timeIntervalSinceReferenceDate * 1_000_000_000)
+        let now = AppleTime.fromDate(Date())
         let sec: Int64 = 1_000_000_000
 
         // 3 from me
@@ -359,7 +359,7 @@ final class ListToolCharacterizationTests: XCTestCase {
         try fixture.joinChatHandle(chatId: 20, handleId: 2)
         try fixture.joinChatHandle(chatId: 20, handleId: 3)
 
-        let now = Int64(Date().timeIntervalSinceReferenceDate * 1_000_000_000)
+        let now = AppleTime.fromDate(Date())
         let sec: Int64 = 1_000_000_000
 
         for i in 0..<2 {
@@ -458,5 +458,62 @@ final class ListToolCharacterizationTests: XCTestCase {
         let twelve = try await queries(limit: 12)
         XCTAssertGreaterThan(three, 0)
         XCTAssertEqual(twelve, three, "a page of 12 ran \(twelve) queries, a page of 3 ran \(three)")
+    }
+
+    // MARK: - get_active_conversations candidates and hidden chats
+
+    /// The chats with enough exchanges are found even when newer chats with
+    /// too few fill the first candidates.
+    func testActiveConversationsFindsQualifyingChatsBehindNewerThinOnes() async throws {
+        let fixture = try ToolTestDatabase(name: "active")
+        let base = AppleTime.fromDate(Date()) - 120 * appleMinute
+        var row = 0
+        func exchange(_ chat: Int, atMinute minute: Int64, rounds: Int) throws {
+            for round in 0..<rounds {
+                for fromMe in [true, false] {
+                    row += 1
+                    try fixture.insertMessage(rowId: row, guid: "A\(row)", text: "t\(row)", date: base + (minute + Int64(round)) * appleMinute,
+                                              isFromMe: fromMe, handleId: fromMe ? nil : chat)
+                    try fixture.joinChatMessage(chatId: chat, messageId: row)
+                }
+            }
+        }
+        for chat in 1...6 {
+            try fixture.insertHandle(rowId: chat, handle: "+1555000000\(chat)")
+            try fixture.insertChat(rowId: chat, guid: "iMessage;-;\(chat)")
+            try fixture.joinChatHandle(chatId: chat, handleId: chat)
+        }
+        try exchange(1, atMinute: 0, rounds: 2)
+        try exchange(2, atMinute: 5, rounds: 2)
+        for chat in 3...6 { try exchange(chat, atMinute: Int64(20 + chat), rounds: 1) }
+
+        let one = try await callTool("get_active_conversations", ["limit": 1, "min_exchanges": 2], database: fixture.database())
+        XCTAssertEqual(try itemIds(one, "conversations"), ["chat2"])
+        XCTAssertEqual(one["more"] as? Bool, true)
+        let all = try await callTool("get_active_conversations", ["limit": 2, "min_exchanges": 2], database: fixture.database())
+        XCTAssertEqual(try itemIds(all, "conversations"), ["chat2", "chat1"])
+        XCTAssertEqual(all["more"] as? Bool, false)
+    }
+
+    /// A hidden chat is left out of get_active_conversations and of an
+    /// unscoped list_attachments; naming it with chat_id still lists it.
+    func testActiveConversationsAndListAttachmentsSkipHiddenChats() async throws {
+        let fixture = try ToolTestDatabase(name: "hidden-active")
+        try fixture.insertHandle(rowId: 1, handle: "spam@example.com")
+        try fixture.insertChat(rowId: 1, guid: "iMessage;-;spam@example.com", isFiltered: 1)
+        try fixture.joinChatHandle(chatId: 1, handleId: 1)
+        let recent = AppleTime.fromDate(Date().addingTimeInterval(-3600))
+        try fixture.insertMessage(rowId: 1, guid: "g1", text: "\u{FFFC}", date: recent, isFromMe: false, handleId: 1)
+        try fixture.insertMessage(rowId: 2, guid: "g2", text: "who is this", date: recent + 1, isFromMe: true)
+        for row in 1...2 { try fixture.joinChatMessage(chatId: 1, messageId: row) }
+        try fixture.insertAttachment(rowId: 1, filename: "/nonexistent/x.pdf", mimeType: "application/pdf", uti: "com.adobe.pdf")
+        try fixture.joinMessageAttachment(messageId: 1, attachmentId: 1)
+
+        let active = try await callTool("get_active_conversations", ["min_exchanges": 1], database: fixture.database())
+        XCTAssertEqual(try itemIds(active, "conversations"), [])
+        let listed = try await callTool("list_attachments", [:], database: fixture.database())
+        XCTAssertEqual(try decodeJSONArray(listed["messages"]).count, 0)
+        let named = try await callTool("list_attachments", ["chat_id": "chat1"], database: fixture.database())
+        XCTAssertEqual(try decodeJSONArray(named["messages"]).count, 1)
     }
 }

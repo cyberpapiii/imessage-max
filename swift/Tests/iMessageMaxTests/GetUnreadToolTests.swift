@@ -1,10 +1,11 @@
+import MCP
 import XCTest
 @testable import iMessageMax
 
 final class GetUnreadToolTests: XCTestCase {
     func testSummaryReportsMoreWhenTruncated() async throws {
         let fixture = try ToolTestDatabase(name: "unread-more")
-        let base = Int64(Date().timeIntervalSinceReferenceDate * 1_000_000_000) - 3_600_000_000_000
+        let base = AppleTime.fromDate(Date().addingTimeInterval(-3600))
         let sec: Int64 = 1_000_000_000
 
         for index in 1...6 {
@@ -54,30 +55,7 @@ final class GetUnreadToolTests: XCTestCase {
     }
 
     func testFilteredChatsAreHiddenByDefault() async throws {
-        let fixture = try ToolTestDatabase(name: "unread-filtered")
-        let now = Int64(Date().timeIntervalSinceReferenceDate * 1_000_000_000)
-        let filters = [0, 1, 36]
-        for (index, isFiltered) in filters.enumerated() {
-            let chatId = index + 1
-            try fixture.insertHandle(rowId: chatId, handle: "+1555000000\(chatId)")
-            try fixture.insertChat(
-                rowId: chatId,
-                guid: "unread-filtered-\(chatId)",
-                displayName: "Unread Filtered \(chatId)",
-                isFiltered: isFiltered
-            )
-            try fixture.joinChatHandle(chatId: chatId, handleId: chatId)
-            try fixture.insertMessage(
-                rowId: chatId,
-                guid: "unread-filtered-msg-\(chatId)",
-                text: "unread \(chatId)",
-                date: now + Int64(chatId) * 1_000_000_000,
-                isFromMe: false,
-                isRead: false,
-                handleId: chatId
-            )
-            try fixture.joinChatMessage(chatId: chatId, messageId: chatId)
-        }
+        let fixture = try filteredChatsFixture()
 
         let tool = GetUnread(database: fixture.database(), contactResolver: makeSeededResolver())
 
@@ -114,5 +92,55 @@ final class GetUnreadToolTests: XCTestCase {
         XCTAssertEqual(messagesShown.messages.count, 3)
         XCTAssertEqual(messagesShown.totalUnread, 3)
         XCTAssertNil(messagesShown.filteredHidden)
+    }
+
+    // MARK: - Totals and paging
+
+    func testTotalsCountEveryChatNotJustThePage() async throws {
+        let fixture = try ToolTestDatabase(name: "unread-totals")
+        let base = AppleTime.fromDate(Date()) - 60 * appleMinute
+        var row = 0
+        for (chat, unread) in [(1, 3), (2, 2), (3, 1)] {
+            try fixture.insertHandle(rowId: chat, handle: "+1555000000\(chat)")
+            try fixture.insertChat(rowId: chat, guid: "iMessage;-;\(chat)")
+            try fixture.joinChatHandle(chatId: chat, handleId: chat)
+            for _ in 0..<unread {
+                row += 1
+                try fixture.insertMessage(rowId: row, guid: "U\(row)", text: "u\(row)", date: base + Int64(row) * appleMinute, isFromMe: false, handleId: chat)
+                try fixture.joinChatMessage(chatId: chat, messageId: row)
+            }
+        }
+
+        let summary = try await callTool("get_unread", ["format": "summary", "limit": 1], database: fixture.database())
+        let messages = try await callTool("get_unread", ["format": "messages", "limit": 1], database: fixture.database())
+        XCTAssertEqual(try decodeJSONArray(summary["chats"]).count, 1)
+        for page in [summary, messages] {
+            XCTAssertEqual(page["total_unread"] as? Int, 6)
+            XCTAssertEqual(page["chats_with_unread"] as? Int, 3)
+            XCTAssertEqual(page["more"] as? Bool, true)
+        }
+    }
+
+    func testMessagesPageWithACursorToTheNewest() async throws {
+        let fixture = try directChatFixture(name: "unread-cursor")
+        let recent = AppleTime.fromDate(Date().addingTimeInterval(-3600))
+        for row in 1...5 {
+            try fixture.insertMessage(rowId: row, guid: "g\(row)", text: "u\(row)", date: recent + Int64(row), isFromMe: false, handleId: 1)
+            try fixture.joinChatMessage(chatId: 1, messageId: row)
+        }
+
+        var seen: [String] = []
+        var cursor: String?
+        for page in 0..<3 {
+            var args: [String: Value] = ["format": "messages", "limit": 2]
+            if let cursor { args["cursor"] = .string(cursor) }
+            let json = try await callTool("get_unread", args, database: fixture.database())
+            seen += try itemIds(json, "messages")
+            cursor = json["cursor"] as? String
+            XCTAssertEqual(json["more"] as? Bool, cursor != nil)
+            XCTAssertEqual(json["total_unread"] as? Int, 5, "every page reports the whole total")
+            XCTAssertEqual(cursor == nil, page == 2)
+        }
+        XCTAssertEqual(seen, (1...5).map { "msg_\($0)" })
     }
 }

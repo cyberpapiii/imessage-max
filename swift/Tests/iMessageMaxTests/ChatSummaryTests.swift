@@ -186,4 +186,57 @@ final class ChatSummaryTests: XCTestCase {
             (chat["id"] as? String).map { ($0, chat) }
         })
     }
+
+    // MARK: - awaiting_reply and group events
+
+    /// A group event after my reply is neither their message nor an
+    /// exchange: the chat is not awaiting my reply in list_chats,
+    /// get_chat_details or get_active_conversations.
+    func testGroupEventIsNotAwaitingReplyOrAnExchange() async throws {
+        let fixture = try groupFixture(name: "awaiting-events")
+        let recent = AppleTime.fromDate(Date().addingTimeInterval(-3600))
+        try fixture.insertMessage(rowId: 1, guid: "g1", text: "dinner?", date: recent, isFromMe: false, isRead: true, handleId: 1)
+        try fixture.insertMessage(rowId: 2, guid: "g2", text: "yes", date: recent + 1_000, isFromMe: true)
+        try fixture.insertMessage(rowId: 3, guid: "g3", text: nil, date: recent + 2_000, isFromMe: false, isRead: true, handleId: 2, itemType: 3)
+        for row in 1...3 { try fixture.joinChatMessage(chatId: 1, messageId: row) }
+
+        let listed = try await callTool("list_chats", [:], database: fixture.database())
+        let chat = try XCTUnwrap(try decodeJSONArray(listed["chats"]).first)
+        XCTAssertNotEqual(chat["awaiting_reply"] as? Bool, true)
+
+        let details = try await callTool("get_chat_details", ["chat_id": "chat1"], database: fixture.database())
+        XCTAssertNotEqual(details["awaiting_reply"] as? Bool, true)
+
+        let active = try await callTool("get_active_conversations", ["min_exchanges": 1], database: fixture.database())
+        let conversation = try XCTUnwrap(try decodeJSONArray(active["conversations"]).first)
+        XCTAssertEqual(conversation["awaiting_reply"] as? Bool, false)
+        let activity = try XCTUnwrap(conversation["activity"] as? [String: Any])
+        XCTAssertEqual(activity["their_msgs"] as? Int, 1)
+    }
+
+    /// A group event of mine after their question does not count as my
+    /// reply: the chat is still awaiting it.
+    func testAwaitingReplyLooksPastAGroupEventToTheirMessage() async throws {
+        let fixture = try groupFixture(name: "awaiting-past-event")
+        let recent = AppleTime.fromDate(Date().addingTimeInterval(-3600))
+        try fixture.insertMessage(rowId: 1, guid: "g1", text: "yes", date: recent, isFromMe: true)
+        try fixture.insertMessage(rowId: 2, guid: "g2", text: "dinner?", date: recent + 1_000, isFromMe: false, isRead: true, handleId: 1)
+        try fixture.insertMessage(rowId: 3, guid: "g3", text: nil, date: recent + 2_000, isFromMe: true, itemType: 2, groupTitle: "Dinner")
+        for row in 1...3 { try fixture.joinChatMessage(chatId: 1, messageId: row) }
+
+        let listed = try await callTool("list_chats", [:], database: fixture.database())
+        XCTAssertEqual(try decodeJSONArray(listed["chats"]).first?["awaiting_reply"] as? Bool, true)
+        let active = try await callTool("get_active_conversations", ["min_exchanges": 1], database: fixture.database())
+        XCTAssertEqual(try decodeJSONArray(active["conversations"]).first?["awaiting_reply"] as? Bool, true)
+    }
+
+    /// Chat 1, "Group", with +15550000001 and +15550000002 and no messages.
+    private func groupFixture(name: String) throws -> ToolTestDatabase {
+        let fixture = try ToolTestDatabase(name: name)
+        try fixture.insertHandle(rowId: 1, handle: "+15550000001")
+        try fixture.insertHandle(rowId: 2, handle: "+15550000002")
+        try fixture.insertChat(rowId: 1, guid: "iMessage;+;chat-g", displayName: "Group")
+        for handle in 1...2 { try fixture.joinChatHandle(chatId: 1, handleId: handle) }
+        return fixture
+    }
 }

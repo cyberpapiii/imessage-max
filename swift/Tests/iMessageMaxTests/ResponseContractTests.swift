@@ -178,7 +178,6 @@ final class ResponseContractTests: XCTestCase {
             SearchTool.execute(
                 query: "appointment",
                 limit: 10,
-                format: "flat",
                 db: fixture.database(),
                 resolver: resolver
             )

@@ -225,4 +225,61 @@ final class GetMessagesSinceToolTests: XCTestCase {
         XCTAssertGreaterThan(one, 0)
         XCTAssertEqual(five, one, "a page of 5 ran \(five) queries, a page of 1 ran \(one)")
     }
+
+    // MARK: - Paging, hidden chats and chat filter
+
+    func testFilteredHiddenCountsHiddenChatsNotMessages() async throws {
+        let fixture = try hiddenMatchesFixture()
+        let page = try await callTool("get_messages_since", ["since_rowid": 0], database: fixture.database())
+        XCTAssertEqual(page["filtered_hidden"] as? Int, 2)
+        XCTAssertEqual(try itemIds(page, "messages"), ["msg_1"])
+    }
+
+    /// A full page whose last kept row is the last row of the batch read
+    /// still reports more, and the next page starts right after it.
+    func testFullPageEndingOnABatchsLastRowStillReportsMore() async throws {
+        let fixture = try ToolTestDatabase(name: "since-full-batch")
+        try fixture.insertHandle(rowId: 1, handle: "+15550000001")
+        try fixture.insertChat(rowId: 1, guid: "iMessage;-;+15550000001")
+        try fixture.insertChat(rowId: 2, guid: "SMS;-;spam", isFiltered: 1)
+        let base: Int64 = 700_000_000_000_000_000
+        // limit 31 reads a first batch of 32 rows; one of them is hidden, so
+        // the 31st kept row is the batch's last.
+        try fixture.insertMessage(rowId: 1, guid: "h", text: "spam", date: base, isFromMe: false, handleId: 1)
+        try fixture.joinChatMessage(chatId: 2, messageId: 1)
+        for row in 2...40 {
+            try fixture.insertMessage(rowId: row, guid: "g\(row)", text: "m\(row)", date: base + Int64(row), isFromMe: false, handleId: 1)
+            try fixture.joinChatMessage(chatId: 1, messageId: row)
+        }
+
+        let first = try await callTool("get_messages_since", ["since_rowid": 0, "limit": 31], database: fixture.database())
+        XCTAssertEqual(try itemIds(first, "messages").count, 31)
+        XCTAssertEqual(first["has_more"] as? Bool, true)
+        XCTAssertEqual(first["next_rowid"] as? Int, 32)
+
+        let second = try await callTool("get_messages_since", ["since_rowid": 32, "limit": 31], database: fixture.database())
+        XCTAssertEqual(try itemIds(second, "messages"), (33...40).map { "msg_\($0)" })
+        XCTAssertEqual(second["has_more"] as? Bool, false)
+    }
+
+    /// `chat_id` matches a message joined to that chat even when its home
+    /// chat is another; unfiltered, the message is listed under its home chat.
+    func testChatFilterMatchesAMessageWhoseHomeChatIsAnother() async throws {
+        let fixture = try ToolTestDatabase(name: "since-second-chat")
+        try fixture.insertHandle(rowId: 1, handle: "+15550000001")
+        try fixture.insertChat(rowId: 1, guid: "iMessage;-;+15550000001")
+        try fixture.insertChat(rowId: 2, guid: "SMS;-;+15550000001", serviceName: "SMS")
+        try fixture.insertMessage(rowId: 1, guid: "g1", text: "in both", date: 700_000_000_000_000_000, isFromMe: false, handleId: 1)
+        try fixture.joinChatMessage(chatId: 1, messageId: 1)
+        try fixture.joinChatMessage(chatId: 2, messageId: 1)
+
+        let filtered = try await callTool("get_messages_since", ["since_rowid": 0, "chat_id": "chat2"], database: fixture.database())
+        let messages = try decodeJSONArray(filtered["messages"])
+        XCTAssertEqual(messages.compactMap { $0["id"] as? String }, ["msg_1"])
+        XCTAssertEqual((messages.first?["chat"] as? [String: Any])?["id"] as? String, "chat2")
+
+        let unfiltered = try await callTool("get_messages_since", ["since_rowid": 0], database: fixture.database())
+        let home = try decodeJSONArray(unfiltered["messages"]).first?["chat"] as? [String: Any]
+        XCTAssertEqual(home?["id"] as? String, "chat1")
+    }
 }

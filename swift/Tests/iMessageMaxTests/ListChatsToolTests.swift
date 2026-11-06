@@ -1,3 +1,4 @@
+import MCP
 import XCTest
 @testable import iMessageMax
 
@@ -123,29 +124,7 @@ final class ListChatsToolTests: XCTestCase {
     }
 
     func testFilteredChatsAreHiddenByDefault() async throws {
-        let fixture = try ToolTestDatabase(name: "list-chats-filtered")
-        try fixture.insertHandle(rowId: 1, handle: "+15550000001")
-        let now = Int64(Date().timeIntervalSinceReferenceDate * 1_000_000_000)
-        let filters = [0, 1, 36]
-        for (index, isFiltered) in filters.enumerated() {
-            let chatId = index + 1
-            try fixture.insertChat(
-                rowId: chatId,
-                guid: "filtered-chat-\(chatId)",
-                displayName: "Filtered \(chatId)",
-                isFiltered: isFiltered
-            )
-            try fixture.joinChatHandle(chatId: chatId, handleId: 1)
-            try fixture.insertMessage(
-                rowId: chatId,
-                guid: "filtered-msg-\(chatId)",
-                text: "hello \(chatId)",
-                date: now + Int64(chatId) * 1_000_000_000,
-                isFromMe: false,
-                handleId: 1
-            )
-            try fixture.joinChatMessage(chatId: chatId, messageId: chatId)
-        }
+        let fixture = try filteredChatsFixture()
 
         let hidden = try await ListChatsTool.execute(
             limit: 10,
@@ -153,10 +132,9 @@ final class ListChatsToolTests: XCTestCase {
             db: fixture.database(),
             resolver: ContactResolver(seedCache: [:])
         )
-        let defaultResponse = hidden
-        XCTAssertEqual(defaultResponse.chats.map(\.id), ["chat1"])
-        XCTAssertEqual(defaultResponse.filteredHidden, 2)
-        XCTAssertEqual(defaultResponse.totalChats, 1)
+        XCTAssertEqual(hidden.chats.map(\.id), ["chat1"])
+        XCTAssertEqual(hidden.filteredHidden, 2)
+        XCTAssertEqual(hidden.totalChats, 1)
 
         let shown = try await ListChatsTool.execute(
             limit: 10,
@@ -165,8 +143,54 @@ final class ListChatsToolTests: XCTestCase {
             db: fixture.database(),
             resolver: ContactResolver(seedCache: [:])
         )
-        let included = shown
-        XCTAssertEqual(Set(included.chats.map(\.id)), Set(["chat1", "chat2", "chat3"]))
-        XCTAssertNil(included.filteredHidden)
+        XCTAssertEqual(Set(shown.chats.map(\.id)), Set(["chat1", "chat2", "chat3"]))
+        XCTAssertNil(shown.filteredHidden)
+    }
+
+    func testLastMessagePreviewSkipsHiddenAttachments() async throws {
+        let fixture = try directChatFixture(name: "hidden-attachment")
+        try fixture.insertMessage(rowId: 1, guid: "IMG", text: "\u{FFFC}", date: AppleTime.fromDate(Date()) - appleMinute, isFromMe: false, handleId: 1)
+        try fixture.joinChatMessage(chatId: 1, messageId: 1)
+        for id in 1...2 {
+            try fixture.insertAttachment(
+                rowId: id, filename: "~/Library/Messages/Attachments/\(id).jpeg", mimeType: "image/jpeg",
+                uti: "public.jpeg", totalBytes: 10, transferName: "\(id).jpeg", hideAttachment: id == 2
+            )
+            try fixture.joinMessageAttachment(messageId: 1, attachmentId: id)
+        }
+
+        let page = try await callTool("list_chats", [:], database: fixture.database())
+        let chat = try XCTUnwrap(try decodeJSONArray(page["chats"]).first)
+        XCTAssertEqual((chat["last_message"] as? [String: Any])?["text"] as? String, "[Photo]")
+    }
+
+    func testPagesReachChatsWithNoMessages() async throws {
+        let fixture = try ToolTestDatabase(name: "list-empty-chats")
+        try fixture.insertHandle(rowId: 1, handle: "+15550000001")
+        for chat in 1...5 {
+            try fixture.insertChat(rowId: chat, guid: "iMessage;+;c\(chat)", displayName: "Chat \(chat)")
+            try fixture.joinChatHandle(chatId: chat, handleId: 1)
+        }
+        // Chats 1 and 2 have messages; 3, 4 and 5 have none.
+        for chat in 1...2 {
+            try fixture.insertMessage(rowId: chat, guid: "g\(chat)", text: "hi", date: 700_000_000_000_000_000 + Int64(chat), isFromMe: false, handleId: 1)
+            try fixture.joinChatMessage(chatId: chat, messageId: chat)
+        }
+        for sort in ["recent", "most_active"] {
+            var seen: [String] = []
+            var cursor: String?
+            for _ in 0..<6 {
+                var args: [String: Value] = ["sort": .string(sort), "limit": 2]
+                if let cursor { args["cursor"] = .string(cursor) }
+                let json = try await callTool("list_chats", args, database: fixture.database())
+                let page = try itemIds(json, "chats")
+                XCTAssertFalse(page.isEmpty, "\(sort): an empty page after more:true")
+                seen += page
+                cursor = json["cursor"] as? String
+                XCTAssertEqual(json["more"] as? Bool, cursor != nil)
+                if cursor == nil { break }
+            }
+            XCTAssertEqual(seen, ["chat2", "chat1", "chat5", "chat4", "chat3"], sort)
+        }
     }
 }
