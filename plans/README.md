@@ -27,6 +27,12 @@ Still open outside this directory: PRs 5 and 6 (`advisor/018-imcore-helper-bridg
 `advisor/019-imcore-helper-dylib`), and the local-only spike branch
 `advisor/077-spike-catch-up-sweep`.
 
+## Round 2026-11-06: install and onboarding
+
+| Plan | Title | Priority | Effort | Depends on | Status |
+|------|-------|----------|--------|------------|--------|
+| 087 | Install and onboard iMessage Max like a normal Mac app: Developer ID signing, notarized DMG, helper inside the app under `SMAppService`, token auth, stdio bridge, one-click client hookup, onboarding rewrite, 2.0 cask | P1 | L | none | PLANNED 2026-11-06, waiting for Rob's go and the release secrets |
+
 ## Round 2026-09-03: search hang
 
 | Plan | Title | Priority | Effort | Depends on | Status |
