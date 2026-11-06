@@ -437,7 +437,8 @@ enum SearchTool {
             return count
         }
 
-        let filteredHidden = includeFiltered ? nil : try hiddenChatsWithMatch()
+        // Counted on the first page only, as list_chats does.
+        let filteredHidden = includeFiltered || cursor != nil ? nil : try hiddenChatsWithMatch()
 
         let fetched = try fetch(
             inChat: chatFilter, includeFiltered: includeFiltered, cursor: cursor.flatMap(TimelineCursor.decode)

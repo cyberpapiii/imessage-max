@@ -115,6 +115,49 @@ final class ToolsReview2RegressionTests: XCTestCase {
         XCTAssertFalse(excerpt.contains("\u{FFFD}"), "an emoji was split")
     }
 
+    // MARK: - search and unanswered costs
+
+    func testSearchCountsHiddenChatsOnTheFirstPageOnly() async throws {
+        let f = try ToolTestDatabase(name: "search-hidden-pages")
+        try f.insertHandle(rowId: 1, handle: "+15550000001")
+        try f.insertChat(rowId: 1, guid: "iMessage;-;+15550000001")
+        try f.insertChat(rowId: 2, guid: "SMS;-;spam", isFiltered: 1)
+        for row in 1...3 {
+            try f.insertMessage(rowId: row, guid: "g\(row)", text: "hello \(row)", date: base + Int64(row), isFromMe: false, handleId: 1)
+            try f.joinChatMessage(chatId: 1, messageId: row)
+        }
+        try f.insertMessage(rowId: 4, guid: "g4", text: "hello spam", date: base, isFromMe: false, handleId: 1)
+        try f.joinChatMessage(chatId: 2, messageId: 4)
+
+        let first = try await callTool("search", ["query": "hello", "limit": 1], database: f.database())
+        XCTAssertEqual(first["filtered_hidden"] as? Int, 1)
+        let cursor = try XCTUnwrap(first["cursor"] as? String)
+        let second = try await callTool("search", ["query": "hello", "limit": 1, "cursor": .string(cursor)], database: f.database())
+        XCTAssertEqual(try ids(second, "results"), ["msg_2"])
+        XCTAssertNil(second["filtered_hidden"])
+    }
+
+    func testUnansweredChecksRepliesPerChunkNotPerRow() async throws {
+        func queries(questions: Int) async throws -> Int {
+            let f = try ToolTestDatabase(name: "unanswered-\(questions)")
+            try f.insertHandle(rowId: 1, handle: "+15550000001")
+            try f.insertChat(rowId: 1, guid: "iMessage;-;+15550000001")
+            try f.joinChatHandle(chatId: 1, handleId: 1)
+            for row in 1...questions {
+                try f.insertMessage(rowId: row, guid: "g\(row)", text: "free at \(row)?", date: base + Int64(row) * 7_200_000_000_000, isFromMe: true)
+                try f.joinChatMessage(chatId: 1, messageId: row)
+            }
+            let db = f.database()
+            return try await countQueries {
+                let json = try await callTool("get_messages", ["chat_id": "chat1", "unanswered": true, "unanswered_hours": 1], database: db)
+                XCTAssertEqual(try ids(json).count, questions)
+            }
+        }
+        let few = try await queries(questions: 5)
+        let many = try await queries(questions: 40)
+        XCTAssertEqual(few, many)
+    }
+
     // MARK: - One chat-id resolver
 
     private func twoChatFixture() throws -> ToolTestDatabase {
