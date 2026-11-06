@@ -14,4 +14,20 @@ final class QueryCountTests: XCTestCase {
         }
         XCTAssertEqual(Database.queryCountForTesting, 1)
     }
+
+    func testQueryCountIsExactUnderConcurrency() async throws {
+        let fixture = try ToolTestDatabase(name: "query-count-concurrent")
+        let db = fixture.database()
+        Database.queryCountForTesting = 0
+        defer { Database.queryCountForTesting = nil }
+
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            for _ in 0..<200 {
+                group.addTask { _ = try db.query("SELECT 1") { $0.int(0) } }
+            }
+            try await group.waitForAll()
+        }
+
+        XCTAssertEqual(Database.queryCountForTesting, 200)
+    }
 }

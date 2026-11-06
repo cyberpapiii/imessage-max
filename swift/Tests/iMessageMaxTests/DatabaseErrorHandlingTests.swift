@@ -60,6 +60,15 @@ final class DatabaseErrorHandlingTests: XCTestCase {
         XCTAssertEqual(falseRows.count, 0, "false should bind as 0 and not match WHERE ? = 1")
     }
 
+    // MARK: - Access check
+
+    func testCheckAccessOnAReadableDatabaseIsAccessible() throws {
+        let fixture = try ToolTestDatabase(name: "check-access")
+        let access = Database.checkAccess(path: fixture.path)
+        XCTAssertEqual(access.status, .accessible)
+        XCTAssertTrue(access.ok)
+    }
+
     // MARK: - Missing database
 
     func testQueryAgainstMissingDatabaseThrowsNotFound() throws {

@@ -2,10 +2,10 @@ import XCTest
 import IMessageMaxContract
 @testable import iMessageMax
 
-/// Plan 049: diagnose is the one tool whose response legitimately names the
-/// database path, but the operator's username must not ride along with it.
-/// All probes are injected so the test is hermetic on a CI runner without
-/// Full Disk Access.
+/// diagnose is the one tool whose response legitimately names the database
+/// path, but the operator's username must not ride along with it. All
+/// probes are injected so the test is hermetic on a CI runner without Full
+/// Disk Access.
 final class DiagnoseToolTests: XCTestCase {
     private static let dbAccessible: DatabaseProbe = { (true, "accessible") }
     private static let dbDenied: DatabaseProbe = { (false, "permission_denied") }
@@ -18,6 +18,25 @@ final class DiagnoseToolTests: XCTestCase {
             automationProbe: DiagnoseToolTests.automationGranted
         )
         return (result, try FormatUtils.encodeJSON(result))
+    }
+
+    /// Diagnose reports the Contacts authorization word on the wire as the
+    /// contract spells it, including the `unknown` fallback.
+    func testContactsAuthorizationReachesDiagnoseUnchanged() async throws {
+        let words: [(PermissionStatus, String)] = [
+            (.authorized, "authorized"), (.limited, "limited"), (.denied, "denied"),
+            (.restricted, "restricted"), (.unknown, "unknown"),
+        ]
+        for (word, wire) in words {
+            let authorized = PermissionStatus.namesAvailable.contains(word)
+            let result = try await DiagnoseTool.execute(
+                resolver: ContactResolver(seedCache: [:], authorization: (authorized, word)),
+                dbProbe: { (true, .accessible) },
+                automationProbe: { (true, .authorized) },
+                usageDescriptionProbe: { true }
+            )
+            XCTAssertEqual(result.contacts.status.rawValue, wire)
+        }
     }
 
     func testResponseDoesNotContainHomeDirectory() async throws {

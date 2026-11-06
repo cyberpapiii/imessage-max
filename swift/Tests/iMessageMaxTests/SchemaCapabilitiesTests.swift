@@ -30,6 +30,26 @@ final class SchemaCapabilitiesTests: XCTestCase {
         XCTAssertFalse(try fixture.database().schema().has(.messageDateEdited))
     }
 
+    /// Each guarded column's fragment selects the column when the probe saw
+    /// it and still runs, under the column's name, when the column is gone.
+    func testGuardedColumnFragmentsRunWithAndWithoutTheirColumn() throws {
+        let fragments: [(column: String, sql: KeyPath<SchemaCapabilities, String>)] = [
+            ("thread_originator_guid", \.threadOriginatorGuidSQL),
+            ("date_edited", \.dateEditedSQL),
+            ("associated_message_emoji", \.associatedMessageEmojiSQL),
+        ]
+        for (column, sql) in fragments {
+            let fixture = try ToolTestDatabase()
+            try fixture.insertMessage(rowId: 1, guid: "g", date: 1, isFromMe: true)
+            let present = fixture.database()
+            XCTAssertEqual(try present.query("SELECT \(column) FROM (SELECT \(try present.schema()[keyPath: sql]) FROM message m)") { $0.int(0) }.count, 1)
+
+            try fixture.execute("ALTER TABLE message DROP COLUMN \(column)")
+            let dropped = fixture.database()
+            XCTAssertEqual(try dropped.query("SELECT \(column) FROM (SELECT \(try dropped.schema()[keyPath: sql]) FROM message m)") { $0.int(0) }.count, 1)
+        }
+    }
+
     func testFeaturesNameEveryOptionalColumnByTableDotColumn() {
         let features = SchemaCapabilities.assumed.without(.messageDateEdited).features
         XCTAssertEqual(features["message.date_edited"], false)
