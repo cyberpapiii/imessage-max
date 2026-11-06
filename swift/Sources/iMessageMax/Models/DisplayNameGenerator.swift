@@ -1,7 +1,6 @@
 import Foundation
 
 enum DisplayNameGenerator {
-    /// Generate a display name from an array of participant names (first names).
     static func fromNames(_ names: [String]) -> String {
         if names.isEmpty { return "Unknown Chat" }
         if names.count <= 4 {

@@ -24,8 +24,6 @@ public struct ServiceInspection: Sendable {
 
 public enum ServiceAction: Sendable { case start, stop, restart }
 
-/// What the companion asks of the service. `ServiceController` is the real
-/// one; design fixtures supply a canned one that never touches launchd.
 public protocol ServiceControlling: Sendable {
   func inspect() async throws -> ServiceInspection
   func perform(_ action: ServiceAction) async throws
@@ -66,8 +64,6 @@ public actor ServiceController: ServiceControlling {
         diagnosis: conflict ? nil : diagnosis,
         problem: conflict ? CoreError.conflict.localizedDescription : nil, conflict: conflict)
     } catch {
-      // Transport failure does not identify the listener. Check socket
-      // ownership independently so a sick owned server remains repairable.
       let result = try await ProcessRunner.run(
         "/usr/sbin/lsof",
         arguments: [

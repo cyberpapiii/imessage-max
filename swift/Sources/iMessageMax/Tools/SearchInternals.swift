@@ -1,12 +1,8 @@
 import Foundation
 
 extension SearchTool {
-    /// The chats a search reads, and how its rows relate to them.
     enum Chats {
-        /// One row per message, under the chat `scope` lists it in.
         case listed(ChatScope)
-        /// One row per hidden chat a message is in, only `inChat` when set:
-        /// the filtered_hidden candidates.
         case hiddenMembership(inChat: Int64?)
     }
 
@@ -50,17 +46,10 @@ extension SearchTool {
         }
 
         if let query, !query.isEmpty {
-            // At most 8 terms reach SQL. Under match_all any 8 still only
-            // narrow (the Swift word filter checks every term), but an
-            // any-word query OR'ing its first 8 would drop rows matching only
-            // a later word, so a longer any-word query skips the prefilter.
             let prefilterCap = 8
             if fuzzy || terms.isEmpty || (!matchAll && terms.count > prefilterCap) {
                 builder.where("(m.text IS NOT NULL OR m.attributedBody IS NOT NULL)")
             } else {
-                // Each term's textMayContain, joined as match_all asks, so
-                // attributedBody-only rows without the words never fill the
-                // fetch window.
                 let matches = terms.prefix(prefilterCap).map { SQLFragments.textMayContain($0) }
                 let joiner = matchAll ? " AND " : " OR "
                 builder.where(
@@ -145,9 +134,6 @@ extension SearchTool {
         return builder.build()
     }
 
-    /// `columns` of hidden chats' rows that pass the SQL prefilter. Starts
-    /// from the few filtered chats rather than scanning every message a
-    /// second time.
     static func filteredHiddenQuery(
         query: String?,
         fromPerson: SenderFilter?,
@@ -291,7 +277,6 @@ extension SearchTool {
                 }
             )
         }
-        // Most matches first; ties go to the most recent match so the order is stable.
         chats.sort {
             ($0.matchCount, $0.lastMatch ?? "", $0.id) > ($1.matchCount, $1.lastMatch ?? "", $1.id)
         }
@@ -308,16 +293,10 @@ extension SearchTool {
         return try FormatUtils.encodeJSON(response)
     }
 
-    /// Excerpt is centred on the first query match. A URL that straddles the
-    /// raw-window boundary is collapsed from its truncated form, so
-    /// `[Link: host]` may become `[Link: link]` or the raw fragment may appear.
-    /// The window is four times the excerpt, so this needs a URL longer than
-    /// ~240 characters positioned exactly at the edge.
     static func makeExcerpt(text: String?, query: String?) -> String {
         guard let text else { return "" }
         let excerptLength = 160
         let rawWindow = 4 * excerptLength
-        /// Characters before the first case-insensitive match of the query.
         func matchOffset(in string: String) -> Int? {
             guard let query, !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                   let range = string.range(of: query, options: .caseInsensitive) else { return nil }

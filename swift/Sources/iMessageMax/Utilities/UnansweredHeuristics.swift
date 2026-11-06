@@ -26,11 +26,6 @@ enum UnansweredHeuristics {
         return false
     }
 
-    /// Rows that look like questions and got no received reply in their
-    /// chat within `hours` (a reply is a conversational message: a tapback
-    /// or a group event such as a rename answers nothing), at most `limit`, in input order. `hours` is
-    /// already clamped by `IntArgument.unansweredHours`. Replies are checked
-    /// one query per chunk of questions, never one per row.
     static func filterUnanswered<Row>(
         db: Database,
         rows: [Row],

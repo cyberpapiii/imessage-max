@@ -1,6 +1,5 @@
 import Foundation
 
-/// Candidate for disambiguation when multiple contacts match
 struct RecipientCandidate: Encodable {
     let name: String
     let handle: String
@@ -12,26 +11,17 @@ struct RecipientCandidate: Encodable {
     }
 }
 
-/// The send tool's `status` field. The tool description documents this
-/// vocabulary to clients, so the raw values are a contract.
 enum SendStatus: String, Encodable, Sendable {
-    /// Transport accepted; verification could not run (DB unreadable) or
-    /// does not apply (file-only send).
     case sent
-    /// DB re-read found the outbound row in the intended chat with error = 0.
     case confirmed
-    /// Transport accepted but no row appeared within the polling window.
     case uncertain
-    /// Row found in a different chat than intended.
     case mismatch
-    /// Row found in the intended chat with error ≠ 0.
     case failedDelivery = "failed_delivery"
     case pendingConfirmation = "pending_confirmation"
     case partialFailure = "partial_failure"
     case failed
     case ambiguous
 
-    /// Reported to the client as a tool error.
     var isError: Bool {
         switch self {
         case .failed, .ambiguous, .failedDelivery, .partialFailure, .mismatch: return true
@@ -39,7 +29,6 @@ enum SendStatus: String, Encodable, Sendable {
         }
     }
 
-    /// Something was handed to Messages.app, so the response is timestamped.
     var dispatched: Bool { self != .failed && self != .ambiguous }
 }
 
@@ -57,7 +46,6 @@ struct SendResponse: Encodable, Sendable {
     let intendedChat: ChatReference?
     let actualChatId: String?
     let disposition: DeliveryDisposition
-    /// True only when a retry cannot duplicate a message.
     let retrySafe: Bool
 
     enum CodingKeys: String, CodingKey {
@@ -105,18 +93,14 @@ struct SendResponse: Encodable, Sendable {
         self.disposition = disposition
         switch status {
         case .failedDelivery:
-            // chat.db recorded the row as failed, so a resend cannot duplicate it.
             self.retrySafe = true
         case .partialFailure:
-            // Earlier payloads already went out; a blind retry would resend them.
             self.retrySafe = false
         default:
             self.retrySafe = disposition.retrySafe
         }
     }
 
-    // Transport accepted, nothing verified: a file-only send, or a text send
-    // whose chat.db check could not run (DB unreadable, call cancelled).
     static func sent(deliveredTo: [String], chat: ChatReference?) -> SendResponse {
         SendResponse(.sent, disposition: .completed, chat: chat, deliveredTo: deliveredTo)
     }

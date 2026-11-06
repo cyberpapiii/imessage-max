@@ -10,7 +10,6 @@ import ServiceManagement
 final class AppModel {
   var section: PanelSection?
   var maximumPanelHeight = Design.maximumPanelHeight
-  /// True while the panel is on screen; the face only animates then.
   var panelOpen = false
   private(set) var inspection: ServiceInspection?
   private(set) var problem: String?
@@ -21,7 +20,6 @@ final class AppModel {
   private(set) var notice: Notice?
   private(set) var celebration = 0
   private(set) var loginStatus = SMAppService.mainApp.status
-  /// Where the switch is heading while a start or stop is under way.
   private var pendingOn: Bool?
   @ObservationIgnored private var timer: DispatchSourceTimer?
   @ObservationIgnored private var observers: [NSObjectProtocol] = []
@@ -35,8 +33,6 @@ final class AppModel {
   @ObservationIgnored private let log = Logger(
     subsystem: ServiceDefaults.companionBundleID, category: "Service")
 
-  /// `prepareMessages` runs before a sending check; the live app opens
-  /// Messages there.
   init(
     service: any ServiceControlling, milestones: Milestones,
     prepareMessages: @escaping @MainActor () async throws -> Void
@@ -46,8 +42,6 @@ final class AppModel {
     self.prepareMessages = prepareMessages
   }
 
-  /// The real service, using the helper and launchd template bundled with
-  /// this app for a fresh install.
   static func live(milestones: Milestones) -> AppModel {
     let resources = Bundle.main.resourceURL ?? Bundle.main.bundleURL
     return AppModel(
@@ -72,7 +66,6 @@ final class AppModel {
   var canControl: Bool { inspection != nil && inspection?.conflict == false && busy == nil }
   var ready: Bool { diagnosis?.readiness == .ready }
   var switchOn: Bool { pendingOn ?? (inspection?.loaded == true) }
-  /// The switch appears once there is an installed service to turn on or off.
   var showsSwitch: Bool { inspection?.configuration.isInstalled == true }
   var messagesNeedOpening: Bool {
     diagnosis?.needsMessagesForSendingCheck == true
@@ -239,7 +232,6 @@ final class AppModel {
     notice = Notice(text: acknowledgement)
   }
 
-  /// A notice is a toast: it leaves on its own after long enough to read.
   func noticeAppeared() {
     noticeTimer?.cancel()
     guard let shown = notice else { return }
@@ -280,10 +272,6 @@ final class AppModel {
   func openMessages() { MessagesApp.open() }
 
   func prepareToQuit() async {
-    // Permission prompts can be cancelled without touching the service.
-    // A requested start/stop/restart finishes before the companion exits.
-    // Cancelling a daemon-owned request stops our wait. Any macOS consent
-    // dialog belongs to the helper and remains until the user answers it.
     if busy?.isPermissionRequest == true { actionTask?.cancel() }
     await actionTask?.value
   }

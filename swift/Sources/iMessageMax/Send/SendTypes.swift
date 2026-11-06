@@ -1,9 +1,5 @@
 import Foundation
 
-// MARK: - What to send, and where
-
-/// One item handed to Messages.app. A send with files and text becomes
-/// several payloads, files first and text last.
 enum SendPayload: Sendable, Equatable {
     case text(String)
     case file(path: String)
@@ -13,9 +9,6 @@ enum SendPayload: Sendable, Equatable {
         case failure(String)
     }
 
-    /// Every payload is validated here, before anything is dispatched, so an
-    /// invalid text after a file fails the whole send instead of leaving the
-    /// file sent and reporting partial_failure.
     static func build(
         text: String?,
         filePaths: [String]?
@@ -42,8 +35,6 @@ enum SendPayload: Sendable, Equatable {
         return .success(payloads)
     }
 
-    /// Client-facing description, for the partial-failure breakdown.
-    /// Files are named by filename only, never the full path.
     var clientDescription: String {
         switch self {
         case .text: return "text message"
@@ -59,9 +50,6 @@ enum SendPayload: Sendable, Equatable {
     }
 }
 
-/// An exact Messages.app destination. `chatId` is the chat.db ROWID the
-/// send is expected to land in, used for post-send verification; a
-/// participant with no existing 1:1 chat has none.
 enum SendTarget: Sendable, Equatable {
     case participant(handle: String, chatId: Int64?)
     case chat(guid: String, chatId: Int64)
@@ -78,7 +66,6 @@ enum SendTarget: Sendable, Equatable {
         return nil
     }
 
-    /// The value the send script resolves inside Messages.app.
     var scriptArgument: String {
         switch self {
         case .participant(let handle, _): return handle
@@ -93,7 +80,6 @@ enum SendTarget: Sendable, Equatable {
         }
     }
 
-    /// What a "can't get participant/chat" AppleScript error means for this target.
     var missingTargetError: SendError {
         switch self {
         case .participant(let handle, _): return .recipientNotFound(handle)
@@ -101,7 +87,6 @@ enum SendTarget: Sendable, Equatable {
         }
     }
 
-    /// Set when this target must be refused before any payload is dispatched.
     var validationError: SendError? {
         switch self {
         case .participant(let handle, _):
@@ -111,8 +96,6 @@ enum SendTarget: Sendable, Equatable {
         }
     }
 }
-
-// MARK: - How a send failed
 
 enum SendError: LocalizedError {
     case automationPermissionRequired
@@ -159,9 +142,6 @@ enum SendError: LocalizedError {
         }
     }
 
-    /// Messages accepted the file but its transfer had not finished when
-    /// polling stopped. The send keeps going and reports
-    /// pending_confirmation rather than failing.
     var isSoftTransferOutcome: Bool {
         switch self {
         case .transferPending, .transferStatusUnknown: return true
@@ -170,23 +150,14 @@ enum SendError: LocalizedError {
     }
 }
 
-/// How far a transport attempt got before it stopped. Mirrors the
-/// dispatchPhase tracked inside the send AppleScript.
 enum DeliveryDisposition: String, Sendable, Encodable, Equatable {
-    /// Messages.app returned from `send` without raising an error.
     case completed
-    /// The failure happened before the `send` Apple event was issued.
-    /// Retrying cannot produce a duplicate.
     case notStarted = "not_started"
-    /// The failure happened after the `send` Apple event was issued, or we
-    /// cannot tell (timeout, osascript killed, no structured result).
     case mayHaveCompleted = "may_have_completed"
 
-    /// True only when a retry provably cannot duplicate a message.
     var retrySafe: Bool { self == .notStarted }
 }
 
-/// A transport failure plus how far it got.
 struct SendFailure: Error, Sendable {
     let error: SendError
     let disposition: DeliveryDisposition

@@ -1,12 +1,8 @@
 import Foundation
 
-/// Who a `from_person` argument names, resolved the same way for every tool.
 enum SenderFilter: Equatable {
     case me
-    /// Exact `handle.id` values: a normalized phone number, an email, or
-    /// every handle of every contact whose name matches.
     case handles([String])
-    /// Nothing resolved, so match the text inside handles.
     case handleContains(String)
 
     static func resolve(_ fromPerson: String?, resolver: ContactResolver) async -> SenderFilter? {
@@ -18,9 +14,6 @@ enum SenderFilter: Equatable {
         return handles.isEmpty ? .handleContains(fromPerson) : .handles(handles)
     }
 
-    /// The `handle.id` values `person` names: a phone number normalized to
-    /// E.164, an email lowercased, or every handle of every contact whose
-    /// name matches. Empty when it names nobody.
     static func exactHandles(for person: String, resolver: ContactResolver) async -> [String] {
         if let normalized = PhoneUtils.normalizeToE164(person) {
             return [normalized]
@@ -31,7 +24,6 @@ enum SenderFilter: Equatable {
         return Set(await resolver.searchByName(person).map(\.handle)).sorted()
     }
 
-    /// A predicate over `m` and the sender join `h`.
     var predicate: (sql: String, params: [Any]) {
         switch self {
         case .me:

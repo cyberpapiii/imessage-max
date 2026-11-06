@@ -111,8 +111,6 @@ final class GetContextToolTests: XCTestCase {
             message: "Either message_id OR (chat_id + contains) is required"
         )
 
-        // First guard fires when contains is set and chat_id is not:
-        // chatId == nil makes (chatId == nil || contains == nil) true.
         let containsOnly = await capture { try await GetContext.execute(contains: "x", database: Database(), resolver: ContactResolver(seedCache: [:])) }
         try assertFailure(
             containsOnly,
@@ -120,7 +118,6 @@ final class GetContextToolTests: XCTestCase {
             message: "Either message_id OR (chat_id + contains) is required"
         )
 
-        // Second string is reachable only when message_id is also present.
         let containsWithMessageId = await capture { try await GetContext.execute(messageId: "msg_1", contains: "x", database: Database(), resolver: ContactResolver(seedCache: [:])) }
         try assertFailure(
             containsWithMessageId,
@@ -253,8 +250,6 @@ final class GetContextToolTests: XCTestCase {
 
     func testContainsMissBeyondCapIsNotFoundInWindow() async throws {
         let fixture = try makeLongChatFixture(messageCount: 5100)
-        // Cap counts post-prefilter candidates: blobs holding the term's
-        // bytes pass the SQL prefilter but decode to no text.
         try fixture.execute("UPDATE message SET text = NULL, attributedBody = CAST('zzz-never' AS BLOB)")
         let result = await capture { try await GetContext.execute(
             chatId: "chat50",
@@ -283,8 +278,6 @@ final class GetContextToolTests: XCTestCase {
         XCTAssertEqual(response.after.map(\.id), ["msg_203"])
     }
 
-    // MARK: - Text and chat resolution
-
     func testContainsFindsBlobTextBehindMoreThanTheScanCapOfBlobRows() async throws {
         let fixture = try blobTextFixture(fillerCount: 5_200)
         let context = try await callTool("get_context", ["chat_id": "chat1", "contains": "lisbon"], database: fixture.database())
@@ -292,12 +285,9 @@ final class GetContextToolTests: XCTestCase {
         XCTAssertEqual(message["id"] as? String, "msg_1")
     }
 
-    /// A message joined to two chats belongs to the lower-numbered one, in
-    /// get_context and in list_attachments under either sort.
     func testContextAndListAttachmentsNameTheMessagesHomeChat() async throws {
         let fixture = try ToolTestDatabase(name: "home-chat")
         try fixture.insertHandle(rowId: 1, handle: "+15550000001")
-        // The higher chat id is inserted first, so an unordered pick lands on it.
         try fixture.insertChat(rowId: 9, guid: "SMS;-;+15550000001", serviceName: "SMS")
         try fixture.insertChat(rowId: 3, guid: "iMessage;-;+15550000001")
         try fixture.insertMessage(rowId: 1, guid: "g1", text: "\u{FFFC}", date: 700_000_000_000_000_000, isFromMe: false, handleId: 1)
@@ -343,9 +333,6 @@ private func makeLongChatFixture(messageCount: Int) throws -> ToolTestDatabase {
     try fixture.execute("COMMIT")
     return fixture
 }
-
-/// Builds: <prefix junk> + marker + 5 filler bytes + length field + payload.
-/// Copied from MessageTextExtractorTests / SearchRecallTests.
 
 private func unwrapSuccess(
     _ result: Result<GetContextResponse, ToolFailure>,

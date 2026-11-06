@@ -120,31 +120,13 @@ struct SendTool: Sendable {
             return .error(ClientErrorMessages.sanitized(invalid))
         }
 
-        // Sends are authorized by the user's request to the agent and by
-        // harness-level tool approval. The server does not gate exact sends.
-        // Ambiguity and validation failures refuse above, and post-send
-        // verification reports the truth below. Interactive confirmation (MCP
-        // elicitation) is not used: it cannot round-trip through real agent
-        // stacks. Do not reintroduce without session-level proof of a working
-        // channel.
 
-        // Only text is verified against chat.db, and SendPayload.build puts
-        // text last. A file-only send keeps the transfer-observation status.
         let verifiedIndex: Int? = {
             guard case .text? = payloads.last else { return nil }
             return payloads.count - 1
         }()
         var verificationBaseline: Int64? = nil
 
-        // Sequential by design: Messages.app ordering matters, so a text that
-        // follows a file must be sent after that file. Do not parallelize.
-        // Stops at the first hard failure: firing later payloads after one has
-        // failed produces out-of-order conversations and compounds the partial
-        // reporting below. Soft transfer outcomes keep sending.
-        // A cancelled call (notifications/cancelled, dropped connection)
-        // dispatches nothing further. A payload already handed to osascript
-        // is never interrupted: killing it mid-send cannot undo the send and
-        // would only make its outcome unknowable.
         var pendingMessages: [String] = []
         for (index, payload) in payloads.enumerated() {
             if Task.isCancelled {
@@ -162,9 +144,6 @@ struct SendTool: Sendable {
                 )
             }
             if index == verifiedIndex {
-                // Read right before this dispatch, so rows from earlier payloads
-                // and earlier identical texts sit at or below it. Unreadable:
-                // nil, and the send reports transport-only `sent`.
                 verificationBaseline = try? verifier.baseline()
             }
             guard case .failure(let failure) = await runner.send(payload, to: resolved.target) else {
@@ -226,7 +205,6 @@ struct SendTool: Sendable {
                 return .uncertain(deliveredTo: resolved.deliveredTo, chat: resolved.chat)
             }
         } catch {
-            // DB unreadable or task cancelled: transport-only fallback.
             return .sent(deliveredTo: resolved.deliveredTo, chat: resolved.chat)
         }
     }

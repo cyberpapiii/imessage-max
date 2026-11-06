@@ -1,12 +1,8 @@
 import CoreGraphics
 
-/// Speech-bubble anatomy shared by the app tile, panel, and menu bar.
-/// All coordinates live on one 24-unit grid; small chrome has separate detail.
 public enum MessageMark {
   public static let blue = (red: 0.13, green: 0.43, blue: 0.91)
 
-  /// A round bubble with a tail swept to the lower left, in the manner of
-  /// a chat bubble. Drawn here from an ellipse and three curves.
   public static func body(in rect: CGRect) -> CGPath {
     let tail = CGMutablePath()
     tail.move(to: CGPoint(x: 4.6, y: 15.6))
@@ -24,9 +20,6 @@ public enum MessageMark {
     return path.copy(using: &transform)!
   }
 
-  /// The softer bubble the companion wears in the panel and the menu bar: a
-  /// circle with a short wedge of a tail, its tip rounded and its joins filled
-  /// in, so it has no sharp corners at any size. Same 24-unit grid as `body`.
   public static func round(in rect: CGRect) -> CGPath {
     let wedge = CGMutablePath()
     wedge.addLines(between: [
@@ -41,20 +34,16 @@ public enum MessageMark {
     return path.copy(using: &transform)!
   }
 
-  /// Rounds the outer corners of a shape by `radius`: shrink it, then grow it
-  /// back. Inner corners are rounded too.
   public static func softened(_ path: CGPath, by radius: CGFloat) -> CGPath {
     let shrunk = path.subtracting(rounded(path, width: 2 * radius))
     return filled(shrunk.union(rounded(shrunk, width: 2 * radius)), by: radius)
   }
 
-  /// Rounds the inner corners of a shape by `radius`: grow it, then shrink it back.
   static func filled(_ path: CGPath, by radius: CGFloat) -> CGPath {
     let grown = path.union(rounded(path, width: 2 * radius))
     return grown.subtracting(rounded(grown, width: 2 * radius))
   }
 
-  /// The outline of `path` traced with a round pen `width` wide.
   public static func rounded(_ path: CGPath, width: CGFloat) -> CGPath {
     path.copy(strokingWithWidth: width, lineCap: .round, lineJoin: .round, miterLimit: 1)
   }

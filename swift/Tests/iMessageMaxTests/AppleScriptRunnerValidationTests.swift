@@ -63,8 +63,6 @@ final class AppleScriptRunnerValidationTests: XCTestCase {
         }
     }
 
-    // MARK: - osascript stderr classification
-
     /// Verbatim stderr from a real failed send: a chat-route send to an
     /// `any;-;` service chat. AppleScript spells "can’t" with the typographic
     /// apostrophe; it must still classify as `.chatNotFound` rather than
@@ -136,8 +134,6 @@ final class AppleScriptRunnerValidationTests: XCTestCase {
         XCTAssertFalse(error.localizedDescription.contains("second line"))
     }
 
-    // The classifier lowercases stderr before matching, so a home-directory
-    // path in any case is caught and never reaches the client verbatim.
     func testHomeDirectoryPathInStderrClassifiesAsPathRejected() {
         let stderr = "execution error: Messages got an error: Can\u{2019}t get file "
             + "\"/Users/alice/Desktop/x.jpg\". (-1728)"
@@ -178,8 +174,6 @@ final class AppleScriptRunnerValidationTests: XCTestCase {
         XCTAssertTrue(prepared.fileURL.path.hasPrefix(stager.root.path + "/"))
     }
 
-    // Staged copies are deleted at terminal transfer states, so a
-    // duplicate of the user's file does not linger in ~/Pictures for 48h.
     func testRemoveStagedDirectoryDeletesOnlyItsOwnDirectory() throws {
         let tempDir = FileManager.default.temporaryDirectory
         let sourceURL = tempDir.appendingPathComponent("imessage-max-cleanup-test.txt")
@@ -190,7 +184,6 @@ final class AppleScriptRunnerValidationTests: XCTestCase {
         let prepared = try stage(sourceURL.path, with: stager)
 
         let stagedDirectory = prepared.fileURL.deletingLastPathComponent()
-        // The UUID directory's parent is the staging root.
         let stagingRoot = stagedDirectory.deletingLastPathComponent()
 
         XCTAssertTrue(FileManager.default.fileExists(atPath: prepared.fileURL.path),

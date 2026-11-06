@@ -1,12 +1,7 @@
 import Foundation
 
-/// The chat a chat id argument names: the chat with that row id (`123`,
-/// `chat123`), else the most recently active chat whose GUID contains the
-/// text. A text that names no chat throws `NotFound`, which the tool layer
-/// answers as `chat_not_found`.
 enum ChatLookup {
     struct NotFound: Error {
-        /// The argument as the caller passed it.
         let chatId: String
     }
 

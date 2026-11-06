@@ -3,9 +3,6 @@ import HTTPTypes
 import IMessageMaxContract
 @testable import iMessageMax
 
-/// The plist template, Makefile and companion build script cannot import the
-/// contract, so they repeat its values. These tests fail when they drift. The
-/// rest pins producers outside this refactor's reach to the contract's words.
 final class ServiceFilesContractTests: XCTestCase {
     private var root: URL { get throws { try findRepoRoot() } }
 
@@ -46,8 +43,6 @@ final class ServiceFilesContractTests: XCTestCase {
         XCTAssertTrue(script.contains("BUNDLE_ID=\"\(ServiceDefaults.companionBundleID)\"\n"), "companion bundle id")
     }
 
-    /// Every option the companion reads back out of the plist is one the
-    /// server's own parser accepts, in both spellings the companion accepts.
     func testServerParsesEveryCompanionOption() throws {
         let command = try iMessageMax.parse([
             ServerOption.http.flag,

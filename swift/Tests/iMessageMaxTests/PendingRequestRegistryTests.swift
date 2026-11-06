@@ -4,7 +4,6 @@ import MCP
 
 final class PendingRequestRegistryTests: XCTestCase {
 
-    /// Starts a request waiting in `registry` and returns once it is stored.
     private func startRequest(
         _ registry: PendingRequestRegistry,
         sessionId: String,
@@ -65,7 +64,6 @@ final class PendingRequestRegistryTests: XCTestCase {
             _ = try await second.value
             XCTFail("duplicate store must not resume a second waiter")
         } catch is CancellationError {
-            // First continuation still owns the slot; we discarded the second.
         }
 
         let pending = await registry.remove(sessionId: "s1", id: "1")

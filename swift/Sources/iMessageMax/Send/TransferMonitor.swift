@@ -1,10 +1,5 @@
 import Foundation
 
-/// Watches Messages.app's outgoing file transfers for a staged attachment.
-///
-/// Messages exposes transfers only by name, so a send records how many
-/// outgoing transfers already carry the name (`baseline`) before handing
-/// the file over, and only the transfers after that count belong to it.
 enum TransferMonitor {
     enum Observation {
         case finished
@@ -35,8 +30,6 @@ enum TransferMonitor {
         let output = execution.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
 
         guard execution.terminationStatus == 0 else {
-            // Status probe is not a send: never map through SendScript.classifyStderr
-            // (fileNotFound / chatNotFound arms are wrong here).
             let raw = output.isEmpty ? execution.stderr : output
             guard let line = Osascript.clientSafeFirstLine(raw, logLabel: "transfer status stderr (scrubbed)") else {
                 throw SendError.failed("Transfer status query failed. Check the server log for details.")
@@ -70,10 +63,6 @@ enum TransferMonitor {
         return .unknown
     }
 
-    /// Polls until the transfer finishes or fails, or the poll window closes.
-    /// Removes the staged copy at terminal states, and on timeout or a failed
-    /// status query after a grace delay because Messages may still be reading it.
-    /// `statusQuery` and `removalDelay` are injectable for tests.
     static func waitForCompletion(
         of staged: OutgoingFileStager.StagedFile,
         baseline: Int,

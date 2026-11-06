@@ -64,10 +64,6 @@ final class AppleScriptSendResultTests: XCTestCase {
         XCTAssertEqual(failure.error.localizedDescription, "Send failed: Messages returned no structured send result")
     }
 
-    // MARK: - Script text
-
-    // Pinned byte-for-byte to the hand-written scripts the builder replaced.
-    // Together these two cover every target and payload fragment.
     func testParticipantTextScriptIsStable() {
         XCTAssertEqual(SendScript.source(.participant, .text), """
             on run argv

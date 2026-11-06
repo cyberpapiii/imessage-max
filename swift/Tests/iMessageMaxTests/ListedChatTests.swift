@@ -3,8 +3,6 @@ import MCP
 import XCTest
 @testable import iMessageMax
 
-/// Every tool lists a message under the same chat, applies the same
-/// hidden-chat rule, and reports what it hid in the same shape.
 final class ListedChatTests: XCTestCase {
     func testEveryToolShowsAHiddenChatNamedById() async throws {
         let fixture = try hiddenChatFixture()
@@ -30,7 +28,6 @@ final class ListedChatTests: XCTestCase {
         let messages = try await callTool("get_messages", ["chat_id": "chat5"], database: db)
         XCTAssertEqual(try itemIds(messages, "messages"), ["msg_2"])
 
-        // Unnamed, the hidden chat stays out and is counted.
         let all = try await callTool("search", ["query": "hello"], database: db)
         XCTAssertEqual(try itemIds(all, "results"), ["msg_1"])
         XCTAssertEqual(all["filtered_hidden"] as? Int, 1)
@@ -39,8 +36,6 @@ final class ListedChatTests: XCTestCase {
         XCTAssertEqual(allSince["filtered_hidden"] as? Int, 1)
     }
 
-    /// Message 1, with an attachment, is in hidden chat 1 and shown chat 2:
-    /// it is listed under chat 2 unless hidden chats are read too.
     func testAMessageAlsoInAShownChatIsListedThere() async throws {
         let fixture = try ToolTestDatabase(name: "home-hidden")
         let recent = AppleTime.fromDate(Date()) - 60 * appleMinute
@@ -69,12 +64,10 @@ final class ListedChatTests: XCTestCase {
         let search = try await callTool("search", ["query": "hello"], database: db)
         XCTAssertEqual(try itemChatIds(search, "results"), ["chat2"])
 
-        // With hidden chats read too, the lowest chat is home again.
         let included = try await callTool("get_messages_since", ["since_rowid": 0, "include_filtered": true], database: db)
         XCTAssertEqual(try itemChatIds(included, "messages"), ["chat1"])
     }
 
-    /// Message 1, with an image, is in hidden chat 1 and shown chat 3.
     func testEveryToolListsAMessageInAHiddenAndAShownChatUnderTheShownOne() async throws {
         let imageURL = try makeFixtureImage(name: "listed-chat-\(UUID().uuidString).jpg", width: 200, height: 100)
         defer { try? FileManager.default.removeItem(at: imageURL) }
@@ -114,7 +107,6 @@ final class ListedChatTests: XCTestCase {
 
         let since = try await callTool("get_messages_since", ["since_rowid": 0], database: db)
         XCTAssertEqual(since["filtered_hidden"] as? Int, 1)
-        // get_messages_since always carries the field.
         let sinceAll = try await callTool(
             "get_messages_since", ["since_rowid": 0, "include_filtered": true], database: db
         )

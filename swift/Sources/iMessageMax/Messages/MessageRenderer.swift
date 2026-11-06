@@ -1,18 +1,12 @@
 import Foundation
 
-/// How a tool names a message's sender and its reactors. Tools differ on
-/// purpose (people-map keys vs display names, "me" vs "Me"), so each picks
-/// its labels here and the renderer applies them the same way everywhere.
 struct SenderLabels {
     enum Missing {
-        /// Show the raw handle.
         case handle
-        /// Show this fixed label.
         case label(String)
     }
 
     let me: String
-    /// A received message whose sender handle is NULL.
     let noHandle: String
     let names: [String: String]
     var missingSender: Missing = .handle
@@ -24,7 +18,6 @@ struct SenderLabels {
         return name(handle, missing: missingSender)
     }
 
-    /// chat.db stores my own tapbacks with no handle.
     func reactor(_ handle: String?) -> String {
         guard let handle else { return me }
         return name(handle, missing: missingReactor)
@@ -38,8 +31,6 @@ struct SenderLabels {
         }
     }
 
-    /// Contact name, business label or formatted number for every sender
-    /// and reactor in `messages`.
     static func displayNames(
         me: String,
         unknown: String,
@@ -67,7 +58,6 @@ struct SenderLabels {
     }
 }
 
-/// Every part of a message a tool may show, computed one way.
 struct RenderedMessage {
     let id: String
     let rowid: Int64
@@ -101,14 +91,10 @@ struct MessageAttachmentSummary: Encodable {
 struct MessageRenderer {
     let annotations: MessageAnnotations
     let labels: SenderLabels
-    /// Display names for group-event targets (`message.other_handle`).
     var eventNames: [String: String] = [:]
 
-    /// Links shown per message; the text itself still carries the rest.
     static let maxLinks = 10
 
-    /// Resolves the display names group events show for the people they
-    /// added or removed.
     static func eventNames(for messages: [MessageRecord], resolver: ContactResolver) async -> [String: String] {
         await SenderLabels.displayNames(messages.compactMap(\.otherHandle), resolver: resolver)
     }
@@ -139,7 +125,6 @@ struct MessageRenderer {
         )
     }
 
-    /// One string per standing tapback, oldest first: "❤️ alice".
     static func reactions(
         _ rows: [MessageAnnotations.Reaction],
         reactorName: (String?) -> String
@@ -151,8 +136,6 @@ struct MessageRenderer {
         return strings.isEmpty ? nil : strings
     }
 
-    /// Replays tapbacks and removals in date order and keeps what still
-    /// stands: one per reactor and kind, at the position it was first given.
     static func standing(_ rows: [MessageAnnotations.Reaction]) -> [MessageAnnotations.Reaction] {
         struct Key: Hashable {
             let handle: String?
@@ -190,8 +173,6 @@ struct MessageRenderer {
     }
 }
 
-/// A message shown beside another one: get_context's window and search's
-/// include_context. Only get_context shows `ago`.
 struct ContextMessage: Codable {
     let id: String
     let from: String

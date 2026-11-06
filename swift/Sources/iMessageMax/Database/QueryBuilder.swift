@@ -27,8 +27,6 @@ final class QueryBuilder {
         join(clause, params: params)
     }
 
-    /// Array form of `join`, for callers that build the join's bindings
-    /// conditionally and so cannot spell them out as variadic arguments.
     @discardableResult
     func join(_ clause: String, params: [Any]) -> QueryBuilder {
         joins.append(("JOIN \(clause)", params))
@@ -46,8 +44,6 @@ final class QueryBuilder {
         `where`(condition, params: params)
     }
 
-    /// Array form of `where`, for callers that build bindings in a loop
-    /// and so cannot spell them out as variadic arguments.
     @discardableResult
     func `where`(_ condition: String, params: [Any]) -> QueryBuilder {
         conditions.append((condition, params))
@@ -84,8 +80,6 @@ final class QueryBuilder {
 
         parts.append("SELECT \(selectCols.joined(separator: ", "))")
         parts.append("FROM \(fromTable)")
-        // Join params bind before WHERE params: a join clause may carry a
-        // parameterized subquery, and SQLite binds by position in SQL order.
         for (clause, params) in joins {
             parts.append(clause)
             allParams.append(contentsOf: params)

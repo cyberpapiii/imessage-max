@@ -1,6 +1,5 @@
 import Foundation
 
-/// Canonical conversation identity shared across discovery, retrieval, and sending.
 struct ChatIdentity: Codable {
     let mcpId: String
     let guid: String?
@@ -45,8 +44,6 @@ struct ChatIdentity: Codable {
         )
     }
 
-    /// Builds an identity from the batched participant rows so every tool
-    /// produces the same name for the same chat.
     static func from(
         chatId: Int64,
         guid: String?,
@@ -131,7 +128,6 @@ struct ChatIdentity: Codable {
     }
 }
 
-/// A chat participant's handle and the contact name it resolved to, if any.
 struct ResolvedParticipant {
     let handle: String
     let name: String?

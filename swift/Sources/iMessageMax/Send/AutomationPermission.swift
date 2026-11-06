@@ -1,17 +1,9 @@
 import AppKit
 import IMessageMaxContract
 
-/// Closure type for automation permission probes.
-/// Using a typealias allows tests to inject mock probes instead of calling the real TCC check.
-/// CI runners report "not_determined" so tests MUST inject rather than call the real probe.
 typealias AutomationProbe = @Sendable () -> (ok: Bool, status: PermissionStatus)
 
 enum AutomationPermission {
-    /// Check whether this process has Automation permission to drive Messages.app,
-    /// using AEDeterminePermissionToAutomateTarget against "com.apple.MobileSMS".
-    ///
-    /// This is a non-prompting read-only TCC check (askUserIfNeeded: false).
-    /// Explicit setup requests opt in to prompting; ordinary diagnose calls do not.
     static func checkAutomationPermission(askUserIfNeeded: Bool = false) -> (ok: Bool, status: PermissionStatus) {
         guard let bundleIDData = "com.apple.MobileSMS".data(using: .utf8) else {
             return (false, .messagesNotFound)

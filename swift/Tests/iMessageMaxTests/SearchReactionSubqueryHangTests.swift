@@ -35,10 +35,6 @@ final class SearchReactionSubqueryHangTests: XCTestCase {
         XCTAssertEqual(response.message.id, "msg_1")
     }
 
-    /// One old attributedBody match plus `fillerCount` newer attributedBody-only
-    /// rows that do not contain the term. Half the fillers also have a
-    /// reaction, so a correlated reaction subquery would full-scan on every
-    /// candidate.
     private func makeHangFixture(fillerCount: Int) throws -> ToolTestDatabase {
         let fixture = try ToolTestDatabase(name: "search-hang-\(fillerCount)")
         try fixture.insertHandle(rowId: 1, handle: "+15550000001")

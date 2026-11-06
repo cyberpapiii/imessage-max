@@ -6,7 +6,6 @@ import XCTest
 /// to the terminal it was typed into: macOS records a TCC grant against the
 /// *responsible* process, and an MCP client like Claude desktop launches the
 /// server disclaimed, so a grant that landed on Terminal is invisible to it.
-/// These tests read the kernel's responsibility record for a real child.
 final class ResponsibilityDisclaimTests: XCTestCase {
     private func responsiblePID(ofChildSpawnedWith disclaim: Bool) throws -> (child: pid_t, responsible: pid_t) {
         let child = try ResponsibilityDisclaim.spawn(

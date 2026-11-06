@@ -1,8 +1,6 @@
 import Foundation
 import IMessageMaxContract
 
-/// A decoded `diagnose` reply. `automation` is the state of both
-/// perm_automation and send_text_dm.
 public func diagnosis(database: Bool = true, contacts: Bool = true, automation: String = "supported")
   throws -> DiagnoseResult
 {

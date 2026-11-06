@@ -6,9 +6,6 @@ import HTTPTypes
 import NIOCore
 @testable import iMessageMax
 
-/// Streamable HTTP integration tests for the modern era (MCP 2026-07-28):
-/// header requirements, header/body consistency, version negotiation over
-/// the wire, and coexistence with the legacy session lane on one endpoint.
 final class ModernHTTPIntegrationTests: XCTestCase {
     func testDiscoverOverHTTPReturnsSupportedVersions() async throws {
         let app = await makeTestTransport().application()
@@ -21,7 +18,6 @@ final class ModernHTTPIntegrationTests: XCTestCase {
             let result = try XCTUnwrap(try decodeJSON(from: response.body)["result"] as? [String: Any])
             XCTAssertEqual(result["supportedVersions"] as? [String], ["2026-07-28"])
             XCTAssertEqual(result["resultType"] as? String, "complete")
-            // Stateless era: no session is created for modern requests.
             XCTAssertNil(response.head.headerFields[.mcpSessionId])
         }
     }
@@ -72,8 +68,6 @@ final class ModernHTTPIntegrationTests: XCTestCase {
         }
     }
 
-    // MARK: - Header validation (-32020 HeaderMismatch)
-
     func testMissingMcpMethodHeaderIsHeaderMismatch() async throws {
         var headers = modernHeaders(method: "tools/list")
         headers[.mcpMethod] = nil
@@ -104,8 +98,6 @@ final class ModernHTTPIntegrationTests: XCTestCase {
         )
     }
 
-    // MARK: - Version negotiation and routing over the wire
-
     func testUnsupportedVersionReturns32022WithSupportedList() async throws {
         let app = await makeTestTransport().application()
         try await app.test(TestingSetup.router) { client in
@@ -135,8 +127,6 @@ final class ModernHTTPIntegrationTests: XCTestCase {
         }
     }
 
-    // MARK: - Dual-era coexistence
-
     /// plug, a legacy client, sends Mcp-Method and MCP-Protocol-Version
     /// headers on legacy session traffic. Header presence does not reroute
     /// a legacy-body request to the modern lane; only modern `_meta` in the
@@ -157,8 +147,6 @@ final class ModernHTTPIntegrationTests: XCTestCase {
         }
     }
 
-    /// `initialize` always selects the legacy lane, even when its body
-    /// carries the modern per-request `_meta`.
     func testInitializeWithModernMetaInBodyStaysLegacy() async throws {
         let app = await makeTestTransport().application()
         try await app.test(TestingSetup.router) { client in
@@ -199,7 +187,6 @@ final class ModernHTTPIntegrationTests: XCTestCase {
     }
 }
 
-/// POSTs `body` and expects a 400 carrying HeaderMismatch (-32020).
 private func assertHeaderMismatch(
     body: String,
     headers: HTTPFields,

@@ -15,11 +15,8 @@ extension HTTPField.Name {
 }
 
 enum HTTPRequestParsing {
-    /// Largest request body accepted on POST.
     static let maxRequestBodyBytes = 512 * 1024
 
-    /// Upper bound on how many over-limit bytes get read and discarded before
-    /// giving up on leaving the connection cleanly closable.
     static let overLimitDrainBytes = 32 * 1024 * 1024
 
     enum BodyCollection {
@@ -30,10 +27,6 @@ enum HTTPRequestParsing {
 
     private struct BodyReadTimeout: Error {}
 
-    /// Collects the request body up to `maxBytes`. On overflow, keeps
-    /// consuming the remaining body (bounded by `drainLimit`) before
-    /// reporting `.tooLarge`.
-    ///
     /// The drain is load-bearing. `collect(upTo:)` threw on overflow and left
     /// the rest of the body unread. For clients that send `Connection: close`
     /// (Python urllib does by default), Hummingbird's HTTP1 loop skips its
@@ -102,8 +95,6 @@ enum HTTPRequestParsing {
         return accept.contains("application/json") && accept.contains("text/event-stream")
     }
 
-    /// Decodes the `=?base64?...?=` sentinel format the spec defines for
-    /// header values that cannot be carried as plain ASCII.
     static func decodeBase64Sentinel(_ value: String) -> String {
         guard value.hasPrefix("=?base64?"), value.hasSuffix("?="),
             value.count > 11

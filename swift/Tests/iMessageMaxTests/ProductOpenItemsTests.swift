@@ -3,11 +3,7 @@ import MCP
 import XCTest
 @testable import iMessageMax
 
-/// `has:` filters by attachment mime type, find_chat by group and content,
-/// and list_chats' most_active sort.
 final class ProductOpenItemsTests: XCTestCase {
-
-    // MARK: - has:images mime filter
 
     func testGetMessagesHasImagesFiltersByMimeNotBareJoin() async throws {
         let fixture = try makeHasMediaFixture()
@@ -31,8 +27,6 @@ final class ProductOpenItemsTests: XCTestCase {
         XCTAssertEqual(ids, ["msg_2", "msg_3"])
     }
 
-    // MARK: - FindChat is_group before LIMIT + attributedBody contains
-
     func testFindChatIsGroupAppliedInSQLBeforeLimit() async throws {
         let fixture = try makeFindChatGroupFixture()
         let contents = try await FindChatTool.execute(
@@ -54,7 +48,6 @@ final class ProductOpenItemsTests: XCTestCase {
     func testFindChatContainsRecentMatchesAttributedBody() async throws {
         let fixture = try makeFindChatAttributedFixture()
         let blob = typedstreamBlob(payload: Array("secret volcano hike".utf8))
-        // Re-insert message 10 with attributedBody only (nil text).
         try fixture.execute("DELETE FROM message WHERE ROWID = 10;")
         try fixture.execute("DELETE FROM chat_message_join WHERE message_id = 10;")
         try fixture.insertMessage(
@@ -81,8 +74,6 @@ final class ProductOpenItemsTests: XCTestCase {
         XCTAssertEqual(chats.first?["id"] as? String, "chat1")
     }
 
-    // MARK: - most_active sort
-
     func testListChatsMostActiveOrdersByMessageCount() async throws {
         let fixture = try makeMostActiveFixture()
         let result = try await ListChatsTool.execute(
@@ -94,8 +85,6 @@ final class ProductOpenItemsTests: XCTestCase {
         let response = result
         XCTAssertEqual(response.chats.map(\.id), ["chat2", "chat1"])
     }
-
-    // MARK: - Fixtures
 
     private func makeHasMediaFixture() throws -> ToolTestDatabase {
         let fixture = try ToolTestDatabase(name: "has-media")
@@ -141,7 +130,6 @@ final class ProductOpenItemsTests: XCTestCase {
         try fixture.insertHandle(rowId: 1, handle: "+15555550123")
         try fixture.insertHandle(rowId: 2, handle: "+15555550124")
 
-        // DM named similarly — would steal LIMIT 1 if is_group applied after.
         try fixture.insertChat(rowId: 1, guid: "dm", displayName: "Crew Notes")
         try fixture.joinChatHandle(chatId: 1, handleId: 1)
 
@@ -181,11 +169,9 @@ final class ProductOpenItemsTests: XCTestCase {
         try fixture.joinChatHandle(chatId: 2, handleId: 2)
 
         let base: Int64 = 6_000_000_000_000
-        // Quiet: 1 message, more recent
         try fixture.insertMessage(rowId: 1, guid: "q1", text: "hi", date: base + 100, isFromMe: false, handleId: 1)
         try fixture.joinChatMessage(chatId: 1, messageId: 1)
 
-        // Busy: 3 older messages → most_active first; recent sort puts Quiet first
         for i in 0..<3 {
             let id = 10 + i
             try fixture.insertMessage(

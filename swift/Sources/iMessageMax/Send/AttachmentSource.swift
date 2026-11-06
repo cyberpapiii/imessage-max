@@ -1,14 +1,11 @@
 import Foundation
 
-/// Opens an outbound attachment without following symlinks and copies it
-/// from the open descriptor, so nothing after the open depends on the path
-/// string. Ported from openclaw/imsg.
 enum AttachmentSource {
     enum Failure: Error {
         case notAbsolute
-        case notFound          // ENOENT / ENOTDIR on a component
-        case notPermitted      // EACCES / EPERM
-        case symlink           // ELOOP from O_NOFOLLOW
+        case notFound
+        case notPermitted
+        case symlink
         case notRegularFile
         case other(Int32)
     }
@@ -40,8 +37,6 @@ enum AttachmentSource {
         return FileHandle(fileDescriptor: fd, closeOnDealloc: true)
     }
 
-    /// Creates `destination` exclusively with mode 0600 and copies data only
-    /// (no xattrs/ACLs: quarantine flags and Finder tags stay behind).
     static func copy(_ source: FileHandle, to destination: URL) throws {
         let destFD = open(destination.path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, S_IRUSR | S_IWUSR)
         guard destFD >= 0 else { throw map(errno) }

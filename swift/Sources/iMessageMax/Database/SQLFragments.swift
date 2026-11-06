@@ -1,8 +1,6 @@
 import Foundation
 
-/// chat.db predicates that encode Messages.app rules, so each rule is written once.
 enum SQLFragments {
-    /// `?, ?, ?` for an IN list of `count` bindings.
     static func placeholders(_ count: Int) -> String {
         Array(repeating: "?", count: count).joined(separator: ", ")
     }
@@ -22,18 +20,12 @@ enum SQLFragments {
         """
     }
 
-    /// A group chat has more than one other participant; every other chat,
-    /// including one with no handles left, is a DM.
     static func isGroup(_ alias: String = "c") -> String { isGroup(count: participantCount(alias)) }
     static func isDirect(_ alias: String = "c") -> String { isDirect(count: participantCount(alias)) }
 
-    /// The same rule over a `participantCount` the query already selected,
-    /// so a HAVING clause does not run the subquery a second time.
     static func isGroup(count: String) -> String { "\(count) > 1" }
     static func isDirect(count: String) -> String { "\(count) <= 1" }
 
-    /// ORDER BY terms putting chat `alias` with the newest message first; a
-    /// chat with no messages sorts last, and ties go to the newest chat.
     static func newestChatFirst(_ alias: String = "c") -> String {
         """
         COALESCE((SELECT MAX(lm.date) FROM chat_message_join lcmj \
@@ -42,12 +34,6 @@ enum SQLFragments {
         """
     }
 
-    /// The one chat a message is listed under where a tool shows one chat
-    /// per message: the lowest chat id it is joined to. With `preferShown`
-    /// (the tool leaves hidden chats out) it is the lowest shown chat, so a
-    /// message also in a shown chat does not vanish with a hidden one; a
-    /// message only in hidden chats keeps the lowest, which the shown-chat
-    /// filter then drops. `messageId` is the SQL expression for the message's ROWID.
     static func homeChat(of messageId: String = "m.ROWID", preferShown: Bool = false) -> String {
         let lowest = "(SELECT MIN(hcmj.chat_id) FROM chat_message_join hcmj WHERE hcmj.message_id = \(messageId))"
         guard preferShown else { return lowest }
@@ -58,12 +44,10 @@ enum SQLFragments {
             """
     }
 
-    /// Received messages not yet read. A tapback is never unread.
     static func unreadInbound(_ alias: String = "m") -> String {
         "(\(alias).is_read = 0 AND \(alias).is_from_me = 0 AND \(notReaction(alias)))"
     }
 
-    /// Attachments Messages.app shows.
     static func shownAttachment(_ alias: String = "a") -> String {
         "COALESCE(\(alias).hide_attachment, 0) = 0"
     }
@@ -77,9 +61,6 @@ enum SQLFragments {
         "(\(notReaction(alias)) AND \(alias).item_type = 0)"
     }
 
-    /// Whether chat `chat` (an SQL expression) awaits my reply: its newest
-    /// conversational message, at or after one bound `?` date when
-    /// `sinceBound`, was received. 0 when it has none.
     static func awaitingReply(chat: String, sinceBound: Bool) -> String {
         """
         COALESCE((SELECT ar.is_from_me = 0 FROM chat_message_join arj \
@@ -89,7 +70,6 @@ enum SQLFragments {
         """
     }
 
-    /// Tapback rows and their removals (see `ReactionType`), nothing else.
     static func tapbackOrRemoval(_ alias: String = "m") -> String {
         let types = ReactionType.types, removals = ReactionType.removalTypes
         return "(\(alias).associated_message_type BETWEEN \(types.lowerBound) AND \(types.upperBound)"
@@ -105,14 +85,11 @@ enum SQLFragments {
             + " ELSE substr(\(column), instr(\(column), '/') + 1) END)"
     }
 
-    /// Text carrying an http(s) URL, or a message Messages.app shows as a link preview.
     static func hasLink(_ alias: String = "m") -> String {
         "(\(alias).text LIKE '%http://%' OR \(alias).text LIKE '%https://%'"
             + " OR \(alias).balloon_bundle_id = '\(BalloonBundle.urlPreview)')"
     }
 
-    /// At least one attachment Messages.app shows, optionally only of one
-    /// `AttachmentType.sqlPredicate` kind.
     static func hasAttachment(ofType type: String? = nil, _ alias: String = "m") -> String {
         let typeClause = AttachmentType.sqlPredicate(for: type, alias: "a").map { "\n  AND (\($0))" } ?? ""
         return """
@@ -125,8 +102,6 @@ enum SQLFragments {
             """
     }
 
-    /// The predicate for a `has` argument, nil for an unknown value (no
-    /// filter). Takes search's singular and get_messages' plural spellings.
     static func has(_ value: String?, _ alias: String = "m") -> String? {
         switch value {
         case "link", "links": hasLink(alias)

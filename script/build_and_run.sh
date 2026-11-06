@@ -12,13 +12,10 @@ case "$MODE" in
   *) echo "usage: $0 [--verify|--build-only|--install|--logs|--telemetry|--debug]" >&2; exit 2 ;;
 esac
 
-# Stop only this companion. The launchd server is managed independently.
 pkill -x iMessageMaxMenu >/dev/null 2>&1 || true
 swift build --package-path "$ROOT_DIR/macos" -c release --build-system native
 MENU_BIN_DIR="$(swift build --package-path "$ROOT_DIR/macos" -c release --build-system native --show-bin-path)"
 SERVER_BINARY="$ROOT_DIR/swift/.build/release/imessage-max"
-# Always package current source, including explicit permission commands. Signing
-# retains the canonical server path; this build does not restart the service.
 make -C "$ROOT_DIR/swift" sign
 VERSION="$("$ROOT_DIR/scripts/check-version.sh" --print)"
 SIGN_HASH="$(security find-identity -v -p codesigning | awk '/"iMessage Max Dev"/ { print $2; exit }')"
@@ -50,10 +47,8 @@ cat > "$APP_BUNDLE/Contents/Info.plist" <<PLIST
 <key>NSAppleEventsUsageDescription</key><string>iMessage Max needs access to Messages so your assistants can send messages when you ask.</string>
 </dict></plist>
 PLIST
-# One shared geometry source keeps panel, chrome, and app-tile identity aligned.
 ICON_RENDERER="$ROOT_DIR/dist/render_app_icon.swift"
 cat "$ROOT_DIR"/macos/Sources/MaxBrand/*.swift "$ROOT_DIR/script/render_app_icon.swift" > "$ICON_RENDERER"
-# The icon shades its metal pixel by pixel, so it is compiled with optimisation.
 swiftc -O "$ICON_RENDERER" -o "$ROOT_DIR/dist/render_app_icon"
 "$ROOT_DIR/dist/render_app_icon" "$APP_BUNDLE/Contents/Resources"
 codesign --force --sign "$SIGN_HASH" "$APP_BUNDLE/Contents/Resources/imessage-max"

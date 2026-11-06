@@ -54,8 +54,6 @@ enum GetActiveConversations {
     static let minExchanges = IntArgument(name: "min_exchanges", defaultValue: 2, range: 1...100)
     static let limit = IntArgument(name: "limit", defaultValue: 10, range: 1...50)
 
-    // MARK: - Tool Registration
-
     static func definition(db: Database, resolver: ContactResolver) -> ToolDefinition {
         let inputSchema: Value = .object([
             "type": "object",
@@ -127,14 +125,12 @@ enum GetActiveConversations {
         let windowStartApple = AppleTime.fromDate(windowStart)
 
         let conversational = SQLFragments.conversational()
-        // No include_filtered: hidden chats are always left out.
         let scope = ChatScope(named: nil, includeFiltered: false)
         let query = QueryBuilder()
             .select(
                 "c.ROWID as chat_id",
                 "c.display_name",
                 "\(SQLFragments.participantCount()) as participant_count",
-                // Group events (renames, joins, leaves) are no one's turn.
                 "SUM(CASE WHEN m.is_from_me = 1 AND \(conversational) THEN 1 ELSE 0 END) as my_count",
                 "SUM(CASE WHEN m.is_from_me = 0 AND \(conversational) THEN 1 ELSE 0 END) as their_count",
                 "MAX(CASE WHEN m.is_from_me = 1 AND \(conversational) THEN m.date ELSE NULL END) as last_from_me",
@@ -154,15 +150,12 @@ enum GetActiveConversations {
             .where(SQLFragments.notReaction())
             .where(scope.shownPredicate() ?? "1")
             .groupBy("c.ROWID")
-            // An exchange needs a message each way, so the qualifying count
-            // is the smaller side; minExchanges is at least 1.
             .having("my_count >= ? AND their_count >= ?", clampedMinExchanges, clampedMinExchanges)
         if let filterGroup = isGroup {
             query.having(filterGroup
                 ? SQLFragments.isGroup(count: "participant_count")
                 : SQLFragments.isDirect(count: "participant_count"))
         }
-        // One row past the page says whether more chats qualify.
         query.orderBy("last_in_window DESC", "c.ROWID DESC").limit(clampedLimit + 1)
         let (sql, params) = query.build()
 
@@ -181,8 +174,6 @@ enum GetActiveConversations {
 
         let includedRows = Array(chatRows.prefix(clampedLimit))
 
-        // last_in_window is the newest qualifying date the activity query
-        // already computed, which is exactly the message the preview wants.
         let page = try await ChatPage.build(
             includedRows.map { ChatPage.Chat(id: $0.chatId, explicitName: $0.displayName, newestDate: $0.lastInWindow) },
             lastMessages: ChatPage.LastMessageOptions(
@@ -219,13 +210,10 @@ enum GetActiveConversations {
             conversations: conversations,
             total: conversations.count,
             windowHours: clampedHours,
-            // No cursor: more says raising limit would show more chats.
             more: chatRows.count > clampedLimit,
             cursor: nil
         )
     }
-
-    // MARK: - Private Helpers
 
     private struct ChatActivityRow {
         let chatId: Int64

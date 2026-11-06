@@ -6,9 +6,7 @@ import Foundation
 import IMessageMaxContract
 import MCP
 
-/// Outcome of one modern-era message.
 enum ModernReply {
-    /// A notification: nothing to send.
     case accepted
     case result(Data)
     case error(Data, JSONRPCErrorCode)
@@ -22,17 +20,10 @@ enum ModernReply {
 }
 
 enum ModernDispatcher {
-    /// Cache hints for the required CacheableResult fields. The tool catalog
-    /// only changes when the binary is rebuilt; results describe personal
-    /// iMessage data, so shared intermediaries must not cache them.
     private static let catalogTTLMs = 3_600_000
     private static let catalogCacheScope = "private"
 
-    /// Validates the required `_meta` fields and the requested version, then
-    /// routes the method. `message.era` must be `.modern`.
     static func handle(_ message: JSONRPCMessage, transport: String, catalog: ToolCatalog) async -> ModernReply {
-        // A notification: nothing to answer. `notifications/cancelled` is
-        // acted on by the transport, which holds the running requests.
         guard let id = message.id, let method = message.method else {
             return .accepted
         }
@@ -69,8 +60,6 @@ enum ModernDispatcher {
             return error(id, .methodNotFound, "Method not found: \(method)")
         }
     }
-
-    // MARK: - Method implementations
 
     private static func discoverResult() -> [String: Any] {
         var serverInfo = Version.serverInfoJSON
@@ -113,8 +102,6 @@ enum ModernDispatcher {
             return success(id, result)
         }
     }
-
-    // MARK: - Envelopes
 
     private static func completeResult() -> [String: Any] {
         [

@@ -24,10 +24,7 @@ enum GetContext {
     static let before = IntArgument(name: "before", defaultValue: 5, range: 0...50)
     static let after = IntArgument(name: "after", defaultValue: 10, range: 0...50)
 
-    /// Stands in for a received message's NULL sender handle in `people`.
     private static let noHandle = "unknown"
-
-    // MARK: - Tool Registration
 
     static func definition(db: Database, resolver: ContactResolver) -> ToolDefinition {
         let inputSchema: Value = .object([
@@ -110,8 +107,6 @@ enum GetContext {
             throw ToolFailure("invalid_params", "chat_id is required when using contains")
         }
 
-        // Reject a malformed message id before touching chat.db, so it reads
-        // as invalid_id even when the database cannot be opened.
         enum Target {
             case message(Int64)
             case text(String, inChat: Int64)
@@ -146,8 +141,6 @@ enum GetContext {
             targetResult = found
 
         case .text(let searchText, let numericChatId):
-            // Page newest-first through the rows that may contain the text;
-            // the decoded-text check below is the one that decides.
             let pageSize = 500
             let scanCap = 5000
             let match = SQLFragments.textMayContain(searchText)
@@ -204,7 +197,6 @@ enum GetContext {
         let shown = [targetResult.message] + beforeRows + afterRows
         let annotations = try MessageAnnotations.load(for: shown, include: [.reactions, .replies], db: database)
 
-        // Keys go to reactors first, then senders, each in window order.
         var people = PeopleMap(rules: .seen)
         func see(_ handle: String?) async {
             guard let handle else { return people.addMe() }

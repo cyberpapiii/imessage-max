@@ -2,10 +2,6 @@ import XCTest
 import IMessageMaxContract
 @testable import iMessageMax
 
-/// diagnose is the one tool whose response legitimately names the database
-/// path, but the operator's username must not ride along with it. All
-/// probes are injected so the test is hermetic on a CI runner without Full
-/// Disk Access.
 final class DiagnoseToolTests: XCTestCase {
     private static let dbAccessible: DatabaseProbe = { (true, "accessible") }
     private static let dbDenied: DatabaseProbe = { (false, "permission_denied") }
@@ -20,8 +16,6 @@ final class DiagnoseToolTests: XCTestCase {
         return (result, try FormatUtils.encodeJSON(result))
     }
 
-    /// Diagnose reports the Contacts authorization word on the wire as the
-    /// contract spells it, including the `unknown` fallback.
     func testContactsAuthorizationReachesDiagnoseUnchanged() async throws {
         let words: [(PermissionStatus, String)] = [
             (.authorized, "authorized"), (.limited, "limited"), (.denied, "denied"),
@@ -57,7 +51,6 @@ final class DiagnoseToolTests: XCTestCase {
         }
     }
 
-    /// diagnose must probe on every call, never on first call only.
     func testDiagnoseReprobesOnEveryCall() async throws {
         final class Counter: @unchecked Sendable {
             let lock = NSLock()
@@ -84,9 +77,6 @@ final class DiagnoseToolTests: XCTestCase {
         XCTAssertEqual(counter.calls, 2)
     }
 
-    /// The fix must say which process to grant, what to do about a stale
-    /// entry, that the grant only applies to newly launched processes, and
-    /// how to bisect between "this user lacks FDA" and "this process lacks FDA".
     func testPermissionDeniedFixIsActionable() async throws {
         let (result, json) = try await encodedResponse(dbProbe: DiagnoseToolTests.dbDenied)
         let fix = try XCTUnwrap(result.database.fix)
@@ -131,9 +121,6 @@ final class DiagnoseToolTests: XCTestCase {
         XCTAssertFalse(json.contains("\"features\""))
     }
 
-    /// A headless process that declined to prompt must say so, and must point
-    /// at the one command that triggers the prompt, instead of the generic
-    /// System Settings advice (the binary is not listed there until it asks).
     func testHeadlessSkipIsVisibleInDiagnose() async throws {
         let resolver = ContactResolver(
             source: ContactResolver.Source(
@@ -161,8 +148,6 @@ final class DiagnoseToolTests: XCTestCase {
         XCTAssertNotNil(result.capabilities["perm_contacts"]?.fix)
     }
 
-    /// Plain not_determined (interactive process, prompt pending or dismissed)
-    /// keeps today's wording and the `unverified` capability state.
     func testNotDeterminedWithoutSkipIsUnchanged() async throws {
         let result = try await DiagnoseTool.execute(
             resolver: ContactResolver(seedCache: [:], authorization: (false, "not_determined")),
@@ -174,10 +159,6 @@ final class DiagnoseToolTests: XCTestCase {
         XCTAssertEqual(result.capabilities["perm_contacts"]?.state, "unverified")
     }
 
-    /// A binary linked without the embedded Info.plist has no
-    /// NSContactsUsageDescription, so macOS can neither prompt for it nor
-    /// record a grant against it. Running the request command cannot fix
-    /// that, so diagnose must name the build as the problem.
     func testMissingUsageDescriptionIsReportedBeforeHeadlessSkip() async throws {
         let resolver = ContactResolver(
             source: ContactResolver.Source(

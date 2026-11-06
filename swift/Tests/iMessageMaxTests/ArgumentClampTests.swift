@@ -3,27 +3,17 @@ import MCP
 import XCTest
 @testable import iMessageMax
 
-/// Each method feeds a tool an argument that could trap the whole launchd
-/// service (Int64 overflow in a multiply or a Date conversion, or `prefix`
-/// on a negative count) and asserts the call returns a normal, decodable
-/// response instead.
 final class ArgumentClampTests: XCTestCase {
 
-    // MARK: - Fixture
-
-    /// Two handles, a DM and a group chat, plus two outgoing messages in the
-    /// DM with no reply so the `unanswered` paths have rows to inspect.
     private func makeFixture() throws -> ToolTestDatabase {
         let fixture = try ToolTestDatabase(name: "argument-clamp")
 
-        try fixture.insertHandle(rowId: 1, handle: "+15550000001")  // Alice
-        try fixture.insertHandle(rowId: 2, handle: "+15550000002")  // Bob
+        try fixture.insertHandle(rowId: 1, handle: "+15550000001")
+        try fixture.insertHandle(rowId: 2, handle: "+15550000002")
 
-        // Chat 1: DM with Alice (one participant)
         try fixture.insertChat(rowId: 1, guid: "iMessage;-;alice-clamp-guid")
         try fixture.joinChatHandle(chatId: 1, handleId: 1)
 
-        // Chat 2: group chat with Alice and Bob
         try fixture.insertChat(rowId: 2, guid: "iMessage;+;group-clamp-guid", displayName: "Group Chat")
         try fixture.joinChatHandle(chatId: 2, handleId: 1)
         try fixture.joinChatHandle(chatId: 2, handleId: 2)
@@ -49,8 +39,6 @@ final class ArgumentClampTests: XCTestCase {
         return fixture
     }
 
-    // MARK: - search
-
     func testSearchWithHugeUnansweredHoursReturns() async throws {
         let fixture = try makeFixture()
         let json = try await callTool("search", [
@@ -62,8 +50,6 @@ final class ArgumentClampTests: XCTestCase {
         XCTAssertNotEqual(json["error"] as? String, "internal_error", "search must clamp unanswered_hours, not fail: \(json)")
         XCTAssertNotNil(json["results"], "search should answer normally with a clamped window: \(json)")
     }
-
-    // MARK: - get_messages
 
     func testGetMessagesWithNegativeLimitReturns() async throws {
         let fixture = try makeFixture()
@@ -106,8 +92,6 @@ final class ArgumentClampTests: XCTestCase {
         let messages = try decodeJSONArray(json["messages"])
         XCTAssertEqual(messages.count, 2, "a capped relative bound still includes every message in the chat: \(json)")
     }
-
-    // MARK: - find_chat
 
     func testFindChatWithNegativeLimitReturns() async throws {
         let fixture = try makeFixture()

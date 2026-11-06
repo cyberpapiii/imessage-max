@@ -1,9 +1,6 @@
 import Foundation
 import MCP
 
-// MARK: - Tool Schema Types
-
-/// Schema type for defining tool input properties using struct-based pattern
 struct SchemaType {
     private let _toValue: () -> Value
 
@@ -117,20 +114,10 @@ extension Server {
         }
     }
 
-    /// Builds the same `Value` that decoding the text with `JSONDecoder`
-    /// produces, without the decoder.
-    ///
-    /// Every tool result is serialized twice, once as text and once as
-    /// structuredContent, and `Value`'s decoder reaches its case by trying each
-    /// one in turn and discarding the failures. That cost about 3.7 ms on a
-    /// 5.7 kB response, more than the database work behind it. JSONSerialization
-    /// parses the same text in about 0.05 ms and this walks the result once.
-    ///
     /// The case choices mirror `Value.init(from:)` exactly: booleans before
     /// numbers, integers before doubles (JSONSerialization flags which one the
     /// text held, the same distinction the decoder makes by trying `Int` first),
     /// and data URLs still become `.data`.
-    /// Exposed for the equivalence test that pins this against `JSONDecoder`.
     nonisolated static func structuredValue(from object: Any) -> Value? {
         switch object {
         case is NSNull:

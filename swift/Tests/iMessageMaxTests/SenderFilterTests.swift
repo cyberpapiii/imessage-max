@@ -22,8 +22,6 @@ final class SenderFilterTests: XCTestCase {
         XCTAssertNil(empty)
     }
 
-    /// Every handle of every matching contact, in a fixed order, rather
-    /// than whichever match the contact cache yielded first.
     func testNameMatchesEveryMatchingHandle() async {
         let alice = await SenderFilter.resolve("Alice", resolver: resolver)
         XCTAssertEqual(alice, .handles(["+15550000001", "+15550000009", "alice@example.com"]))

@@ -36,7 +36,6 @@ enum ResponsibilityDisclaim {
         return unsafeBitCast(sym, to: type)
     }
 
-    /// Spawn `path` with inherited stdio and environment (plus `extraEnvironment`).
     static func spawn(
         path: String,
         arguments: [String],
@@ -73,7 +72,6 @@ enum ResponsibilityDisclaim {
         return pid
     }
 
-    /// Wait for `pid` and return its exit status (128 + signal if it was killed).
     static func wait(_ pid: pid_t) -> Int32 {
         var status: Int32 = 0
         while waitpid(pid, &status, 0) == -1 && errno == EINTR {}
@@ -81,7 +79,6 @@ enum ResponsibilityDisclaim {
         return signal == 0 ? (status >> 8) & 0xff : 128 + signal
     }
 
-    /// The process macOS holds responsible for `pid`, or nil if unknown.
     static func responsiblePID(for pid: pid_t) -> pid_t? {
         guard let responsibleFor = symbol("responsibility_get_pid_responsible_for_pid", as: ResponsibleFor.self) else {
             return nil

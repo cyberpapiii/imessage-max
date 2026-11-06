@@ -2,8 +2,6 @@ import MCP
 import XCTest
 @testable import iMessageMax
 
-/// A database error a tool lets escape reaches the client as a JSON error
-/// with a stable code and fixed guidance, never the path or SQLite detail.
 final class ToolErrorMappingTests: XCTestCase {
 
     func testDatabaseErrorsBecomeStableCodesWithoutInternalDetail() async throws {

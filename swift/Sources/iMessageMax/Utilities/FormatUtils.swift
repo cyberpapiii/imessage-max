@@ -77,15 +77,12 @@ enum FormatUtils {
         "aliases",
     ]
 
-    /// Format byte count as a compact human-readable string (e.g., "45.0KB").
     static func fileSize(_ bytes: Int) -> String {
         if bytes < 1024 { return "\(bytes)B" }
         else if bytes < 1024 * 1024 { return String(format: "%.1fKB", Double(bytes) / 1024.0) }
         else { return String(format: "%.1fMB", Double(bytes) / (1024.0 * 1024.0)) }
     }
 
-    /// Key → position in `orderedKeys`, built once. Keys absent from the list
-    /// rank after every listed key and sort alphabetically among themselves.
     private static let orderedKeyRank: [String: Int] = {
         var rank: [String: Int] = [:]
         rank.reserveCapacity(orderedKeys.count)
@@ -95,12 +92,6 @@ enum FormatUtils {
         return rank
     }()
 
-    /// Encode an Encodable value to a JSON string with deliberate user-facing key order.
-    ///
-    /// Two Foundation passes (`JSONEncoder` for Codable semantics and number
-    /// formatting, `JSONSerialization` to get a walkable object graph) followed
-    /// by one linear write into a byte buffer. Key ordering is a dictionary
-    /// lookup per key and escaping copies unmodified byte runs in bulk.
     static func encodeJSON<T: Encodable>(_ value: T) throws -> String {
         let encoder = JSONEncoder()
         let data = try encoder.encode(value)
@@ -153,13 +144,8 @@ enum FormatUtils {
 
     private static let hexDigits: [UInt8] = Array("0123456789ABCDEF".utf8)
 
-    /// Append `string` as a quoted JSON string. Only `"`, `\`, and control
-    /// characters below 0x20 are escaped; `/`, U+2028/U+2029 and all non-ASCII
-    /// pass through as raw UTF-8 (this matches the pinned golden output).
     private static func appendEscapedJSONString(_ string: String, to out: inout [UInt8]) {
         out.append(UInt8(ascii: "\""))
-        // Strings out of JSONSerialization are NSString-bridged; withUTF8 makes
-        // a contiguous copy only when the storage is not already native.
         var contiguous = string
         contiguous.withUTF8 { bytes in
             var runStart = bytes.startIndex

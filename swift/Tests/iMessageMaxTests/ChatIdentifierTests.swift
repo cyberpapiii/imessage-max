@@ -34,10 +34,6 @@ final class ChatIdentifierTests: XCTestCase {
         }
     }
 
-    // MARK: - Chat ids in the tools
-
-    /// chat1 and chat2 ("Old Trip", "New Trip") both say "trip hello"; chat2
-    /// is the more recent.
     private func twoTripChatsFixture() throws -> ToolTestDatabase {
         let fixture = try ToolTestDatabase(name: "chat-ids")
         try fixture.insertHandle(rowId: 1, handle: "+15550000001")
@@ -70,8 +66,6 @@ final class ChatIdentifierTests: XCTestCase {
         }
     }
 
-    /// A GUID substring names one chat, the most recently active match, in
-    /// search's in_chat and in get_chat_details.
     func testGuidSubstringNamesOneChatInEveryTool() async throws {
         let fixture = try twoTripChatsFixture()
         let search = try await callTool("search", ["query": "trip", "in_chat": "chat-trip"], database: fixture.database())
@@ -96,7 +90,6 @@ final class ChatIdentifierTests: XCTestCase {
         XCTAssertEqual((page["chat"] as? [String: Any])?["id"] as? String, "chat2")
     }
 
-    /// An unreadable database is reported as such, not as chat_not_found.
     func testChatIdLookupDoesNotHideDatabaseErrors() async throws {
         let missing = Database(path: "/nonexistent/\(UUID().uuidString)/chat.db")
         let tool = GetMessagesTool(db: missing, resolver: ContactResolver(seedCache: [:]))

@@ -1,11 +1,7 @@
 import XCTest
 @testable import iMessageMax
 
-/// Characterization tests for the two keyset cursor codecs. Cursors are opaque
-/// to agents but round-trip through them verbatim, so the wire format is pinned.
 final class CursorCodecTests: XCTestCase {
-
-    // MARK: - TimelineCursor
 
     func testTimelineCursorRoundTrip() {
         let encoded = TimelineCursor.encode(date: 123, messageId: 456)
@@ -22,8 +18,6 @@ final class CursorCodecTests: XCTestCase {
             XCTAssertNil(TimelineCursor.decode(raw), "raw: \(String(reflecting: raw))")
         }
     }
-
-    // MARK: - ChatListCursor
 
     func testChatListCursorTwoAndThreePartRoundTrip() {
         let twoPart = ChatListCursor.encode(primary: 10, secondary: nil, chatId: 5)

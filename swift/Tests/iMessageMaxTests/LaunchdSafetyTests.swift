@@ -1,13 +1,10 @@
 import XCTest
 
 final class LaunchdSafetyTests: XCTestCase {
-    /// Task.sleep aborts intermittently inside the launchd-run service
-    /// (see AGENTS.md "No Task.sleep in the service runtime"). Use
-    /// AsyncTimeout.sleep or the Dispatch-timer pattern instead.
     func testNoTaskSleepInServiceSources() throws {
         let testsDir = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()               // iMessageMaxTests
-            .deletingLastPathComponent()               // Tests
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
         let sourcesDir = testsDir.deletingLastPathComponent()
             .appendingPathComponent("Sources")
         var isDirectory: ObjCBool = false

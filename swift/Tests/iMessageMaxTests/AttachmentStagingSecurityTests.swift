@@ -41,8 +41,6 @@ final class AttachmentStagingSecurityTests: XCTestCase {
         return try FileManager.default.contentsOfDirectory(atPath: root.path).count
     }
 
-    /// A symlinked staging root is refused before anything follows the link,
-    /// so the link's target keeps its permissions.
     func testSymlinkedStagingRootIsRefusedBeforeItIsChmodded() throws {
         let target = scratch.appendingPathComponent("target", isDirectory: true)
         try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o755])
@@ -66,8 +64,8 @@ final class AttachmentStagingSecurityTests: XCTestCase {
         XCTAssertEqual(SecurePath.absoluteLexicalPath("/var/folders/a/b.png"), "/private/var/folders/a/b.png")
         XCTAssertEqual(SecurePath.absoluteLexicalPath("/etc/hosts"), "/private/etc/hosts")
         XCTAssertEqual(SecurePath.absoluteLexicalPath("/tmp"), "/private/tmp")
-        XCTAssertEqual(SecurePath.absoluteLexicalPath("/tmpfoo/x"), "/tmpfoo/x")       // prefix must be a whole component
-        XCTAssertEqual(SecurePath.absoluteLexicalPath("/private/tmp/x"), "/private/tmp/x") // idempotent
+        XCTAssertEqual(SecurePath.absoluteLexicalPath("/tmpfoo/x"), "/tmpfoo/x")
+        XCTAssertEqual(SecurePath.absoluteLexicalPath("/private/tmp/x"), "/private/tmp/x")
     }
 
     func testTildeAndDotSegmentsAreResolvedLexically() {

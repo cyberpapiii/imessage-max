@@ -28,14 +28,8 @@ struct ToolDefinition: Sendable {
     }
 }
 
-/// The tools this process serves, built once at startup and handed to every
-/// lane (legacy stdio, legacy HTTP sessions, the modern dispatcher).
 final class ToolCatalog: @unchecked Sendable {
-    /// In registration order: MCP 2026-07-28 asks for a deterministic
-    /// `tools/list` so client and prompt caches stay warm.
     let tools: [Tool]
-    /// `tools` as JSON objects for the modern lane, which advertises a
-    /// one-hour catalog TTL and should not re-encode on every request.
     let toolsJSON: [[String: Any]]
     private let handlers: [String: ToolHandler]
 
@@ -52,8 +46,6 @@ final class ToolCatalog: @unchecked Sendable {
         }
     }
 
-    /// `liveInbox` reports whether new-message notifications are flowing;
-    /// only the HTTP lane runs the watcher behind them.
     convenience init(
         database: Database,
         resolver: ContactResolver,

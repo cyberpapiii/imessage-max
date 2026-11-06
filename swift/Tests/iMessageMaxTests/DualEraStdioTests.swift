@@ -4,9 +4,6 @@ import Logging
 import MCP
 @testable import iMessageMax
 
-/// Verifies era routing in the stdio dual-era adapter: modern 2026-07-28
-/// messages are answered directly by ModernDispatcher, while legacy traffic
-/// passes through untouched to the SDK Server's receive stream.
 final class DualEraStdioTests: XCTestCase {
     private var definitions: [ToolDefinition] = []
     private var catalog: ToolCatalog { ToolCatalog(definitions) }
@@ -29,8 +26,6 @@ final class DualEraStdioTests: XCTestCase {
         let result = try XCTUnwrap(response["result"] as? [String: Any])
         XCTAssertEqual(result["supportedVersions"] as? [String], ["2026-07-28"])
 
-        // Legacy initialize must reach the downstream (SDK) stream, not the
-        // dispatcher, and the discover message must never have been forwarded.
         let legacy = Data(initializeBody(id: 2, protocolVersion: "2025-11-25").utf8)
         await base.feed(legacy)
 
@@ -56,8 +51,6 @@ final class DualEraStdioTests: XCTestCase {
         await dual.stop()
     }
 
-    /// The SDK's initialize result leaves through the legacy lane, which adds
-    /// the server icons the SDK cannot carry.
     func testLegacyInitializeResultGainsServerIcons() async throws {
         let base = FakeBaseTransport()
         let dual = DualEraStdio(base: base, catalog: catalog)
@@ -77,8 +70,6 @@ final class DualEraStdioTests: XCTestCase {
         await dual.stop()
     }
 
-    // MARK: - modern tools/list
-
     func testModernToolsListIsAnsweredDirectly() async throws {
         let base = FakeBaseTransport()
         let dual = DualEraStdio(base: base, catalog: catalog)
@@ -97,8 +88,6 @@ final class DualEraStdioTests: XCTestCase {
         let result = try XCTUnwrap(response["result"] as? [String: Any])
         XCTAssertNotNil(result["tools"], "tools/list must answer with a catalog")
 
-        // Prove tools/list was never forwarded downstream: the next thing on
-        // the downstream stream must be the legacy message fed after it.
         let legacy = Data(initializeBody(id: 2, protocolVersion: "2025-11-25").utf8)
         await base.feed(legacy)
         let forwarded = try await iterator.next()
@@ -109,8 +98,6 @@ final class DualEraStdioTests: XCTestCase {
 
         await dual.stop()
     }
-
-    // MARK: - modern tools/call
 
     func testModernToolCallIsAnsweredDirectly() async throws {
         registerFakeTool(named: "stdio_echo")
@@ -143,8 +130,6 @@ final class DualEraStdioTests: XCTestCase {
         await dual.stop()
     }
 
-    // MARK: - modern notification
-
     func testModernNotificationIsConsumedSilently() async throws {
         let base = FakeBaseTransport()
         let dual = DualEraStdio(base: base, catalog: catalog)
@@ -153,18 +138,12 @@ final class DualEraStdioTests: XCTestCase {
         let downstream = await dual.legacy.receive()
         var iterator = downstream.makeAsyncIterator()
 
-        // Modern-shaped message with no `id`: a notification. The dispatcher
-        // must accept and drop it (no response), and it must never reach the
-        // legacy downstream stream.
         let notification = Data(modernBody(id: nil, method: "notifications/cancelled", params: #""requestId":9"#).utf8)
         await base.feed(notification)
 
         let legacy = Data(initializeBody(id: 2, protocolVersion: "2025-11-25").utf8)
         await base.feed(legacy)
 
-        // Awaiting this guarantees the pump has already finished processing
-        // the notification (it is handled synchronously-in-order before the
-        // legacy message can be yielded).
         let forwarded = try await iterator.next()
         XCTAssertEqual(forwarded, legacy, "the legacy message must be the first thing forwarded")
 
@@ -174,8 +153,6 @@ final class DualEraStdioTests: XCTestCase {
         await dual.stop()
     }
 
-    // MARK: - initialize carrying modern _meta
-
     func testInitializeWithModernMetaStaysLegacy() async throws {
         let base = FakeBaseTransport()
         let dual = DualEraStdio(base: base, catalog: catalog)
@@ -184,9 +161,6 @@ final class DualEraStdioTests: XCTestCase {
         let downstream = await dual.legacy.receive()
         var iterator = downstream.makeAsyncIterator()
 
-        // An `initialize` request whose params carry the modern protocol
-        // version _meta key must still be treated as legacy: era selection
-        // always keeps `initialize` on the legacy lane, matching HTTP.
         let initializeWithModernMeta = Data(modernBody(method: "initialize", params: #""protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"tests","version":"1.0"}"#).utf8)
         await base.feed(initializeWithModernMeta)
 
@@ -201,8 +175,6 @@ final class DualEraStdioTests: XCTestCase {
 
         await dual.stop()
     }
-
-    // MARK: - unparseable line
 
     func testUnparseableLinePassesThroughToLegacyLane() async throws {
         let base = FakeBaseTransport()
@@ -227,13 +199,11 @@ final class DualEraStdioTests: XCTestCase {
         await dual.stop()
     }
 
-    // MARK: - Concurrency: slow modern calls don't block the pump
-
     func testSlowModernCallDoesNotBlockSubsequentMessages() async throws {
         let gate = AsyncStream<Void>.makeStream()
         registerFakeTool(named: "slow_tool") { _ in
             var iterator = gate.stream.makeAsyncIterator()
-            _ = await iterator.next()  // parks until the test opens the gate
+            _ = await iterator.next()
             return [.plainText("done")]
         }
 
@@ -250,19 +220,12 @@ final class DualEraStdioTests: XCTestCase {
         let legacy = Data(initializeBody(id: 2, protocolVersion: "2025-11-25").utf8)
         await base.feed(legacy)
 
-        // The legacy message must reach the downstream stream without
-        // waiting for the parked slow_tool call: this is only possible if
-        // the pump loop spawned the modern call into a child task instead
-        // of awaiting it inline.
         let forwarded = try await iterator.next()
         XCTAssertEqual(forwarded, legacy)
 
-        // At the moment the legacy message arrived, the slow call must
-        // still be parked on the gate, with no response written yet.
         let sentCountWhileParked = await base.sentCount()
         XCTAssertEqual(sentCountWhileParked, 0, "the slow tool call must still be in flight")
 
-        // Open the gate; the slow call's response must eventually arrive.
         gate.continuation.yield(())
         let responseData = try await base.waitForFirstSend()
         let response = try XCTUnwrap(
@@ -274,13 +237,10 @@ final class DualEraStdioTests: XCTestCase {
         await dual.stop()
     }
 
-    // MARK: - Write-failure resilience
-
     func testWriteFailureIsSwallowedButLogged() async throws {
         let base = FakeBaseTransport()
         let dual = DualEraStdio(base: base, catalog: catalog)
         let log = Log.Capture()
-        // The writer task inherits the capture from start().
         try await Log.$capture.withValue(log) { try await dual.start() }
 
         await base.failNextSend()
@@ -288,9 +248,6 @@ final class DualEraStdioTests: XCTestCase {
         let discover1 = Data(modernBody(method: "server/discover").utf8)
         await base.feed(discover1)
 
-        // Wait for the (failing) write attempt before feeding the next
-        // message, so the flag is deterministically consumed by the first
-        // request rather than racing with the second on the actor.
         await base.waitForAttempts(1)
         let attempts = await base.sendAttemptCount()
         XCTAssertEqual(attempts, 1, "the first response must have attempted a write")
@@ -300,9 +257,6 @@ final class DualEraStdioTests: XCTestCase {
         let discover2 = Data(modernBody(id: 2, method: "server/discover").utf8)
         await base.feed(discover2)
 
-        // The pump must have survived the failed write: this second modern
-        // request still gets answered normally, proving the failure was
-        // logged and swallowed rather than wedging or crashing the pump.
         let responseData = try await base.waitForFirstSend()
         let response = try XCTUnwrap(
             JSONSerialization.jsonObject(with: responseData) as? [String: Any]
@@ -316,8 +270,6 @@ final class DualEraStdioTests: XCTestCase {
         await dual.stop()
     }
 
-    /// stdout can be full; the SDK's send then suspends mid-line. A reply
-    /// sent meanwhile must wait rather than splice into that line.
     func testRepliesAreWrittenOneAtATime() async throws {
         let base = FakeBaseTransport(suspendsMidWrite: true)
         let dual = DualEraStdio(base: base, catalog: catalog)
@@ -338,10 +290,6 @@ final class DualEraStdioTests: XCTestCase {
         }
     }
 
-    // MARK: - Cancellation
-
-    /// A `notifications/cancelled` stops a modern `tools/call`, whether the
-    /// notification is legacy-shaped or carries the modern `_meta`.
     func testCancelledNotificationStopsModernToolCall() async throws {
         let cancels = [
             #"{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":5}}"#,
@@ -369,10 +317,6 @@ final class DualEraStdioTests: XCTestCase {
         }
     }
 
-    // MARK: - End of input
-
-    /// A modern request followed by end of input is answered before the
-    /// stdio server returns.
     func testModernReplyIsWrittenBeforeServeStdioReturnsAtEndOfInput() async throws {
         let slow = fakeTool(named: "slow") { _ in
             await AsyncTimeout.sleep(.milliseconds(300))
@@ -390,8 +334,6 @@ final class DualEraStdioTests: XCTestCase {
         XCTAssertEqual((result["structuredContent"] as? [String: Any])?["done"] as? Bool, true)
     }
 
-    // MARK: - Helpers
-
     private func registerFakeTool(
         named name: String,
         handler: @escaping @Sendable ([String: Value]?) async throws -> [Tool.Content] = { _ in [.plainText("ok")] }
@@ -400,8 +342,6 @@ final class DualEraStdioTests: XCTestCase {
     }
 }
 
-/// Minimal in-memory Transport double: `feed` injects inbound messages,
-/// `sent` records everything the adapter writes back.
 private actor FakeBaseTransport: Transport {
     nonisolated let logger: Logger
 
@@ -461,7 +401,6 @@ private actor FakeBaseTransport: Transport {
         continuation.yield(data)
     }
 
-    /// Ends the inbound stream, as stdin reaching end of file does.
     func endInput() {
         continuation.finish()
     }
@@ -474,25 +413,18 @@ private actor FakeBaseTransport: Transport {
         sent
     }
 
-    /// Makes the next `send(_:)` call throw instead of recording, simulating
-    /// a stdout write failure (closed pipe, dying client).
     func failNextSend() {
         shouldFailNextSend = true
     }
 
-    /// Total `send(_:)` calls, whether they succeeded or failed.
     func sendAttemptCount() -> Int {
         sendAttempts
     }
 
-    /// Returns once `send(_:)` has been called `count` times, failed or not,
-    /// so a test can let a failing write happen before feeding the next message.
     func waitForAttempts(_ count: Int) async {
         await wait { attempts, _ in attempts >= count }
     }
 
-    /// Returns once `count` messages have been written (the pump answers
-    /// asynchronously).
     func waitForSent(_ count: Int) async {
         await wait { _, sent in sent >= count }
     }

@@ -16,7 +16,6 @@ enum TimeUtils {
         return f
     }()
 
-    /// "just now", "5m ago", "3h ago", "2d ago", then "Mar 4".
     static func formatCompactRelative(_ date: Date?) -> String? {
         guard let date = date else { return nil }
 

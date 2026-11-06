@@ -18,8 +18,6 @@ struct MessageRecord {
     let threadOriginatorGuid: String?
     let isEdited: Bool
 
-    /// The columns `init(_:)` reads, in its order. A query appends its own
-    /// columns after these and reads them from `columnCount` on.
     static func selectList(_ schema: SchemaCapabilities) -> String {
         [
             "m.ROWID AS msg_id",
@@ -40,7 +38,6 @@ struct MessageRecord {
 
     static let columnCount: Int32 = 13
 
-    /// The two handle joins `selectList` reads from (`h` sender, `oh` event target).
     static let senderJoin = "handle h ON m.handle_id = h.ROWID"
     static let otherHandleJoin = "handle oh ON m.other_handle = oh.ROWID"
     static let handleJoinsSQL = "LEFT JOIN \(senderJoin)\nLEFT JOIN \(otherHandleJoin)"
@@ -61,14 +58,11 @@ struct MessageRecord {
     }
 }
 
-/// A message with the chat a query found it in.
 struct MessageInChat {
     let message: MessageRecord
     let chatId: Int64
-    /// `chat.display_name`, possibly blank.
     let chatName: String?
 
-    /// Selected right after `MessageRecord.selectList`, from chat alias `c`.
     static let chatColumns = "c.ROWID AS chat_id, c.display_name AS chat_name"
 
     init(_ row: SQLiteRow) {
@@ -79,14 +73,11 @@ struct MessageInChat {
 }
 
 extension QueryBuilder {
-    /// `MessageRecord.selectList`, then the caller's own columns.
     @discardableResult
     func selectMessages(_ schema: SchemaCapabilities, _ extra: String...) -> QueryBuilder {
         select(([MessageRecord.selectList(schema)] + extra).joined(separator: ", "))
     }
 
-    /// Call after the query's inner joins, so the join order SQLite plans
-    /// from stays message, chat joins, then the optional handles.
     @discardableResult
     func joinMessageHandles() -> QueryBuilder {
         leftJoin(MessageRecord.senderJoin).leftJoin(MessageRecord.otherHandleJoin)

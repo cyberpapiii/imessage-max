@@ -1,12 +1,10 @@
 import Foundation
 
-/// Lengths the relative-time parser and formatter agree on.
 enum Seconds {
     static let minute: Double = 60
     static let hour: Double = 3600
     static let day: Double = 86_400
     static let week: Double = 604_800
-    /// "m" in a relative bound means about a month.
     static let month: Double = 30 * day
 }
 
@@ -20,9 +18,6 @@ enum AppleTime {
         return epoch.addingTimeInterval(seconds)
     }
 
-    /// Saturates at the Int64 range instead of trapping: `Int64(Double)` crashes
-    /// on values outside ±9.2e18, which a relative bound like "999999999h" or an
-    /// ISO year 9999 reaches easily. A trap here takes down the launchd service.
     static func fromDate(_ date: Date) -> Int64 {
         let nanoseconds = date.timeIntervalSinceReferenceDate * 1_000_000_000
         if nanoseconds >= Double(Int64.max) { return Int64.max }
@@ -32,7 +27,6 @@ enum AppleTime {
     }
 
     static func parse(_ input: String) -> Int64? {
-        // Relative first: "24h", "7d", "2w"
         if let relative = parseRelative(input) {
             return fromDate(relative)
         }
@@ -68,8 +62,6 @@ enum AppleTime {
         default: return nil
         }
 
-        // Cap relative bounds at 100 years so the caller gets "everything"
-        // rather than an overflowing Date arithmetic result.
         let maxRelativeSeconds: Double = 100 * 365 * Seconds.day
         let bounded = min(seconds, maxRelativeSeconds)
         return Date().addingTimeInterval(-bounded)
@@ -120,7 +112,6 @@ enum AppleTime {
             break
         }
 
-        // "N days/weeks/months ago" pattern
         let agoPattern = #"^(\d+)\s+(day|days|week|weeks|month|months)\s+ago$"#
         if let regex = try? NSRegularExpression(pattern: agoPattern, options: .caseInsensitive),
            let match = regex.firstMatch(in: lower, range: NSRange(lower.startIndex..., in: lower)),
@@ -128,8 +119,6 @@ enum AppleTime {
            let unitRange = Range(match.range(at: 2), in: lower),
            let num = Int(lower[numRange]) {
             let unit = String(lower[unitRange]).lowercased()
-            // Bound each unit at roughly 100 years; Calendar does not reliably
-            // return nil for absurd offsets, and fromDate must stay in range.
             switch unit {
             case "day", "days":
                 guard num <= 36_500 else { return nil }
@@ -145,7 +134,6 @@ enum AppleTime {
             }
         }
 
-        // "last tuesday", "last friday" etc.
         let weekdays = ["sunday": 1, "monday": 2, "tuesday": 3, "wednesday": 4,
                         "thursday": 5, "friday": 6, "saturday": 7]
         if lower.hasPrefix("last ") {

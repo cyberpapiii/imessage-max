@@ -2,12 +2,7 @@ import Foundation
 import Logging
 import MCP
 
-/// The Transport an SDK `Server` runs on, for both legacy-lane connections:
-/// the stdio process and each HTTP session. Messages arrive on `inbound`;
-/// replies leave through `deliver`, with server icons added to the
-/// `initialize` result on the way out.
 actor LegacyLaneTransport: Transport {
-    /// Required by `Transport`. Diagnostics go through `Log`.
     nonisolated let logger = Logger(label: "imessage-max.legacy", factory: { _ in SwiftLogNoOpLogHandler() })
 
     private let inbound: AsyncThrowingStream<Data, Error>
@@ -19,10 +14,8 @@ actor LegacyLaneTransport: Transport {
         self.deliver = deliver
     }
 
-    /// The owner opens the underlying channel before handing this to the SDK.
     func connect() async throws {}
 
-    /// Replies sent after the SDK stops its Server are dropped.
     func disconnect() async {
         connected = false
     }

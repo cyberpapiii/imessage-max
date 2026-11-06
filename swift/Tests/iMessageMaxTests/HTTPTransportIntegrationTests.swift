@@ -112,9 +112,6 @@ final class HTTPTransportIntegrationTests: XCTestCase {
         }
     }
 
-    /// A legacy `tools/call` answers in the SDK's envelope shapes: a failing
-    /// tool is an isError result, an unknown tool is the SDK's
-    /// method-not-found error, and a string id comes back unchanged.
     func testLegacyToolCallEnvelopeMatchesTheSDK() async throws {
         let app = await makeTestTransport().application()
 
@@ -152,8 +149,6 @@ final class HTTPTransportIntegrationTests: XCTestCase {
         }
     }
 
-    /// A `notifications/cancelled` POST stops a legacy `tools/call`, which
-    /// then replies with its cancelled result, as on stdio.
     func testCancelledNotificationStopsLegacyToolCall() async throws {
         let (started, startedSink) = AsyncStream<Void>.makeStream()
         let app = await makeTestTransport(catalog: ToolCatalog([waitForCancelTool(started: startedSink)])).application()
@@ -186,9 +181,6 @@ final class HTTPTransportIntegrationTests: XCTestCase {
         }
     }
 
-    /// Non-object `arguments` never run the tool on its defaults: the legacy
-    /// lane answers an error and the modern lane answers invalid params.
-    /// `null` and absent `arguments` still run it.
     func testNonObjectArgumentsAreRefusedOnBothLanes() async throws {
         let ran = Mutex(0)
         let probe = fakeTool(named: "probe") { _ in
@@ -245,9 +237,6 @@ final class HTTPTransportIntegrationTests: XCTestCase {
     func testRequestTrackingIsScopedPerSessionEvenWithSameJsonRpcId() async throws {
         var configuration = HTTPTransport.Configuration.test
         configuration.requestTimeout = .seconds(2)
-        // Sessions answer as session-a and session-b, in creation order.
-        // Neither answers until both requests are in flight, so the two
-        // same-id requests always overlap.
         configuration.makeServer = serversWithSlowMethod(
             [("session-a", .zero), ("session-b", .zero)],
             rendezvous: Rendezvous(parties: 2)
@@ -269,8 +258,6 @@ final class HTTPTransportIntegrationTests: XCTestCase {
         }
     }
 
-    /// A request reusing an in-flight id is the client's error: 400 with
-    /// -32600 and its id. The first request still completes.
     func testDuplicateInFlightIdIsA400CarryingTheId() async throws {
         let rendezvous = Rendezvous(parties: 2)
         var configuration = HTTPTransport.Configuration.test
@@ -293,7 +280,6 @@ final class HTTPTransportIntegrationTests: XCTestCase {
         }
     }
 
-    /// An id that is not a JSON scalar is an invalid request (400, -32600).
     func testNonScalarIdIsA400() async throws {
         let app = await makeTestTransport().application()
 
@@ -310,8 +296,6 @@ final class HTTPTransportIntegrationTests: XCTestCase {
         }
     }
 
-    /// The legacy tools/call shortcut answers a non-scalar id as the SDK
-    /// route does: 400 with -32600, never a 200 echoing an object id.
     func testNonScalarIdOnTheToolsCallShortcutIsA400() async throws {
         let app = await makeTestTransport(catalog: ToolCatalog([])).application()
 
@@ -330,8 +314,6 @@ final class HTTPTransportIntegrationTests: XCTestCase {
         }
     }
 
-    /// A tools/call or tools/list reusing the id of a tools/call still in
-    /// flight is a 400 carrying the id, and the first call still answers.
     func testInFlightIdOnTheToolsCallShortcutIsA400CarryingTheId() async throws {
         let (started, startedSink) = AsyncStream<Void>.makeStream()
         let slow = fakeTool(named: "slow") { _ in
@@ -360,8 +342,6 @@ final class HTTPTransportIntegrationTests: XCTestCase {
         }
     }
 
-    /// A server-initiated request whose id equals a waiting POST's id goes
-    /// to SSE; only the response completes the POST.
     func testServerRequestWithClientIdDoesNotCompleteWaitingPost() async throws {
         let rendezvous = Rendezvous(parties: 2)
         var configuration = HTTPTransport.Configuration.test
@@ -402,8 +382,6 @@ final class HTTPTransportIntegrationTests: XCTestCase {
         }
     }
 
-    /// A handler that never answers in time gets a timeout reply before it
-    /// finishes.
     func testRequestTimeoutFiresWhenHandlerNeverResponds() async throws {
         var configuration = HTTPTransport.Configuration.test
         configuration.requestTimeout = .milliseconds(200)
@@ -422,8 +400,6 @@ final class HTTPTransportIntegrationTests: XCTestCase {
         }
     }
 
-    /// `1e300` is a legal JSON number outside Int's range. Any answer at all
-    /// means the id parse did not trap, and the server keeps serving.
     func testHugeJsonRpcIdDoesNotCrashTheServer() async throws {
         let app = await makeTestTransport().application()
 
@@ -437,8 +413,6 @@ final class HTTPTransportIntegrationTests: XCTestCase {
         }
     }
 
-    /// A protocol-version header holding a backslash and a quote is echoed
-    /// back inside well-formed JSON, intact.
     func testMaliciousProtocolVersionHeaderYieldsWellFormedJson() async throws {
         let app = await makeTestTransport().application()
 
@@ -447,7 +421,6 @@ final class HTTPTransportIntegrationTests: XCTestCase {
             let response = try await client.post(initializeBody(), headers: jsonHeaders(protocolVersion: maliciousVersion))
 
             XCTAssertEqual(response.head.status, .badRequest)
-            // decodeJSON throws on a malformed body.
             let json = try decodeJSON(from: response.body)
             let error = try XCTUnwrap(json["error"] as? [String: Any])
             XCTAssertEqual(error["code"] as? Int, -32600)
@@ -570,8 +543,6 @@ private struct TestSlowMethod: MCP.Method {
     }
 }
 
-/// A Server factory whose nth Server also answers `TestSlowMethod` with the
-/// nth (source, delay), after every party has reached `rendezvous` if given.
 private func serversWithSlowMethod(
     _ answers: [(source: String, delay: Duration)],
     rendezvous: Rendezvous? = nil
@@ -593,7 +564,6 @@ private func serversWithSlowMethod(
     }
 }
 
-/// Suspends each caller until `parties` callers have arrived.
 private actor Rendezvous {
     private let parties: Int
     private var waiting: [CheckedContinuation<Void, Never>] = []

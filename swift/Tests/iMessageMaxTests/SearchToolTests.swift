@@ -61,10 +61,6 @@ final class SearchToolTests: XCTestCase {
         XCTAssertNil(shown["filtered_hidden"])
     }
 
-    /// The hidden-chat count runs on every unfiltered search. Driven from
-    /// `message` it is a second scan of the whole table (150-316 ms of a
-    /// 300-380 ms search on a real chat.db); driven from the few filtered chats
-    /// it only visits their messages.
     func testFilteredHiddenCountIsDrivenFromFilteredChats() throws {
         let fixture = try ToolTestDatabase(name: "search-filtered-plan")
         try fixture.execute("""
@@ -332,7 +328,6 @@ final class SearchToolTests: XCTestCase {
         XCTAssertEqual(chat["id"] as? String, "chat40")
     }
 
-    /// Context windows are fetched once per chat, not once per hit.
     func testIncludeContextQueryCountIsPerChatNotPerRow() async throws {
         let fixture = try ToolTestDatabase(name: "search-ctx-batch")
         try fixture.insertHandle(rowId: 1, handle: "+15550000001")
@@ -379,7 +374,6 @@ final class SearchToolTests: XCTestCase {
                 XCTAssertEqual(results.count, limit)
             }
         }
-        // Both pages span both chats: 12 newest hits reach back into chat 1.
         let twelve = try await queries(limit: 12)
         let twenty = try await queries(limit: 20)
         XCTAssertGreaterThan(twelve, 0)
@@ -448,7 +442,6 @@ final class SearchToolTests: XCTestCase {
             let before = try decodeJSONArray(result["context_before"]).compactMap { $0["text"] as? String }
             let after = try decodeJSONArray(result["context_after"]).compactMap { $0["text"] as? String }
             XCTAssertEqual(before, ["filler \(index - 2)", "filler \(index - 1)"])
-            // The twin shares anchor 15's timestamp with a higher ROWID, so it comes right after it.
             let expectedAfter = index == 15 ? ["twin 15", "filler 16"] : ["filler \(index + 1)", "filler \(index + 2)"]
             XCTAssertEqual(after, expectedAfter)
             XCTAssertFalse(before.contains("loved") || after.contains("loved"))
@@ -482,8 +475,6 @@ final class SearchToolTests: XCTestCase {
         XCTAssertEqual(try window("msg_3", "context_after"), ["msg_4"])
     }
 
-    /// Unnamed chats get generated names in grouped results, from batched
-    /// queries rather than one lookup per chat.
     func testGroupedSearchNamesUnnamedChatsWithoutPerChatQueries() async throws {
         func run(chatCount: Int) async throws -> (queries: Int, chats: [[String: Any]]) {
             let fixture = try ToolTestDatabase(name: "search-grouped-batchname")
@@ -528,8 +519,6 @@ final class SearchToolTests: XCTestCase {
         XCTAssertEqual(eight.queries, two.queries, "8 chats ran \(eight.queries) queries, 2 ran \(two.queries)")
     }
 
-    /// Unnamed 6-handle chat. Recency is handles 6, 5, 4; prioritized is
-    /// Alice, Bob, Chris. Generated names must not become explicitName.
     func testGroupedSearchUnnamedChatIsNotNamed() async throws {
         let fixture = try ToolTestDatabase(name: "search-grouped-unnamed-large")
         for rowId in 1...6 {
@@ -633,7 +622,6 @@ final class SearchToolTests: XCTestCase {
         let directs = try await ids(false)
         let all = try await ids(nil)
         XCTAssertEqual(groups, Set(["msg_3"]))
-        // A chat with no handles left is a DM, as in every other tool.
         XCTAssertEqual(directs, Set(["msg_1", "msg_2"]))
         XCTAssertEqual(all, Set(["msg_1", "msg_2", "msg_3"]))
     }
@@ -695,11 +683,6 @@ final class SearchToolTests: XCTestCase {
         XCTAssertFalse(json.contains("\"edited\""))
     }
 
-    // MARK: - Paging, hidden chats and short queries
-
-    /// The blob holds the class name "NSString", so every attributedBody
-    /// row passes the SQL prefilter for "string" and is then dropped in
-    /// Swift. Paging still reaches the one real match, fuzzy or not.
     func testReachesAMatchBehindAFullFetchOfPrefilterFalsePositives() async throws {
         let fixture = try directChatFixture(name: "search-paging")
         let base = AppleTime.fromDate(Date()) - 1_000 * appleMinute
@@ -722,8 +705,6 @@ final class SearchToolTests: XCTestCase {
         }
     }
 
-    /// filtered_hidden counts hidden chats with a real match, under every
-    /// search mode, not hidden chats in general.
     func testFilteredHiddenCountsOnlyHiddenChatsWithARealMatch() async throws {
         let fixture = try hiddenMatchesFixture()
         for args: [String: Value] in [
@@ -768,8 +749,6 @@ final class SearchToolTests: XCTestCase {
         }
     }
 
-    /// `has` takes either tool's spelling ("image" or "images"), in search
-    /// and in get_messages.
     func testHasAcceptsSingularAndPluralInSearchAndGetMessages() async throws {
         let fixture = try directChatFixture(name: "has-alias")
         let now = AppleTime.fromDate(Date())
@@ -788,8 +767,6 @@ final class SearchToolTests: XCTestCase {
         }
     }
 
-    // MARK: - Excerpts
-
     func testExcerptSurvivesTextWhoseLowercaseIsLonger() {
         let text = String(repeating: "İ", count: 300) + " needle " + String(repeating: "x", count: 300)
         let excerpt = SearchTool.makeExcerpt(text: text, query: "needle")
@@ -805,8 +782,6 @@ final class SearchToolTests: XCTestCase {
         XCTAssertFalse(excerpt.contains("\u{FFFD}"), "an emoji was split")
     }
 
-    /// A message in two chats is listed once in either sort, and under the
-    /// chat named by in_chat when one is.
     func testAMessageInTwoChatsIsListedOnceAcrossPages() async throws {
         let fixture = try messageInTwoChatsFixture()
         for limit in 1...3 {
@@ -895,9 +870,6 @@ func makeSearchFixture() throws -> ToolTestDatabase {
 }
 
 extension SearchToolTests {
-    /// Any-word search past the 8-word SQL prefilter cap still finds a
-    /// message whose only matching word is the ninth, and counts it in
-    /// filtered_hidden.
     func testAnyWordSearchMatchesAWordPastThePrefilterCap() async throws {
         let fixture = try hiddenMatchesFixture()
         let page = try await callTool(

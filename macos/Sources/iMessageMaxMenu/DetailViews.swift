@@ -3,8 +3,6 @@ import MaxCore
 import ServiceManagement
 import SwiftUI
 
-/// The one setup step that is waiting, shown on the home page with its own
-/// action. Its first button is the panel's single blue button.
 struct SetupStep: View {
   let model: AppModel
 
@@ -104,7 +102,6 @@ struct SetupStep: View {
   }
 }
 
-/// Lays buttons out in a row and wraps the ones that do not fit.
 struct FlowRow: Layout {
   var spacing: CGFloat
 

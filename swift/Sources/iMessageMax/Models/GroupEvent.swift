@@ -8,17 +8,15 @@ struct GroupEvent: Encodable, Equatable {
              participantRemoved = "participant_removed", left, other
     }
     let type: Kind
-    let title: String?          // rename only
-    let participant: String?    // added/removed, resolved display name
-    let itemType: Int?          // set only for .other
+    let title: String?
+    let participant: String?
+    let itemType: Int?
 
     private enum CodingKeys: String, CodingKey {
         case type, title, participant
         case itemType = "item_type"
     }
 
-    /// Classifies the raw columns. `otherHandleName` is the display name of
-    /// the handle behind `message.other_handle`, or nil.
     static func classify(
         itemType: Int,
         groupActionType: Int,
@@ -66,7 +64,6 @@ struct GroupEvent: Encodable, Equatable {
         }
     }
 
-    /// Short preview phrase, e.g. "renamed the group to Trip".
     var previewText: String {
         switch type {
         case .rename:

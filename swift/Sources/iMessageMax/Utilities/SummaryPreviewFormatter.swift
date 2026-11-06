@@ -23,14 +23,10 @@ enum SummaryPreviewFormatter {
         return truncate(collapsed, maxLength: maxLength)
     }
 
-    /// A text-less message's preview: "[Photo]", "[3 Photos]", or
-    /// "[2 Attachments]" for mixed kinds.
     static func attachmentPlaceholder(for attachmentTypes: [AttachmentType]) -> String {
         summary(of: attachmentTypes, namingTwoKinds: false)
     }
 
-    /// list_attachments' per-message summary: like `attachmentPlaceholder`,
-    /// but two kinds are named in kind order, "[Photo, PDF]".
     static func sharedSummary(for attachmentTypes: [AttachmentType]) -> String {
         summary(of: attachmentTypes, namingTwoKinds: true)
     }

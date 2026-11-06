@@ -2,19 +2,8 @@ import MCP
 import XCTest
 @testable import iMessageMax
 
-/// Characterization tests for the `list_attachments` message query.
-///
-/// The query has to satisfy several constraints at once: one row per message
-/// even when a message carries several attachments or belongs to several
-/// chats, a type filter that applies to the attachments rather than the
-/// message, three sort orders, and cursor paging on the two date sorts. These
-/// tests pin that behavior so the SQL underneath can be reshaped safely.
 final class ListAttachmentsQueryTests: XCTestCase {
 
-    // MARK: - Fixture
-
-    /// Chats 1 and 2 hold the bulk of the data. Message 105 is deliberately
-    /// joined to both chats, which is rare in a real chat.db but does occur.
     private func makeFixture() throws -> ToolTestDatabase {
         let fixture = try ToolTestDatabase(name: "attachment-query")
 
@@ -25,10 +14,6 @@ final class ListAttachmentsQueryTests: XCTestCase {
         try fixture.joinChatHandle(chatId: 1, handleId: 1)
         try fixture.joinChatHandle(chatId: 2, handleId: 2)
 
-        // Dates are whole seconds in Apple epoch nanoseconds, one hour apart.
-        // Whole seconds matter: the `since`/`before` bounds travel through an
-        // ISO-8601 string, which has no sub-second precision.
-        // (messageId, chatId, date, isFromMe, handleId)
         let messages: [(Int, Int, Int64, Bool, Int?)] = [
             (101, 1, fixtureDay(1), false, 1),
             (102, 1, fixtureDay(2), true, nil),
@@ -48,10 +33,8 @@ final class ListAttachmentsQueryTests: XCTestCase {
             )
             try fixture.joinChatMessage(chatId: chat, messageId: id)
         }
-        // Message 105 lives in both chats.
         try fixture.joinChatMessage(chatId: 2, messageId: 105)
 
-        // (attachmentId, messageId, mime, uti, bytes)
         let attachments: [(Int, Int, String, String, Int)] = [
             (201, 101, "image/jpeg", "public.jpeg", 100),
             (202, 102, "application/pdf", "com.adobe.pdf", 900),
@@ -72,11 +55,9 @@ final class ListAttachmentsQueryTests: XCTestCase {
             try fixture.joinMessageAttachment(messageId: messageId, attachmentId: attachmentId)
         }
 
-        // A message with no attachment must never appear in the results.
         try fixture.insertMessage(rowId: 150, guid: "msg-150", text: "no attachment", date: fixtureDay(7), isFromMe: false, handleId: 1)
         try fixture.joinChatMessage(chatId: 1, messageId: 150)
 
-        // A reaction carrying an attachment must never appear either.
         try fixture.insertMessage(
             rowId: 151,
             guid: "msg-151",
@@ -122,8 +103,6 @@ final class ListAttachmentsQueryTests: XCTestCase {
         response.messages.map(\.messageId)
     }
 
-    // MARK: - Sorts
-
     func testRecentFirstReturnsEveryAttachmentMessageOnceNewestFirst() async throws {
         let response = try await run(try makeFixture())
         XCTAssertEqual(ids(response), ["msg_106", "msg_105", "msg_104", "msg_103", "msg_102", "msg_101"])
@@ -136,26 +115,20 @@ final class ListAttachmentsQueryTests: XCTestCase {
     }
 
     func testLargestFirstRanksByTheMessagesBiggestAttachment() async throws {
-        // msg_103 carries a 300-byte and a 700-byte attachment and ranks on
-        // 700, below the 900-byte msg_102.
         let response = try await run(try makeFixture(), sort: "largest_first")
         XCTAssertEqual(ids(response), ["msg_102", "msg_103", "msg_104", "msg_106", "msg_105", "msg_101"])
     }
-
-    // MARK: - Filters
 
     func testChatFilterKeepsMessagesSharedIntoThatChat() async throws {
         let chatOne = try await run(try makeFixture(), chatId: "chat1")
         XCTAssertEqual(ids(chatOne), ["msg_106", "msg_105", "msg_102", "msg_101"])
 
-        // msg_105 is joined to both chats and must appear under either filter.
         let chatTwo = try await run(try makeFixture(), chatId: "chat2")
         XCTAssertEqual(ids(chatTwo), ["msg_105", "msg_104", "msg_103"])
     }
 
     func testTypeFilterMatchesOnAttachmentsNotMessages() async throws {
         let images = try await run(try makeFixture(), type: "image")
-        // msg_103 qualifies through its PNG even though it also holds a video.
         XCTAssertEqual(ids(images), ["msg_105", "msg_104", "msg_103", "msg_101"])
 
         let pdfs = try await run(try makeFixture(), type: "pdf")
@@ -172,7 +145,6 @@ final class ListAttachmentsQueryTests: XCTestCase {
         let theirs = try await run(try makeFixture(), fromPerson: "+15550000002")
         XCTAssertEqual(ids(theirs), ["msg_104", "msg_103"])
 
-        // A contact name resolves like it does for search and get_messages.
         let byName = try await run(try makeFixture(), fromPerson: "Bob")
         XCTAssertEqual(ids(byName), ["msg_104", "msg_103"])
     }
@@ -185,8 +157,6 @@ final class ListAttachmentsQueryTests: XCTestCase {
         let windowed = try await run(fixture, since: since, before: before)
         XCTAssertEqual(ids(windowed), ["msg_105", "msg_104", "msg_103"])
     }
-
-    // MARK: - Paging
 
     func testCursorPagingWalksBothDateSortsWithoutOverlap() async throws {
         for sort in ["recent_first", "oldest_first"] {
@@ -217,10 +187,6 @@ final class ListAttachmentsQueryTests: XCTestCase {
         XCTAssertNotNil(response.cursor)
     }
 
-    // MARK: - Type classification
-
-    /// The SQL type filter puts each attachment in the same kind the
-    /// response labels it with.
     func testTypeFilterAgreesWithTheKindEachAttachmentIsLabelled() throws {
         let fixture = try ToolTestDatabase(name: "attachment-kinds")
         let samples: [(mime: String?, uti: String?, kind: String)] = [

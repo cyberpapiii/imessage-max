@@ -2,21 +2,15 @@ import Foundation
 import IMessageMaxContract
 import MCP
 
-/// Probe type for database accessibility checks. Injectable so tests stay hermetic.
 typealias DatabaseProbe = @Sendable () -> (ok: Bool, status: DatabaseStatus)
 
-/// Whether this executable carries NSContactsUsageDescription in an embedded Info.plist.
 typealias UsageDescriptionProbe = @Sendable () -> Bool
 
-/// Probe type for optional chat.db column flags. Injectable so tests stay hermetic.
 typealias SchemaProbe = @Sendable () -> SchemaCapabilities?
 
-/// Probe type for the live-inbox watcher. Injectable so tests stay hermetic.
 typealias LiveInboxProbe = @Sendable () -> Bool
 
 enum DiagnoseTool {
-    // MARK: - Tool Registration
-
     static func definition(db: Database, resolver: ContactResolver, liveInbox: @escaping LiveInboxProbe) -> ToolDefinition {
         let inputSchema: Value = .object([
             "type": "object",
@@ -63,10 +57,6 @@ enum DiagnoseTool {
         }
     }
 
-    /// The process that opens chat.db is the one that needs the grant. For
-    /// the launchd service that is the release binary; for stdio it is the
-    /// binary the MCP client spawned. Tilde-abbreviated: diagnose must not
-    /// echo the username (DiagnoseToolTests.testResponseDoesNotContainHomeDirectory).
     static var executableForGrant: String {
         let raw = Bundle.main.executablePath ?? CommandLine.arguments.first ?? ServiceDefaults.executableName
         return (raw as NSString).abbreviatingWithTildeInPath
@@ -86,8 +76,6 @@ enum DiagnoseTool {
             + "'unable to open database file' means the user lacks it everywhere."
     }
 
-    /// CI runners report "not_determined" for automation and may lack Full
-    /// Disk Access, so tests inject these probes instead of the real ones.
     static func execute(
         resolver: ContactResolver,
         dbProbe: DatabaseProbe = { Database.checkAccess() },
@@ -120,8 +108,6 @@ enum DiagnoseTool {
         if contactsAuthorized {
             if contacts.loadFailed {
                 contactsStatus = .loadFailed(authorizationStatus)
-                // CNContactStore errors routinely embed local paths and the
-                // username; the resolver logged the detail.
                 contactsFix = "Contacts permission is granted, but loading contacts failed. Check the server log for details."
             } else {
                 contactsLoaded = contacts.handleCount
@@ -150,13 +136,9 @@ enum DiagnoseTool {
 
         let overallStatus: DiagnoseStatus = dbOk && contactsAuthorized ? .ready : .needsSetup
 
-        // MARK: - Capability derivation (design §2.4)
-
         let automationFix = "Grant Automation access: System Settings -> Privacy & Security -> " +
             "Automation -> Enable Messages for your terminal app or the imessage-max executable"
 
-        // Only an explicit TCC denial is permission-gated. Messages not
-        // running, or no decision yet, leaves sending unverified.
         let automation: Capability
         if automationOk {
             automation = Capability(state: .supported)
@@ -236,8 +218,6 @@ enum DiagnoseTool {
             database: .init(
                 accessible: dbOk,
                 status: dbStatus,
-                // Keep the path actionable for the operator without echoing
-                // their username to the client.
                 path: (Database.defaultPath as NSString).abbreviatingWithTildeInPath,
                 fix: databaseFix,
                 features: features

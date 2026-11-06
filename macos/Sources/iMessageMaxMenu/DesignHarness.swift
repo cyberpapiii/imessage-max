@@ -4,18 +4,10 @@ import MaxBrand
 import MaxCore
 import SwiftUI
 
-// Design checks (see macos/README.md): command-line flags that show canned
-// states, pin appearance and motion for this process, and capture artwork.
-// Nothing here changes the Mac's settings, and a fixture never contacts the
-// real service.
-
 struct DesignOptions {
   var appearance: NSAppearance.Name?
-  /// `--design-artwork <file.png>`: write the menu bar contact sheet and exit.
   var artworkSheet: URL?
-  /// `--design-state <name>`: a canned service state from `FixtureService`.
   var fixture: String?
-  /// `--design-window`: show the panel in a floating window, not a popover.
   var window = false
   var page: PanelSection?
   var act: String?
@@ -39,10 +31,8 @@ struct DesignOptions {
       reduce: arguments.contains("--design-reduce-motion"))
   }
 
-  /// A fixture or design window replaces the background monitoring.
   var isActive: Bool { fixture != nil || window }
 
-  /// Loads the first state; the "working" fixture then holds a start open.
   @MainActor func prepare(_ model: AppModel) {
     Task {
       await model.refresh()
@@ -50,8 +40,6 @@ struct DesignOptions {
     }
   }
 
-  /// A plain window that stays put, so every state can be captured without
-  /// opening the real popover. Prints its window number for screenshots.
   @MainActor func showWindow(_ hosting: NSViewController, model: AppModel) -> NSWindow {
     let window = NSWindow(contentViewController: hosting)
     window.styleMask = [.borderless]
@@ -84,10 +72,6 @@ extension AppModel {
   }
 }
 
-/// Canned service states: `fresh`, `stopped`, `setup-messages`,
-/// `setup-contacts`, `setup-sending`, `problem`, `working`, `checking`, and
-/// `ready` (also the fallback). A start, stop, or permission request takes a
-/// moment and then lands on the state it would reach.
 actor FixtureService: ServiceControlling {
   private static let processID: Int32 = 4242
   private var name: String
@@ -98,13 +82,11 @@ actor FixtureService: ServiceControlling {
   }
 
   func inspect() async throws -> ServiceInspection {
-    // A first check that never answers.
     while name == "checking" { await withCheckedContinuation { waiting.append($0) } }
     return try Self.inspection(name)
   }
 
   func perform(_ action: ServiceAction) async throws {
-    // An action that stays under way.
     while name == "working" { await withCheckedContinuation { waiting.append($0) } }
     await Self.pause()
     land(on: action == .stop ? "stopped" : "ready")
@@ -181,7 +163,6 @@ actor FixtureService: ServiceControlling {
   }
 }
 
-/// Every menu bar mood, enlarged on a light and a dark bar.
 @MainActor func writeArtworkSheet(to url: URL) {
   let moods = CompanionMood.allCases
   let (cell, zoom) = (CGFloat(36), CGFloat(6))

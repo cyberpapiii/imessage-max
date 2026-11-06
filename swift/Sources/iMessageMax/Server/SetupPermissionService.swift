@@ -4,8 +4,6 @@ import IMessageMaxContract
 /// Permission requests must originate in the process that uses the grant.
 /// A companion-spawned CLI inherits the companion's TCC responsibility and
 /// cannot establish permission for the independently launchd-run service.
-/// Only the explicit native setup route uses this service; sends, MCP tools
-/// and startup never do. Ordinary headless starts remain non-prompting.
 actor SetupPermissionService {
     typealias Request = @Sendable () async -> (ok: Bool, status: PermissionStatus)
     enum RequestError: Error { case alreadyRequesting }

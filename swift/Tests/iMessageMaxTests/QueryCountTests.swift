@@ -32,8 +32,6 @@ final class QueryCountTests: XCTestCase {
         XCTAssertEqual(Database.queryCountForTesting, 200)
     }
 
-    /// get_messages with unanswered checks replies once per chunk, so its
-    /// query count does not grow with the number of questions.
     func testUnansweredChecksRepliesPerChunkNotPerRow() async throws {
         func queries(questions: Int) async throws -> Int {
             let fixture = try directChatFixture(name: "unanswered-\(questions)")
@@ -55,8 +53,6 @@ final class QueryCountTests: XCTestCase {
         XCTAssertEqual(few, many)
     }
 
-    /// search counts hidden chats with a word match from one read, so its
-    /// query count does not grow with the number of hidden chats.
     func testHiddenChatCountIsOneReadNotOnePerChat() async throws {
         func queries(hiddenChats: Int) async throws -> Int {
             let fixture = try ToolTestDatabase(name: "hidden-count-\(hiddenChats)")

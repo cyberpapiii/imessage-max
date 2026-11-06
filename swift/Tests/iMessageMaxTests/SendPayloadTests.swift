@@ -47,7 +47,6 @@ final class SendPayloadTests: XCTestCase {
         XCTAssertEqual(message, "Message too long (max 20,000 chars)")
     }
 
-    // The text is validated with the files, before any of them is dispatched.
     func testBuildRejectsOverlongTextAfterFiles() {
         guard case .failure(let message) = SendPayload.build(
             text: String(repeating: "a", count: 20_001),

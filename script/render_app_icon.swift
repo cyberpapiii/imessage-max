@@ -1,10 +1,5 @@
 import AppKit
 
-// The app icon is a satin-silver speech bubble on a blue tile, catching a lens
-// flare at its shoulder. The build script prepends the MaxBrand sources to this
-// renderer, so the bubble has the same outline as the panel and the menu bar.
-// The metal is shaded pixel by pixel, so the build compiles this file with
-// optimisation instead of interpreting it.
 let output = URL(fileURLWithPath: CommandLine.arguments[1])
 let iconset = output.appendingPathComponent("AppIcon.iconset")
 try FileManager.default.createDirectory(at: iconset, withIntermediateDirectories: true)
@@ -40,9 +35,6 @@ let bubble = MessageMark.body(in: face)
 let tileColours = [colour(0.36, 0.76, 1), colour(0.13, 0.50, 0.97), colour(0.03, 0.30, 0.86)]
 let glowTint: (CGFloat, CGFloat, CGFloat) = (0.90, 0.96, 1.0)
 
-// MARK: - The metal
-
-/// The bubble is shaded on a grid finer than the canvas, then drawn down.
 let grid = 1440
 let inside: [Bool] = (0..<grid * grid).map { k in
   let x = face.minX + (CGFloat(k % grid) + 0.5) / CGFloat(grid) * face.width
@@ -70,8 +62,6 @@ func blur(_ values: [Double], _ radius: Int) -> [Double] {
   return result
 }
 
-/// Surface normals of the bubble inflated like a balloon (a Poisson solve), so
-/// the metal has no crease where the tail joins the body.
 let normals: (x: [Double], y: [Double], z: [Double]) = {
   let coarse = 360
   let step = grid / coarse
@@ -122,9 +112,6 @@ let normals: (x: [Double], y: [Double], z: [Double]) = {
   return (nx, ny, nz)
 }()
 
-/// The body without its tail, as a circle in the grid's 0...1 space: the
-/// widest row gives the centre, the average of width and height the radius.
-/// The reflection is taken from this ball, so the tail never bends it.
 let ball: (x: Double, y: Double, radius: Double) = {
   var widest = (span: 0, from: 0, to: 0)
   for j in 0..<grid {
@@ -143,9 +130,6 @@ let ball: (x: Double, y: Double, radius: Double) = {
   )
 }()
 
-/// Satin silver: a soft dark horizon curving round the ball, turned 10 degrees
-/// toward the flare, with faint iridescent fringes at its edges and the blue
-/// tile bouncing back into the underside.
 func silver(_ k: Int, _ u: Double, _ v: Double) -> RGB {
   let (x, y, z) = (normals.x[k], normals.y[k], normals.z[k])
   let turn = 10.0 * .pi / 180
@@ -176,8 +160,6 @@ func silver(_ k: Int, _ u: Double, _ v: Double) -> RGB {
   return (shade.0 + light, shade.1 + light, shade.2 + light)
 }
 
-// MARK: - Drawing
-
 func drawTile(_ context: CGContext) {
   context.saveGState()
   context.setShadow(offset: CGSize(width: 0, height: -12), blur: 24, color: colour(0, 0, 0, 0.32))
@@ -207,7 +189,6 @@ func drawTile(_ context: CGContext) {
 }
 
 func drawBubble(_ context: CGContext) {
-  // A soft glow around the bubble, then a shadow lifting it off the tile.
   for (radius, alpha) in [(90, 0.40), (30, 0.45)] as [(CGFloat, CGFloat)] {
     context.saveGState()
     context.addPath(tile)
@@ -249,7 +230,6 @@ func drawBubble(_ context: CGContext) {
   context.draw(image, in: face)
   context.restoreGState()
 
-  // A thin bright rim, brightest along the top edge.
   context.saveGState()
   context.addPath(bubble)
   context.setLineWidth(8)
@@ -261,9 +241,6 @@ func drawBubble(_ context: CGContext) {
   context.restoreGState()
 }
 
-/// A lens flare at the bubble's shoulder: a hot core in a wide bloom, long thin
-/// streaks on the diagonals, and a four-point sparkle whose rays swell into the
-/// core along concave curves.
 func drawFlare(_ context: CGContext, at centre: CGPoint) {
   func glow(_ stops: [(CGFloat, CGFloat)], _ tint: (CGFloat, CGFloat, CGFloat) = (1, 1, 1))
     -> CGGradient
@@ -274,7 +251,6 @@ func drawFlare(_ context: CGContext, at centre: CGPoint) {
     _ length: CGFloat, _ thickness: CGFloat, _ degrees: CGFloat, _ alpha: CGFloat,
     inward: CGFloat = 1
   ) {
-    // The arm pointing into the bubble is shorter, so it does not scratch the metal.
     for side in [CGFloat(1), -1] {
       let reach = side > 0 ? length : length * inward
       context.saveGState()
@@ -339,8 +315,6 @@ func drawFlare(_ context: CGContext, at centre: CGPoint) {
   context.restoreGState()
 }
 
-// MARK: - Output
-
 func bitmap(_ pixels: Int) -> NSBitmapImageRep {
   NSBitmapImageRep(
     bitmapDataPlanes: nil, pixelsWide: pixels, pixelsHigh: pixels, bitsPerSample: 8,
@@ -348,7 +322,6 @@ func bitmap(_ pixels: Int) -> NSBitmapImageRep {
     bytesPerRow: 0, bitsPerPixel: 0)!
 }
 
-// The icon is drawn once at full size; every smaller size is scaled from it.
 let master = bitmap(1024)
 let canvas = NSGraphicsContext(bitmapImageRep: master)!.cgContext
 canvas.translateBy(x: 0, y: 1024)

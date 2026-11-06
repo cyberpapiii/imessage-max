@@ -19,8 +19,6 @@ final class ListAttachments {
         self.resolver = resolver
     }
 
-    // MARK: - Tool Registration
-
     static func definition(db: Database, resolver: ContactResolver) -> ToolDefinition {
         let inputSchema: Value = .object([
             "type": "object",

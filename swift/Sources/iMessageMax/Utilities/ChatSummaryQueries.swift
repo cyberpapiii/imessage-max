@@ -1,7 +1,5 @@
 import Foundation
 
-/// Batched query layer for list/overview tools: one IN-clause query covers
-/// all requested chat IDs at once instead of one query per chat.
 enum ChatSummaryQueries {
 
     struct LastMessage {
@@ -9,13 +7,6 @@ enum ChatSummaryQueries {
         let awaitingReply: Bool
     }
 
-    // MARK: - Participants
-
-    /// Returns participants grouped by chat ID.
-    ///
-    /// One query for all chats. Contact names are resolved with one
-    /// `resolver.resolve` call per *unique* handle so the same person
-    /// in many chats is not looked up repeatedly.
     static func participantsByChat(
         db: Database,
         chatIds: [Int64],
@@ -37,7 +28,6 @@ enum ChatSummaryQueries {
             (chatId: row.int(0), handle: row.string(1) ?? "")
         }
 
-        // Collect unique handles and resolve all at once.
         let uniqueHandles = Set(rows.map(\.handle))
         var resolvedNames: [String: String] = [:]
         for handle in uniqueHandles {
@@ -46,10 +36,6 @@ enum ChatSummaryQueries {
             }
         }
 
-        // Group by chat id. chat_handle_join has no unique constraint, and the
-        // same handle can be joined to one chat more than once (iCloud sync
-        // merges, SMS and iMessage handles that normalize to the same string).
-        // DISTINCT above collapses those to one row per handle.
         var result: [Int64: [ResolvedParticipant]] = [:]
         for chatId in chatIds {
             result[chatId] = []
@@ -61,7 +47,6 @@ enum ChatSummaryQueries {
         return result
     }
 
-    /// Single-chat wrapper around `participantsByChat`.
     static func participants(
         db: Database,
         chatId: Int64,
@@ -70,8 +55,6 @@ enum ChatSummaryQueries {
         try await participantsByChat(db: db, chatIds: [chatId], resolver: resolver)[chatId] ?? []
     }
 
-    /// Most-recent inbound sender handles per chat, newest first, at most
-    /// `perChatLimit` rows per chat. Reactions and outbound rows excluded.
     static func recentSendersByChat(
         db: Database,
         chatIds: [Int64],
@@ -113,16 +96,6 @@ enum ChatSummaryQueries {
         return result
     }
 
-    // MARK: - Last messages
-
-    /// The newest non-reaction message per chat that `options` admits,
-    /// keyed by chat ID; a chat with none is absent. One query for all
-    /// chats, then one for the attachment kinds of text-less previews.
-    ///
-    /// - Parameter newestDates: Each chat's newest admitted message date,
-    ///   when the caller's own query already found it under the same
-    ///   filters. The lookup then seeks to that date instead of searching
-    ///   the chat's history. Used only when every chat in `chatIds` has one.
     static func lastMessagesByChat(
         db: Database,
         chatIds: [Int64],
@@ -146,7 +119,6 @@ enum ChatSummaryQueries {
                 params.append(chatId)
                 params.append(date)
             }
-            // A pinned date already satisfies the caller's `since`.
             pick = "\n      AND m2.date = i.newest_date"
         } else {
             params.append(contentsOf: chatIds.map { $0 as Any })
@@ -155,8 +127,6 @@ enum ChatSummaryQueries {
                 pickParams.append(since)
             }
         }
-        // A conversational last message answers awaiting_reply itself; only
-        // a group event sends the lookup back for the newest one before it.
         let awaiting = "CASE WHEN \(SQLFragments.conversational("m")) THEN m.is_from_me = 0 ELSE "
             + SQLFragments.awaitingReply(chat: "i.chat_id", sinceBound: options.sinceApple != nil) + " END"
         if let since = options.sinceApple {
@@ -167,8 +137,6 @@ enum ChatSummaryQueries {
             pick += "\n      AND \(SQLFragments.unreadInbound("m2"))"
         }
 
-        // One correlated LIMIT 1 per chat, ordered on message.date rather
-        // than the copy in chat_message_join, newest ROWID breaking ties.
         let width = pinnedDates == nil ? 1 : 2
         let row = "(" + SQLFragments.placeholders(width) + ")"
         let sql = """

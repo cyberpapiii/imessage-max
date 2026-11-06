@@ -1,8 +1,4 @@
 #!/usr/bin/env bash
-# Verify every hand-written copy of the version agrees with Version.swift.
-#   --tag    also require HEAD to carry the matching vX.Y.Z tag
-#   --print  print the Version.swift version and exit (the one extractor the
-#            Makefile, build_and_run.sh, and release.yml use)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

@@ -128,7 +128,6 @@ final class GetMessagesToolTests: XCTestCase {
 
     func testReactionsAndAttachmentMediaSummariesAreIncluded() async throws {
         let fixture = try makeGetMessagesFixture()
-        // Fixture images live in the temp dir; the tool contains chat.db paths to allowed roots, so the test supplies its own root.
         let tool = GetMessagesTool(db: fixture.database(), resolver: makeSeededResolver(), allowedRoots: [FileManager.default.temporaryDirectory.path])
 
         let response = try await decodeJSONDictionary(from:
@@ -381,9 +380,6 @@ final class GetMessagesToolTests: XCTestCase {
         XCTAssertNotNil(attachments.first?["id"] as? String)
     }
 
-    // The GUID-substring fallback binds the caller's text into a
-    // LIKE pattern. Without escaping, "%" (or "_", or "") matches every chat
-    // and hands back the first row's messages.
     func testChatIdWildcardDoesNotMatchEveryChat() async throws {
         let fixture = try makeGetMessagesFixture()
         let tool = GetMessagesTool(db: fixture.database(), resolver: makeSeededResolver())
@@ -433,8 +429,6 @@ final class GetMessagesToolTests: XCTestCase {
             )
             try fixture.joinChatMessage(chatId: 7, messageId: messageId)
         }
-        // Two undated rows sort last, so a page of 3 ends on one of them
-        // with one more row behind it.
         try fixture.execute("UPDATE message SET date = NULL WHERE ROWID IN (1, 4)")
 
         let tool = GetMessagesTool(db: fixture.database(), resolver: ContactResolver(seedCache: [:]))
@@ -538,8 +532,6 @@ final class GetMessagesToolTests: XCTestCase {
         }
     }
 
-    // MARK: - Paging and participants
-
     func testUnansweredPagesPastNonQuestions() async throws {
         let fixture = try directChatFixture(name: "unanswered-paging")
         let base = AppleTime.fromDate(Date()) - 1_000 * appleMinute
@@ -581,8 +573,6 @@ final class GetMessagesToolTests: XCTestCase {
         XCTAssertEqual((page["chat"] as? [String: Any])?["id"] as? String, "chat30")
     }
 
-    /// unanswered counts a message as a question when it ends with an asking
-    /// phrase, in any case and with trailing spaces, even without "?".
     func testUnansweredTreatsAskingPhraseEndingsAsQuestions() async throws {
         let fixture = try directChatFixture(name: "unanswered-phrases")
         let texts = [
@@ -604,15 +594,12 @@ final class GetMessagesToolTests: XCTestCase {
         XCTAssertEqual(Set(try itemIds(json, "messages")), ["msg_1", "msg_2", "msg_3", "msg_4", "msg_5"])
     }
 
-    /// Only a conversational message answers a question: a group event
-    /// after it does not, in get_messages or in search.
     func testAGroupEventDoesNotAnswerAQuestion() async throws {
         let fixture = try ToolTestDatabase(name: "unanswered-event")
         for row in 1...2 { try fixture.insertHandle(rowId: row, handle: "+1555000000\(row)") }
         try fixture.insertChat(rowId: 1, guid: "iMessage;+;chat-group", displayName: "Group")
         try fixture.joinChatHandle(chatId: 1, handleId: 1)
         try fixture.joinChatHandle(chatId: 1, handleId: 2)
-        // A DM where the question did get a reply.
         try fixture.insertChat(rowId: 2, guid: "iMessage;-;+15550000002")
         try fixture.joinChatHandle(chatId: 2, handleId: 2)
         let recent = AppleTime.fromDate(Date()) - 60 * appleMinute

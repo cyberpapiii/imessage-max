@@ -57,8 +57,6 @@ final class AppleScriptStagingTests: XCTestCase {
         )
     }
 
-    /// A failed transfer-status query still schedules removal of the staged
-    /// copy, whether the query failed with a SendError or anything else.
     func testFailedStatusQueryRemovesTheStagedCopy() async throws {
         struct StatusQueryFailure: Error {}
         let errors: [any Error] = [SendError.failed("status probe failed"), StatusQueryFailure()]
@@ -90,7 +88,6 @@ final class AppleScriptStagingTests: XCTestCase {
         }
     }
 
-    /// Polls for up to two seconds for `directory` to disappear.
     private func waitForRemoval(of directory: URL) async -> Bool {
         for _ in 0..<100 {
             if !FileManager.default.fileExists(atPath: directory.path) { return true }

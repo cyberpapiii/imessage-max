@@ -1,13 +1,6 @@
 import XCTest
 @testable import iMessageMax
 
-/// Characterization tests for the recent sort's bounded candidate scan.
-///
-/// The recent sort groups a date-ordered prefix of the newest messages into
-/// candidate chats, rather than aggregating every message, and widens that
-/// prefix only when the page comes back short. These tests pin what the
-/// shortcut has to keep: the same ordering, no chat lost because it fell
-/// outside the prefix, and no chat repeated across pages.
 final class ListChatsRecentScanTests: XCTestCase {
 
     private func ids(_ response: ListChatsResponse) -> [String] {
@@ -55,8 +48,6 @@ final class ListChatsRecentScanTests: XCTestCase {
     }
 
     func testChatOutsideTheCandidatePrefixIsStillFound() async throws {
-        // The busy chat owns every message in the first candidate width, so a
-        // scan that stopped there would report that no group chat exists.
         let fixture = try ToolTestDatabase()
         try fixture.insertHandle(rowId: 1, handle: "+15550000001")
         try fixture.insertHandle(rowId: 2, handle: "+15550000002")
@@ -67,8 +58,6 @@ final class ListChatsRecentScanTests: XCTestCase {
         try fixture.joinChatHandle(chatId: 11, handleId: 1)
         try fixture.joinChatHandle(chatId: 11, handleId: 2)
 
-        // The group's messages are the oldest in the database, so they sort
-        // behind the entire first candidate width of 2000.
         for messageId in 1...3 {
             try fixture.insertMessage(
                 rowId: messageId,
@@ -97,9 +86,6 @@ final class ListChatsRecentScanTests: XCTestCase {
     }
 
     func testPagingDoesNotRepeatAChatWithMessagesOnBothSidesOfTheCursor() async throws {
-        // The newest chat also holds a message older than every other chat's.
-        // Narrowing the scan by the cursor would truncate that chat's newest
-        // date to the old message and hand it back on the second page.
         let fixture = try ToolTestDatabase()
         try fixture.insertHandle(rowId: 1, handle: "+15550000001")
 
@@ -109,12 +95,10 @@ final class ListChatsRecentScanTests: XCTestCase {
         }
 
         let messages: [(Int, Int, Int64)] = [
-            (1, 10, fixtureDay(9)),   // newest overall
-            (2, 10, fixtureDay(1)),   // older than every other chat's newest
+            (1, 10, fixtureDay(9)),
+            (2, 10, fixtureDay(1)),
             (3, 11, fixtureDay(5)),
             (4, 12, fixtureDay(3)),
-            // Older than the straddling chat's old message, so the page that
-            // would repeat chat10 still comes back full and is never widened.
             (5, 13, fixtureDay(0)),
         ]
         for (messageId, chatId, date) in messages {
@@ -129,10 +113,6 @@ final class ListChatsRecentScanTests: XCTestCase {
             try fixture.joinChatMessage(chatId: chatId, messageId: messageId)
         }
 
-        // A single-chat page is what exposes the hazard: each page comes back
-        // full, so a scan narrowed by the cursor would never widen and correct
-        // itself, and the straddling chat would be handed out a second time
-        // once the cursor moved past its older message.
         var seen: [String] = []
         var cursor: String? = nil
         for _ in 0..<10 {

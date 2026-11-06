@@ -1,10 +1,6 @@
 import Foundation
 
-/// The messages just before and after anchor messages in their chat,
-/// for get_context and search's include_context.
 enum MessageWindow {
-    /// Windows are cut on `(date, ROWID)` like every other timeline, so a
-    /// message sharing the anchor's timestamp still lands on one side.
     struct Anchor: Hashable {
         let chatId: Int64
         let date: Int64
@@ -26,14 +22,10 @@ enum MessageWindow {
     }
 
     struct Context {
-        /// Oldest first.
         var before: [MessageRecord] = []
-        /// Oldest first.
         var after: [MessageRecord] = []
     }
 
-    /// One statement per chat and 100 anchors: a UNION ALL of per-anchor
-    /// `LIMIT` windows, so the cost does not grow with the anchor count.
     static func around(
         _ anchors: [Anchor],
         before: Int,
@@ -81,8 +73,6 @@ enum MessageWindow {
         return result
     }
 
-    /// Five bindings per side per anchor; 100 anchors stay far below
-    /// SQLite's default variable limit of 32766.
     private static func windowSQL(
         chatId: Int64,
         anchors: [Anchor],

@@ -1,7 +1,5 @@
 import Foundation
 
-/// Hands one payload to Messages.app. The production implementation is
-/// LiveScriptRunner; tests inject a stub.
 protocol ScriptRunning: Sendable {
     func send(_ payload: SendPayload, to target: SendTarget) async -> Result<Void, SendFailure>
 }
@@ -50,8 +48,6 @@ struct LiveScriptRunner: ScriptRunning {
         }
     }
 
-    /// Validates and copies the file, and counts the outgoing transfers that
-    /// already carry its name so the poll can ignore them.
     private func stage(_ path: String) throws -> (OutgoingFileStager.StagedFile, baseline: Int) {
         stager.sweepExpired()
         let source = try stager.openSource(path)
@@ -71,7 +67,6 @@ struct LiveScriptRunner: ScriptRunning {
         case .failure(.timeout):
             return .failure(SendFailure(.timeout, disposition: .mayHaveCompleted))
         case .failure(let error):
-            // Osascript.run only fails this way when osascript could not be launched.
             return .failure(SendFailure(error, disposition: .notStarted))
         case .success(let output):
             return SendScript.interpretResult(
