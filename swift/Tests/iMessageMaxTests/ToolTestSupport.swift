@@ -380,6 +380,11 @@ func itemIds(_ json: [String: Any], _ key: String, file: StaticString = #filePat
     try decodeJSONArray(json[key], file: file, line: line).compactMap { $0["id"] as? String }
 }
 
+/// The `chat.id` of every item in `json[key]`.
+func itemChatIds(_ json: [String: Any], _ key: String, file: StaticString = #filePath, line: UInt = #line) throws -> [String?] {
+    try decodeJSONArray(json[key], file: file, line: line).map { ($0["chat"] as? [String: Any])?["id"] as? String }
+}
+
 /// Follows a tool's cursors until it stops returning one, collecting the
 /// `id` of every item under `resultsKey`. Stops after 20 pages.
 func collectPages(
@@ -511,6 +516,77 @@ func hiddenMatchesFixture() throws -> ToolTestDatabase {
             try fixture.joinChatMessage(chatId: chat, messageId: row)
         }
     }
+    return fixture
+}
+
+/// Unread "hello 1" to "hello 3" (msg_1 to msg_3) from +15550000001 an
+/// hour ago, all in shown iMessage chat 1; msg_2 is also in shown SMS chat 2.
+func messageInTwoChatsFixture() throws -> ToolTestDatabase {
+    let fixture = try ToolTestDatabase(name: "two-chats")
+    let recent = AppleTime.fromDate(Date()) - 60 * appleMinute
+    try fixture.insertHandle(rowId: 1, handle: "+15550000001")
+    try fixture.insertChat(rowId: 1, guid: "iMessage;-;+15550000001")
+    try fixture.insertChat(rowId: 2, guid: "SMS;-;+15550000001", serviceName: "SMS")
+    for row in 1...3 {
+        try fixture.insertMessage(rowId: row, guid: "g\(row)", text: "hello \(row)", date: recent + Int64(row), isFromMe: false, handleId: 1)
+        try fixture.joinChatMessage(chatId: 1, messageId: row)
+    }
+    try fixture.joinChatMessage(chatId: 2, messageId: 2)
+    return fixture
+}
+
+/// Shown chat 1 holds unread "hello friend" (msg_1) from +15550000001;
+/// hidden chat 5 holds the newer unread "hello prize" (msg_2) from
+/// spam@example.com. Both are about an hour old.
+func hiddenChatFixture() throws -> ToolTestDatabase {
+    let fixture = try ToolTestDatabase(name: "named-hidden")
+    let recent = AppleTime.fromDate(Date()) - 60 * appleMinute
+    try fixture.insertHandle(rowId: 1, handle: "+15550000001")
+    try fixture.insertHandle(rowId: 2, handle: "spam@example.com")
+    try fixture.insertChat(rowId: 1, guid: "iMessage;-;+15550000001")
+    try fixture.insertChat(rowId: 5, guid: "iMessage;-;spam@example.com", isFiltered: 1)
+    try fixture.insertMessage(rowId: 1, guid: "g1", text: "hello friend", date: recent, isFromMe: false, handleId: 1)
+    try fixture.joinChatMessage(chatId: 1, messageId: 1)
+    try fixture.insertMessage(rowId: 2, guid: "g2", text: "hello prize", date: recent + 1, isFromMe: false, handleId: 2)
+    try fixture.joinChatMessage(chatId: 5, messageId: 2)
+    return fixture
+}
+
+/// chat.db's own indexes on the tables the tools read (the
+/// chat_message_join primary key and message_id index, message_idx_date,
+/// message_idx_is_read, and the join tables' keys) over 40 unread
+/// "hello zebra N" messages from the last hour. Every fourth message is in
+/// hidden chat 5 with spam@example.com, the rest in shown chat 1 with
+/// +15550000001. Message 4 has a 10-byte image, att1.
+func indexedHiddenChatFixture() throws -> ToolTestDatabase {
+    let fixture = try ToolTestDatabase(name: "named-chat-plan")
+    let recent = AppleTime.fromDate(Date()) - 60 * appleMinute
+    try fixture.execute("""
+        CREATE UNIQUE INDEX cmj_pk ON chat_message_join(chat_id, message_id);
+        CREATE INDEX chat_message_join_idx_message_id_only ON chat_message_join(message_id);
+        CREATE INDEX message_idx_date ON message(date);
+        CREATE INDEX message_idx_is_read ON message(is_read, is_from_me);
+        CREATE INDEX message_idx_handle ON message(handle_id, date);
+        CREATE UNIQUE INDEX chj_pk ON chat_handle_join(chat_id, handle_id);
+        CREATE UNIQUE INDEX maj_pk ON message_attachment_join(message_id, attachment_id);
+        CREATE INDEX maj_attachment ON message_attachment_join(attachment_id);
+        """)
+    try fixture.insertHandle(rowId: 1, handle: "+15550000001")
+    try fixture.insertHandle(rowId: 2, handle: "spam@example.com")
+    try fixture.insertChat(rowId: 1, guid: "iMessage;-;+15550000001")
+    try fixture.insertChat(rowId: 5, guid: "iMessage;-;spam@example.com", isFiltered: 1)
+    try fixture.joinChatHandle(chatId: 1, handleId: 1)
+    try fixture.joinChatHandle(chatId: 5, handleId: 2)
+    for row in 1...40 {
+        let chat = row % 4 == 0 ? 5 : 1
+        try fixture.insertMessage(
+            rowId: row, guid: "g\(row)", text: "hello zebra \(row)",
+            date: recent + Int64(row), isFromMe: false, handleId: chat == 5 ? 2 : 1
+        )
+        try fixture.joinChatMessage(chatId: chat, messageId: row)
+    }
+    try fixture.insertAttachment(rowId: 1, filename: "~/Library/Messages/Attachments/a.jpg", mimeType: "image/jpeg", uti: "public.jpeg", totalBytes: 10)
+    try fixture.joinMessageAttachment(messageId: 4, attachmentId: 1)
     return fixture
 }
 

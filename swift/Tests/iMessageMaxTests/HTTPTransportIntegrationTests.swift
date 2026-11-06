@@ -310,6 +310,56 @@ final class HTTPTransportIntegrationTests: XCTestCase {
         }
     }
 
+    /// The legacy tools/call shortcut answers a non-scalar id as the SDK
+    /// route does: 400 with -32600, never a 200 echoing an object id.
+    func testNonScalarIdOnTheToolsCallShortcutIsA400() async throws {
+        let app = await makeTestTransport(catalog: ToolCatalog([])).application()
+
+        try await app.test(TestingSetup.router) { client in
+            let sessionId = try await client.initializeSession()
+            for body in [
+                #"{"jsonrpc":"2.0","id":{"a":1},"method":"tools/call","params":{"name":"anything","arguments":{}}}"#,
+                #"{"jsonrpc":"2.0","id":{"a":1},"method":"tools/list","params":{}}"#,
+            ] {
+                let response = try await client.post(body, headers: jsonHeaders(sessionId: sessionId))
+                XCTAssertEqual(response.head.status, .badRequest, body)
+                let json = try decodeJSON(from: response.body)
+                XCTAssertTrue(json["id"] is NSNull, body)
+                XCTAssertEqual((json["error"] as? [String: Any])?["code"] as? Int, -32600, body)
+            }
+        }
+    }
+
+    /// A tools/call or tools/list reusing the id of a tools/call still in
+    /// flight is a 400 carrying the id, and the first call still answers.
+    func testInFlightIdOnTheToolsCallShortcutIsA400CarryingTheId() async throws {
+        let (started, startedSink) = AsyncStream<Void>.makeStream()
+        let slow = fakeTool(named: "slow") { _ in
+            startedSink.yield()
+            await AsyncTimeout.sleep(.milliseconds(300))
+            return [.plainText(#"{"done":true}"#)]
+        }
+        let app = await makeTestTransport(catalog: ToolCatalog([slow])).application()
+
+        try await app.test(TestingSetup.router) { client in
+            let sessionId = try await client.initializeSession()
+            let call = #"{"jsonrpc":"2.0","id":"dup","method":"tools/call","params":{"name":"slow","arguments":{}}}"#
+            async let first = client.post(call, headers: jsonHeaders(sessionId: sessionId))
+            var iterator = started.makeAsyncIterator()
+            _ = await iterator.next()
+
+            for body in [call, #"{"jsonrpc":"2.0","id":"dup","method":"tools/list","params":{}}"#] {
+                let second = try await client.post(body, headers: jsonHeaders(sessionId: sessionId))
+                XCTAssertEqual(second.head.status, .badRequest, body)
+                let json = try decodeJSON(from: second.body)
+                XCTAssertEqual(json["id"] as? String, "dup", body)
+                XCTAssertEqual((json["error"] as? [String: Any])?["code"] as? Int, -32600, body)
+            }
+            let firstStatus = try await first.head.status
+            XCTAssertEqual(firstStatus, .ok)
+        }
+    }
+
     /// A server-initiated request whose id equals a waiting POST's id goes
     /// to SSE; only the response completes the POST.
     func testServerRequestWithClientIdDoesNotCompleteWaitingPost() async throws {

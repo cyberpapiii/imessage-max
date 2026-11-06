@@ -143,4 +143,58 @@ final class GetUnreadToolTests: XCTestCase {
         }
         XCTAssertEqual(seen, (1...5).map { "msg_\($0)" })
     }
+
+    /// A message in two chats is listed once, so it neither repeats on a
+    /// page nor loses its second copy to the (date, ROWID) cursor.
+    func testMessagesListAMessageInTwoChatsOnceAcrossPages() async throws {
+        let fixture = try messageInTwoChatsFixture()
+        for limit in 1...3 {
+            let seen = try await collectPages(
+                "get_unread", ["format": "messages", "limit": .int(limit)], resultsKey: "messages", database: fixture.database()
+            )
+            XCTAssertEqual(seen.ids, ["msg_1", "msg_2", "msg_3"], "limit \(limit)")
+        }
+        let one = try await callTool("get_unread", ["format": "messages"], database: fixture.database())
+        XCTAssertEqual(try itemChatIds(one, "messages"), ["chat1", "chat1", "chat1"])
+    }
+
+    func testFilteredHiddenIsCountedOnTheFirstPageOnly() async throws {
+        let fixture = try hiddenChatFixture()
+        let newest = AppleTime.fromDate(Date()) - 60 * appleMinute + 2
+        try fixture.insertMessage(rowId: 3, guid: "g3", text: "again", date: newest, isFromMe: false, handleId: 1)
+        try fixture.joinChatMessage(chatId: 1, messageId: 3)
+
+        let first = try await callTool("get_unread", ["format": "messages", "limit": 1], database: fixture.database())
+        XCTAssertEqual(first["filtered_hidden"] as? Int, 1)
+        let cursor = try XCTUnwrap(first["cursor"] as? String)
+        let second = try await callTool(
+            "get_unread", ["format": "messages", "limit": 1, "cursor": .string(cursor)], database: fixture.database()
+        )
+        XCTAssertEqual(try itemIds(second, "messages"), ["msg_3"])
+        XCTAssertNil(second["filtered_hidden"])
+    }
+
+    /// Each message counts once, under the one chat it is listed in.
+    func testSummaryCountsAMessageInTwoChatsOnce() async throws {
+        let fixture = try messageInTwoChatsFixture()
+        let db = fixture.database()
+
+        let summary = try await callTool("get_unread", [:], database: db)
+        XCTAssertEqual(try itemChatIds(summary, "chats"), ["chat1"])
+        let chats = try decodeJSONArray(summary["chats"])
+        XCTAssertEqual(chats.first?["unread_count"] as? Int, 3)
+        XCTAssertEqual(summary["total_unread"] as? Int, 3)
+        XCTAssertEqual(summary["chats_with_unread"] as? Int, 1)
+
+        let messages = try await callTool("get_unread", ["format": "messages"], database: db)
+        XCTAssertEqual(try itemChatIds(messages, "messages"), ["chat1", "chat1", "chat1"])
+        XCTAssertEqual(messages["total_unread"] as? Int, 3)
+        XCTAssertEqual(messages["chats_with_unread"] as? Int, 1)
+
+        // Named, chat 2 holds its one message.
+        let second = try await callTool("get_unread", ["chat_id": "chat2"], database: db)
+        XCTAssertEqual(try decodeJSONArray(second["chats"]).first?["unread_count"] as? Int, 1)
+        XCTAssertEqual(second["total_unread"] as? Int, 1)
+        XCTAssertEqual(second["chats_with_unread"] as? Int, 1)
+    }
 }

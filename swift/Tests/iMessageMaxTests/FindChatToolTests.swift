@@ -226,6 +226,27 @@ final class FindChatToolTests: XCTestCase {
         XCTAssertEqual(try itemIds(byContent, "chats").count, 1)
         XCTAssertEqual(byContent["filtered_hidden"] as? Int, 3)
     }
+
+    /// When one path finds only hidden chats and another path answers, the
+    /// hidden count of the first is kept.
+    func testKeepsTheHiddenCountOfAPathThatFoundOnlyHiddenChats() async throws {
+        let fixture = try ToolTestDatabase(name: "find-hidden-handover")
+        try fixture.insertHandle(rowId: 1, handle: "+15550000001")
+        try fixture.insertHandle(rowId: 2, handle: "+15550000002")
+        try fixture.insertChat(rowId: 1, guid: "iMessage;+;chat-trip", displayName: "Trip")
+        try fixture.joinChatHandle(chatId: 1, handleId: 1)
+        try fixture.insertChat(rowId: 5, guid: "iMessage;-;+15550000002", isFiltered: 1)
+        try fixture.joinChatHandle(chatId: 5, handleId: 2)
+        // Bob's only chat is hidden, so the name path answers.
+        let json = try await callTool("find_chat", ["participants": ["Bob"], "name": "Trip"], database: fixture.database())
+        XCTAssertEqual(try decodeJSONArray(json["chats"]).count, 1)
+        XCTAssertEqual(json["filtered_hidden"] as? Int, 1)
+
+        // A hidden chat both paths match counts once.
+        try fixture.execute("UPDATE chat SET display_name = 'Trip spam' WHERE ROWID = 5")
+        let both = try await callTool("find_chat", ["participants": ["Bob"], "name": "Trip"], database: fixture.database())
+        XCTAssertEqual(both["filtered_hidden"] as? Int, 1)
+    }
 }
 
 private func makeContainsRecentRichFixture() throws -> ToolTestDatabase {

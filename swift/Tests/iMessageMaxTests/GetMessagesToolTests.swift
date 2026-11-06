@@ -603,6 +603,35 @@ final class GetMessagesToolTests: XCTestCase {
         let json = try await callTool("get_messages", ["chat_id": "chat1", "unanswered": true], database: fixture.database())
         XCTAssertEqual(Set(try itemIds(json, "messages")), ["msg_1", "msg_2", "msg_3", "msg_4", "msg_5"])
     }
+
+    /// Only a conversational message answers a question: a group event
+    /// after it does not, in get_messages or in search.
+    func testAGroupEventDoesNotAnswerAQuestion() async throws {
+        let fixture = try ToolTestDatabase(name: "unanswered-event")
+        for row in 1...2 { try fixture.insertHandle(rowId: row, handle: "+1555000000\(row)") }
+        try fixture.insertChat(rowId: 1, guid: "iMessage;+;chat-group", displayName: "Group")
+        try fixture.joinChatHandle(chatId: 1, handleId: 1)
+        try fixture.joinChatHandle(chatId: 1, handleId: 2)
+        // A DM where the question did get a reply.
+        try fixture.insertChat(rowId: 2, guid: "iMessage;-;+15550000002")
+        try fixture.joinChatHandle(chatId: 2, handleId: 2)
+        let recent = AppleTime.fromDate(Date()) - 60 * appleMinute
+        try fixture.insertMessage(rowId: 1, guid: "q1", text: "dinner at 7?", date: recent, isFromMe: true)
+        try fixture.insertMessage(rowId: 2, guid: "e1", text: nil, date: recent + appleMinute, isFromMe: false, handleId: 1,
+                                  itemType: 2, groupTitle: "Dinner Club")
+        for row in 1...2 { try fixture.joinChatMessage(chatId: 1, messageId: row) }
+        try fixture.insertMessage(rowId: 3, guid: "q2", text: "who is driving?", date: recent, isFromMe: true)
+        try fixture.insertMessage(rowId: 4, guid: "r2", text: "me", date: recent + appleMinute, isFromMe: false, handleId: 2)
+        for row in 3...4 { try fixture.joinChatMessage(chatId: 2, messageId: row) }
+
+        let search = try await callTool("search", ["unanswered": true], database: fixture.database())
+        XCTAssertEqual(try itemIds(search, "results"), ["msg_1"])
+
+        let messages = try await callTool("get_messages", ["chat_id": "chat1", "unanswered": true], database: fixture.database())
+        XCTAssertEqual(try itemIds(messages, "messages"), ["msg_1"])
+        let answered = try await callTool("get_messages", ["chat_id": "chat2", "unanswered": true], database: fixture.database())
+        XCTAssertEqual(try itemIds(answered, "messages"), [])
+    }
 }
 
 private func assertGroupEvent(

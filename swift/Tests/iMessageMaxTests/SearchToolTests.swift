@@ -804,6 +804,25 @@ final class SearchToolTests: XCTestCase {
         XCTAssertTrue(excerpt.hasSuffix("..."))
         XCTAssertFalse(excerpt.contains("\u{FFFD}"), "an emoji was split")
     }
+
+    /// A message in two chats is listed once in either sort, and under the
+    /// chat named by in_chat when one is.
+    func testAMessageInTwoChatsIsListedOnceAcrossPages() async throws {
+        let fixture = try messageInTwoChatsFixture()
+        for limit in 1...3 {
+            for sort in ["recent_first", "oldest_first"] {
+                let seen = try await collectPages(
+                    "search", ["query": "hello", "limit": .int(limit), "sort": .string(sort)],
+                    resultsKey: "results", database: fixture.database()
+                )
+                XCTAssertEqual(Set(seen.ids), ["msg_1", "msg_2", "msg_3"], "limit \(limit) \(sort)")
+                XCTAssertEqual(seen.ids.count, 3, "limit \(limit) \(sort)")
+            }
+        }
+        let inSecond = try await callTool("search", ["query": "hello", "in_chat": "chat2"], database: fixture.database())
+        XCTAssertEqual(try itemIds(inSecond, "results"), ["msg_2"])
+        XCTAssertEqual(try itemChatIds(inSecond, "results"), ["chat2"])
+    }
 }
 
 func makeSearchFixture() throws -> ToolTestDatabase {
