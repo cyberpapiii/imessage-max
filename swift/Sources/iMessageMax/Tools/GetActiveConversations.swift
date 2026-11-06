@@ -163,7 +163,6 @@ enum GetActiveConversations {
             ChatActivityRow(
                 chatId: row.int(0),
                 displayName: row.string(1),
-                participantCount: Int(row.int(2)),
                 myCount: Int(row.int(3)),
                 theirCount: Int(row.int(4)),
                 lastFromMe: row.optionalInt(5),
@@ -224,7 +223,6 @@ enum GetActiveConversations {
     private struct ChatActivityRow {
         let chatId: Int64
         let displayName: String?
-        let participantCount: Int
         let myCount: Int
         let theirCount: Int
         let lastFromMe: Int64?

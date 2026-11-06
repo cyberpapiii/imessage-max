@@ -154,11 +154,9 @@ enum ListChatsTool {
 
         let sinceApple = since.flatMap(AppleTime.parse)
 
-        // Message totals come from a per-chat aggregate subquery rather than
-        // joining chat_handle_join and message in the same FROM. Joining both
-        // multiplies each chat's rows by its participant count, which both
-        // inflated message_count (and therefore the most_active sort) and
-        // forced SQLite to aggregate participants x messages for every chat.
+        // Message totals come from a per-chat aggregate subquery, not from
+        // joining chat_handle_join and message in one FROM, which would
+        // multiply each chat's messages by its participants.
         //
         // The aggregate walks every non-reaction message in the database,
         // so it is only worth paying for when the answer depends on it.
@@ -336,7 +334,6 @@ enum ListChatsTool {
                     id: row.int(0),
                     guid: row.string(1),
                     displayName: row.string(2),
-                    participantCount: Int(row.int(3)),
                     messageCount: row.int(4),
                     lastMessageDate: row.optionalInt(5)
                 )
@@ -417,7 +414,6 @@ enum ListChatsTool {
         let id: Int64
         let guid: String?
         let displayName: String?
-        let participantCount: Int
         let messageCount: Int64
         let lastMessageDate: Int64?
     }

@@ -217,7 +217,6 @@ enum ChatSummaryQueries {
             let rendered = renderer.render(message)
             let text = rendered.event?.previewText ?? MessagePreviewResolver.messageSummary(
                 text: message.text,
-                attributedBody: nil,
                 maxLength: options.previewMaxLength,
                 attachmentTypes: typesByMessage[message.id] ?? []
             )

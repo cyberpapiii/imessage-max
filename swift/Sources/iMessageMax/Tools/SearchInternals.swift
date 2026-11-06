@@ -357,7 +357,6 @@ extension SearchTool {
         let source = String(text.dropFirst(rawStart).prefix(rawWindow))
         let normalized = SummaryPreviewFormatter.formattedTextPreview(
             text: source,
-            attributedBody: nil,
             maxLength: Int.max
         ) ?? source
 

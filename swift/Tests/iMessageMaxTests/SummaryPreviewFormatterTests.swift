@@ -5,7 +5,6 @@ final class SummaryPreviewFormatterTests: XCTestCase {
     func testCollapsesLinksAndWhitespace() {
         let preview = SummaryPreviewFormatter.formattedTextPreview(
             text: "see  https://www.example.com/x\n\nnow",
-            attributedBody: nil,
             maxLength: 200
         )
         XCTAssertEqual(preview, "see [Link: example.com] now")
@@ -15,14 +14,12 @@ final class SummaryPreviewFormatterTests: XCTestCase {
         XCTAssertNil(
             SummaryPreviewFormatter.formattedTextPreview(
                 text: "[Photo] [Video]",
-                attributedBody: nil,
                 maxLength: 200
             )
         )
         XCTAssertNotNil(
             SummaryPreviewFormatter.formattedTextPreview(
                 text: "[Photo] and text",
-                attributedBody: nil,
                 maxLength: 200
             )
         )
@@ -33,7 +30,6 @@ final class SummaryPreviewFormatterTests: XCTestCase {
         let preview = try XCTUnwrap(
             SummaryPreviewFormatter.formattedTextPreview(
                 text: text,
-                attributedBody: nil,
                 maxLength: 50
             )
         )

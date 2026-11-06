@@ -54,7 +54,6 @@ enum SharedMessages {
             let date = AppleTime.toDate(row.message.date)
             let messagePreview = SummaryPreviewFormatter.formattedTextPreview(
                 text: row.message.text,
-                attributedBody: nil,
                 maxLength: 80
             )
 

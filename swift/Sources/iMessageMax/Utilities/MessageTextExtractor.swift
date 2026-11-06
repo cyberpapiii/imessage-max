@@ -13,12 +13,8 @@ enum MessageTextExtractor {
     }
 
     /// Parse Apple typedstream: find "NSString"/"NSMutableString", skip 5 bytes,
-    /// read length byte (0x81 = 2-byte, 0x82 = 3-byte, < 0x80 = literal
-    /// single byte). Any other byte (0x80-0x83, 0x84+) is an unrecognized
-    /// length marker and returns nil rather than misreading it as a literal
-    /// length. Garbage extraction is worse than nil here, since
-    /// SendVerifier.textMatches matches send-verification text against it.
-    /// Then reads UTF-8 text of the parsed length.
+    /// read the length (0x81 = 2-byte, 0x82 = 3-byte, < 0x80 = literal
+    /// single byte), then UTF-8 text of that length.
     static func extractFromTypedstream(_ data: Data) -> String? {
         // Re-base: callers may pass a Data slice whose indices don't start
         // at 0; all math below assumes zero-based absolute indexing.

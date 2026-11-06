@@ -7,12 +7,8 @@ enum SummaryPreviewFormatter {
     private static let placeholderRun = try! NSRegularExpression(
         pattern: #"^(?:\[(?:Photo|Video|Audio|PDF|Attachment)\])+$"#)
 
-    static func formattedTextPreview(
-        text: String?,
-        attributedBody: Data?,
-        maxLength: Int
-    ) -> String? {
-        guard let extracted = MessageTextExtractor.extract(text: text, attributedBody: attributedBody)?
+    static func formattedTextPreview(text: String?, maxLength: Int) -> String? {
+        guard let extracted = MessageTextExtractor.extract(text: text, attributedBody: nil)?
             .trimmingCharacters(in: .whitespacesAndNewlines),
             !extracted.isEmpty
         else {

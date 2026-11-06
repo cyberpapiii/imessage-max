@@ -173,8 +173,6 @@ final class GetUnread {
     }
 
     func execute(params: Parameters) async throws -> any Encodable {
-
-        // "all" means no time filter
         var sinceApple: Int64?
         if params.since.lowercased() != "all" {
             sinceApple = AppleTime.parse(params.since)
