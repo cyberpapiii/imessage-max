@@ -127,15 +127,20 @@ actor SSEConnectionManager {
     private var channels: [String: SSEChannel] = [:]
     private var sessionConnections: [String: Set<String>] = [:]
     private let keepAliveInterval: Duration
+    /// Set by `closeAll`: a stream registered later starts closed.
+    private var isClosed = false
 
     init(keepAliveInterval: Duration) {
         self.keepAliveInterval = keepAliveInterval
     }
 
     func register(info: SSEConnectionInfo) -> SSEChannel {
-        connectionInfo[info.id] = info
-
         let channel = SSEChannel(keepAliveInterval: keepAliveInterval)
+        guard !isClosed else {
+            channel.close()
+            return channel
+        }
+        connectionInfo[info.id] = info
         channels[info.id] = channel
 
         if sessionConnections[info.sessionId] == nil {
@@ -178,6 +183,18 @@ actor SSEConnectionManager {
             channels[connectionId]?.close()
             channels.removeValue(forKey: connectionId)
         }
+    }
+
+    /// For shutdown: closes every stream, whatever its session's state,
+    /// and every stream registered from now on.
+    func closeAll() {
+        isClosed = true
+        for channel in channels.values {
+            channel.close()
+        }
+        channels.removeAll()
+        connectionInfo.removeAll()
+        sessionConnections.removeAll()
     }
 
     var connectionCount: Int {

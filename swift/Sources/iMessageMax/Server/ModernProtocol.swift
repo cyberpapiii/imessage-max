@@ -31,8 +31,8 @@ enum ModernDispatcher {
     /// Validates the required `_meta` fields and the requested version, then
     /// routes the method. `message.era` must be `.modern`.
     static func handle(_ message: JSONRPCMessage, transport: String, catalog: ToolCatalog) async -> ModernReply {
-        // A notification: the modern core protocol defines none the server
-        // must act on here (stdio cancellation passes through the legacy lane).
+        // A notification: nothing to answer. `notifications/cancelled` is
+        // acted on by the transport, which holds the running requests.
         guard let id = message.id, let method = message.method else {
             return .accepted
         }
@@ -104,12 +104,12 @@ enum ModernDispatcher {
             return error(id, .invalidParams, "Invalid parameter: arguments must be an object")
         }
 
-        switch await ToolCallDispatch.perform(name: name, arguments: message.toolArguments, lane: .modern(transport: transport), catalog: catalog) {
+        switch await ToolCallDispatch.execute(name: name, arguments: message.toolArguments, lane: .modern(transport: transport), catalog: catalog) {
         case .unknownTool:
             return error(id, .invalidParams, "Unknown tool: \(name)")
-        case .completed(let outcome):
+        case .completed(let content, let isError):
             var result = completeResult()
-            result.merge(ToolCallDispatch.resultJSON(outcome)) { _, new in new }
+            result.merge(ToolCallDispatch.resultJSON(content: content, isError: isError)) { _, new in new }
             return success(id, result)
         }
     }

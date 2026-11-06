@@ -51,7 +51,7 @@ actor HTTPTransport {
     private let pendingRequests: PendingRequestRegistry
     /// Legacy `tools/call`s answered here rather than by the session's SDK
     /// Server, by (session, JSON-RPC id), for `notifications/cancelled`.
-    private var inFlightToolCalls: [PendingRequestRegistry.Key: Task<ToolCallDispatch.Execution, Never>] = [:]
+    private let inFlightToolCalls = InFlightRequests<PendingRequestRegistry.Key>()
     private var isConnected = false
     private var routingConfigured = false
     private var serverTask: Task<Void, Error>?
@@ -163,13 +163,11 @@ actor HTTPTransport {
         )
     }
 
-    /// Ends every open SSE stream. An SSE GET never finishes on its own, and
-    /// graceful shutdown waits for open requests, so without this a single
-    /// connected client kept the process alive until launchd's SIGKILL.
+    /// Ends every open SSE stream, and any opened after. An SSE GET never
+    /// finishes on its own, and graceful shutdown waits for open requests,
+    /// so one left open holds the process until the shutdown cap.
     fileprivate func closeAllSSEStreams() async {
-        for sessionId in await sessionManager.activeSessionIds() {
-            await sseManager.terminateSession(sessionId: sessionId)
-        }
+        await sseManager.closeAll()
     }
 
     // MARK: - POST
@@ -200,8 +198,7 @@ actor HTTPTransport {
         case .complete(let data):
             requestData = data
         case .tooLarge:
-            // Same observable shape as the old `collect(upTo:)` throw that
-            // Hummingbird converted to 413: empty body, Content-Length: 0.
+            // An empty 413, the shape Hummingbird gives an oversized body.
             return Response(status: .contentTooLarge)
         case .timedOut:
             return errorResponse(.requestTimeout, "Request body read timed out")
@@ -254,7 +251,7 @@ actor HTTPTransport {
                 return errorResponse(.badRequest, "Missing Mcp-Session-Id header")
             }
             // 404 tells the client to re-initialize (spec).
-            guard await sessionManager.validate(sessionId: requestSessionId) != nil else {
+            guard await sessionManager.validate(sessionId: requestSessionId) else {
                 return errorResponse(.notFound, "Invalid or expired session. Please re-initialize.")
             }
             sessionId = requestSessionId
@@ -283,12 +280,12 @@ actor HTTPTransport {
 
         switch message.kind {
         case .request:
-            return await forwardRequest(requestData, key: message.requestKey, sessionId: sessionId, headers: responseHeaders)
+            return await forwardRequest(requestData, message: message, sessionId: sessionId, headers: responseHeaders)
         case .notification, .response:
             // The SDK cancels the requests it holds; the calls answered here
             // it never saw, so cancel those directly.
             if let cancelled = message.cancelledRequestKey {
-                inFlightToolCalls[PendingRequestRegistry.Key(sessionId: sessionId, requestId: cancelled)]?.cancel()
+                inFlightToolCalls.cancel(PendingRequestRegistry.Key(sessionId: sessionId, requestId: cancelled))
             }
             guard await sessionManager.routeMessage(sessionId: sessionId, data: requestData) else {
                 return errorResponse(.notFound, "Session no longer valid")
@@ -298,20 +295,19 @@ actor HTTPTransport {
     }
 
     /// Routes a request to the session's Server and waits for its answer.
-    private func forwardRequest(_ requestData: Data, key: String?, sessionId: String, headers: HTTPFields) async -> Response {
+    /// A malformed or reused id is the client's error (400, with the id when
+    /// it has one); a timeout or a session that ends first is ours (500).
+    private func forwardRequest(_ requestData: Data, message: JSONRPCMessage, sessionId: String, headers: HTTPFields) async -> Response {
+        // An id that is not a JSON scalar can never be matched to the SDK's
+        // answer.
+        guard let key = message.requestKey else {
+            return errorResponse(.badRequest, "Invalid Request: id must be a string, a number, or null")
+        }
         do {
-            // An id that is not a JSON scalar can never be matched to the
-            // SDK's answer, so it fails the way an unanswered request does.
-            guard let key else { throw MCPError.serverError(code: JSONRPCErrorCode.serverError.rawValue, message: "Request timeout") }
             let responseData = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, Error>) in
                 Task {
                     guard await self.pendingRequests.store(sessionId: sessionId, id: key, continuation: continuation) else {
-                        continuation.resume(
-                            throwing: MCPError.serverError(
-                                code: JSONRPCErrorCode.invalidRequest.rawValue,
-                                message: "Duplicate in-flight JSON-RPC request id: \(key)"
-                            )
-                        )
+                        continuation.resume(throwing: DuplicateRequestId())
                         return
                     }
                     let routed = await self.sessionManager.routeMessage(sessionId: sessionId, data: requestData)
@@ -322,6 +318,12 @@ actor HTTPTransport {
                 }
             }
             return Response(status: .ok, headers: headers, body: .init(byteBuffer: ByteBuffer(data: responseData)))
+        } catch is DuplicateRequestId {
+            return errorResponse(
+                .badRequest,
+                "Invalid Request: id is already in use by a request in flight on this session",
+                id: JSONRPC.fallbackId(for: message.id)
+            )
         } catch {
             Log.error("Request handling failed: \(error)")
             return errorResponse(.internalServerError, ClientErrorMessages.internalError)
@@ -342,37 +344,20 @@ actor HTTPTransport {
         let id = message.id ?? NSNull()
         let arguments = message.toolArguments
         let catalog = self.catalog
-        let call = Task {
+        let call = inFlightToolCalls.start(
+            message.requestKey.map { PendingRequestRegistry.Key(sessionId: sessionId, requestId: $0) }
+        ) {
             await ToolCallDispatch.execute(name: name, arguments: arguments, lane: .legacyHTTP(session: sessionId), catalog: catalog)
         }
-        // A reused in-flight id (a client error) runs untracked rather than
-        // taking over the first call's entry.
-        var trackedKey: PendingRequestRegistry.Key?
-        if let requestKey = message.requestKey {
-            let key = PendingRequestRegistry.Key(sessionId: sessionId, requestId: requestKey)
-            if inFlightToolCalls[key] == nil {
-                inFlightToolCalls[key] = call
-                trackedKey = key
-            }
-        }
-        // A dropped connection cancels the request's task; pass that on, as
-        // when the call ran on that task directly.
-        let execution = await withTaskCancellationHandler {
-            await call.value
-        } onCancel: {
-            call.cancel()
-        }
-        if let trackedKey {
-            inFlightToolCalls[trackedKey] = nil
-        }
+        let execution = await inFlightToolCalls.finish(call)
 
         let body: Data
-        switch ToolCallDispatch.render(execution) {
+        switch execution {
         case .unknownTool:
             body = JSONRPC.error(id: id, ToolCallDispatch.unknownToolError(name))
-        case .completed(let outcome):
+        case .completed(let content, let isError):
             do {
-                body = try JSONRPC.success(id: id, result: ToolCallDispatch.resultJSON(outcome))
+                body = try JSONRPC.success(id: id, result: ToolCallDispatch.resultJSON(content: content, isError: isError))
             } catch {
                 Log.error("legacy tools/call serialization failed for \(name)")
                 return errorResponse(.internalServerError, ClientErrorMessages.internalError)
@@ -466,7 +451,7 @@ actor HTTPTransport {
         guard let sessionId = request.headers[.mcpSessionId] else {
             return errorResponse(.badRequest, "Missing Mcp-Session-Id header")
         }
-        guard await sessionManager.validate(sessionId: sessionId) != nil else {
+        guard await sessionManager.validate(sessionId: sessionId) else {
             return errorResponse(.notFound, "Invalid or expired session. Please re-initialize.")
         }
 
@@ -481,6 +466,12 @@ actor HTTPTransport {
         let connectionId = connectionInfo.id
         let sseManager = self.sseManager
         let sessionManager = self.sessionManager
+        // A session terminated between the check above and the register
+        // already closed its streams, so this one would never be closed.
+        guard await sessionManager.validate(sessionId: sessionId) else {
+            await sseManager.unregister(connectionId: connectionId)
+            return errorResponse(.notFound, "Invalid or expired session. Please re-initialize.")
+        }
 
         return Response(
             status: .ok,
@@ -510,7 +501,7 @@ actor HTTPTransport {
         guard let sessionId = request.headers[.mcpSessionId] else {
             return errorResponse(.badRequest, "Missing Mcp-Session-Id header")
         }
-        guard await sessionManager.validate(sessionId: sessionId) != nil else {
+        guard await sessionManager.validate(sessionId: sessionId) else {
             return errorResponse(.notFound, "Invalid or expired session")
         }
 
@@ -633,19 +624,23 @@ actor HTTPTransport {
     }
 
     /// A transport-level failure: the HTTP status carries the meaning, the
-    /// body is a JSON-RPC error with a null id.
+    /// body is a JSON-RPC error, with a null id unless the request's is known.
     private nonisolated func errorResponse(
         _ status: HTTPResponse.Status,
         _ message: String,
-        code: JSONRPCErrorCode = .invalidRequest
+        code: JSONRPCErrorCode = .invalidRequest,
+        id: Any? = nil
     ) -> Response {
         Response(
             status: status,
             headers: [.contentType: "application/json"],
-            body: .init(byteBuffer: ByteBuffer(data: JSONRPC.error(id: nil, code: code, message: message)))
+            body: .init(byteBuffer: ByteBuffer(data: JSONRPC.error(id: id, code: code, message: message)))
         )
     }
 }
+
+/// A request reused the id of one still waiting on the same session.
+private struct DuplicateRequestId: Error {}
 
 /// Waits for graceful shutdown, then closes the transport's SSE streams.
 private struct SSEShutdownService: Service {

@@ -8,23 +8,11 @@ import MCP
 /// result differs, and each lane keeps its own.
 enum ToolCallDispatch {
 
-    /// A finished call, already rendered as JSON-ready Foundation objects.
-    struct Outcome {
-        let content: [[String: Any]]
-        let structuredContent: [String: Any]?
-        let isError: Bool
-    }
-
-    enum Result {
+    /// A finished call. The legacy stdio lane hands it straight to the SDK;
+    /// the other lanes render it with `resultJSON`.
+    enum Execution {
         /// No handler is registered under that name. The eras report this
         /// differently, so the decision stays with the caller.
-        case unknownTool
-        case completed(Outcome)
-    }
-
-    /// A finished call before rendering. The legacy stdio lane hands this
-    /// straight to the SDK; the HTTP lanes render it with `perform`.
-    enum Execution {
         case unknownTool
         case completed(content: [Tool.Content], isError: Bool)
     }
@@ -55,6 +43,9 @@ enum ToolCallDispatch {
     ///
     /// Logs one line per call with the tool, lane, outcome and duration. It
     /// never logs arguments: they carry message text and phone numbers.
+    ///
+    /// Arguments arrive already decoded: the raw `Any` a JSON parse yields is
+    /// not `Sendable`, so it must not cross into the handler's task.
     static func execute(name: String, arguments: [String: Value]?, lane: Lane, catalog: ToolCatalog) async -> Execution {
         let start = ContinuousClock.now
         let (execution, outcome) = await run(name, catalog.handler(named: name), arguments: arguments)
@@ -95,28 +86,6 @@ enum ToolCallDispatch {
         return false
     }
 
-    /// Arguments arrive already decoded: the raw `Any` a JSON parse yields is
-    /// not `Sendable`, so it must not cross into the handler's task.
-    static func perform(name: String, arguments: [String: Value]?, lane: Lane, catalog: ToolCatalog) async -> Result {
-        render(await execute(name: name, arguments: arguments, lane: lane, catalog: catalog))
-    }
-
-    /// An execution as JSON-ready objects.
-    static func render(_ execution: Execution) -> Result {
-        switch execution {
-        case .unknownTool:
-            return .unknownTool
-        case .completed(let content, let isError):
-            return .completed(
-                Outcome(
-                    content: contentJSON(content),
-                    structuredContent: isError ? nil : structuredContent(from: content),
-                    isError: isError
-                )
-            )
-        }
-    }
-
     // MARK: - Serialization helpers
 
     static func contentJSON(_ content: [Tool.Content]) -> [[String: Any]] {
@@ -149,13 +118,14 @@ enum ToolCallDispatch {
         return decoded
     }
 
-    /// The `result` object both eras put their own envelope around.
-    static func resultJSON(_ outcome: Outcome) -> [String: Any] {
-        var result: [String: Any] = ["content": outcome.content]
-        if let structured = outcome.structuredContent {
+    /// The `result` object, as JSON-ready objects, that both eras put their
+    /// own envelope around.
+    static func resultJSON(content: [Tool.Content], isError: Bool) -> [String: Any] {
+        var result: [String: Any] = ["content": contentJSON(content)]
+        if !isError, let structured = structuredContent(from: content) {
             result["structuredContent"] = structured
         }
-        if outcome.isError {
+        if isError {
             result["isError"] = true
         }
         return result

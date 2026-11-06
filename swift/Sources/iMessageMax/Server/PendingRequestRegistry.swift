@@ -1,5 +1,6 @@
 import Foundation
 import MCP
+import Synchronization
 
 /// In-flight JSON-RPC requests awaiting a response from the session's server,
 /// keyed by (session, request id), each with a cancellable timeout timer.
@@ -86,4 +87,52 @@ actor PendingRequestRegistry {
     }
 
     var count: Int { entries.count }
+}
+
+/// Requests this server runs itself rather than through an SDK Server, by
+/// JSON-RPC request key, so a `notifications/cancelled` naming one stops it.
+/// The legacy HTTP `tools/call` shortcut and the modern stdio lane share it.
+final class InFlightRequests<Key: Hashable & Sendable>: Sendable {
+    struct Call<Value: Sendable>: Sendable {
+        let task: Task<Value, Never>
+        /// Nil when the call runs untracked.
+        let trackedKey: Key?
+    }
+
+    private let cancellers = Mutex<[Key: @Sendable () -> Void]>([:])
+
+    /// Starts `operation` in its own task, cancellable through `cancel(_:)`
+    /// from the moment this returns. A reused in-flight key (a client error)
+    /// runs untracked rather than taking over the first call's entry.
+    func start<Value: Sendable>(
+        _ key: Key?,
+        _ operation: @escaping @Sendable () async -> Value
+    ) -> Call<Value> {
+        let task = Task { await operation() }
+        guard let key else { return Call(task: task, trackedKey: nil) }
+        let tracked = cancellers.withLock { entries in
+            guard entries[key] == nil else { return false }
+            entries[key] = { task.cancel() }
+            return true
+        }
+        return Call(task: task, trackedKey: tracked ? key : nil)
+    }
+
+    /// Waits for the call and stops tracking it. Cancelling the waiting task
+    /// (a dropped connection) cancels the call too.
+    func finish<Value>(_ call: Call<Value>) async -> Value {
+        let value = await withTaskCancellationHandler {
+            await call.task.value
+        } onCancel: {
+            call.task.cancel()
+        }
+        if let key = call.trackedKey {
+            _ = cancellers.withLock { $0.removeValue(forKey: key) }
+        }
+        return value
+    }
+
+    func cancel(_ key: Key) {
+        cancellers.withLock { $0[key] }?()
+    }
 }

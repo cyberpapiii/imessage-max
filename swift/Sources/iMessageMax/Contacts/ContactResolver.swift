@@ -22,12 +22,10 @@ actor ContactResolver {
     }
 
     private let source: Source
-    private let refreshInterval: TimeInterval
     private let now: () -> TimeInterval
 
     private var cache: [String: String] = [:]
     private var isInitialized = false
-    private var loadedAt: TimeInterval = -.infinity
     private var checkedAt: TimeInterval = -.infinity
     private var invalidated = false
     private var lastAuthorized = false
@@ -41,7 +39,6 @@ actor ContactResolver {
     init() {
         self.init(
             source: .live(),
-            refreshInterval: 30,
             now: { ProcessInfo.processInfo.systemUptime },
             observeChanges: true
         )
@@ -49,12 +46,10 @@ actor ContactResolver {
 
     init(
         source: Source,
-        refreshInterval: TimeInterval,
         now: @escaping () -> TimeInterval,
         observeChanges: Bool = false
     ) {
         self.source = source
-        self.refreshInterval = refreshInterval
         self.now = now
         if observeChanges {
             changeObserver = NotificationCenter.default.addObserver(
@@ -113,18 +108,16 @@ actor ContactResolver {
 
     // MARK: - Loading
 
-    /// Reloads names when the cache expired, Contacts changed, or
-    /// authorization changed. Throws only when names have never loaded, so a
-    /// transient AddressBook failure does not blank names that were good.
-    func refresh() throws {
+    /// Loads names on first use, after a CNContactStoreDidChange, or when
+    /// authorization changed. A failed load keeps names that were good; a
+    /// failure before any good load is reported through `status().loadFailed`.
+    private func refresh() {
         checkedAt = now()
         let (authorized, _) = source.authorization()
-        let expired = now() - loadedAt >= refreshInterval
         let authorizationChanged = authorized != lastAuthorized
-        guard !isInitialized || invalidated || expired || authorizationChanged else { return }
+        guard !isInitialized || invalidated || authorizationChanged else { return }
 
         invalidated = false
-        loadedAt = now()
         lastAuthorized = authorized
         isInitialized = true
         lastLoadFailed = false
@@ -142,7 +135,6 @@ actor ContactResolver {
             Log.warning("Contacts: refresh failed, keeping \(cache.count) cached names: \(error.localizedDescription)")
             if !hasLastGoodCache {
                 lastLoadFailed = true
-                throw error
             }
         }
     }
@@ -151,7 +143,7 @@ actor ContactResolver {
     /// handles asks macOS for the authorization status once.
     private func refreshIfStale() {
         guard invalidated || now() - checkedAt >= 1 else { return }
-        try? refresh()
+        refresh()
     }
 
     private static func loadNames(from store: CNContactStore) throws -> [String: String] {
@@ -227,7 +219,7 @@ actor ContactResolver {
     }
 
     func status() -> Status {
-        try? refresh()
+        refresh()
         let (authorized, authorization) = source.authorization()
         return Status(
             authorized: authorized,

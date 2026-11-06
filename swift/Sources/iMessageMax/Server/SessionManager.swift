@@ -2,12 +2,12 @@ import Foundation
 import MCP
 
 /// Outcome of createSession: capacity refusal and startup failure need
-/// different HTTP answers (503 retry-later vs 500 internal). Collapsing both
-/// into `nil` told clients to retry against a server that would never succeed.
+/// different HTTP answers (503 retry-later vs 500 internal).
 enum SessionCreationResult {
     case created(SessionManager.MCPSessionState)
     case atCapacity
-    case startFailed(any Error)
+    /// The SDK Server would not start; the error is logged here.
+    case startFailed
 }
 
 /// Manages MCP sessions for the HTTP transport.
@@ -126,7 +126,7 @@ actor SessionManager {
         } catch {
             session.messageContinuation.finish()
             Log.error("session Server.start failed: \(error)")
-            return .startFailed(error)
+            return .startFailed
         }
 
         session.serverTask = Task {
@@ -151,21 +151,21 @@ actor SessionManager {
         await responseHandler?(sessionId, data)
     }
 
-    /// The live session for a client request, marked active; nil when the
-    /// id is unknown or expired (an expired one is terminated here).
-    func validate(sessionId: String) async -> MCPSessionState? {
+    /// True when the id names a live session, which is marked active; false
+    /// when it is unknown or expired (an expired one is terminated here).
+    func validate(sessionId: String) async -> Bool {
         guard let session = sessions[sessionId] else {
-            return nil
+            return false
         }
 
         let now = Date()
         if now.timeIntervalSince(session.lastActivity) > sessionTimeout {
             await terminateSession(sessionId: sessionId)
-            return nil
+            return false
         }
 
         session.lastActivity = now
-        return session
+        return true
     }
 
     func touch(sessionId: String) {

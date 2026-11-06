@@ -151,8 +151,7 @@ final class Database: @unchecked Sendable {
 
         guard result == SQLITE_OK, let db = db else {
             // SQLite allocates a connection handle even when open fails and
-            // requires sqlite3_close to free it. Skipping this leaked ~1.5 KiB
-            // per failed open on the permission_denied path.
+            // requires sqlite3_close to free it.
             if let db = db {
                 sqlite3_close(db)
             }

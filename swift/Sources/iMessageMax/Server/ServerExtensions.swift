@@ -1,6 +1,5 @@
 import Foundation
 import MCP
-import Synchronization
 
 // MARK: - Tool Schema Types
 
@@ -171,27 +170,5 @@ extension Server {
         default:
             return nil
         }
-    }
-}
-
-extension Value {
-    var stringValue: String? {
-        if case .string(let s) = self { return s }
-        return nil
-    }
-
-    var intValue: Int? {
-        if case .int(let i) = self { return i }
-        return nil
-    }
-
-    var boolValue: Bool? {
-        if case .bool(let b) = self { return b }
-        return nil
-    }
-
-    var arrayValue: [Value]? {
-        if case .array(let a) = self { return a }
-        return nil
     }
 }

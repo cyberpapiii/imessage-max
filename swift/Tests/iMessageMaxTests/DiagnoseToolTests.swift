@@ -122,7 +122,6 @@ final class DiagnoseToolTests: XCTestCase {
                 load: { [:] },
                 requestAccess: { XCTFail("must not prompt"); return false }
             ),
-            refreshInterval: 30,
             now: { 0 }
         )
         await resolver.requestAccessIfAllowed(policy: .skipIfNotDetermined)
@@ -166,7 +165,6 @@ final class DiagnoseToolTests: XCTestCase {
                 load: { [:] },
                 requestAccess: { XCTFail("must not prompt"); return false }
             ),
-            refreshInterval: 30,
             now: { 0 }
         )
         await resolver.requestAccessIfAllowed(policy: .skipIfNotDetermined)
