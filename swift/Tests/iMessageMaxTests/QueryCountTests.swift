@@ -54,4 +54,30 @@ final class QueryCountTests: XCTestCase {
         let many = try await queries(questions: 40)
         XCTAssertEqual(few, many)
     }
+
+    /// search counts hidden chats with a word match from one read, so its
+    /// query count does not grow with the number of hidden chats.
+    func testHiddenChatCountIsOneReadNotOnePerChat() async throws {
+        func queries(hiddenChats: Int) async throws -> Int {
+            let fixture = try ToolTestDatabase(name: "hidden-count-\(hiddenChats)")
+            try fixture.insertHandle(rowId: 1, handle: "spam@example.com")
+            for chat in 1...hiddenChats {
+                try fixture.insertChat(rowId: chat, guid: "iMessage;-;spam\(chat)", isFiltered: 1)
+                try fixture.joinChatHandle(chatId: chat, handleId: 1)
+                try fixture.insertMessage(
+                    rowId: chat, guid: "g\(chat)", text: "a zebra",
+                    date: 700_000_000_000_000_000 + Int64(chat), isFromMe: false, handleId: 1
+                )
+                try fixture.joinChatMessage(chatId: chat, messageId: chat)
+            }
+            let db = fixture.database()
+            return try await countQueries {
+                let json = try await callTool("search", ["query": "zebra"], database: db)
+                XCTAssertEqual(json["filtered_hidden"] as? Int, hiddenChats)
+            }
+        }
+        let few = try await queries(hiddenChats: 2)
+        let many = try await queries(hiddenChats: 12)
+        XCTAssertEqual(few, many)
+    }
 }

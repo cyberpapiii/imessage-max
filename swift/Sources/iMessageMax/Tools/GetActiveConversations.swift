@@ -142,9 +142,14 @@ enum GetActiveConversations {
                 "MIN(m.date) as first_in_window",
                 "MAX(m.date) as last_in_window"
             )
-            .from("chat c")
-            .join("chat_message_join cmj ON c.ROWID = cmj.chat_id")
-            .join("message m ON cmj.message_id = m.ROWID")
+            // CROSS JOIN pins SQLite's loop order to the window's messages by
+            // date. With the hidden-chat predicate on c, the planner otherwise
+            // walks every chat's whole history to satisfy GROUP BY c.ROWID.
+            .from("""
+                message m
+                CROSS JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
+                CROSS JOIN chat c ON c.ROWID = cmj.chat_id
+                """)
             .where("m.date >= ?", windowStartApple)
             .where(SQLFragments.notReaction())
             .where(scope.shownPredicate() ?? "1")

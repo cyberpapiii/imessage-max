@@ -24,17 +24,42 @@ final class QueryPlanTests: XCTestCase {
         }
     }
 
-    /// The hidden-chat check on a first search page walks each hidden
-    /// candidate by its chat id too.
-    func testSearchWalksHiddenCandidatesByIndex() async throws {
+    /// The hidden-chat check on a first search page reads the hidden chats'
+    /// rows by chat id too, never walking every message.
+    func testSearchReadsHiddenChatsByIndex() async throws {
         let fixture = try indexedHiddenChatFixture()
         let recorded = try await plans {
             let json = try await callTool("search", ["query": "zebra"], database: fixture.database())
             XCTAssertEqual(json["filtered_hidden"] as? Int, 1)
         }
-        XCTAssertTrue(recorded.contains(where: readsOneChat), "plans: \(recorded)")
+        XCTAssertTrue(recorded.contains(where: readsChatsByIndex), "plans: \(recorded)")
         // The one message walk is the unnamed page itself.
         XCTAssertEqual(recorded.filter(walksMessages).count, 1, "plans: \(recorded)")
+    }
+
+    /// The activity window is read by message date. Given a real chat.db's
+    /// statistics and the hidden-chat predicate, SQLite otherwise starts at
+    /// chats and walks every message.
+    func testActiveConversationsReadsTheWindowByDate() async throws {
+        let fixture = try indexedHiddenChatFixture()
+        try fixture.execute("""
+            ANALYZE;
+            DELETE FROM sqlite_stat1;
+            INSERT INTO sqlite_stat1 VALUES
+                ('message', 'message_idx_date', '300000 1'),
+                ('chat_message_join', 'cmj_pk', '300000 150 1'),
+                ('chat_message_join', 'chat_message_join_idx_message_id_only', '300000 1'),
+                ('chat_handle_join', 'chj_pk', '3450 2 1'),
+                ('chat', NULL, '2000');
+            """)
+        let recorded = try await plans {
+            _ = try await callTool("get_active_conversations", [:], database: fixture.database())
+        }
+        let activity = try XCTUnwrap(recorded.first, "plans: \(recorded)")
+        XCTAssertEqual(
+            activity.first { $0.hasPrefix("S") }, "SEARCH m USING INDEX message_idx_date (date>?)",
+            "plans: \(recorded)"
+        )
     }
 
     /// The plans of every query `body` ran.
@@ -58,9 +83,15 @@ final class QueryPlanTests: XCTestCase {
     /// A plan that starts at one chat by id, reads its join rows by chat_id,
     /// then each message by rowid.
     private func readsOneChat(_ plan: [String]) -> Bool {
+        readsChatsByIndex(plan) && plan.first { $0.hasPrefix("S") }?.hasPrefix("SEARCH c USING INTEGER PRIMARY KEY (rowid=?)") == true
+    }
+
+    /// A plan that starts at chats, reads their join rows by chat_id, then
+    /// each message by rowid.
+    private func readsChatsByIndex(_ plan: [String]) -> Bool {
         let loops = plan.filter { $0.hasPrefix("SCAN") || $0.hasPrefix("SEARCH") }
         return loops.count >= 3
-            && loops[0].hasPrefix("SEARCH c USING INTEGER PRIMARY KEY (rowid=?)")
+            && (loops[0].hasPrefix("SCAN c") || loops[0].hasPrefix("SEARCH c "))
             && loops[1].hasPrefix("SEARCH cmj USING") && loops[1].contains("(chat_id=?")
             && loops[2].hasPrefix("SEARCH m USING INTEGER PRIMARY KEY (rowid=?)")
     }
