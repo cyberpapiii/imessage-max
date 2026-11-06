@@ -144,6 +144,9 @@ enum SharedMessages {
         }
         if let chatId {
             query.where(SQLFragments.messageInChat(), chatId)
+        } else {
+            // A chat named outright is shown even when Messages.app hides it.
+            query.where(SQLFragments.shownChat())
         }
 
         if let sender {

@@ -173,6 +173,28 @@ final class ToolsReview2RegressionTests: XCTestCase {
         }
     }
 
+    // MARK: - Hidden chats stay hidden
+
+    func testActiveConversationsAndAttachmentsSkipHiddenChats() async throws {
+        let f = try ToolTestDatabase(name: "hidden-active")
+        try f.insertHandle(rowId: 1, handle: "spam@example.com")
+        try f.insertChat(rowId: 1, guid: "iMessage;-;spam@example.com", isFiltered: 1)
+        try f.joinChatHandle(chatId: 1, handleId: 1)
+        let recent = Int64(Date().timeIntervalSinceReferenceDate) * 1_000_000_000 - 3_600_000_000_000
+        try f.insertMessage(rowId: 1, guid: "g1", text: "\u{FFFC}", date: recent, isFromMe: false, handleId: 1)
+        try f.insertMessage(rowId: 2, guid: "g2", text: "who is this", date: recent + 1, isFromMe: true)
+        for row in 1...2 { try f.joinChatMessage(chatId: 1, messageId: row) }
+        try f.insertAttachment(rowId: 1, filename: "/nonexistent/x.pdf", mimeType: "application/pdf", uti: "com.adobe.pdf")
+        try f.joinMessageAttachment(messageId: 1, attachmentId: 1)
+
+        let active = try await callTool("get_active_conversations", [:], database: f.database())
+        XCTAssertEqual(try decodeJSONArray(active["conversations"]).count, 0)
+        let listed = try await callTool("list_attachments", [:], database: f.database())
+        XCTAssertEqual(try decodeJSONArray(listed["messages"]).count, 0)
+        let named = try await callTool("list_attachments", ["chat_id": "chat1"], database: f.database())
+        XCTAssertEqual(try decodeJSONArray(named["messages"]).count, 1)
+    }
+
     // MARK: - search and unanswered costs
 
     func testSearchCountsHiddenChatsOnTheFirstPageOnly() async throws {
