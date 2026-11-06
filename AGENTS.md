@@ -6,37 +6,36 @@ This file provides guidance to coding agents (Claude Code, Codex) and contributo
 
 iMessage Max is an MCP (Model Context Protocol) server for iMessage, built for AI assistants to call.
 
-The goal is to cut tool calls per user intent from 3-5 down to 1-2. Tools are shaped around what someone wants to know, not around the database tables.
+The goal is to cut tool calls per user intent from 3-5 down to 1-2. Tools are shaped around what someone wants to know, not around the database tables. The tool list and what each tool is for are in `README.md`.
 
-## Current implementation
+The project is written in Swift and lives in `/swift/`.
 
-The project is written in Swift and lives in `/swift/`. The old Python implementation is gone.
-
-### Build, install, run
-
-After making code changes, build and deploy with:
+## Build, install, run
 
 ```bash
 cd swift
-make install    # builds, signs, restarts launchd service, verifies health
+make install    # builds, signs, restarts the launchd service, verifies health
 ```
 
-Always run `make install` after code changes. It signs the binary, which is what keeps Full Disk Access from being revoked on every rebuild.
+`make install` replaces the live service that every MCP client uses through plug. Run it when a change needs to reach that service, for example to check behaviour on real data. Code-only work verified by tests does not need it. Before installing, copy the current release binary to a scratch folder so `make restart` can bring it back.
+
+It signs the binary, which is what keeps Full Disk Access from being revoked on every rebuild.
 
 Other Makefile targets:
 - `make test` runs the full test suite (`FILTER=ClassOrMethod` for a subset)
 - `make status` checks process, version, signature, health
 - `make logs` tails the stderr log
+- `make restart` restarts the service. Use it, not `launchctl kill`: the plist's `KeepAlive` has `SuccessfulExit` false, so launchd does not relaunch after a clean SIGTERM
 - `make clean` removes debug artifacts and clears logs
 - `make setup-signing` is one-time setup for a persistent code signing identity
 - `make version` checks the five version sites agree; `make release-check` runs everything that must pass before tagging (see `docs/RELEASING.md`)
 - `make install-agent` renders `swift/launchd/local.imessage-max.plist` (binary path and `~/` log paths filled in) into `~/Library/LaunchAgents/` and loads it (do not hand-write the plist)
 
-The server runs as a launchd service (`local.imessage-max`) on port 8080, configured at `~/Library/LaunchAgents/local.imessage-max.plist`. Install that agent with `make install-agent`. It auto-starts on login and auto-restarts on crash.
+The server runs as a launchd service (`local.imessage-max`) on port 8080. It auto-starts on login and auto-restarts on crash.
 
 Clients reach it through plug (HTTP, `protocol = "legacy"`) at `http://127.0.0.1:8080`. After restarting the service, clients may need to reconnect (e.g. `/mcp` in Codex).
 
-`make build` passes `--build-system native` so the binary stays at `.build/arm64-apple-macosx/release/imessage-max`, the path the Full Disk Access grant names. Swift 6.4's default build system writes elsewhere; a bare `swift build -c release` binary is not the one launchd runs.
+`make build` passes `--build-system native` so the binary stays at `.build/arm64-apple-macosx/release/imessage-max`. Full Disk Access is granted by path, and that is the path the grant names. Swift 6.4's default build system writes elsewhere, so a bare `swift build -c release` binary is not the one launchd runs, and it cannot read chat.db.
 
 ### Manual build and run (without Makefile)
 
@@ -56,22 +55,24 @@ $BIN --http --port 8080
 $BIN --request-contacts-access
 ```
 
-### Running the test suite
+## Running the test suite
 
 ```bash
 cd swift
-swift test                              # full suite
-swift test --filter HTTPTransportTests  # one test class
-make test                               # same as `swift test`
-make test FILTER=HTTPTransportTests     # same filter via the Makefile
+CI=true swift test                                      # full suite
+CI=true swift test --filter 'iMessageMaxTests.HTTPTransportTests/'   # one class
+CI=true make test FILTER=HTTPTransportTests             # via the Makefile
 ```
 
-The wire contract shared with the companion app has its own tests:
-`cd contract && swift test`.
+Set `CI=true` when running tests from an agent shell. Without it, some tests take a path meant for an interactive machine.
 
-`swift test --filter` takes a substring of the test class or method name, so
-`--filter LaunchdSafetyTests` runs just that class and
-`--filter testNoTaskSleepInServiceSources` runs the single case.
+`--filter` matches a substring of the test class or method name, so `--filter testNoTaskSleepInServiceSources` runs a single case.
+
+From an agent shell, xctest can hang forever in a cfprefsd XPC wait (`_CFPreferencesCopyAppValueWithContainerAndConfiguration`) as soon as a test touches ImageIO or `CNContactStore`. The fault is intermittent and comes from the environment, not the code. One hung class blocks the whole run with no output, and the machine has no `timeout` binary. If a full run stalls, check with `sample <xctest pid> 1`. Then run each class alone under a 90 s watchdog (`swift test --skip-build --filter 'iMessageMaxTests.<Class>/'`) and report any class that hung as unverified, not as passing.
+
+A test that copies a WAL-mode SQLite fixture must run `PRAGMA journal_mode=DELETE;` on it first, or copy its `-wal` and `-shm` files too. `Database` opens `mode=ro`, and a WAL file without its `-shm` fails to open with an error that looks like an unreadable database.
+
+The wire contract shared with the companion app has its own tests: `cd contract && swift test`.
 
 ### Test via MCP protocol
 
@@ -96,60 +97,16 @@ curl -X POST http://localhost:8080 \
 
 ## Architecture
 
-### Swift Stack
-- Language: Swift (tools-version 6.3; builds with the 6.4 toolchain)
-- MCP SDK: modelcontextprotocol/swift-sdk (version pinned in `swift/Package.swift` / `swift/Package.resolved`)
-- HTTP server: Hummingbird 2.x (for `--http` mode)
-- Database: raw SQLite3 C API for `~/Library/Messages/chat.db`
-- Contacts: CNContactStore
-- Images: Core Image for GPU-accelerated resizing
-- Send: AppleScript/JXA backend for Messages.app
+Swift (tools-version 6.3; builds with the 6.4 toolchain), the modelcontextprotocol/swift-sdk (pinned in `swift/Package.resolved`), Hummingbird 2.x for `--http`, the raw SQLite3 C API against `~/Library/Messages/chat.db`, CNContactStore, Core Image, and AppleScript/JXA for sending.
 
-### Directory structure
+### Where things live
 
-```
-contract/                       # IMessageMaxContract: diagnose and setup wire types,
-                                # capability keys, status words, defaults (host, port,
-                                # launchd label), CLI flags, protocol version. Imported by
-                                # swift/ and macos/; edit a wire word here, not in either app.
-macos/                          # Companion menu bar app (MaxCore, MaxBrand, iMessageMaxMenu)
-swift/
-├── Sources/iMessageMax/
-│   ├── iMessageMaxCommand.swift # Entry point
-│   ├── Server/
-│   │   ├── MCPServer.swift     # Startup for both transports, the stdio server
-│   │   ├── JSONRPC.swift       # Message parse, era rule, error codes, envelopes, era log line
-│   │   ├── HTTPTransport.swift # HTTP Streamable transport (dual-era)
-│   │   ├── ModernProtocol.swift # MCP 2026-07-28 stateless dispatcher
-│   │   ├── DualEraStdio.swift  # stdio era router
-│   │   ├── LegacyLaneTransport.swift # Transport under every SDK Server; adds server icons
-│   │   ├── SessionManager.swift # Per-session Server instances (legacy)
-│   │   ├── SSEConnection.swift # Server-Sent Events
-│   │   ├── HTTPRequestParsing.swift # Header names, header and body parsing helpers
-│   │   ├── PendingRequestRegistry.swift # Request/response correlation and timeouts
-│   │   ├── MessageWatcher.swift # chat.db watcher for live inbox notifications
-│   │   ├── NewMessagesNotification.swift # notifications/imessage/new_messages payload
-│   │   ├── OriginValidationMiddleware.swift
-│   │   ├── ToolCatalog.swift   # The tools a process serves, handed to every lane
-│   │   ├── ToolCallDispatch.swift # tools/call routing
-│   │   ├── ToolFailure.swift   # A tool's error answer
-│   │   ├── IntArgument.swift   # An integer argument's default and bounds, for schema text and clamp
-│   │   ├── ServerExtensions.swift # Server helpers
-│   │   ├── SetupPermissionService.swift # Native setup route for permission prompts
-│   │   ├── IconMetadata.swift  # Embedded icons, the serverInfo icon injection
-│   │   └── Version.swift       # Version.current (source of truth), protocol versions, SDK Server factory
-│   ├── Database/               # SQLite wrapper, query builder, SQLFragments (chat.db rules), ChatScope (hidden-chat rule), ChatLookup, schema probe
-│   ├── Models/                 # Identifiers (chat/msg_/att id codecs), ChatIdentity and its naming rules, GroupEvent, Reactions, AttachmentType, ResponsePrimitives
-│   ├── Messages/               # Message row and renderer, people map, context window, sender filter, participant→chat matching, reactions/attachments annotations, shared-content query
-│   ├── Tools/                  # One file per MCP tool (plus GetMessagesInternals, SearchInternals)
-│   ├── Send/                   # send tool: resolver, AppleScript template, file stager, verifier
-│   ├── Contacts/               # CNContactStore resolver (refreshes itself), headless access policy
-│   ├── Enrichment/             # Image processor (thumbnail, vision, full variants)
-│   └── Utilities/              # ChatPage (chat summaries), AsyncTimeout, path policies, cursors, Log.swift
-├── Tests/
-├── launchd/                    # launchd plist template (local.imessage-max)
-└── Package.swift
-```
+- `contract/` holds the wire types shared with the companion app: diagnose and setup types, capability keys, status words, defaults (host, port, launchd label), CLI flags and the protocol version. Edit a wire word here, not in either app.
+- `macos/` is the companion menu bar app.
+- `swift/Sources/iMessageMax/Server/Version.swift` is the source of truth for the version and the server instructions.
+- `swift/Sources/iMessageMax/Database/` holds each chat.db rule once: `SQLFragments` for the SQL rules, `ChatScope` for which chats are hidden, `ChatLookup` for resolving a chat id. Reuse them instead of writing the rule again in a tool.
+- `swift/Sources/iMessageMax/Tools/` has one file per MCP tool.
+- `swift/Sources/iMessageMax/Utilities/ChatPage.swift` builds the chat summaries that several tools return.
 
 ### Protocol support (dual-era)
 
@@ -205,74 +162,6 @@ self-contained files. Removing it means routing every message to the legacy
 lane in `HTTPTransport.handlePost` and `DualEraStdio.start` (and dropping
 `ModernProtocol.swift`); the shared JSON-RPC and startup code stays.
 
-### HTTP transport architecture
-
-The HTTP mode implements MCP Streamable HTTP transport (legacy sessions
-per spec 2025-03-26+, modern stateless per 2026-07-28):
-
-```
-┌─────────────────────────────────────────────────────────┐
-│  HTTPTransport (Hummingbird HTTP Server)                │
-│  POST / → modern `_meta` body → ModernDispatcher        │
-│  POST / → legacy JSON-RPC → SessionManager              │
-│  GET /  → SSE streaming ← Server notifications (legacy) │
-│  DELETE / → Session termination (legacy)                │
-├─────────────────────────────────────────────────────────┤
-│  SessionManager (per-session isolation)                 │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐     │
-│  │ Session A   │  │ Session B   │  │ Session C   │     │
-│  │ Server inst │  │ Server inst │  │ Server inst │     │
-│  │ Message strm│  │ Message strm│  │ Message strm│     │
-│  └─────────────┘  └─────────────┘  └─────────────┘     │
-│  - 1 hour timeout with automatic cleanup                │
-│  - Clean reconnection (no "already initialized" error)  │
-└─────────────────────────────────────────────────────────┘
-```
-
-## Database schema (iMessage chat.db)
-
-- `chat` holds conversation metadata (ROWID, guid, display_name)
-- `message` holds individual messages (text, attributedBody, date, is_from_me)
-- `handle` holds phone numbers and emails
-- `attachment` holds media files (filename, mime_type, total_bytes)
-- `chat_handle_join` links chats to handles
-- `chat_message_join` links messages to chats
-- `message_attachment_join` links messages to attachments
-
-### Apple epoch time
-
-iMessage uses nanoseconds since 2001-01-01:
-```swift
-let APPLE_EPOCH = Date(timeIntervalSinceReferenceDate: 0)
-let date = Date(timeIntervalSinceReferenceDate: TimeInterval(appleTimestamp) / 1_000_000_000)
-```
-
-### attributedBody Format
-
-Message text is often stored in `attributedBody` (binary typedstream format) instead of `text` column. Parse by:
-1. Find "NSString" or "NSMutableString" marker
-2. Skip 5 bytes after marker
-3. Read length byte (0x81 = 2-byte length, 0x82 = 3-byte length, < 0x80 = literal length; any other marker yields no text)
-4. Read UTF-8 text of that length
-
-## Thirteen core tools
-
-| Tool | Purpose |
-|------|---------|
-| `find_chat` | Locate chat by participants, name, or content |
-| `get_chat_details` | Inspect a known chat's participants, handles, state, and recent shared summary |
-| `get_messages` | Retrieve messages with flexible filtering |
-| `get_messages_since` | New messages across chats after a ROWID cursor, in arrival order |
-| `get_context` | Get messages surrounding a specific message |
-| `search` | Full-text search with compound filters |
-| `list_chats` | Browse recent/active chats with previews |
-| `send` | Send a message to person or group |
-| `get_active_conversations` | Find chats with recent back-and-forth |
-| `list_attachments` | Browse shared items grouped by message, with exact attachment ids for fetches |
-| `get_unread` | Get unread messages or summary |
-| `get_attachment` | Get image content with variant options (vision/thumb/full) |
-| `diagnose` | Troubleshoot configuration and permissions |
-
 ## Critical implementation details
 
 ### No Task.sleep in the service runtime
@@ -285,6 +174,7 @@ cancellable `DispatchSourceTimer` pattern in
 asyncAfter work item stays enqueued until its deadline and retains each
 request's timeout timer under load). This crashed production on
 2026-06-11 (send-confirmation timeout path); do not reintroduce.
+`LaunchdSafetyTests` enforces it.
 
 ### Send contract (no confirmation gate)
 
@@ -307,6 +197,9 @@ and a send tool must return synchronously. Do not reintroduce either without
 operator sign-off and proof of a working elicitation round trip for the
 current session.
 
+The full status vocabulary that agents read is the `send` tool description in
+`Send/SendTool.swift`; `CONCEPTS.md` defines the terms.
+
 ### Image handling
 
 Images are returned using MCP's native image content type (not base64 in JSON text) to avoid token bloat. Use the `.plainText`/`.plainImage` helpers defined in `Server/ServerExtensions.swift` (annotations-free wrappers over the SDK's content cases):
@@ -316,24 +209,6 @@ return [
     .plainImage(data: base64String, mimeType: "image/jpeg")
 ]
 ```
-
-### Attachment availability
-
-Attachments can be offloaded to iCloud. `list_attachments` includes nested attachment summaries with `available: true/false` for each file. When `get_attachment` hits an offloaded file, the error says so and tells the caller to retry.
-
-### Reaction type mapping
-
-| `associated_message_type` | Reaction |
-|---------------------------|----------|
-| 2000 | Loved ❤️ |
-| 2001 | Liked 👍 |
-| 2002 | Disliked 👎 |
-| 2003 | Laughed 😂 |
-| 2004 | Emphasized ‼️ |
-| 2005 | Questioned ❓ |
-| 2006 | Custom emoji |
-| 2007 | Sticker |
-| 3000-3007 | Removal of above |
 
 ### Token-efficient response design
 
@@ -351,9 +226,8 @@ Attachments can be offloaded to iCloud. `list_attachments` includes nested attac
 
 ## Maintainer notes
 
-For current tradeoffs and "why we did it this way" context, see:
-
-- `docs/maintainers/2026-04-09-maintainer-notes.md`
+For current tradeoffs and "why we did it this way" context, see
+`docs/maintainers/2026-04-09-maintainer-notes.md`.
 
 ### Knowledge store
 
