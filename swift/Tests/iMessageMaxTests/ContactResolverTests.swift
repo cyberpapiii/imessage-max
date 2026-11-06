@@ -13,7 +13,7 @@ final class ContactResolverTests: XCTestCase {
         var clock: TimeInterval = 0
     }
 
-    private func makeInjected() -> (ContactResolver, Box) {
+    private func makeInjected(refreshInterval: TimeInterval = 30) -> (ContactResolver, Box) {
         let box = Box()
         let resolver = ContactResolver(
             source: ContactResolver.Source(
@@ -28,6 +28,7 @@ final class ContactResolverTests: XCTestCase {
                 },
                 requestAccess: { box.requested = true; return true }
             ),
+            refreshInterval: refreshInterval,
             now: { box.clock }
         )
         return (resolver, box)
@@ -107,17 +108,19 @@ final class ContactResolverTests: XCTestCase {
         XCTAssertFalse(stats.accessRequestSkippedHeadless)
     }
 
-    /// Names reload on a Contacts change, not on a timer.
-    func testCacheDoesNotReloadOnTimeAlone() async {
+    func testCacheRefreshesAfterTTL() async {
         let (resolver, box) = makeInjected()
         box.names = ["+15550000001": "Old"]
         let first = await resolver.resolve("+15550000001")
         XCTAssertEqual(first, "Old")
         box.names["+15550000001"] = "New"
-        box.clock += 3600
         let stillOld = await resolver.resolve("+15550000001")
         XCTAssertEqual(stillOld, "Old")
         XCTAssertEqual(box.loads, 1)
+        box.clock += 31
+        let refreshed = await resolver.resolve("+15550000001")
+        XCTAssertEqual(refreshed, "New")
+        XCTAssertEqual(box.loads, 2)
     }
 
     func testChangeNotificationInvalidatesCache() async {
@@ -150,7 +153,7 @@ final class ContactResolverTests: XCTestCase {
         box.names = ["+15550000001": "Old"]
         _ = await resolver.resolve("+15550000001")
         box.failNext = true
-        await resolver.invalidate()
+        box.clock += 31
         let name = await resolver.resolve("+15550000001")
         XCTAssertEqual(name, "Old")
         let kept = await resolver.status()
