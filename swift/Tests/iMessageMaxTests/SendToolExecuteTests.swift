@@ -21,9 +21,9 @@ final class StubScriptRunner: ScriptRunning, @unchecked Sendable {
     /// When non-empty, each call pops the next result; nextResult is the fallback.
     /// Lets a test express "payload 1 succeeds, payload 2 fails".
     var queuedResults: [Result<Void, SendFailure>] = []
-    /// Optional side effect run on every send call before nextResult is returned.
-    /// Used to simulate Messages.app writing the chat.db row between send and verify.
-    var onSend: (() -> Void)?
+    /// Runs on every send before the result is returned, standing in for
+    /// Messages.app writing its chat.db row. A throw fails the test.
+    var onSend: ((SendPayload) throws -> Void)?
 
     private func takeResult() -> Result<Void, SendFailure> {
         queuedResults.isEmpty ? nextResult : queuedResults.removeFirst()
@@ -40,7 +40,11 @@ final class StubScriptRunner: ScriptRunning, @unchecked Sendable {
         case (.chat(let guid, _), .file(let path)):
             invocations.append(.fileToChat(guid: guid, filePath: path))
         }
-        onSend?()
+        do {
+            try onSend?(payload)
+        } catch {
+            XCTFail("onSend failed: \(error)")
+        }
         return takeResult()
     }
 }
@@ -77,7 +81,7 @@ private func fastVerifier(fixture: ToolTestDatabase) -> SendVerifier {
 
 final class SendToolExecuteTests: XCTestCase {
 
-    // Stub success with no DB row → "uncertain" (plan Step 4, sanctioned contract change).
+    // A dispatched send with no matching chat.db row is "uncertain".
     func testSendTextToKnownHandleInvokesParticipantSend() async throws {
         let fixture = try makeSendFixture()
         let stub = StubScriptRunner()
@@ -98,7 +102,7 @@ final class SendToolExecuteTests: XCTestCase {
 
         let json = try decodeJSONDictionary(from: contents)
         XCTAssertEqual(json["status"] as? String, "uncertain",
-            "Without a matching DB row, status should be 'uncertain' (sanctioned contract change per plan 012)")
+            "Without a matching DB row, status should be 'uncertain'")
         // Something was dispatched, so a retry could duplicate it.
         XCTAssertEqual(json["disposition"] as? String, "completed")
         XCTAssertEqual(json["retry_safe"] as? Bool, false)
@@ -117,12 +121,12 @@ final class SendToolExecuteTests: XCTestCase {
         let fixture = try makeSendFixture()
         let stub = StubScriptRunner()
         stub.nextResult = .success(())
-        stub.onSend = {
-            try? fixture.insertMessage(
+        stub.onSend = { _ in
+            try fixture.insertMessage(
                 rowId: 200, guid: "msg-guid-group", text: "Hey group",
                 date: AppleTime.fromDate(Date()), isFromMe: true, error: 0, isSent: 0
             )
-            try? fixture.joinChatMessage(chatId: 2, messageId: 200)
+            try fixture.joinChatMessage(chatId: 2, messageId: 200)
         }
 
         let tool = SendTool(
@@ -177,10 +181,8 @@ final class SendToolExecuteTests: XCTestCase {
         XCTAssertEqual(stub.invocations.count, 1, "Stub should have been called once before the failure was detected")
     }
 
-    // Pre-insert a matching outbound row (error=0) in the DM → verifier returns confirmed.
-    // Uses the FULL multi-chat fixture (DM chat 1 + group chat 2, both containing Alice):
-    // this is the common real-world topology that previously produced a false mismatch
-    // via the findDirectChatForHandle resolver bug.
+    // A matching outbound row (error=0) in the DM confirms the send, even
+    // though Alice is also in the group chat.
     func testStubSendWithMatchingRowConfirms() async throws {
         let fixture = try makeSendFixture()  // DM chat 1 (Alice) + group chat 2 (Alice+Bob)
         let stub = StubScriptRunner()
@@ -189,12 +191,12 @@ final class SendToolExecuteTests: XCTestCase {
         // The expected outbound row in chat 1 (Alice DM).
         let rowDate = AppleTime.fromDate(Date())
         // Messages.app writes the row during the send, after the baseline.
-        stub.onSend = {
-            try? fixture.insertMessage(
+        stub.onSend = { _ in
+            try fixture.insertMessage(
                 rowId: 100, guid: "msg-guid-confirm", text: "Hello Alice",
                 date: rowDate, isFromMe: true, error: 0, isSent: 0
             )
-            try? fixture.joinChatMessage(chatId: 1, messageId: 100)
+            try fixture.joinChatMessage(chatId: 1, messageId: 100)
         }
 
         let tool = SendTool(
@@ -226,7 +228,7 @@ final class SendToolExecuteTests: XCTestCase {
     // in the GROUP (chat 2) while the send targets Alice's DM (chat 1). The verifier
     // finds the row through Alice's handle, sees it is not in the intended chat, and
     // the tool must surface "mismatch" as a ToolFailure so an agent never treats it as
-    // confirmed. Pins the response envelope that plans 045 and 049 will touch.
+    // confirmed.
     func testRowInDifferentChatProducesMismatchStatus() async throws {
         let fixture = try makeSendFixture()  // DM chat 1 (Alice) + group chat 2 (Alice+Bob)
         let stub = StubScriptRunner()
@@ -234,12 +236,12 @@ final class SendToolExecuteTests: XCTestCase {
 
         let rowDate = AppleTime.fromDate(Date())
         // Messages.app writes the row during the send, after the baseline.
-        stub.onSend = {
-            try? fixture.insertMessage(
+        stub.onSend = { _ in
+            try fixture.insertMessage(
                 rowId: 103, guid: "msg-guid-mismatch", text: "Hello Alice",
                 date: rowDate, isFromMe: true, error: 0, isSent: 0
             )
-            try? fixture.joinChatMessage(chatId: 2, messageId: 103)
+            try fixture.joinChatMessage(chatId: 2, messageId: 103)
         }
 
         let tool = SendTool(
@@ -305,20 +307,19 @@ final class SendToolExecuteTests: XCTestCase {
         XCTAssertEqual(filePath, "/tmp/a.jpg")
     }
 
-    // End-to-end variant of the previously false-mismatch scenario: the stub runner's
-    // side effect inserts the matching row into the DM during the send call (simulating
-    // Messages.app writing chat.db), then verification runs and must confirm.
+    // The row lands in the DM during the send call, as Messages.app writes
+    // it, and verification confirms it with the group present.
     func testStubSideEffectRowInDMConfirmsWithGroupPresent() async throws {
         let fixture = try makeSendFixture()  // DM chat 1 (Alice) + group chat 2 (Alice+Bob)
         let stub = StubScriptRunner()
         stub.nextResult = .success(())
-        stub.onSend = {
+        stub.onSend = { _ in
             // Simulate Messages.app writing the outbound row to the DM at send time.
-            try? fixture.insertMessage(
+            try fixture.insertMessage(
                 rowId: 102, guid: "msg-guid-side-effect", text: "Hello Alice",
                 date: AppleTime.fromDate(Date()), isFromMe: true, error: 0, isSent: 0
             )
-            try? fixture.joinChatMessage(chatId: 1, messageId: 102)
+            try fixture.joinChatMessage(chatId: 1, messageId: 102)
         }
 
         let tool = SendTool(
@@ -349,12 +350,12 @@ final class SendToolExecuteTests: XCTestCase {
 
         let rowDate = AppleTime.fromDate(Date())
         // Messages.app writes the row during the send, after the baseline.
-        stub.onSend = {
-            try? fixture.insertMessage(
+        stub.onSend = { _ in
+            try fixture.insertMessage(
                 rowId: 101, guid: "msg-guid-error-row", text: "Hello Alice",
                 date: rowDate, isFromMe: true, error: 22, isSent: 0
             )
-            try? fixture.joinChatMessage(chatId: 1, messageId: 101)
+            try fixture.joinChatMessage(chatId: 1, messageId: 101)
         }
 
         let tool = SendTool(
@@ -432,21 +433,21 @@ final class SendToolExecuteTests: XCTestCase {
         )
     }
 
-    // MARK: - Agent-native send contract (plan 017): no confirmation gate
+    // MARK: - No confirmation gate
 
-    // 501-char text with NO confirm flag sends immediately (long text no longer gates).
+    // 501-char text with no confirm flag sends immediately.
     func testLongTextSendsWithoutConfirm() async throws {
         let fixture = try makeSendFixture()
         let stub = StubScriptRunner()
         stub.nextResult = .success(())
 
         let longText = String(repeating: "a", count: 501)
-        stub.onSend = {
-            try? fixture.insertMessage(
+        stub.onSend = { _ in
+            try fixture.insertMessage(
                 rowId: 111, guid: "msg-guid-long-017", text: longText,
                 date: AppleTime.fromDate(Date()), isFromMe: true, error: 0, isSent: 0
             )
-            try? fixture.joinChatMessage(chatId: 1, messageId: 111)
+            try fixture.joinChatMessage(chatId: 1, messageId: 111)
         }
 
         let tool = SendTool(
@@ -463,12 +464,12 @@ final class SendToolExecuteTests: XCTestCase {
 
         let json = try decodeJSONDictionary(from: contents)
         XCTAssertEqual(json["status"] as? String, "confirmed",
-            "Long text (>500 chars) without confirm must send immediately; long text no longer gates")
+            "Long text (>500 chars) without confirm must send immediately")
         XCTAssertEqual(stub.invocations.count, 1, "Stub should have been invoked exactly once")
     }
 
-    // Before payloads were validated up front, the file went out and the text
-    // then failed its length check, which reported partial_failure.
+    // Every payload is validated before the first is dispatched, so an
+    // overlong text stops the file that would go out ahead of it.
     func testOverlongTextAfterFileFailsBeforeAnythingIsSent() async throws {
         let fixture = try makeSendFixture()
         let stub = StubScriptRunner()
@@ -523,12 +524,12 @@ final class SendToolExecuteTests: XCTestCase {
             let fixture = try makeSendFixture()
             let stub = StubScriptRunner()
             stub.nextResult = .success(())
-            stub.onSend = {
-                try? fixture.insertMessage(
+            stub.onSend = { _ in
+                try fixture.insertMessage(
                     rowId: rowId, guid: guid, text: "Hello Alice",
                     date: AppleTime.fromDate(Date()), isFromMe: true, error: 0, isSent: 0
                 )
-                try? fixture.joinChatMessage(chatId: 1, messageId: rowId)
+                try fixture.joinChatMessage(chatId: 1, messageId: rowId)
             }
 
             let tool = SendTool(
@@ -554,7 +555,7 @@ final class SendToolExecuteTests: XCTestCase {
         }
     }
 
-    // MARK: - Partial multi-payload send reporting (plan 026)
+    // MARK: - Partial multi-payload send reporting
 
     // NOTE on payload order: SendPayload.build appends FILES first, then the
     // text. So for `text` + one `file_paths` entry the dispatch order is
@@ -637,7 +638,7 @@ final class SendToolExecuteTests: XCTestCase {
     }
 
     // A soft transfer outcome is not a hard failure: sending continues, and the
-    // aggregate stays pending_confirmation. Unchanged behavior, now locked down.
+    // aggregate stays pending_confirmation.
     func testSoftPendingKeepsSendingRemainingPayloads() async throws {
         let fixture = try makeSendFixture()
         let stub = StubScriptRunner()
@@ -663,7 +664,7 @@ final class SendToolExecuteTests: XCTestCase {
             "A soft outcome must not stop the loop; the second file must still be sent")
     }
 
-    // MARK: - Disposition and retry_safe (plan 079)
+    // MARK: - Disposition and retry_safe
 
     func testMayHaveCompletedFailureIsNotRetrySafe() async throws {
         let fixture = try makeSendFixture()
@@ -701,4 +702,102 @@ final class SendToolExecuteTests: XCTestCase {
         }
         XCTAssertTrue(stub.invocations.isEmpty)
     }
+
+    // MARK: - Verification window
+
+    /// A retry of the same text does not confirm against the earlier
+    /// attempt's row.
+    func testEarlierIdenticalTextDoesNotConfirmARetry() async throws {
+        let fixture = try makeSendFixture()
+        try insertOutbound(fixture, rowId: 50, text: "Hello Alice", date: Date())
+        let stub = StubScriptRunner()   // this send writes no row
+        let tool = SendTool(db: fixture.database(), resolver: makeSeededResolver(), runner: stub, verifier: fastVerifier(fixture: fixture))
+
+        let json = try decodeJSONDictionary(from: try await tool.execute(args: [
+            "to": .string("+15550000001"),
+            "text": .string("Hello Alice"),
+        ]))
+
+        XCTAssertEqual(json["status"] as? String, "uncertain")
+        XCTAssertNil(json["verified_message_guid"])
+    }
+
+    /// Files go first; a slow transfer can push the text's row well past a
+    /// minute after the send began. It still confirms.
+    func testTextAfterSlowFileTransferStillConfirms() async throws {
+        let fixture = try makeSendFixture()
+        let stub = StubScriptRunner()
+        stub.onSend = { payload in
+            guard case .text(let text) = payload else { return }
+            try insertOutbound(fixture, rowId: 60, text: text, date: Date().addingTimeInterval(90))
+        }
+        let tool = SendTool(db: fixture.database(), resolver: makeSeededResolver(), runner: stub, verifier: fastVerifier(fixture: fixture))
+
+        let json = try decodeJSONDictionary(from: try await tool.execute(args: [
+            "to": .string("+15550000001"),
+            "text": .string("Here is the file"),
+            "file_paths": .array([.string("/tmp/a.jpg")]),
+        ]))
+
+        XCTAssertEqual(stub.invocations.count, 2)
+        XCTAssertEqual(json["status"] as? String, "confirmed")
+        XCTAssertEqual(json["verified_message_guid"] as? String, "outbound-60")
+    }
+
+    func testUncertainFollowUpNamesTheChatIdOrTheIntendedChat() {
+        let withChat = SendResponse.uncertain(deliveredTo: ["A"], chat: ChatReference(id: "chat7", name: "Alice"))
+        XCTAssertTrue(withChat.message?.hasSuffix("Use get_messages on chat7 to confirm.") == true, withChat.message ?? "nil")
+        let withoutChat = SendResponse.uncertain(deliveredTo: ["A"], chat: nil)
+        XCTAssertTrue(withoutChat.message?.hasSuffix("Use get_messages on the intended chat to confirm.") == true, withoutChat.message ?? "nil")
+    }
+
+    // MARK: - Cancellation
+
+    /// A send cancelled after its first payload went out dispatches nothing
+    /// further and reports partial_failure.
+    func testCancelledSendDispatchesNothingFurther() async throws {
+        let fixture = try makeSendFixture()
+        let stub = StubScriptRunner()
+        stub.onSend = { _ in withUnsafeCurrentTask { $0?.cancel() } }
+        let tool = SendTool(db: fixture.database(), resolver: makeSeededResolver(), runner: stub, verifier: fastVerifier(fixture: fixture))
+
+        let call = Task {
+            try await tool.execute(args: [
+                "to": .string("+15550000001"),
+                "text": .string("Hello"),
+                "file_paths": .array([.string("/tmp/a.jpg"), .string("/tmp/b.jpg")]),
+            ])
+        }
+        let json = try await toolFailureBody { try await call.value }
+        XCTAssertEqual(json["status"] as? String, "partial_failure")
+        XCTAssertEqual(json["disposition"] as? String, "not_started")
+        XCTAssertEqual(json["retry_safe"] as? Bool, false)
+        let message = json["message"] as? String ?? ""
+        XCTAssertTrue(message.contains("file 'a.jpg'"), message)
+        XCTAssertTrue((json["error"] as? String ?? "").contains("cancelled"), "\(json)")
+        XCTAssertEqual(stub.invocations.count, 1, "nothing may be dispatched after cancellation")
+    }
+
+    /// Cancelled before the first payload: nothing is sent, and the answer
+    /// says so.
+    func testSendCancelledBeforeDispatchSendsNothing() async throws {
+        let fixture = try makeSendFixture()
+        let stub = StubScriptRunner()
+        let tool = SendTool(db: fixture.database(), resolver: makeSeededResolver(), runner: stub, verifier: fastVerifier(fixture: fixture))
+
+        let call = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return try await tool.execute(args: ["to": .string("+15550000001"), "text": .string("Hello")])
+        }
+        let json = try await toolFailureBody { try await call.value }
+        XCTAssertEqual(json["status"] as? String, "failed")
+        XCTAssertEqual(json["disposition"] as? String, "not_started")
+        XCTAssertTrue(stub.invocations.isEmpty)
+    }
+}
+
+/// An outbound row in chat 1, guid `outbound-<rowId>`.
+private func insertOutbound(_ fixture: ToolTestDatabase, rowId: Int, text: String, date: Date) throws {
+    try fixture.insertMessage(rowId: rowId, guid: "outbound-\(rowId)", text: text, date: AppleTime.fromDate(date), isFromMe: true)
+    try fixture.joinChatMessage(chatId: 1, messageId: rowId)
 }

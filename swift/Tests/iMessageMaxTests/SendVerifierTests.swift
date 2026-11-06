@@ -50,7 +50,7 @@ final class SendVerifierTests: XCTestCase {
     }
 
     // Row with error = 22 (measured failed-send pattern) → failedDelivery, not confirmed.
-    // This is §3 finding 3: failed iMessage sends write rows with error = 22 immediately.
+    // Failed iMessage sends write their row with error = 22 at once.
     func testErrorRowClassifiesAsFailedDelivery() async throws {
         let fixture = try makeFixture()
         let date = nowNs()
@@ -188,7 +188,7 @@ final class SendVerifierTests: XCTestCase {
         }
     }
 
-    // MARK: - Failed-delivery classification (plan 021)
+    // MARK: - Failed-delivery classification
 
     // A failed row AND a clean row both match in the intended chat → confirmed.
     // Covers Messages' own immediate-retry behaviour: a clean row anywhere in the
@@ -270,5 +270,35 @@ final class SendVerifierTests: XCTestCase {
 
         XCTAssertEqual(result, .failedDelivery(guid: "msg-guid-fallback-failed", errorCode: 22),
             "The fallback scan must classify a failed matching row as failedDelivery")
+    }
+
+    /// Two concurrent identical sends share one verifier. Each row confirms
+    /// at most one of them.
+    func testIdenticalSendsCannotConfirmTheSameRow() async throws {
+        let fixture = try makeFixture()
+        let verifier = makeVerifier(fixture: fixture)
+        let baseline = try verifier.baseline()
+        try fixture.insertMessage(rowId: 70, guid: "same-70", text: "Same text", date: nowNs(), isFromMe: true)
+        try fixture.joinChatMessage(chatId: 1, messageId: 70)
+
+        let first = try await verifier.verify(intendedChatId: 1, handle: nil, afterRowId: baseline, expectedText: "Same text")
+        let second = try await verifier.verify(intendedChatId: 1, handle: nil, afterRowId: baseline, expectedText: "Same text")
+        guard case .confirmed(let firstGuid, _) = first else { return XCTFail("expected confirmed, got \(first)") }
+        XCTAssertEqual(firstGuid, "same-70")
+        XCTAssertEqual(second, .notFound, "the row is already claimed by the first send")
+
+        try fixture.insertMessage(rowId: 71, guid: "same-71", text: "Same text", date: nowNs(), isFromMe: true)
+        try fixture.joinChatMessage(chatId: 1, messageId: 71)
+        let third = try await verifier.verify(intendedChatId: 1, handle: nil, afterRowId: baseline, expectedText: "Same text")
+        guard case .confirmed(let thirdGuid, _) = third else { return XCTFail("expected confirmed, got \(third)") }
+        XCTAssertEqual(thirdGuid, "same-71", "the second send confirms its own row")
+    }
+
+    func testBaselineIsTheNewestMessageRowId() throws {
+        let fixture = try makeFixture()
+        let verifier = makeVerifier(fixture: fixture)
+        XCTAssertEqual(try verifier.baseline(), 0)
+        try fixture.insertMessage(rowId: 42, guid: "x", text: "x", date: nowNs(), isFromMe: true)
+        XCTAssertEqual(try verifier.baseline(), 42)
     }
 }

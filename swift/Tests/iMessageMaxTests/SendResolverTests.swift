@@ -199,6 +199,53 @@ final class SendResolverTests: XCTestCase {
         XCTAssertGreaterThan(few, 0)
         XCTAssertEqual(many, few, "send-by-name ran \(many) queries for 8 candidates, \(few) for 2")
     }
+
+    /// A carrier short code with a conversation resolves to its handle.
+    func testShortCodeResolvesToItsHandle() async throws {
+        let fixture = try ToolTestDatabase(name: "send-short-code")
+        try fixture.insertHandle(rowId: 9, handle: "12345", service: "SMS")
+        try fixture.insertChat(rowId: 9, guid: "SMS;-;12345")
+        try fixture.joinChatHandle(chatId: 9, handleId: 9)
+
+        let resolver = SendResolver(db: fixture.database(), resolver: ContactResolver(seedCache: [:]))
+        guard case .success(let resolved) = await resolver.resolve(.recipient("12345")) else {
+            return XCTFail("a short code with a conversation should resolve")
+        }
+        XCTAssertEqual(resolved.target, .participant(handle: "12345", chatId: 9))
+    }
+
+    /// `to` and `chat_id` name the same unnamed 1:1 the way every other tool
+    /// does: by the contact's name.
+    func testChatNameMatchesAcrossEntryPoints() async throws {
+        let fixture = try ToolTestDatabase(name: "send-chat-name")
+        try fixture.insertHandle(rowId: 1, handle: "+15550000001")
+        try fixture.insertChat(rowId: 1, guid: "iMessage;-;+15550000001")
+        try fixture.joinChatHandle(chatId: 1, handleId: 1)
+        let resolver = SendResolver(db: fixture.database(), resolver: makeSeededResolver())
+
+        guard case .success(let byRecipient) = await resolver.resolve(.recipient("+15550000001")),
+              case .success(let byChatId) = await resolver.resolve(.chatId("chat1")) else {
+            return XCTFail("both entry points should resolve")
+        }
+        for resolved in [byRecipient, byChatId] {
+            XCTAssertEqual(resolved.chat?.id, "chat1")
+            XCTAssertEqual(resolved.chat?.name, "Alice Smith")
+        }
+    }
+
+    /// A named chat keeps its explicit name, trimmed, when reached by `to`.
+    func testNamedChatKeepsItsNameViaRecipient() async throws {
+        let fixture = try ToolTestDatabase(name: "send-named-chat")
+        try fixture.insertHandle(rowId: 1, handle: "+15550000001")
+        try fixture.insertChat(rowId: 1, guid: "iMessage;-;named", displayName: "  Alice Work  ")
+        try fixture.joinChatHandle(chatId: 1, handleId: 1)
+        let resolver = SendResolver(db: fixture.database(), resolver: makeSeededResolver())
+
+        guard case .success(let resolved) = await resolver.resolve(.recipient("+15550000001")) else {
+            return XCTFail("should resolve")
+        }
+        XCTAssertEqual(resolved.chat?.name, "Alice Work")
+    }
 }
 
 /// A two-person group (chat 10) and a DM with the first person (chat 11),
