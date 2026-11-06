@@ -14,6 +14,10 @@ struct ChatScope {
         self.includeFiltered = includeFiltered
     }
 
+    /// A tool without include_filtered that finds a message by its own id
+    /// lists it where search and get_unread do by default.
+    static let byMessage = ChatScope(named: nil, includeFiltered: false)
+
     /// Hidden chats are left out, and so counted in `filtered_hidden`.
     var hidesChats: Bool { named == nil && !includeFiltered }
 

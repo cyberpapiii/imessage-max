@@ -197,7 +197,7 @@ struct GetAttachment {
                 JOIN chat_message_join cmj ON maj.message_id = cmj.message_id
                 JOIN chat c ON cmj.chat_id = c.ROWID
                 WHERE a.ROWID = ?
-                  AND c.ROWID = \(SQLFragments.homeChat(of: "maj.message_id"))
+                  AND c.ROWID = \(ChatScope.byMessage.listedChat(of: "maj.message_id"))
                 LIMIT 1
                 """,
                 params: [rowId]

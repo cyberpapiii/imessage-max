@@ -168,4 +168,39 @@ final class ReviewFourRegressionTests: XCTestCase {
         XCTAssertEqual(second["total_unread"] as? Int, 1)
         XCTAssertEqual(second["chats_with_unread"] as? Int, 1)
     }
+
+    // MARK: - Every tool lists a message in the same chat
+
+    /// Message 1, with an image, is in hidden chat 1 and shown chat 3.
+    func testEveryToolListsAMessageInAHiddenAndAShownChatUnderTheShownOne() async throws {
+        let imageURL = try makeFixtureImage(name: "review-four-\(UUID().uuidString).jpg", width: 200, height: 100)
+        defer { try? FileManager.default.removeItem(at: imageURL) }
+        let f = try ToolTestDatabase(name: "hidden-and-shown-\(UUID().uuidString)")
+        try f.insertHandle(rowId: 1, handle: "+15550000001")
+        try f.insertChat(rowId: 1, guid: "SMS;-;+15550000001", serviceName: "SMS", isFiltered: 1)
+        try f.insertChat(rowId: 3, guid: "iMessage;-;+15550000001")
+        try f.joinChatHandle(chatId: 1, handleId: 1)
+        try f.joinChatHandle(chatId: 3, handleId: 1)
+        try f.insertMessage(rowId: 1, guid: "g1", text: "hello there", date: recent, isFromMe: false, handleId: 1)
+        try f.joinChatMessage(chatId: 1, messageId: 1)
+        try f.joinChatMessage(chatId: 3, messageId: 1)
+        try f.insertAttachment(rowId: 7, filename: imageURL.path, mimeType: "image/jpeg", uti: "public.jpeg", transferName: "photo.jpg")
+        try f.joinMessageAttachment(messageId: 1, attachmentId: 7)
+        let db = f.database()
+
+        let search = try await callTool("search", ["query": "hello"], database: db)
+        XCTAssertEqual(try chatIds(search, "results"), ["chat3"])
+        let unread = try await callTool("get_unread", ["format": "messages"], database: db)
+        XCTAssertEqual(try chatIds(unread), ["chat3"])
+
+        let context = try await callTool("get_context", ["message_id": "msg_1"], database: db)
+        XCTAssertEqual((context["chat"] as? [String: Any])?["id"] as? String, "chat3")
+
+        let image = try await GetAttachment(db: db, resolver: makeSeededResolver()).execute(
+            attachmentId: "att7",
+            variant: "thumb",
+            allowedRoots: [FileManager.default.temporaryDirectory.path]
+        )
+        XCTAssertEqual(image.metadata.chat?.id, "chat3")
+    }
 }
