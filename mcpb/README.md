@@ -3,12 +3,14 @@
 This directory contains the Claude Desktop / MCPB manifest and PNG icon assets
 for iMessage Max.
 
-The manifest carries metadata only. Runtime uses `user_config.binary_path`
-(`${user_config.binary_path}` in `mcp_config.command`). No built macOS
-executable is committed to the repository.
+The manifest holds only metadata. At runtime, `mcp_config.command` is
+`${user_config.binary_path}`, so the client runs the binary at
+`user_config.binary_path`. The repository does not include a built macOS
+executable.
 
-`server.entry_point` (`server/imessage-max`) is the packaging-time path for a
-self-contained `.mcpb` bundle. It is intentionally absent in git. To package:
+`server.entry_point`, set to `server/imessage-max`, is where the binary goes
+when you package a self-contained `.mcpb` bundle. That file is left out of git
+on purpose. To package:
 
 ```bash
 mkdir -p mcpb/server

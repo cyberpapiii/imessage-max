@@ -2,9 +2,10 @@ import Foundation
 import Synchronization
 
 enum AsyncTimeout {
-    /// Dispatch-backed sleep. NEVER sleep Swift tasks inside the launchd service
-    /// (sleeping unstructured tasks abort in swift_task_dealloc at wakeup;
-    /// PendingRequestRegistry.store has the other known-good timer pattern).
+    /// Sleeps on a Dispatch timer. Never sleep Swift tasks inside the launchd
+    /// service, because unstructured tasks that sleep abort in
+    /// swift_task_dealloc when they wake. PendingRequestRegistry.store has the
+    /// other known-good timer pattern.
     static func sleep(_ duration: Duration) async {
         await sleep(duration, gate: ResumeGate())
     }
@@ -12,8 +13,8 @@ enum AsyncTimeout {
     static func sleep(_ duration: Duration, gate: ResumeGate) async {
         await withTaskCancellationHandler {
             await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-                // A timer source, not asyncAfter: cancelling a source releases
-                // its handler at once, while a cancelled asyncAfter item stays
+                // Use a timer source, not asyncAfter. Cancelling a source
+                // releases its handler at once. A cancelled asyncAfter item stays
                 // enqueued, with everything it captured, until its deadline.
                 let timer = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
                 timer.setEventHandler {
@@ -22,7 +23,7 @@ enum AsyncTimeout {
                 timer.schedule(deadline: .now() + dispatchInterval(for: duration))
                 guard gate.arm(timer: timer, continuation: continuation) else {
                     // Releasing a never-activated source traps in libdispatch,
-                    // so cancel it and activate it; it never fires.
+                    // so cancel it and then activate it. It never fires.
                     timer.cancel()
                     timer.activate()
                     return
@@ -49,11 +50,11 @@ enum AsyncTimeout {
             : secondNanoseconds + fractionalNanoseconds
     }
 
-    /// Invariant: `resumed` is true only after a continuation has actually
-    /// been resumed. `withTaskCancellationHandler` runs `onCancel` before the
-    /// body when the task is already cancelled on entry, so `cancelAndResume`
-    /// can run before `arm`; it must not claim the resume in that case, or the
-    /// continuation that `arm` later delivers is never resumed.
+    /// Invariant: `resumed` is true only after a continuation has been
+    /// resumed. `withTaskCancellationHandler` runs `onCancel` before the body
+    /// when the task is already cancelled on entry, so `cancelAndResume` can
+    /// run before `arm`. In that case it must not claim the resume. Otherwise
+    /// nothing resumes the continuation that `arm` delivers later.
     final class ResumeGate: @unchecked Sendable {
         private let state = Mutex(())
         private var timer: DispatchSourceTimer?

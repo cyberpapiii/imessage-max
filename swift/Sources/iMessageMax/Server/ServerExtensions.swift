@@ -114,10 +114,10 @@ extension Server {
         }
     }
 
-    /// The case choices mirror `Value.init(from:)` exactly: booleans before
-    /// numbers, integers before doubles (JSONSerialization flags which one the
-    /// text held, the same distinction the decoder makes by trying `Int` first),
-    /// and data URLs still become `.data`.
+    /// The cases follow the same order as `Value.init(from:)`. Booleans come
+    /// before numbers, and integers come before doubles. JSONSerialization
+    /// flags which kind of number the text held, the same distinction the
+    /// decoder makes by trying `Int` first. Data URLs still become `.data`.
     nonisolated static func structuredValue(from object: Any) -> Value? {
         switch object {
         case is NSNull:

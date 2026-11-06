@@ -28,7 +28,7 @@ enum GetChatDetailsTool {
                 ]),
                 "include_shared_summary": .object([
                     "type": "boolean",
-                    "description": "Include a compact recent shared-items summary",
+                    "description": "Include a short summary of recently shared items",
                     "default": true
                 ]),
             ]),
@@ -38,7 +38,7 @@ enum GetChatDetailsTool {
 
         return ToolDefinition(
             name: name,
-            description: "Get factual details for a known chat. Useful when you already have chat_id and need exact participants, handles, thread state, and recent shared-item context without reading the full conversation. Use chat.id for follow-up tool calls only; when explaining results to the user, refer to chat.name or participant names, not the id.",
+            description: "Get details for a known chat. Use it when you already have a chat_id and need the exact participants, handles, thread state, and recently shared items without reading the full conversation. Use chat.id only in follow-up tool calls. When you explain results to the user, refer to chat.name or participant names, not the id.",
             inputSchema: inputSchema,
             outputSchema: OutputSchema.object,
             annotations: Tool.Annotations(

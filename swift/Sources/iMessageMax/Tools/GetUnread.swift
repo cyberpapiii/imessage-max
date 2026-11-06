@@ -85,16 +85,16 @@ final class GetUnread {
                 ]),
                 "since": .object([
                     "type": "string",
-                    "description": "Time window for unread-only results (default \"\(defaultSince)\", use \"all\" for all time)",
+                    "description": "Time window for unread messages (default \"\(defaultSince)\"; use \"all\" for all time)",
                 ]),
                 "format": .object([
                     "type": "string",
-                    "description": "Response format for unread data (default summary)",
+                    "description": "Response format (default summary)",
                     "enum": ["messages", "summary"],
                 ]),
                 "limit": .object([
                     "type": "integer",
-                    "description": "Max messages (\(Self.limit.defaultAndMax))",
+                    "description": "Maximum messages to return (\(Self.limit.defaultAndMax))",
                 ]),
                 "include_filtered": .object([
                     "type": "boolean",
@@ -110,7 +110,7 @@ final class GetUnread {
 
         return ToolDefinition(
             name: "get_unread",
-            description: "Get a narrower view of still-unread messages or unread activity summary. Returns chat ids for follow-up tool calls and chat names for user-facing summaries. When explaining results to the user, refer to chats by name, not by id. Useful as a follow-up check, not a complete recent conversation overview.",
+            description: "Get the messages that are still unread, or a summary of unread activity. Returns chat ids for follow-up tool calls and chat names for user-facing summaries. When you explain results to the user, refer to chats by name, not by id. Use it as a narrow follow-up check, not as a complete overview of recent conversations.",
             inputSchema: inputSchema,
             outputSchema: OutputSchema.object,
             annotations: Tool.Annotations(

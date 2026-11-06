@@ -14,16 +14,16 @@ struct iMessageMax: AsyncParsableCommand {
     @Flag(name: .customLong(ServerOption.http.rawValue), help: "Run with HTTP transport instead of stdio")
     var http = false
 
-    @Option(name: .customLong(ServerOption.host.rawValue), help: "Host for HTTP transport (default: \(ServiceDefaults.host) for security)")
+    @Option(name: .customLong(ServerOption.host.rawValue), help: "Host for HTTP transport")
     var host: String = ServiceDefaults.host
 
-    @Option(name: .customLong(ServerOption.port.rawValue), help: "Port for HTTP transport (default: \(ServiceDefaults.port))")
+    @Option(name: .customLong(ServerOption.port.rawValue), help: "Port for HTTP transport")
     var port: Int = ServiceDefaults.port
 
-    @Flag(name: .customLong(ServerOption.allowExternalBind.rawValue), help: "Allow binding the HTTP transport to a non-loopback host (exposes iMessage data to the network; no authentication is provided)")
+    @Flag(name: .customLong(ServerOption.allowExternalBind.rawValue), help: "Allow binding the HTTP transport to a non-loopback host (this exposes iMessage data to the network, and the server provides no authentication)")
     var allowExternalBind = false
 
-    @Option(name: .customLong(ServerOption.contactsPolicy.rawValue), help: "When Contacts authorization is not yet determined: auto (prompt only if stdin is a terminal), request, or skip. IMESSAGE_MAX_CONTACTS_POLICY=request|skip is honoured when auto.")
+    @Option(name: .customLong(ServerOption.contactsPolicy.rawValue), help: "What to do when Contacts authorization is not yet determined: auto (prompt only if stdin is a terminal), request, or skip. With auto, the server honours IMESSAGE_MAX_CONTACTS_POLICY=request|skip.")
     var contactsPolicy: ContactsAccessPolicy.Override = .auto
 
     @Flag(name: .long, help: "Ask macOS for Contacts access once, print the resulting status, and exit. Run this from a terminal; the server never prompts when it has no terminal.")

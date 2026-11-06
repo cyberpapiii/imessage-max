@@ -103,13 +103,14 @@ enum SharedMessages {
         let typeClause = AttachmentType.sqlPredicate(for: typeFilter, alias: "a")
             .map { " AND (\($0))" } ?? ""
 
-        // The two sort families want different shapes. largest_first has to
-        // rank every attachment message before it knows which page to return,
-        // so it reads the attachment tables in one pass and collapses the rows
-        // that join produces with GROUP BY m.ROWID. The date sorts can walk
-        // message_idx_date and stop at LIMIT, but only if nothing forces a
-        // GROUP BY first, so they resolve the chat and the attachments with
-        // subqueries that keep the result one row per message on their own.
+        // The two sort families need different query shapes. largest_first
+        // must rank every attachment message before the query knows which
+        // page to return. It reads the attachment tables in one pass and uses
+        // GROUP BY m.ROWID to collapse the extra rows that the join produces.
+        // The date sorts can walk message_idx_date and stop at LIMIT, but only
+        // if nothing forces a GROUP BY first. They resolve the chat and the
+        // attachments with subqueries, which keep the result at one row per
+        // message without a GROUP BY.
         let ranksBySize = sort == .largestFirst
         let query = QueryBuilder()
         ChatScope(named: chatId, includeFiltered: false).read(query)

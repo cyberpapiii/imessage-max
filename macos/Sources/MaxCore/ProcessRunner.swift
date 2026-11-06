@@ -18,8 +18,8 @@ public enum ProcessRunner {
   }
 }
 
-/// Process, file handles, timers, and continuation have one actor owner. Output
-/// uses a temporary file rather than pipes so a verbose child cannot deadlock.
+/// One actor owns the process, file handles, timers and continuation. Output
+/// goes to a temporary file, not a pipe, so a verbose child cannot deadlock.
 private actor CommandExecution {
   private var process: Process?
   private var outputFile: URL?

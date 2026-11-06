@@ -1,7 +1,7 @@
 import Foundation
 
-/// The `diagnose` tool's reply. The server encodes it; the companion decodes
-/// it. Optional fields are omitted when nil.
+/// The `diagnose` tool's reply. The server encodes it and the companion
+/// decodes it. The JSON leaves out optional fields that are nil.
 public struct DiagnoseResult: Codable, Sendable, Equatable {
   public static let toolName = "diagnose"
   /// The companion refuses a larger diagnose reply.
@@ -45,8 +45,8 @@ public struct DiagnoseResult: Codable, Sendable, Equatable {
   public let status: DiagnoseStatus
   public let database: DatabaseAccess
   public let contacts: ContactsAccess
-  /// Keyed by `CapabilityKey` raw values; a String-keyed map so a reader
-  /// still decodes keys a newer server adds.
+  /// The keys are `CapabilityKey` raw values. The map is keyed by String so a
+  /// reader still decodes keys that a newer server adds.
   public let capabilities: [String: Capability]
 
   public init(

@@ -30,31 +30,31 @@ struct SendTool: Sendable {
                 Send a message or file to a person or an existing chat.
 
                 Prefer 'chat_id' when the exact thread matters.
-                Use 'to' when starting from a person is acceptable.
-                chat_id is an exact tool-call target; when talking to the user, refer to the destination by the returned chat.name or recipient names.
+                Use 'to' when it is fine to start from a person.
+                chat_id is the exact target for tool calls. When you talk to the user, name the destination by the returned chat.name or the recipient names.
 
-                Proof vocabulary for text sends (status field):
-                  confirmed: outbound row found in chat.db within the verification window (about 1 s) with error=0. Not a delivery receipt.
-                  uncertain: transport accepted but no row appeared within the polling window. Follow up with get_messages.
-                  mismatch: row found in a different chat than intended. Alert the user, do not treat as success.
-                  failed_delivery: row found with a delivery error recorded. The message was NOT delivered.
-                  partial_failure: some payloads were dispatched before a later one failed. The message lists which. Never blind-retry the whole call.
-                  sent: verification unavailable (DB unreadable). Transport accepted only.
-                Every response also carries disposition (completed | not_started | may_have_completed) and retry_safe.
-                retry_safe=true means a retry cannot duplicate the message (nothing reached Messages, or chat.db shows the row failed).
-                retry_safe=false means do not resend blindly; check with get_messages first.
-                Sends execute immediately when the destination is exact. Ambiguous destinations return status 'ambiguous' without sending. Invalid input returns status 'failed' without sending. File transfers may return 'pending_confirmation' while Messages.app completes the transfer.
+                The status field of a text send takes one of these values:
+                  confirmed: an outbound row with error=0 appeared in chat.db within the verification window (about 1 s). This is not a delivery receipt.
+                  uncertain: the transport accepted the send, but no row appeared within the polling window. Follow up with get_messages.
+                  mismatch: the row appeared in a different chat than the intended one. Alert the user, and do not treat it as success.
+                  failed_delivery: the row appeared with a recorded delivery error. The message was NOT delivered.
+                  partial_failure: some payloads were dispatched before a later one failed. The message field names them. Never retry the whole call blindly.
+                  sent: verification was unavailable because the database could not be read. The only evidence is that the transport accepted the send.
+                Every response also includes disposition (completed, not_started, or may_have_completed) and retry_safe.
+                retry_safe=true means a retry cannot duplicate the message, because nothing reached Messages or chat.db shows that the row failed.
+                retry_safe=false means you must not resend blindly. Check with get_messages first.
+                A send runs immediately when the destination is exact. An ambiguous destination returns status 'ambiguous' and sends nothing. Invalid input returns status 'failed' and sends nothing. A file transfer may return 'pending_confirmation' while Messages.app finishes the transfer.
                 """,
             inputSchema: InputSchema.object(
                 properties: [
                     "to": .string(description: "Contact name, phone number, or email"),
-                    "chat_id": .string(description: "Existing chat ID (for groups or disambiguation)"),
+                    "chat_id": .string(description: "Existing chat ID. Use it for groups or to resolve an ambiguous recipient."),
                     "text": .string(description: "Message content to send"),
                     "file_paths": .array(
-                        description: "Local file paths to send as attachments. If combined with text, files are sent first and text is sent last.",
-                        items: .string(description: "Absolute or ~/expanded local file path")
+                        description: "Local file paths to send as attachments. With text, the tool sends the files first and the text last.",
+                        items: .string(description: "Absolute local file path, or a path that starts with ~/")
                     ),
-                    "confirm": .boolean(description: "Deprecated; accepted for compatibility and ignored. Sends do not require confirmation. An ambiguous destination is refused with status 'ambiguous', and the tool verifies results after sending."),
+                    "confirm": .boolean(description: "Deprecated. The tool accepts it for compatibility and ignores it. Sends need no confirmation. The tool refuses an ambiguous destination with status 'ambiguous' and verifies results after sending."),
                 ]
             ),
             outputSchema: OutputSchema.object,
@@ -95,7 +95,7 @@ struct SendTool: Sendable {
         } else if let to {
             destination = .recipient(to)
         } else {
-            return .error("Either 'to' or 'chat_id' must be provided")
+            return .error("Provide either 'to' or 'chat_id'")
         }
 
         let payloads: [SendPayload]
@@ -130,7 +130,7 @@ struct SendTool: Sendable {
         var pendingMessages: [String] = []
         for (index, payload) in payloads.enumerated() {
             if Task.isCancelled {
-                let cancelled = "Send cancelled before \(payload.clientDescription) was dispatched."
+                let cancelled = "The send was cancelled before \(payload.clientDescription) was dispatched."
                 if index == 0 {
                     return .error(cancelled)
                 }

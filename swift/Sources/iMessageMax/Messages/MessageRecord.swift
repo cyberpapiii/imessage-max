@@ -1,8 +1,8 @@
 import Foundation
 
-/// One `message` row as every tool reads it. `text` is already extracted:
-/// Messages.app often leaves `message.text` empty and keeps the text only in
-/// the `attributedBody` typedstream.
+/// One `message` row as every tool reads it. `text` is already extracted,
+/// because Messages.app often leaves `message.text` empty and keeps the text
+/// only in the `attributedBody` typedstream.
 struct MessageRecord {
     let id: Int64
     let guid: String
@@ -13,7 +13,8 @@ struct MessageRecord {
     let itemType: Int
     let groupActionType: Int
     let groupTitle: String?
-    /// `handle.id` behind `message.other_handle`: who a group event added or removed.
+    /// The `handle.id` that `message.other_handle` points to. It names the
+    /// person a group event added or removed.
     let otherHandle: String?
     let threadOriginatorGuid: String?
     let isEdited: Bool

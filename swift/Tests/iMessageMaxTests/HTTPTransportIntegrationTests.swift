@@ -472,7 +472,7 @@ final class HTTPTransportIntegrationTests: XCTestCase {
         }
     }
 
-    /// The GET calls `handleGet` directly, not through the test client: the
+    /// The GET calls `handleGet` directly, not through the test client. The
     /// client writes the whole response body before it returns, and an open
     /// SSE body never ends, so the request would hang the suite. The head is
     /// complete when `handleGet` returns.

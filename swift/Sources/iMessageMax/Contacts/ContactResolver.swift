@@ -96,7 +96,7 @@ actor ContactResolver {
             Log.info("Contacts: authorization requested, granted=\(granted)")
         case .skipIfNotDetermined:
             accessRequestSkippedHeadless = true
-            Log.info("Contacts: authorization not determined and this process is headless; not prompting. Run `imessage-max --request-contacts-access` from a terminal once, then restart the service.")
+            Log.info("Contacts: authorization is not determined and this process is headless, so it will not prompt. Run `imessage-max --request-contacts-access` from a terminal once, then restart the service.")
         }
     }
 

@@ -4,15 +4,15 @@
 
 # iMessage Max
 
-Want a simple Mac control panel? The [native menu bar companion](macos/README.md) checks setup, manages the local service, and shares assistant connection details.
+For a Mac control panel, use the [native menu bar companion](macos/README.md). It checks setup, manages the local service, and copies the connection details your assistant needs.
 
-An MCP (Model Context Protocol) server for iMessage. It lets AI agents read, search, and send your messages, resolving phone numbers to contact names along the way.
+iMessage Max is an MCP (Model Context Protocol) server for iMessage. AI agents use it to read, search, and send your messages. It resolves phone numbers to contact names.
 
-Written in Swift. One binary, no runtime dependencies.
+It is written in Swift and ships as one binary with no runtime dependencies.
 
 ## Distribution
 
-One Swift implementation, under `swift/`, shipped as:
+There is one Swift implementation, in `swift/`. It ships as:
 - GitHub releases (arm64, ad-hoc signed)
 - Homebrew (`cyberpapiii/tap`)
 - source builds
@@ -21,17 +21,17 @@ One Swift implementation, under `swift/`, shipped as:
 
 ## Features
 
-- 13 tools shaped around questions people actually ask, not around database tables
+- 13 tools, each shaped around a question people ask rather than around a database table
 - Phone numbers resolve to names through macOS Contacts
-- Three image variants: vision (1568px), thumb (400px), full (original), so a photo does not have to arrive at full size
-- Messages group into sessions, split on gaps of 4 hours or more
+- Three image variants: vision (1568px), thumb (400px), and full (original), so an agent can fetch a photo below full size
+- A gap of 4 hours or more starts a new message session
 - Attachment listings say whether each file is on disk or offloaded to iCloud
-- Raw SQLite3 and Core Image GPU acceleration
-- Reads chat.db only. Sending needs Automation permission for Messages.app
+- Queries use raw SQLite3, and image resizing runs on the GPU through Core Image
+- The server only reads chat.db. Sending needs Automation permission for Messages.app
 
 ## Why this exists
 
-Most iMessage tools expose raw database structures, requiring 3-5 tool calls per user intent. This MCP provides intent-aligned tools:
+Most iMessage tools expose raw database structures, so one user request takes 3 to 5 tool calls. iMessage Max has tools that match what the user asks for:
 
 ```
 "What did Contact A and I talk about yesterday?"
@@ -49,7 +49,7 @@ Most iMessage tools expose raw database structures, requiring 3-5 tool calls per
 
 ## Common agent workflows
 
-The tools work best when an agent uses them as short workflows instead of isolated one-off calls.
+The tools work best when an agent chains them into short workflows instead of making isolated one-off calls.
 
 Agents should treat `chat_id` values like `chat123` as internal handles for tool calls and exact sends. When explaining results to a person, use the returned chat name, group name, or participant-derived label instead of saying "Chat 123."
 
@@ -79,7 +79,7 @@ get_unread()
 get_active_conversations(hours=24, min_exchanges=2)
 ```
 
-Use this to surface unread threads and active conversations after a broad chat-list sweep.
+Use this to find unread threads and active conversations after a broad sweep of the chat list.
 
 ### Work with attachments safely
 
@@ -97,7 +97,7 @@ find_chat(participants=["Contact A", "Contact B"])
 send(chat_id="chat456", text="Please use the latest draft")
 ```
 
-For sensitive sends, prefer resolving the exact chat first and then using `chat_id` so the message lands in the intended thread.
+For sensitive sends, prefer to resolve the exact chat first and then send with its `chat_id`. That way the message goes to the intended thread.
 
 ## Installation
 
@@ -125,8 +125,8 @@ For local development, advanced setup, and the signed install workflow, see:
 
 ## Protocol support
 
-iMessage Max is a dual-era MCP server. Both transports (stdio and HTTP)
-serve both eras concurrently, selected per request:
+iMessage Max is a dual-era MCP server. Both transports, stdio and HTTP,
+serve both eras at the same time. The server picks the era for each request:
 
 | Era | Revisions | Lifecycle | Selected by |
 | --- | --- | --- | --- |
@@ -135,19 +135,19 @@ serve both eras concurrently, selected per request:
 
 Modern clients probe with `server/discover` and send the required
 `MCP-Protocol-Version`, `Mcp-Method`, and (for `tools/call`) `Mcp-Name`
-headers over HTTP. Legacy clients keep working unchanged. No client
-migration is required, and legacy support stays as long as real clients
-depend on it.
+headers over HTTP. Legacy clients keep working without changes. No client
+has to migrate, and legacy support stays as long as real clients depend
+on it.
 
-The server implements tools only. It has no prompts, resources,
-completion, subscriptions, tasks, or MRTR flows, on purpose. The official
+The server implements only tools. By design, it has no prompts, resources,
+completion, subscriptions, tasks, or MRTR flows. The official
 conformance suite runs against both eras with the documented baseline in
 `docs/conformance-baseline.yml`.
 
 ## Client icon metadata
 
-iMessage Max ships icons for the main MCP protocol surface and the client
-packaging surfaces that use their own metadata:
+iMessage Max ships icons for the MCP protocol itself and for each client
+package format that carries its own metadata:
 
 - MCP `2025-11-25` initialize responses include PNG `serverInfo.icons`.
 - Each tool advertises a compact PNG tool icon.
@@ -156,14 +156,14 @@ packaging surfaces that use their own metadata:
 - Claude Desktop / MCPB metadata lives in `mcpb/manifest.json` and uses PNG
   assets under `mcpb/assets/`.
 
-The committed PNG source set is under `assets/icons/` at `16x16`, `32x32`,
-`64x64`, `128x128`, `256x256`, and `512x512`.
+The source PNGs are committed under `assets/icons/` in these sizes: `16x16`,
+`32x32`, `64x64`, `128x128`, `256x256`, and `512x512`.
 
 ## Setup
 
 ### 1. Grant Full Disk Access
 
-Required to read `~/Library/Messages/chat.db`:
+The server needs Full Disk Access to read `~/Library/Messages/chat.db`:
 
 1. Open System Settings → Privacy & Security → Full Disk Access
 2. Click + to add the binary
@@ -175,15 +175,15 @@ open $(dirname $(readlink -f $(which imessage-max)))
 ```
 
 For source builds, add `.build/release/imessage-max` from your clone directory.
-After changing the grant, relaunch the server; macOS applies Full Disk Access only to processes started after the change.
+After you change the grant, relaunch the server. macOS applies Full Disk Access only to processes started after the change.
 
 > In the file picker, press ⌘+Shift+G and paste the path to go straight there.
 
 ### 2. Grant Contacts access
 
-Required to resolve phone numbers to names. The server only asks for access when it is started from a terminal; launchd and MCP clients start it headless, and a headless process never prompts. Grant access once with `imessage-max --request-contacts-access` from a terminal, then restart the service. `--contacts-policy request|skip` (or `IMESSAGE_MAX_CONTACTS_POLICY`) overrides the terminal detection.
+The server needs Contacts access to resolve phone numbers to names. It asks for access only when you start it from a terminal. launchd and MCP clients start it headless, and a headless process never prompts. Grant access once by running `imessage-max --request-contacts-access` from a terminal, then restart the service. `--contacts-policy request|skip`, or `IMESSAGE_MAX_CONTACTS_POLICY`, overrides the terminal detection.
 
-System Settings → Privacy & Security → Contacts → add `imessage-max` is the manual alternative.
+To grant access by hand instead, add `imessage-max` in System Settings → Privacy & Security → Contacts.
 
 ### 3. Configure your MCP client
 
@@ -217,14 +217,14 @@ If your client uses a different config format, point it at the same binary path.
 
 ### 4. Reconnect your MCP client
 
-After saving the config, reconnect or restart your MCP client. The server should appear in the available tools, and you can verify the connection with `diagnose`.
+After you save the config, reconnect or restart your MCP client. The server's tools should then appear in the client. Run `diagnose` to check the connection.
 
 ## Tools
 
 ### find_chat
 Find chats by participants, name, or recent content.
 
-By default, chats Messages.app has filtered into Unknown Senders or Junk are hidden. The response carries `filtered_hidden`, the number of chats the filter removed from this view; pass `include_filtered=True` to see them.
+By default, `find_chat` hides chats that Messages.app has filtered into Unknown Senders or Junk. The response carries `filtered_hidden`, the number of chats the filter removed from this view. Pass `include_filtered=True` to see them.
 
 ```text
 find_chat(participants=["Contact A"])              # Find a direct chat
@@ -243,7 +243,7 @@ get_chat_details(chat_id="chat123", include_shared_summary=false) # Skip recent 
 ```
 
 ### get_messages
-Retrieve messages with flexible filtering. Returns metadata for media. Explicit `chat_id` lookups are never filtered.
+Retrieve messages, filtered by time, sender, or content type. For media, it returns metadata. A lookup by explicit `chat_id` is never filtered.
 
 ```text
 get_messages(chat_id="chat123", limit=50)           # Recent messages
@@ -252,7 +252,7 @@ get_messages(chat_id="chat123", from_person="Contact A")  # From specific person
 get_messages(chat_id="chat123", has="links")        # Messages that contain a URL
 ```
 
-`has` filters by content type (`links`, `attachments`, `images`). `links` includes link messages Messages stores as URL preview balloons (the common case on macOS 26).
+`has` filters by content type: `links`, `attachments`, or `images`. `links` also matches link messages that Messages stores as URL preview balloons, which is the common case on macOS 26.
 
 Group system messages (renames, members added or removed, someone
 leaving) come back with `text: null` and an `event` object:
@@ -262,17 +262,17 @@ leaving) come back with `text: null` and an `event` object:
 name. Chat previews describe the same events in words
 ("renamed the group to Trip").
 
-Reactions, replies, edits: each message may include `reactions`
+For reactions, replies, and edits, each message may include `reactions`
 (`["❤️ alice"]` for standard tapbacks; custom emoji show the emoji
 itself; sticker reactions use the token `🩵 sticker`), `reply_to`
 (`msg_<rowid>` of the originator), `reply_count`, and `edited: true`.
 Removed tapbacks are omitted. All four fields are optional and omitted
 when empty. `search` and `get_context` carry the same four fields.
-These are read-only; `diagnose` still reports `tapbacks` and
-`edit_unsend` as `unsupported` because the server cannot send them.
+The server only reads these. It cannot send them, so `diagnose` still
+reports `tapbacks` and `edit_unsend` as `unsupported`.
 
 ### get_messages_since
-New messages across all chats after a ROWID cursor, in arrival order. Pass the returned `next_rowid` back as `since_rowid` to page or poll. `next_rowid` may be larger than the last returned message's rowid because consumed rows (reactions, filtered chats, orphans) advance it. Omit `since_rowid` to get only the current cursor. Cursors are only valid against this Mac's `chat.db`.
+New messages across all chats after a ROWID cursor, in arrival order. Pass the returned `next_rowid` back as `since_rowid` to page or poll. `next_rowid` may be larger than the last returned message's rowid because consumed rows (reactions, filtered chats, orphans) advance it. Omit `since_rowid` to get only the current cursor. A cursor is valid only against this Mac's `chat.db`.
 
 ```text
 get_messages_since()                          # Current cursor only
@@ -321,7 +321,7 @@ Example response:
 }
 ```
 
-Polling recipe: call once without `since_rowid`, store `next_rowid`, then call with it on whatever cadence. When `stalled` is true, wait about one second and retry with the same cursor. Never compare `next_rowid` to message ids.
+To poll, call once without `since_rowid` and store `next_rowid`. Then call with it on whatever schedule you choose. When `stalled` is true, wait about one second and retry with the same cursor. Never compare `next_rowid` to message ids.
 
 ### get_attachment
 Retrieve image content by attachment ID with resolution variants.
@@ -341,7 +341,7 @@ get_attachment(attachment_id="att123", variant="full")  # Original resolution
 ### list_chats
 Browse recent chats with previews.
 
-By default, chats Messages.app has filtered into Unknown Senders or Junk are hidden. The response carries `filtered_hidden`, the number of chats the filter removed; pass `include_filtered=True` to see them.
+By default, `list_chats` hides chats that Messages.app has filtered into Unknown Senders or Junk. The response carries `filtered_hidden`, the number of chats the filter removed. Pass `include_filtered=True` to see them.
 
 ```text
 list_chats(limit=20)          # Recent chats
@@ -353,7 +353,7 @@ list_chats(include_filtered=True)   # Also show junk / unknown-sender chats
 ### search
 Full-text search across messages.
 
-By default, junk and unknown-sender chats are hidden. The response carries `filtered_hidden`; pass `include_filtered=True` to search them too.
+By default, `search` hides junk and unknown-sender chats. The response carries `filtered_hidden`. Pass `include_filtered=True` to search them too.
 
 ```text
 search(query="draft")                           # Search all messages
@@ -385,12 +385,12 @@ list_attachments(type="image", since="7d")
 list_attachments(chat_id="chat123", type="any")
 ```
 
-Attachments Messages hides (`hide_attachment`, e.g. link-preview payloads) are not listed; `get_attachment` still returns them by id.
+`list_attachments` skips attachments that Messages hides with `hide_attachment`, such as link-preview payloads. `get_attachment` still returns them by id.
 
 ### get_unread
-Get unread threads or unread messages. Default is summary by chat.
+Get unread threads or unread messages. By default, it returns a summary by chat.
 
-By default, junk and unknown-sender chats are hidden. The response carries `filtered_hidden`; pass `include_filtered=True` to include them.
+By default, `get_unread` hides junk and unknown-sender chats. The response carries `filtered_hidden`. Pass `include_filtered=True` to include them.
 
 ```text
 get_unread()                         # Summary by chat for last 7 days
@@ -412,16 +412,16 @@ send(to="Contact A", file_paths=["/path/reference.png"], text="Sharing the file 
 Rules:
 - Exactly one of `to` or `chat_id`
 - At least one of `text` or `file_paths`
-- If both are provided, files are sent first and text is sent last
+- If you pass both, `send` sends the files first and the text last
 
-Attachment paths must be absolute (or start with `~/`). The path is
-checked component by component and refused if any part of it is a symbolic link
-(`/tmp`, `/var`, `/etc` are allowed and read as `/private/...`). The
-file is opened without following links, must be a regular file, and is
-copied from that open handle into a private `0700` directory under
-`~/Pictures/imessage-max-staging/`; Messages only ever sees the copy. If
-`~/Pictures` itself is a symlink on your Mac, `send` with a file will refuse
-to stage until it points at a real directory.
+Attachment paths must be absolute or start with `~/`. `send` checks the
+path one component at a time and refuses it if any component is a symbolic
+link. `/tmp`, `/var`, and `/etc` are allowed and read as `/private/...`.
+`send` opens the file without following links, and the file must be a
+regular file. `send` copies it from that open handle into a private `0700`
+directory under `~/Pictures/imessage-max-staging/`. Messages only ever sees
+the copy. If `~/Pictures` itself is a symlink on your Mac, `send` with a file
+refuses to stage it until `~/Pictures` points at a real directory.
 
 ### diagnose
 Troubleshoot configuration and permission issues.
@@ -444,23 +444,23 @@ Before a release, work through:
 - [docs/validation/2026-04-09-release-checklist.md](docs/validation/2026-04-09-release-checklist.md), live spot checks
 - [swift/Tests/iMessageMaxTests/SendManualValidation.md](swift/Tests/iMessageMaxTests/SendManualValidation.md), manual send checks in Messages.app
 
-Additional send note:
-- Sends execute immediately when the destination is exact; there is no confirmation gate. Ambiguous destinations are refused with `status: "ambiguous"`. The `confirm` parameter is deprecated and ignored (kept only for compatibility). Authorization happens in the user's conversation with the agent and in the client's tool-approval UI, not server-side.
+One more note on sends:
+- When the destination is exact, `send` sends at once. There is no confirmation step. `send` refuses an ambiguous destination with `status: "ambiguous"`. The `confirm` parameter is deprecated and ignored, and it remains only for compatibility. The user authorizes a send in their conversation with the agent and in the client's tool-approval UI, not on the server.
 
-Send result semantics (text sends are verified post-send against chat.db):
-- `status: "confirmed"` means the outbound row was found in chat.db within the verification window with no error; `verified_message_guid` is the evidence. It is not a delivery receipt.
-- `status: "uncertain"` means transport accepted the send but the row was not found within the polling window; follow up with `get_messages`
-- `status: "mismatch"` means the message landed in a different chat than intended; do not treat as success
-- `status: "failed_delivery"` means the message row was found with a delivery error recorded; the message did not deliver, and `verified_message_guid` plus the error code are the evidence
-- `status: "partial_failure"` means a multi-payload send dispatched some payloads before a later one failed; `message` lists what was dispatched and what failed. Retry only the failed payload, never the whole call
-- `status: "sent"` means verification was unavailable (DB unreadable); transport accepted only
-- `status: "pending_confirmation"` means Messages accepted an attachment send, but the file transfer was not confirmed as finished within the polling window
-- `status: "failed"` means the send failed
-- `status: "ambiguous"` means the target could not be resolved safely
+After a text send, the server checks chat.db for the sent message. Each `status` means:
+- `status: "confirmed"` means the server found the outbound row in chat.db within the verification window, with no error. `verified_message_guid` is the evidence. It is not a delivery receipt.
+- `status: "uncertain"` means the transport accepted the send, but the server did not find the row within the polling window. Follow up with `get_messages`.
+- `status: "mismatch"` means the message went to a different chat than intended. Do not treat it as success.
+- `status: "failed_delivery"` means the server found the message row with a delivery error recorded. The message did not deliver, and `verified_message_guid` plus the error code are the evidence.
+- `status: "partial_failure"` means a multi-payload send dispatched some payloads before a later one failed. `message` lists what was dispatched and what failed. Retry only the failed payload, never the whole call.
+- `status: "sent"` means verification was unavailable because the database was unreadable. The only evidence is that the transport accepted the send.
+- `status: "pending_confirmation"` means Messages accepted an attachment send, but the server could not confirm within the polling window that the file transfer finished.
+- `status: "failed"` means the send failed.
+- `status: "ambiguous"` means the server could not resolve the target safely.
 
 #### Disposition and retry_safe
 
-Every `send` response also carries `disposition` and `retry_safe`. `disposition` is about the transport (did the Apple event go out); `status` is about chat.db.
+Every `send` response also carries `disposition` and `retry_safe`. `disposition` describes the transport, that is, whether the Apple event went out. `status` describes what chat.db shows.
 
 | status | disposition | retry_safe |
 |---|---|---|
@@ -478,13 +478,13 @@ Every `send` response also carries `disposition` and `retry_safe`. `disposition`
 ```
 
 Notes:
-- `pending_confirmation` is a normal non-fatal attachment state, not the same as a hard failure
-- exact chat sends target the existing conversation identified by `chat_id`
-- JSON-shaped tools return MCP `structuredContent` as well as legacy text content for older clients
+- `pending_confirmation` is a normal, non-fatal attachment state. It is not a hard failure.
+- A send by `chat_id` goes to the existing conversation with that id.
+- JSON-shaped tools return MCP `structuredContent` as well as legacy text content for older clients.
 
 Examples:
-- `{"status":"confirmed","verified_message_guid":"...",...}` means delivery was verified in chat.db
-- `{"status":"pending_confirmation","success":false,...}` means Messages accepted the attachment, but the MCP could not yet confirm final completion
+- `{"status":"confirmed","verified_message_guid":"...",...}` means the outbound row was found in chat.db. It is not a delivery receipt.
+- `{"status":"pending_confirmation","success":false,...}` means Messages accepted the attachment, but the server could not yet confirm that the transfer finished
 
 ## Troubleshooting
 
@@ -493,28 +493,28 @@ Examples:
 Run `diagnose` and read `contacts.status`. If it is `denied` or `not_determined`:
 - Add the `imessage-max` binary to System Settings → Privacy & Security → Contacts
 
-If `diagnose` reports `contacts.status: "not_requested_headless"`, run `imessage-max --request-contacts-access` from a terminal. Names refresh within 30 s of a Contacts change and are dropped as soon as access is revoked; no restart needed.
+If `diagnose` reports `contacts.status: "not_requested_headless"`, run `imessage-max --request-contacts-access` from a terminal. Names refresh within 30 seconds of a Contacts change. The server drops them as soon as access is revoked, and no restart is needed.
 
 ### "Cannot read the iMessage database" / `permission_denied`
 
-Full Disk Access is missing for the **process that opens chat.db**, which
-is the `imessage-max` binary itself for the launchd service, or the app
-that spawns it for stdio clients. Run `diagnose`; `database.fix` names the
-executable and the steps:
+Full Disk Access is missing for the **process that opens chat.db**. For
+the launchd service, that process is the `imessage-max` binary itself. For
+stdio clients, it is the app that spawns the binary. Run `diagnose`. Its
+`database.fix` field names the executable and the steps:
 
 1. System Settings → Privacy & Security → Full Disk Access → add that
    executable (or its launching app).
 2. If it is already listed, toggle it off and on. A grant bound to an
-   earlier code signature looks present but does not work; `make
+   earlier code signature looks present but does not work. `make
    setup-signing` gives the binary a stable identity so rebuilds keep it.
-3. The grant applies only to newly launched processes. Relaunch:
-   `cd swift && make restart` (launchctl bootout, then bootstrap; `kickstart -k`
-   can hit the launchd crash throttle).
-4. Bisect from a terminal: `sqlite3 -readonly ~/Library/Messages/chat.db 'pragma quick_check;'`.
-   `ok` means your terminal has access and the server process does not;
+3. The grant applies only to newly launched processes. Relaunch with
+   `cd swift && make restart`, which runs launchctl bootout and then bootstrap.
+   `kickstart -k` can hit the launchd crash throttle.
+4. To narrow it down, run `sqlite3 -readonly ~/Library/Messages/chat.db 'pragma quick_check;'` from a terminal.
+   `ok` means your terminal has access and the server process does not.
    `unable to open database file` means the grant is missing for your user.
 
-`make install` now ends with `make verify-db`, which calls `diagnose` over
+`make install` ends with `make verify-db`, which calls `diagnose` over
 HTTP and fails if `database.accessible` is false. Run it on its own after
 changing Full Disk Access:
 
@@ -531,8 +531,8 @@ Some attachments are stored in iCloud, not on disk. `list_attachments` includes 
 
 ### MCP client not loading the server
 
-1. Check config file syntax is valid JSON
-2. Verify the binary path is correct
+1. Check that the config file is valid JSON
+2. Check that the binary path is correct
 3. Reconnect or fully restart your MCP client
 
 ## Architecture
@@ -559,10 +559,10 @@ Some attachments are stored in iCloud, not on disk. `list_attachments` includes 
 
 ## Advanced setup
 
-For HTTP mode, local background service setup, development commands, and
-contributor-focused workflow details, see the Swift README. Request bodies
-must arrive within 30 seconds; a stalled upload gets HTTP 408 with a JSON-RPC
-error body, and connections idle for 60 seconds are closed. See also:
+For HTTP mode, the local background service, development commands, and the
+contributor workflow, see the Swift README. Request bodies must arrive within
+30 seconds. A stalled upload gets HTTP 408 with a JSON-RPC error body, and the
+server closes connections that are idle for 60 seconds. See also:
 
 - [swift/README.md](swift/README.md)
 

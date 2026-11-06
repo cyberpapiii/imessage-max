@@ -1,8 +1,8 @@
-# Send Manual Validation
+# Send manual validation
 
 This document records the manual validation flow for the public send tools in
-`iMessage Max`. It covers the supported feature set without relying on private
-APIs or UI scripting.
+`iMessage Max`. It covers the supported features and uses no private APIs or UI
+scripting.
 
 ## Preconditions
 
@@ -137,7 +137,7 @@ Call:
 Expected:
 
 - MCP returns `status: "failed"`
-- Error clearly indicates file validation failure
+- The error says that file validation failed
 - No Messages send attempt occurs
 
 ### 8. Unsupported reply
@@ -155,13 +155,13 @@ Call:
 Expected:
 
 - MCP returns `status: "failed"`
-- Error clearly states that `reply_to` is unsupported
+- The error says that `reply_to` is unsupported
 
 ## Notes
 
-- There is no confirmation gate: exact-destination sends execute
-  immediately, and text sends are verified post-send against chat.db
-  (`confirmed` / `uncertain` / `mismatch`, with `sent` as the
+- There is no confirmation gate. Sends to an exact destination run
+  immediately, and the server verifies text sends against chat.db after
+  sending (`confirmed`, `uncertain` or `mismatch`, with `sent` as the
   transport-only fallback). See "Send contract (no confirmation gate)"
   in `AGENTS.md`. If a text send returns `uncertain`, follow up with
   `get_messages` instead of retrying.
@@ -169,5 +169,5 @@ Expected:
   - chat labels show the other people in the thread
   - `me` appears in message history for outbound messages
   - the current visible participant list does not include self
-- The resolver should preserve that UX model while still using exact `chat_id`
+- The resolver should keep that presentation and still use exact `chat_id`
   targeting for sends.

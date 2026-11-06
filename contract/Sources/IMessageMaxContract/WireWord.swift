@@ -1,8 +1,8 @@
 import Foundation
 
 /// A string the server writes and the companion reads, with its known values
-/// as static members. Open on purpose: a reader must still decode a word a
-/// newer server adds, so these are not closed enums.
+/// as static members. The type is open on purpose. A reader must still decode
+/// a word that a newer server adds, so these are not closed enums.
 public protocol WireWord: RawRepresentable, Codable, Hashable, Sendable,
   ExpressibleByStringLiteral, CustomStringConvertible
 where RawValue == String {
@@ -61,8 +61,8 @@ public struct PermissionStatus: WireWord {
   public static let notDetermined: Self = "not_determined"
   /// Contacts: a process with no terminal does not prompt.
   public static let notRequestedHeadless: Self = "not_requested_headless"
-  /// Contacts: without an embedded Info.plist macOS can neither prompt for
-  /// nor record a grant for the executable.
+  /// Contacts: without an embedded Info.plist, macOS can neither prompt for
+  /// the executable nor record a grant for it.
   public static let missingUsageDescription: Self = "missing_usage_description"
   /// Automation: Messages.app is not running, so TCC cannot be asked.
   public static let messagesNotRunning: Self = "messages_not_running"
@@ -70,7 +70,7 @@ public struct PermissionStatus: WireWord {
   /// Contacts: an authorization state newer than this server knows.
   public static let unknown: Self = "unknown"
 
-  /// Contacts is granted but the store failed to load.
+  /// Contacts access is granted, but the store failed to load.
   public static func loadFailed(_ authorization: Self) -> Self {
     Self(rawValue: "\(authorization.rawValue)_load_failed")
   }

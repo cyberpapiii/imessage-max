@@ -64,15 +64,15 @@ enum GetActiveConversations {
                 ]),
                 "min_exchanges": .object([
                     "type": "integer",
-                    "description": "Minimum back-and-forth exchanges to qualify as active (default \(minExchanges.defaultValue))",
+                    "description": "Minimum messages from each side for a chat to count as active (default \(minExchanges.defaultValue))",
                 ]),
                 "is_group": .object([
                     "type": "boolean",
-                    "description": "True for groups only, False for DMs only",
+                    "description": "true for groups only, false for DMs only",
                 ]),
                 "limit": .object([
                     "type": "integer",
-                    "description": "Max recent active conversations to return (\(limit.defaultAndMax))",
+                    "description": "Maximum active conversations to return (\(limit.defaultAndMax))",
                 ]),
             ]),
             "additionalProperties": false,
@@ -80,7 +80,7 @@ enum GetActiveConversations {
 
         return ToolDefinition(
             name: "get_active_conversations",
-            description: "Find conversations with recent bidirectional activity. Returns chat ids for follow-up tool calls and chat names for user-facing summaries. When explaining results to the user, refer to chats by name, not by id. Use it to find threads that deserve attention first. It is not a complete recent overview across all chats; use list_chats for that.",
+            description: "Find conversations where both sides sent messages recently. Returns chat ids for follow-up tool calls and chat names for user-facing summaries. When you explain results to the user, refer to chats by name, not by id. Use it to find the threads that need attention first. It is not a complete recent overview across all chats; use list_chats for that.",
             inputSchema: inputSchema,
             outputSchema: OutputSchema.object,
             annotations: Tool.Annotations(
@@ -138,8 +138,8 @@ enum GetActiveConversations {
                 "MIN(m.date) as first_in_window",
                 "MAX(m.date) as last_in_window"
             )
-            // CROSS JOIN pins SQLite's loop order to the window's messages by
-            // date. With the hidden-chat predicate on c, the planner otherwise
+            // CROSS JOIN makes SQLite loop over the window's messages by date
+            // first. With the hidden-chat predicate on c, the planner otherwise
             // walks every chat's whole history to satisfy GROUP BY c.ROWID.
             .from("""
                 message m

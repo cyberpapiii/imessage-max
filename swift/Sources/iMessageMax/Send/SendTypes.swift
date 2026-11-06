@@ -114,13 +114,13 @@ enum SendError: LocalizedError {
         switch self {
         case .automationPermissionRequired:
             return """
-                Messages.app Automation permission required. \
-                When prompted, click 'OK' to allow iMessage Max to send messages. \
-                If you missed the prompt: System Settings → Privacy & Security → \
-                Automation → Enable Messages.app for your terminal/application.
+                iMessage Max needs Automation permission for Messages.app. \
+                When macOS asks, click 'OK' to let iMessage Max send messages. \
+                If you missed the prompt, open System Settings, go to Privacy & Security, \
+                then Automation, and enable Messages.app for your terminal or application.
                 """
         case .messagesAppUnavailable:
-            return "Messages.app is not responding. Please open Messages.app and try again."
+            return "Messages.app is not responding. Open Messages.app and try again."
         case .recipientNotFound(let recipient):
             return "Could not find recipient '\(recipient)' in Messages.app."
         case .chatNotFound(let guid):
@@ -128,11 +128,11 @@ enum SendError: LocalizedError {
         case .fileNotFound(let path):
             return "Could not read file at '\(path)'."
         case .transferPending(let filename):
-            return "Messages accepted '\(filename)', but the transfer is still pending and could not be confirmed as delivered yet."
+            return "Messages accepted '\(filename)', but the transfer is still pending, so its delivery is not confirmed yet."
         case .transferFailed(let filename):
-            return "Messages created a transfer for '\(filename)', but it failed."
+            return "Messages created a transfer for '\(filename)', but the transfer failed."
         case .transferStatusUnknown(let filename):
-            return "Messages accepted '\(filename)', but no reliable transfer status could be confirmed."
+            return "Messages accepted '\(filename)', but the tool could not get a reliable transfer status."
         case .timeout:
             return "Send operation timed out. Messages.app may be unresponsive."
         case .failed(let message):

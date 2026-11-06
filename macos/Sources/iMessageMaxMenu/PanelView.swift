@@ -70,7 +70,7 @@ struct PanelView: View {
       header(state)
       if let problem = model.problem {
         Card(wash: Design.attention) {
-          IconLabel(title: "Needs a little attention", glyph: .warning)
+          IconLabel(title: "Needs attention", glyph: .warning)
             .font(.maxStrong).foregroundStyle(Design.attention)
           Text(problem).font(.maxLine).fixedSize(horizontal: false, vertical: true)
           if model.canControl && !model.stopped {
@@ -211,7 +211,7 @@ extension PanelSection {
   var heading: String {
     switch self {
     case .connection: "Connect your assistant"
-    case .details: "A closer look"
+    case .details: "Details & help"
     case .preferences: "Preferences"
     }
   }

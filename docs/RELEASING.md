@@ -1,9 +1,9 @@
 # Releasing
 
-The version is written by hand in five places. `scripts/check-version.sh`
-(also `make version`, CI, and `VersionConsistencyTests`) fails if they
-disagree. `swift/Sources/iMessageMax/Server/Version.swift` is the source
-of truth; the other sites must match it.
+The version is set by hand in five places. `scripts/check-version.sh`
+fails if they disagree, and so do `make version`, CI and
+`VersionConsistencyTests`. `swift/Sources/iMessageMax/Server/Version.swift`
+is the source of truth. The other sites must match it.
 
 ## 1. Bump the version
 
@@ -19,7 +19,7 @@ sed -i '' "s/v$OLD\//v$NEW\//; s/version \"$OLD\"/version \"$NEW\"/; s/from v$OL
 scripts/check-version.sh   # prints "OK 1.4.3"
 ```
 
-The Formula `sha256` cannot be known until the release asset exists; step 4 fills it in. `scripts/check-version.sh` checks the version and url tag only.
+The Formula `sha256` is unknown until the release asset exists. Step 4 fills it in. `scripts/check-version.sh` checks only the version and the url tag.
 
 Commit the bump.
 
@@ -29,9 +29,9 @@ Commit the bump.
 cd swift && make release-check
 ```
 
-This builds, runs the suite, checks the five version sites, and syntax
-checks the Formula. The "Not on a matching tag yet" line is expected
-before you tag.
+This builds, runs the suite, checks the five version sites, and checks
+the Formula's syntax. Before you tag, expect a "Not on a matching tag yet"
+line.
 
 ## 3. Tag and push
 
@@ -53,9 +53,10 @@ mkdir -p /tmp/imessage-max-release && tar -xzf imessage-max-macos.tar.gz -C /tmp
 codesign -dv /tmp/imessage-max-release/imessage-max 2>&1 | grep Signature   # Signature=adhoc
 ```
 
-The digest must match the one in the GitHub release body. `Signature=adhoc`
-is required: the Formula ships this binary as-is, and a binary signed with
-the local "iMessage Max Dev" identity is trusted by no other machine.
+The digest must match the one in the GitHub release body. The signature
+must be `Signature=adhoc`. The Formula ships this binary as-is, and no
+other machine trusts a binary signed with the local "iMessage Max Dev"
+identity.
 
 Do not run `brew install --build-from-source swift/Formula/imessage-max.rb`.
 Homebrew 6 refuses a path argument when a formula of that name already
@@ -65,10 +66,10 @@ the prebuilt tarball anyway, so there is nothing to build.
 ## 5. Update the Formula and publish it to the tap
 
 In `swift/Formula/imessage-max.rb`, set `url` to the new asset and `sha256`
-to the digest from step 4 (`version` was already bumped in step 1). Commit.
+to the digest from step 4. Step 1 already bumped `version`. Commit the change.
 
-Then copy it into the tap checkout, commit, and push (this is the operator's
-push, not CI's). The tap keeps formulas at the repo root
+Then copy it into the tap checkout, commit, and push. The operator pushes
+this, not CI. The tap keeps formulas at the repo root
 (`/opt/homebrew/Library/Taps/cyberpapiii/homebrew-tap/imessage-max.rb`):
 
 ```bash

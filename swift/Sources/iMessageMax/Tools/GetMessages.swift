@@ -139,10 +139,10 @@ actor GetMessagesTool {
         return ToolDefinition(
             name: "get_messages",
             description: """
-                Retrieve messages from a chat, filtered by time, sender, content type, or text. Either chat_id or participants must be provided.
-                Returns messages with metadata. Images return metadata only; use get_attachment for the content.
-                Messages are grouped into sessions (4+ hour gaps start new sessions). Best used after you already know which conversation you want to review more closely.
-                Use chat.id/chat_id for follow-up tool calls only. When explaining results to the user, refer to chats by name using chat.name and participant names, not by the chat id.
+                Get messages from one chat, filtered by time, sender, content type, or text. Provide either chat_id or participants.
+                Returns messages with metadata. Images return metadata only; use get_attachment for the image content.
+                The response groups messages into sessions, and a gap of 4 or more hours starts a new session. Use this tool after you know which conversation you want to read closely.
+                Use chat.id or chat_id only in follow-up tool calls. When you explain results to the user, refer to chats by name, using chat.name and participant names, not the chat id.
 
                 Examples:
                 - get_messages(chat_id: "chat123"): recent messages from a chat
@@ -155,23 +155,23 @@ actor GetMessagesTool {
                 properties: [
                     "chat_id": .string(description: "Chat identifier (e.g., 'chat123')"),
                     "participants": .array(
-                        description: "Find chat by participant names/handles (alternative to chat_id)",
+                        description: "Participant names or handles that identify the chat (alternative to chat_id)",
                         items: .string(description: "Participant name or handle")
                     ),
-                    "since": .string(description: "Time bound (ISO, relative like '24h', or 'yesterday')"),
+                    "since": .string(description: "Lower time bound (ISO, relative like '24h', or natural like 'yesterday')"),
                     "before": .string(description: "Upper time bound"),
                     "limit": .integer(description: "Maximum messages to return (\(Self.limit.defaultAndMax))"),
-                    "from_person": .string(description: "Filter to messages from specific person (or 'me')"),
-                    "contains": .string(description: "Text search within messages"),
+                    "from_person": .string(description: "Only messages from this person (or 'me')"),
+                    "contains": .string(description: "Text to search for within messages"),
                     "has": .string(
                         description: "Filter by content type",
                         enumValues: ["links", "attachments", "images"]
                     ),
                     "include_reactions": .boolean(description: "Include reaction data (default true)"),
-                    "cursor": .string(description: "Pagination cursor for continuing retrieval"),
+                    "cursor": .string(description: "Pagination cursor from a previous get_messages response"),
                     "unanswered": .boolean(description: "Only return my messages that didn't receive a reply"),
                     "unanswered_hours": .integer(description: "Window in hours to check for replies (default \(IntArgument.unansweredHours.defaultValue))"),
-                    "session": .string(description: "Filter to specific session ID (e.g., 'session_1')")
+                    "session": .string(description: "Only messages in this session ID (e.g., 'session_1')")
                 ]
             ),
             outputSchema: OutputSchema.object,
@@ -215,7 +215,7 @@ actor GetMessagesTool {
         } else if let participants, !participants.isEmpty {
             chatRef = try await resolveParticipantsToChat(participants: participants)
         } else {
-            throw ToolFailure("validation_error", "Either chat_id or participants must be provided")
+            throw ToolFailure("validation_error", "Provide either chat_id or participants")
         }
         let chat = try ChatIdentifier.resolveChat(chatRef, db: db)
         let numericChatId = Int(chat.id)
@@ -357,7 +357,7 @@ actor GetMessagesTool {
             mediaTruncated: mediaTruncated ? true : nil,
             mediaTotal: mediaTruncated ? mediaTotal : nil,
             mediaIncluded: mediaTruncated ? mediaIncluded : nil,
-            suggestions: messages.isEmpty ? ["Try different filters or time range"] : nil
+            suggestions: messages.isEmpty ? ["Try different filters or a different time range"] : nil
         )
     }
 }

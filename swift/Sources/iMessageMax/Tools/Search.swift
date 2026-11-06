@@ -123,11 +123,11 @@ enum SearchTool {
             "properties": .object([
                 "query": .object([
                     "type": "string",
-                    "description": "Text to search for (optional if filters provided)"
+                    "description": "Text to search for (optional if you provide filters)"
                 ]),
                 "from_person": .object([
                     "type": "string",
-                    "description": "Filter to messages from this person (or \"me\")"
+                    "description": "Only messages from this person (or \"me\")"
                 ]),
                 "in_chat": .object([
                     "type": "string",
@@ -135,7 +135,7 @@ enum SearchTool {
                 ]),
                 "is_group": .object([
                     "type": "boolean",
-                    "description": "True for groups only, False for DMs only"
+                    "description": "true for groups only, false for DMs only"
                 ]),
                 "include_filtered": .object([
                     "type": "boolean",
@@ -148,7 +148,7 @@ enum SearchTool {
                 ]),
                 "since": .object([
                     "type": "string",
-                    "description": "Time bound (ISO, relative like \"24h\"/\"7d\", or natural like \"yesterday\"/\"last tuesday\"/\"2 weeks ago\")"
+                    "description": "Lower time bound (ISO, relative like \"24h\" or \"7d\", or natural like \"yesterday\", \"last tuesday\", or \"2 weeks ago\")"
                 ]),
                 "match_all": .object([
                     "type": "boolean",
@@ -157,7 +157,7 @@ enum SearchTool {
                 ]),
                 "fuzzy": .object([
                     "type": "boolean",
-                    "description": "Enable typo-tolerant matching (allows 1-2 character differences). Useful for finding messages with typos.",
+                    "description": "Match despite typos (allows 1-2 character differences). Use it to find messages that contain typos.",
                     "default": .bool(false)
                 ]),
                 "before": .object([
@@ -170,7 +170,7 @@ enum SearchTool {
                 ]),
                 "limit": .object([
                     "type": "integer",
-                    "description": "Max results (\(limit.defaultAndMax))",
+                    "description": "Maximum results to return (\(limit.defaultAndMax))",
                     "default": .int(limit.defaultValue)
                 ]),
                 "sort": .object([
@@ -187,7 +187,7 @@ enum SearchTool {
                 ]),
                 "include_context": .object([
                     "type": "boolean",
-                    "description": "Include messages before/after each result",
+                    "description": "Include the messages before and after each result",
                     "default": false
                 ]),
                 "unanswered": .object([
@@ -207,8 +207,8 @@ enum SearchTool {
         return ToolDefinition(
             name: "search",
             description: """
-                Full-text search across messages. Best when you know the topic or phrase you want to find, but not which conversation it appeared in.
-                Search results include chat ids for follow-up tool calls and chat names for user-facing summaries. When explaining results to the user, refer to chats by name, not by id.
+                Full-text search across messages. Use it when you know the topic or phrase but not which conversation it appeared in.
+                Results include chat ids for follow-up tool calls and chat names for user-facing summaries. When you explain results to the user, refer to chats by name, not by id.
 
                 Search features:
                 - Multi-word: "costa rica trip" matches ANY word by default
@@ -309,7 +309,7 @@ enum SearchTool {
                        !(query?.trimmingCharacters(in: .whitespaces).isEmpty ?? true)
 
         if !hasQuery && !hasFilter {
-            throw ToolFailure("invalid_query", "Query or at least one filter required")
+            throw ToolFailure("invalid_query", "Provide a query or at least one filter")
         }
 
         let clampedLimit = Self.limit.clamp(limit)

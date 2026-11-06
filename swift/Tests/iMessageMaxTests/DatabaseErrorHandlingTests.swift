@@ -86,9 +86,10 @@ final class DatabaseErrorHandlingTests: XCTestCase {
         let db = Database(path: path)
 
         // Settle sqlite's one-time/global allocations before measuring.
-        // sqlite3_memory_used() cannot be the meter here: Apple's sqlite
-        // build does not account these allocations (measured delta 0 even
-        // when leaking), so measure live malloc bytes across all zones.
+        // sqlite3_memory_used() does not work as the measure here. Apple's
+        // sqlite build does not count these allocations (the measured delta
+        // was 0 even when leaking), so measure live malloc bytes across all
+        // zones.
         for _ in 0..<20 {
             XCTAssertThrowsError(try db.query("SELECT 1") { _ in 0 })
         }
@@ -101,15 +102,16 @@ final class DatabaseErrorHandlingTests: XCTestCase {
 
         let before = liveMallocBytes()
         // malloc_zone_statistics is process-wide, so other tests running in the
-        // same process contribute ~150 KiB of ambient growth over this test's
-        // lifetime. 200 calls put the leak signal (~285 KiB) too close to that
-        // noise floor and the assertion flaked in full-suite runs. 2000 calls
-        // raise the signal to ~2.8 MiB while the noise floor is unchanged.
+        // same process contribute about 150 KiB of ambient growth over this
+        // test's lifetime. 200 calls put the leak signal (about 285 KiB) too
+        // close to that noise floor, and the assertion flaked in full-suite
+        // runs. 2000 calls raise the signal to about 2.8 MiB while the noise
+        // floor stays the same.
         let calls = 2000
         var deniedCount = 0
         for _ in 0..<calls {
-            // Plain do/catch inside an autoreleasepool: XCTAssert* helpers
-            // accumulate autoreleased bookkeeping that would drown the signal.
+            // Use a plain do/catch inside an autoreleasepool. XCTAssert* helpers
+            // accumulate autoreleased bookkeeping that would hide the leak signal.
             autoreleasepool {
                 do {
                     _ = try db.query("SELECT 1") { _ in 0 }

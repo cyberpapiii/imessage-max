@@ -11,10 +11,11 @@ struct LiveScriptRunner: ScriptRunning {
         self.stager = stager
     }
 
-    /// The send blocks its thread (process wait, transfer polling), so run
-    /// it on a GCD background thread, never on the cooperative pool. GCD grows
-    /// its pool to absorb blocked threads. The cooperative pool does not, so a
-    /// blocked send there would stall unrelated requests service-wide.
+    /// The send blocks its thread while it waits for the process and polls the
+    /// transfer, so run it on a GCD background thread, never on the cooperative
+    /// pool. GCD adds threads to its pool when threads block. The cooperative
+    /// pool does not, so a blocked send there would stall unrelated requests
+    /// across the whole service.
     func send(_ payload: SendPayload, to target: SendTarget) async -> Result<Void, SendFailure> {
         await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {

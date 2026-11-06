@@ -29,8 +29,8 @@ extension SearchTool {
                 .leftJoin(MessageRecord.senderJoin)
                 .where(SQLFragments.notReaction())
         case .hiddenMembership(let inChat):
-            // CROSS JOIN pins SQLite's loop order: visit the chats the
-            // predicate selects, then only their messages by rowid.
+            // CROSS JOIN fixes SQLite's loop order. It visits the chats the
+            // predicate selects first, then only their messages by rowid.
             builder
                 .from("""
                     chat c

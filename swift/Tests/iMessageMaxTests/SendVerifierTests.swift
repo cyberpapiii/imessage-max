@@ -221,7 +221,7 @@ final class SendVerifierTests: XCTestCase {
         )
 
         XCTAssertEqual(result, .notFound,
-            "A failed row in a different chat must not surface as mismatch or failedDelivery")
+            "A failed row in a different chat must not be reported as mismatch or failedDelivery")
     }
 
     func testFallbackFailedRowWithoutIntendedChat() async throws {

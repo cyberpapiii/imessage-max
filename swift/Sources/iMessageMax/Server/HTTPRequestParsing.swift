@@ -27,21 +27,21 @@ enum HTTPRequestParsing {
 
     private struct BodyReadTimeout: Error {}
 
-    /// The drain is load-bearing. `collect(upTo:)` threw on overflow and left
+    /// Do not remove the drain. `collect(upTo:)` threw on overflow and left
     /// the rest of the body unread. For clients that send `Connection: close`
     /// (Python urllib does by default), Hummingbird's HTTP1 loop skips its
     /// own post-response body drain and blocks on the channel's closeFuture.
-    /// With megabytes unread, NIO back-pressure stops socket reads, EOF is
-    /// never seen, and the server-side FD is never closed — each oversized
-    /// request leaked one descriptor (CLOSED / FIN_WAIT_2 / TIME_WAIT under
-    /// the pid in lsof) against a soft limit of 256. Orderly keep-alive
-    /// clients (http.client) were unaffected because the HTTP1 loop drains
-    /// before reading the next request head.
+    /// With megabytes unread, NIO back-pressure stops socket reads, the
+    /// server never sees EOF, and it never closes the server-side FD. Each
+    /// oversized request leaked one descriptor (CLOSED / FIN_WAIT_2 /
+    /// TIME_WAIT under the pid in lsof) against a soft limit of 256. Orderly
+    /// keep-alive clients (http.client) were unaffected because the HTTP1
+    /// loop drains before it reads the next request head.
     ///
-    /// The body is a single-iteration sequence, so draining cannot happen
-    /// after `collect` throws; this helper owns the one iteration and does
-    /// both jobs. Bodies whose declared Content-Length exceeds `drainLimit`
-    /// are rejected without reading, which keeps the work bounded.
+    /// The body is a single-iteration sequence, so nothing can drain it
+    /// after `collect` throws. This helper owns the one iteration and does
+    /// both jobs. It rejects a body whose declared Content-Length exceeds
+    /// `drainLimit` without reading it, which keeps the work bounded.
     static func collectBodyDrainingOverflow(
         _ body: RequestBody,
         declaredLength: Int?,

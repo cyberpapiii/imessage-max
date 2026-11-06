@@ -32,7 +32,7 @@ enum GetContext {
             "properties": .object([
                 "message_id": .object([
                     "type": "string",
-                    "description": "Specific message ID to get context around (e.g., \"msg_1\")",
+                    "description": "Message ID to get context around (e.g., \"msg_1\")",
                 ]),
                 "chat_id": .object([
                     "type": "string",
@@ -40,7 +40,7 @@ enum GetContext {
                 ]),
                 "contains": .object([
                     "type": "string",
-                    "description": "Find the newest message containing this text (case-insensitive), then get context. Scans up to 5000 candidate messages newest-first; returns not_found_in_window if the cap is reached.",
+                    "description": "Find the newest message that contains this text (case-insensitive), then get its context. The scan checks up to 5000 candidate messages, newest first, and returns not_found_in_window if it reaches that cap.",
                 ]),
                 "before": .object([
                     "type": "integer",
@@ -56,7 +56,7 @@ enum GetContext {
 
         return ToolDefinition(
             name: "get_context",
-            description: "Get messages surrounding a specific message. Returns the containing chat id for follow-up tool calls and chat name for user-facing summaries. When explaining results to the user, refer to chats by name, not by id.",
+            description: "Get the messages before and after a specific message. Returns the id of the chat that contains it for follow-up tool calls and the chat name for user-facing summaries. When you explain results to the user, refer to chats by name, not by id.",
             inputSchema: inputSchema,
             outputSchema: OutputSchema.object,
             annotations: Tool.Annotations(
@@ -179,7 +179,7 @@ enum GetContext {
                 if exhausted {
                     throw ToolFailure("not_found", "No message found containing '\(searchText)'")
                 }
-                throw ToolFailure("not_found_in_window", "No message containing '\(searchText)' in the newest \(scanned) candidate messages of this chat (scan cap \(scanCap)). Narrow the phrase or use search with chat_id to find the message id, then call get_context with message_id.")
+                throw ToolFailure("not_found_in_window", "No message containing '\(searchText)' in the newest \(scanned) candidate messages of this chat (scan cap \(scanCap)). Narrow the phrase or use search with in_chat to find the message id, then call get_context with message_id.")
             }
             targetResult = found
         }

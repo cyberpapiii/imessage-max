@@ -41,7 +41,7 @@ public enum CoreError: Error, LocalizedError, Sendable {
     switch self {
     case .invalidResponse: "iMessage Max returned an unreadable response. Try restarting it."
     case .invalidConfiguration:
-      "The installed service configuration needs attention. Only a local iMessage Max service can be managed."
+      "The installed service configuration is not valid. This app manages only a local iMessage Max service."
     case .timeout: "That took too long. Try again."
     case .conflict:
       "Another process is using this connection. iMessage Max has not changed or stopped it."

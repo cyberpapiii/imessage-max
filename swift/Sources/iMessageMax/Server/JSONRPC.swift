@@ -54,11 +54,11 @@ struct JSONRPCMessage: @unchecked Sendable {
 
     var modernProtocolVersion: String? { meta?[ModernMetaKey.protocolVersion] as? String }
 
-    /// Era selection, identical on both transports. Only the body decides:
-    /// real legacy clients (plug) send `Mcp-Method` and
-    /// `MCP-Protocol-Version` on session traffic too, so headers must never
+    /// Selects the era the same way on both transports. Only the body
+    /// decides. Real legacy clients (plug) also send `Mcp-Method` and
+    /// `MCP-Protocol-Version` on session traffic, so headers must never
     /// reroute a request. `initialize` always selects the legacy session
-    /// lane; `server/discover` or a `_meta` protocol version, which legacy
+    /// lane. `server/discover` or a `_meta` protocol version, which legacy
     /// clients never send, selects the stateless lane.
     var era: Era {
         guard let method, method != "initialize" else { return .legacy }
@@ -87,9 +87,9 @@ struct JSONRPCMessage: @unchecked Sendable {
 
     var requestKey: String? { Self.requestKey(for: id) }
 
-    /// Branch order matters: `["id": 1]` bridges to NSNumber, and on Apple
+    /// Branch order matters. `["id": 1]` bridges to NSNumber, and on Apple
     /// platforms both `as? Int` and `as? Double` succeed for integral
-    /// NSNumbers, so Int must be tested first to keep `1` in the `i:` space.
+    /// NSNumbers. Test Int first so that `1` stays in the `i:` space.
     static func requestKey(for id: Any?) -> String? {
         switch id {
         case let string as String:

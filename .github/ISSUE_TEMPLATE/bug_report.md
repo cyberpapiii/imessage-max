@@ -7,7 +7,7 @@ assignees: ''
 ---
 
 **Describe the bug**
-A clear description of what the bug is.
+Say what went wrong.
 
 **To reproduce**
 1. Tool called: `find_chat`, `get_messages`, etc.

@@ -48,15 +48,15 @@ enum ListChatsTool {
             "properties": .object([
                 "limit": .object([
                     "type": "integer",
-                    "description": "Max chats to return (\(limit.defaultAndMax))",
+                    "description": "Maximum chats to return (\(limit.defaultAndMax))",
                 ]),
                 "since": .object([
                     "type": "string",
-                    "description": "Only chats with activity since this time (ISO, relative, or natural). Good for broad recent catch-up windows like \"2d\" or \"yesterday\".",
+                    "description": "Only chats with activity since this time (ISO, relative, or natural). Use it for broad catch-up windows such as \"2d\" or \"yesterday\".",
                 ]),
                 "is_group": .object([
                     "type": "boolean",
-                    "description": "True for groups only, False for DMs only",
+                    "description": "true for groups only, false for DMs only",
                 ]),
                 "include_filtered": .object([
                     "type": "boolean",
@@ -72,7 +72,7 @@ enum ListChatsTool {
                 ]),
                 "sort": .object([
                     "type": "string",
-                    "description": "Sort order. \"recent\" by last message; \"most_active\" by message count in the selected window; \"alphabetical\" by display name.",
+                    "description": "Sort order. \"recent\" sorts by last message, \"most_active\" by message count in the selected window, and \"alphabetical\" by display name.",
                     "enum": ["recent", "alphabetical", "most_active"],
                 ]),
                 "cursor": .object([
@@ -85,7 +85,7 @@ enum ListChatsTool {
 
         return ToolDefinition(
             name: "list_chats",
-            description: "List recent chats with previews. Returns chat ids for follow-up tool calls and chat names for user-facing summaries. When explaining results to the user, refer to chats by name, not by id. Good starting point for broad catch-ups and discovery before drilling deeper. Totals (total_chats, total_groups, total_dms) appear on the first page only.",
+            description: "List recent chats with previews. Returns chat ids for follow-up tool calls and chat names for user-facing summaries. When you explain results to the user, refer to chats by name, not by id. Start here for broad catch-ups and to find chats before you read one in detail. Totals (total_chats, total_groups, total_dms) appear on the first page only.",
             inputSchema: inputSchema,
             outputSchema: OutputSchema.object,
             annotations: Tool.Annotations(
@@ -186,8 +186,8 @@ enum ListChatsTool {
                 "c.display_name",
                 "\(SQLFragments.participantCount()) as participant_count",
                 needsMessageAggregate ? "COALESCE(msg.n, 0) as message_count" : "0 as message_count",
-                // msg's columns are named apart from these aliases: HAVING
-                // would otherwise bind the uncoalesced column.
+                // msg's columns have names distinct from these aliases, because
+                // HAVING would otherwise bind the uncoalesced column.
                 needsMessageAggregate ? "COALESCE(msg.last_date, 0) as last_message_date" : "NULL as last_message_date"
             )
             .from("chat c")

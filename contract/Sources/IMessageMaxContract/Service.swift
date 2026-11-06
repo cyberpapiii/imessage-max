@@ -8,7 +8,7 @@ public enum ServiceDefaults {
   public static let port = 8080
   public static let executableName = "imessage-max"
   public static let launchdLabel = "local.imessage-max"
-  /// Home-relative paths.
+  /// These paths are relative to the home directory.
   public static let launchAgentPath = "Library/LaunchAgents/\(launchdLabel).plist"
   public static let stdoutLogPath = "Library/Logs/imessage-max.stdout.log"
   public static let stderrLogPath = "Library/Logs/imessage-max.stderr.log"
@@ -52,8 +52,8 @@ public enum ContactsPolicyOption: String, CaseIterable, Sendable {
   case auto, request, skip
 }
 
-/// MCP 2026-07-28 (the stateless "modern" era) names the companion's
-/// diagnose request uses.
+/// Names from MCP 2026-07-28, the stateless "modern" era, that the
+/// companion's diagnose request uses.
 public enum ModernMCP {
   public static let protocolVersion = "2026-07-28"
 }

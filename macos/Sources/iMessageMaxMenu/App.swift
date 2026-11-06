@@ -21,9 +21,10 @@ struct iMessageMaxMenuApp {
   }
 }
 
-/// AppKit owns only the status-item/popover lifecycle. A public MenuBarExtra
-/// API cannot present on app launch or reopen; grandma-simple discovery needs
-/// both. The entire panel and its state remain SwiftUI/Observation.
+/// AppKit owns only the status item and popover lifecycle. The public
+/// MenuBarExtra API cannot show the panel on app launch or reopen, and a new
+/// user needs both to find the app. The panel and its state use SwiftUI and
+/// Observation.
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
   private let design: DesignOptions
@@ -104,8 +105,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     popover.contentViewController?.view.window?.makeKey()
     if keyMonitor == nil {
       // Local monitors run on NSApplication's main event-dispatch thread. This
-      // is a narrow responder bridge: only Escape in our shown panel is taken.
-      // Escape goes back to the home page, then closes the panel.
+      // monitor takes only the Escape key, and only in the shown panel.
+      // Escape goes back to the home page first, then closes the panel.
       keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
         let handled = MainActor.assumeIsolated {
           guard let self, self.popover.isShown, event.keyCode == 53,
