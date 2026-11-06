@@ -103,6 +103,10 @@ final class GetUnread {
                     "type": "boolean",
                     "description": "Include chats Messages.app has filtered as junk or unknown senders (default false)",
                 ]),
+                "cursor": .object([
+                    "type": "string",
+                    "description": "Pagination cursor from a previous get_unread response (messages format only)",
+                ]),
             ]),
             "additionalProperties": false,
         ])
@@ -125,6 +129,7 @@ final class GetUnread {
             let formatStr = arguments?["format"]?.stringValue ?? "summary"
             let limit = Self.limit.read(arguments)
             let includeFiltered = arguments?["include_filtered"]?.boolValue ?? false
+            let cursor = arguments?["cursor"]?.stringValue
 
             let format = UnreadFormat(rawValue: formatStr) ?? .summary
             let params = Parameters(
@@ -132,7 +137,8 @@ final class GetUnread {
                 since: since,
                 format: format,
                 limit: limit,
-                includeFiltered: includeFiltered
+                includeFiltered: includeFiltered,
+                cursor: cursor
             )
 
             let tool = GetUnread(database: db, contactResolver: resolver)
@@ -147,19 +153,22 @@ final class GetUnread {
         var format: UnreadFormat
         var limit: Int
         var includeFiltered: Bool
+        var cursor: String?
 
         init(
             chatId: String? = nil,
             since: String = GetUnread.defaultSince,
             format: UnreadFormat = .summary,
             limit: Int = GetUnread.limit.defaultValue,
-            includeFiltered: Bool = false
+            includeFiltered: Bool = false,
+            cursor: String? = nil
         ) {
             self.chatId = chatId
             self.since = since
             self.format = format
             self.limit = GetUnread.limit.clamp(limit)
             self.includeFiltered = includeFiltered
+            self.cursor = cursor
         }
     }
 
@@ -186,7 +195,8 @@ final class GetUnread {
                 chatId: numericChatId,
                 sinceApple: sinceApple,
                 limit: params.limit,
-                includeFiltered: params.includeFiltered
+                includeFiltered: params.includeFiltered,
+                cursor: params.cursor.flatMap(TimelineCursor.decode)
             )
         }
     }
@@ -226,24 +236,27 @@ final class GetUnread {
         chatId: Int64?,
         sinceApple: Int64?,
         limit: Int,
-        includeFiltered: Bool
+        includeFiltered: Bool,
+        cursor: TimelineCursor?
     ) async throws -> UnreadMessagesResponse {
-        let (sql, params) = Self.unread(
+        let query = Self.unread(
             QueryBuilder().selectMessages(try database.schema(), MessageInChat.chatColumns),
             chatId: chatId,
             sinceApple: sinceApple,
             chats: Self.shownChats(includeFiltered)
         )
         .joinMessageHandles()
-        .orderBy("m.date ASC", "m.ROWID ASC")
-        .limit(limit + 1)
-        .build()
-
-        var rows = try database.query(sql, params: params, map: MessageInChat.init)
-        let more = rows.count > limit
-        if more {
-            rows = Array(rows.prefix(limit))
+        if let after = cursor?.predicate(descending: false) {
+            query.where(after.sql, params: after.params)
         }
+        let (sql, params) = query
+            .orderBy("m.date ASC", "m.ROWID ASC")
+            .limit(limit + 1)
+            .build()
+
+        let fetched = try database.query(sql, params: params, map: MessageInChat.init)
+        let rows = Array(fetched.prefix(limit))
+        let nextCursor = TimelineCursor.next(after: rows.last?.message, pageFull: fetched.count > limit)
 
         let counts = try getUnreadCounts(chatId: chatId, sinceApple: sinceApple, includeFiltered: includeFiltered)
         let filteredHidden = includeFiltered
@@ -274,9 +287,8 @@ final class GetUnread {
             messages: unreadMessages,
             totalUnread: counts.totalUnread,
             chatsWithUnread: counts.chatsWithUnread,
-            // Pagination is by limit only (no cursor); more reports truncation honestly.
-            more: more,
-            cursor: nil,
+            more: nextCursor != nil,
+            cursor: nextCursor,
             filteredHidden: filteredHidden
         )
     }

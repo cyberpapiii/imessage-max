@@ -115,6 +115,32 @@ final class ToolsReview2RegressionTests: XCTestCase {
         XCTAssertFalse(excerpt.contains("\u{FFFD}"), "an emoji was split")
     }
 
+    // MARK: - get_unread pages to the newest message
+
+    func testUnreadMessagesPageWithACursorToTheNewest() async throws {
+        let f = try ToolTestDatabase(name: "unread-cursor")
+        try f.insertHandle(rowId: 1, handle: "+15550000001")
+        try f.insertChat(rowId: 1, guid: "iMessage;-;+15550000001")
+        let recent = Int64(Date().timeIntervalSinceReferenceDate) * 1_000_000_000 - 3_600_000_000_000
+        for row in 1...5 {
+            try f.insertMessage(rowId: row, guid: "g\(row)", text: "u\(row)", date: recent + Int64(row), isFromMe: false, handleId: 1)
+            try f.joinChatMessage(chatId: 1, messageId: row)
+        }
+        var seen: [String] = []
+        var cursor: String?
+        for page in 0..<3 {
+            var args: [String: Value] = ["format": "messages", "limit": 2]
+            if let cursor { args["cursor"] = .string(cursor) }
+            let json = try await callTool("get_unread", args, database: f.database())
+            seen += try ids(json)
+            cursor = json["cursor"] as? String
+            XCTAssertEqual(json["more"] as? Bool, cursor != nil)
+            XCTAssertEqual(json["total_unread"] as? Int, 5)
+            XCTAssertEqual(cursor == nil, page == 2)
+        }
+        XCTAssertEqual(seen, (1...5).map { "msg_\($0)" })
+    }
+
     // MARK: - search and unanswered costs
 
     func testSearchCountsHiddenChatsOnTheFirstPageOnly() async throws {
