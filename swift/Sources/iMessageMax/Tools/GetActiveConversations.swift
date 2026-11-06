@@ -126,15 +126,17 @@ enum GetActiveConversations {
         let windowStart = now.addingTimeInterval(-Double(clampedHours) * Seconds.hour)
         let windowStartApple = AppleTime.fromDate(windowStart)
 
+        let conversational = SQLFragments.conversational()
         let query = QueryBuilder()
             .select(
                 "c.ROWID as chat_id",
                 "c.display_name",
                 "\(SQLFragments.participantCount()) as participant_count",
-                "SUM(CASE WHEN m.is_from_me = 1 THEN 1 ELSE 0 END) as my_count",
-                "SUM(CASE WHEN m.is_from_me = 0 THEN 1 ELSE 0 END) as their_count",
-                "MAX(CASE WHEN m.is_from_me = 1 THEN m.date ELSE NULL END) as last_from_me",
-                "MAX(CASE WHEN m.is_from_me = 0 THEN m.date ELSE NULL END) as last_from_them",
+                // Group events (renames, joins, leaves) are no one's turn.
+                "SUM(CASE WHEN m.is_from_me = 1 AND \(conversational) THEN 1 ELSE 0 END) as my_count",
+                "SUM(CASE WHEN m.is_from_me = 0 AND \(conversational) THEN 1 ELSE 0 END) as their_count",
+                "MAX(CASE WHEN m.is_from_me = 1 AND \(conversational) THEN m.date ELSE NULL END) as last_from_me",
+                "MAX(CASE WHEN m.is_from_me = 0 AND \(conversational) THEN m.date ELSE NULL END) as last_from_them",
                 "MIN(m.date) as first_in_window",
                 "MAX(m.date) as last_in_window"
             )
@@ -194,7 +196,7 @@ enum GetActiveConversations {
                 chat: entry.summary,
                 details: ActiveConversationDetails(
                     lastMessage: entry.lastMessage?.info,
-                    awaitingReply: row.lastFromThem.map { $0 > (row.lastFromMe ?? .min) } ?? false,
+                    awaitingReply: entry.lastMessage?.awaitingReply ?? false,
                     activity: ConversationActivity(
                         exchanges: min(row.myCount, row.theirCount),
                         myMsgs: row.myCount,

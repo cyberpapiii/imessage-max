@@ -144,6 +144,7 @@ enum ChatSummaryQueries {
         }()
 
         var params: [Any] = []
+        var pickParams: [Any] = []
         var pick = ""
         if let pinnedDates {
             for (chatId, date) in zip(chatIds, pinnedDates) {
@@ -156,9 +157,17 @@ enum ChatSummaryQueries {
             params.append(contentsOf: chatIds.map { $0 as Any })
             if let since = options.sinceApple {
                 pick = "\n      AND m2.date >= ?"
-                params.append(since)
+                pickParams.append(since)
             }
         }
+        // A conversational last message answers awaiting_reply itself; only
+        // a group event sends the lookup back for the newest one before it.
+        let awaiting = "CASE WHEN m.item_type = 0 THEN m.is_from_me = 0 ELSE "
+            + SQLFragments.awaitingReply(chat: "i.chat_id", sinceBound: options.sinceApple != nil) + " END"
+        if let since = options.sinceApple {
+            params.append(since)
+        }
+        params += pickParams
         if options.onlyUnreadInbound {
             pick += "\n      AND \(SQLFragments.unreadInbound("m2"))"
         }
@@ -171,7 +180,7 @@ enum ChatSummaryQueries {
             WITH ids(\(pinnedDates == nil ? "chat_id" : "chat_id, newest_date")) AS (
               VALUES \(Array(repeating: row, count: chatIds.count).joined(separator: ","))
             )
-            SELECT \(MessageRecord.selectList(try db.schema())), i.chat_id
+            SELECT \(MessageRecord.selectList(try db.schema())), i.chat_id, \(awaiting)
             FROM ids i
             JOIN message m ON m.ROWID = (
               SELECT cmj.message_id
@@ -186,7 +195,8 @@ enum ChatSummaryQueries {
             """
 
         let rows = try db.query(sql, params: params) { row in
-            (chatId: row.int(MessageRecord.columnCount), message: MessageRecord(row))
+            (chatId: row.int(MessageRecord.columnCount), message: MessageRecord(row),
+             awaitingReply: row.int(MessageRecord.columnCount + 1) != 0)
         }
         let messages = rows.map(\.message)
 
@@ -203,7 +213,7 @@ enum ChatSummaryQueries {
         )
 
         var result: [Int64: LastMessage] = [:]
-        for (chatId, message) in rows {
+        for (chatId, message, awaitingReply) in rows {
             let rendered = renderer.render(message)
             let text = rendered.event?.previewText ?? MessagePreviewResolver.messageSummary(
                 text: message.text,
@@ -218,7 +228,7 @@ enum ChatSummaryQueries {
                     ago: rendered.ago ?? options.agoFallback,
                     ts: rendered.ts
                 ),
-                awaitingReply: !message.isFromMe
+                awaitingReply: awaitingReply
             )
         }
         return result

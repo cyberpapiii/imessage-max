@@ -67,6 +67,24 @@ enum SQLFragments {
     /// Tapbacks and other associated messages carry a nonzero type.
     static func notReaction(_ alias: String = "m") -> String { "\(alias).associated_message_type = 0" }
 
+    /// A message that carries the conversation: not a tapback and not a
+    /// group event (rename, membership change, leave).
+    static func conversational(_ alias: String = "m") -> String {
+        "(\(notReaction(alias)) AND \(alias).item_type = 0)"
+    }
+
+    /// Whether chat `chat` (an SQL expression) awaits my reply: its newest
+    /// conversational message, at or after one bound `?` date when
+    /// `sinceBound`, was received. 0 when it has none.
+    static func awaitingReply(chat: String, sinceBound: Bool) -> String {
+        """
+        COALESCE((SELECT ar.is_from_me = 0 FROM chat_message_join arj \
+        JOIN message ar ON ar.ROWID = arj.message_id \
+        WHERE arj.chat_id = \(chat) AND \(conversational("ar"))\(sinceBound ? " AND ar.date >= ?" : "") \
+        ORDER BY ar.date DESC, ar.ROWID DESC LIMIT 1), 0)
+        """
+    }
+
     /// Tapback rows and their removals (see `ReactionType`), nothing else.
     static func tapbackOrRemoval(_ alias: String = "m") -> String {
         let types = ReactionType.types, removals = ReactionType.removalTypes

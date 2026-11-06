@@ -187,12 +187,58 @@ final class ToolsReview2RegressionTests: XCTestCase {
         try f.insertAttachment(rowId: 1, filename: "/nonexistent/x.pdf", mimeType: "application/pdf", uti: "com.adobe.pdf")
         try f.joinMessageAttachment(messageId: 1, attachmentId: 1)
 
-        let active = try await callTool("get_active_conversations", [:], database: f.database())
+        let active = try await callTool("get_active_conversations", ["min_exchanges": 1], database: f.database())
         XCTAssertEqual(try decodeJSONArray(active["conversations"]).count, 0)
         let listed = try await callTool("list_attachments", [:], database: f.database())
         XCTAssertEqual(try decodeJSONArray(listed["messages"]).count, 0)
         let named = try await callTool("list_attachments", ["chat_id": "chat1"], database: f.database())
         XCTAssertEqual(try decodeJSONArray(named["messages"]).count, 1)
+    }
+
+    // MARK: - awaiting_reply ignores group events
+
+    func testGroupEventIsNotAwaitingReplyOrAnExchange() async throws {
+        let f = try ToolTestDatabase(name: "awaiting-events")
+        try f.insertHandle(rowId: 1, handle: "+15550000001")
+        try f.insertHandle(rowId: 2, handle: "+15550000002")
+        try f.insertChat(rowId: 1, guid: "iMessage;+;chat-g", displayName: "Group")
+        for h in 1...2 { try f.joinChatHandle(chatId: 1, handleId: h) }
+        let recent = Int64(Date().timeIntervalSinceReferenceDate) * 1_000_000_000 - 3_600_000_000_000
+        try f.insertMessage(rowId: 1, guid: "g1", text: "dinner?", date: recent, isFromMe: false, isRead: true, handleId: 1)
+        try f.insertMessage(rowId: 2, guid: "g2", text: "yes", date: recent + 1_000, isFromMe: true)
+        try f.insertMessage(rowId: 3, guid: "g3", text: nil, date: recent + 2_000, isFromMe: false, isRead: true, handleId: 2, itemType: 3)
+        for row in 1...3 { try f.joinChatMessage(chatId: 1, messageId: row) }
+
+        let listed = try await callTool("list_chats", [:], database: f.database())
+        let chat = try XCTUnwrap(try decodeJSONArray(listed["chats"]).first)
+        XCTAssertNotEqual(chat["awaiting_reply"] as? Bool, true)
+
+        let details = try await callTool("get_chat_details", ["chat_id": "chat1"], database: f.database())
+        XCTAssertNotEqual(details["awaiting_reply"] as? Bool, true)
+
+        let active = try await callTool("get_active_conversations", ["min_exchanges": 1], database: f.database())
+        let conversation = try XCTUnwrap(try decodeJSONArray(active["conversations"]).first)
+        XCTAssertEqual(conversation["awaiting_reply"] as? Bool, false)
+        let activity = try XCTUnwrap(conversation["activity"] as? [String: Any])
+        XCTAssertEqual(activity["their_msgs"] as? Int, 1)
+    }
+
+    func testAwaitingReplyLooksPastAGroupEventToTheirMessage() async throws {
+        let f = try ToolTestDatabase(name: "awaiting-past-event")
+        try f.insertHandle(rowId: 1, handle: "+15550000001")
+        try f.insertHandle(rowId: 2, handle: "+15550000002")
+        try f.insertChat(rowId: 1, guid: "iMessage;+;chat-g", displayName: "Group")
+        for h in 1...2 { try f.joinChatHandle(chatId: 1, handleId: h) }
+        let recent = Int64(Date().timeIntervalSinceReferenceDate) * 1_000_000_000 - 3_600_000_000_000
+        try f.insertMessage(rowId: 1, guid: "g1", text: "yes", date: recent, isFromMe: true)
+        try f.insertMessage(rowId: 2, guid: "g2", text: "dinner?", date: recent + 1_000, isFromMe: false, isRead: true, handleId: 1)
+        try f.insertMessage(rowId: 3, guid: "g3", text: nil, date: recent + 2_000, isFromMe: true, itemType: 2, groupTitle: "Dinner")
+        for row in 1...3 { try f.joinChatMessage(chatId: 1, messageId: row) }
+
+        let listed = try await callTool("list_chats", [:], database: f.database())
+        XCTAssertEqual(try decodeJSONArray(listed["chats"]).first?["awaiting_reply"] as? Bool, true)
+        let active = try await callTool("get_active_conversations", ["min_exchanges": 1], database: f.database())
+        XCTAssertEqual(try decodeJSONArray(active["conversations"]).first?["awaiting_reply"] as? Bool, true)
     }
 
     // MARK: - search and unanswered costs
