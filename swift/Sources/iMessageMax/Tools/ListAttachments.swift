@@ -1,12 +1,6 @@
 import Foundation
 import MCP
 
-enum AttachmentSort: String {
-    case recentFirst = "recent_first"
-    case oldestFirst = "oldest_first"
-    case largestFirst = "largest_first"
-}
-
 struct ListAttachmentsResponse: Codable {
     let messages: [SharedMessageItem]
     let total: Int

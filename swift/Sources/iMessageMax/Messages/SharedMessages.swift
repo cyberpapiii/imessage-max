@@ -1,5 +1,12 @@
 import Foundation
 
+/// The order a shared-attachments page lists messages in.
+enum AttachmentSort: String {
+    case recentFirst = "recent_first"
+    case oldestFirst = "oldest_first"
+    case largestFirst = "largest_first"
+}
+
 /// Messages that shared attachments, one item per message with its shown
 /// attachments: list_attachments' page and get_chat_details' shared summary.
 enum SharedMessages {
