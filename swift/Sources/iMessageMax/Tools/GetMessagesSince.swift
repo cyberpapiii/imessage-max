@@ -230,7 +230,8 @@ actor GetMessagesSinceTool {
             hasMore: hasMore,
             currentRowid: currentRowid,
             stalled: stalled,
-            filteredHidden: hiddenChats.count
+            // The field is always present: 0 where ChatScope would omit it.
+            filteredHidden: scope.filteredHidden { hiddenChats.count } ?? 0
         )
     }
 

@@ -153,6 +153,7 @@ enum ListChatsTool {
         let sortOrder = ListChatsSort(rawValue: sort) ?? .recent
 
         let sinceApple = since.flatMap(AppleTime.parse)
+        let scope = ChatScope(named: nil, includeFiltered: includeFiltered)
 
         // Message totals come from a per-chat aggregate subquery, not from
         // joining chat_handle_join and message in one FROM, which would
@@ -228,8 +229,8 @@ enum ListChatsTool {
             )
             .from("chat c")
 
-            if !includeFiltered {
-                qb.where(SQLFragments.shownChat())
+            if let shown = scope.shownPredicate() {
+                qb.where(shown)
             }
 
             if sinceApple != nil || candidateWidth != nil {
@@ -367,10 +368,10 @@ enum ListChatsTool {
             }
         }
 
-        let totals = cursor == nil ? try getTotals(db: db, includeFiltered: includeFiltered) : nil
-        let filteredHidden = (cursor == nil && !includeFiltered)
-            ? try getFilteredHidden(db: db, sinceApple: sinceApple)
-            : nil
+        let totals = cursor == nil ? try getTotals(db: db, scope: scope) : nil
+        let filteredHidden = try scope.filteredHidden(firstPage: cursor == nil) {
+            try getFilteredHidden(db: db, sinceApple: sinceApple)
+        }
 
         let nextCursor: String?
         if hasMore, let last = chatRows.last {
@@ -419,8 +420,8 @@ enum ListChatsTool {
     }
 
     /// Get total counts
-    private static func getTotals(db: Database, includeFiltered: Bool) throws -> (total: Int, groups: Int, dms: Int) {
-        let filter = includeFiltered ? "" : "WHERE \(SQLFragments.shownChat())"
+    private static func getTotals(db: Database, scope: ChatScope) throws -> (total: Int, groups: Int, dms: Int) {
+        let filter = scope.shownPredicate().map { "WHERE \($0)" } ?? ""
         let sql = """
             SELECT
                 COUNT(*) as total,

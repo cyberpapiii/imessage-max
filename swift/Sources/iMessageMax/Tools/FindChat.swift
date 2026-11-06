@@ -131,14 +131,15 @@ enum FindChatTool {
         // hidden chats.
         var results: [ChatResult] = []
         var hiddenMatches: Set<Int64> = []
-        let shown = params.includeFiltered ? "1" : SQLFragments.shownChat()
+        let scope = ChatScope(named: nil, includeFiltered: params.includeFiltered)
+        let shown = scope.shownPredicate() ?? "1"
 
         if let participants = params.participants, !participants.isEmpty {
             // A participant who resolves to nobody matches no chat.
             let match = await ParticipantChats.resolve(participants, resolver: resolver)
             let chats = try match.chats(
                 db: database,
-                chatPredicate: params.includeFiltered ? nil : SQLFragments.shownChat(),
+                chatPredicate: scope.shownPredicate(),
                 isGroup: params.isGroup,
                 order: .exactSizeFirst,
                 limit: params.limit
@@ -149,7 +150,7 @@ enum FindChatTool {
                 resolver: resolver,
                 matchType: "participants"
             ))
-            if !params.includeFiltered {
+            if scope.hidesChats {
                 hiddenMatches.formUnion(try match.chats(
                     db: database,
                     chatPredicate: SQLFragments.hiddenChat(),
@@ -175,7 +176,7 @@ enum FindChatTool {
                 resolver: resolver,
                 matchType: "name"
             ))
-            if !params.includeFiltered {
+            if scope.hidesChats {
                 hiddenMatches.formUnion(try await findChatsByName(
                     database: database,
                     name: name,
@@ -201,7 +202,7 @@ enum FindChatTool {
                 resolver: resolver,
                 matchType: "content"
             ))
-            if !params.includeFiltered {
+            if scope.hidesChats {
                 hiddenMatches.formUnion(try findChatsByContent(
                     database: database,
                     content: containsRecent,
@@ -217,7 +218,7 @@ enum FindChatTool {
         let response = Response(
             chats: results,
             more: false,
-            filteredHidden: params.includeFiltered ? nil : hiddenMatches.count
+            filteredHidden: scope.filteredHidden { hiddenMatches.count }
         )
 
         return [.plainText(try FormatUtils.encodeJSON(response))]

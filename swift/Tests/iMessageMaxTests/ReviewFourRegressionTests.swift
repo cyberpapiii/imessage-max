@@ -203,4 +203,30 @@ final class ReviewFourRegressionTests: XCTestCase {
         )
         XCTAssertEqual(image.metadata.chat?.id, "chat3")
     }
+
+    // MARK: - filtered_hidden through ChatScope keeps each tool's shape
+
+    func testFilteredHiddenKeepsEachToolsShape() async throws {
+        let f = try indexedFixture()
+        let db = f.database()
+
+        let since = try await callTool("get_messages_since", ["since_rowid": 0], database: db)
+        XCTAssertEqual(since["filtered_hidden"] as? Int, 1)
+        // get_messages_since always carries the field.
+        let sinceAll = try await callTool(
+            "get_messages_since", ["since_rowid": 0, "include_filtered": true], database: db
+        )
+        XCTAssertEqual(sinceAll["filtered_hidden"] as? Int, 0)
+        XCTAssertEqual(try ids(sinceAll).count, 40)
+
+        let find = try await callTool("find_chat", ["contains_recent": "zebra"], database: db)
+        XCTAssertEqual(find["filtered_hidden"] as? Int, 1)
+        let findAll = try await callTool("find_chat", ["contains_recent": "zebra", "include_filtered": true], database: db)
+        XCTAssertNil(findAll["filtered_hidden"])
+
+        let chats = try await callTool("list_chats", [:], database: db)
+        XCTAssertEqual(chats["filtered_hidden"] as? Int, 1)
+        let chatsAll = try await callTool("list_chats", ["include_filtered": true], database: db)
+        XCTAssertNil(chatsAll["filtered_hidden"])
+    }
 }
