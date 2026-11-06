@@ -127,6 +127,8 @@ enum GetActiveConversations {
         let windowStartApple = AppleTime.fromDate(windowStart)
 
         let conversational = SQLFragments.conversational()
+        // No include_filtered: hidden chats are always left out.
+        let scope = ChatScope(named: nil, includeFiltered: false)
         let query = QueryBuilder()
             .select(
                 "c.ROWID as chat_id",
@@ -145,7 +147,7 @@ enum GetActiveConversations {
             .join("message m ON cmj.message_id = m.ROWID")
             .where("m.date >= ?", windowStartApple)
             .where(SQLFragments.notReaction())
-            .where(SQLFragments.shownChat())
+            .where(scope.shownPredicate() ?? "1")
             .groupBy("c.ROWID")
             // An exchange needs a message each way, so the qualifying count
             // is the smaller side; minExchanges is at least 1.
