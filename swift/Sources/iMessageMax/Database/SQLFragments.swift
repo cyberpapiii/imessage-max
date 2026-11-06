@@ -58,11 +58,6 @@ enum SQLFragments {
             """
     }
 
-    /// The message is joined to the chat bound as `?`, home chat or not.
-    static func messageInChat(_ messageId: String = "m.ROWID") -> String {
-        "EXISTS (SELECT 1 FROM chat_message_join icmj WHERE icmj.message_id = \(messageId) AND icmj.chat_id = ?)"
-    }
-
     /// Received messages not yet read. A tapback is never unread.
     static func unreadInbound(_ alias: String = "m") -> String {
         "(\(alias).is_read = 0 AND \(alias).is_from_me = 0 AND \(notReaction(alias)))"

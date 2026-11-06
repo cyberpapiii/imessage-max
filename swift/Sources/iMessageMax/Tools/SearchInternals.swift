@@ -28,12 +28,10 @@ extension SearchTool {
     ) {
         switch chats {
         case .listed(let scope):
+            scope.read(builder)
             builder
-                .from("message m")
-                .join("chat c ON c.ROWID = \(scope.listedChat())")
                 .leftJoin(MessageRecord.senderJoin)
                 .where(SQLFragments.notReaction())
-            scope.narrow(builder)
         case .hiddenMembership(let inChat):
             // CROSS JOIN pins SQLite's loop order: visit the chats the
             // predicate selects, then only their messages by rowid.

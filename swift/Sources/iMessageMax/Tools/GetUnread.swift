@@ -198,37 +198,20 @@ final class GetUnread {
 
     // MARK: - Private Methods
 
-    /// Unread inbound messages, one row per chat each is in, narrowed by
-    /// the tool's filters. `chats` is the shown/hidden chat predicate, nil for all.
-    private static func unread(
-        _ query: QueryBuilder,
-        chatId: Int64?,
-        sinceApple: Int64?,
-        chats: String?
-    ) -> QueryBuilder {
-        query
-            .from("message m")
-            .join("chat_message_join cmj ON m.ROWID = cmj.message_id")
-            .join("chat c ON cmj.chat_id = c.ROWID")
-            .where(SQLFragments.unreadInbound())
-        if let chats {
-            query.where(chats)
-        }
-        if let sinceApple {
-            query.where("m.date >= ?", sinceApple)
-        }
-        if let chatId {
-            query.where("cmj.chat_id = ?", chatId)
-        }
-        return query
-    }
-
+    /// Unread inbound messages, one row per message under the chat the
+    /// scope lists it in (`c`), so every format and count places a message
+    /// in two chats once, in the same chat.
     private static func unread(
         _ query: QueryBuilder,
         scope: ChatScope,
         sinceApple: Int64?
     ) -> QueryBuilder {
-        unread(query, chatId: scope.named, sinceApple: sinceApple, chats: scope.shownPredicate())
+        scope.read(query)
+        query.where(SQLFragments.unreadInbound())
+        if let sinceApple {
+            query.where("m.date >= ?", sinceApple)
+        }
+        return query
     }
 
     private func getUnreadMessages(
@@ -237,18 +220,14 @@ final class GetUnread {
         limit: Int,
         cursor: TimelineCursor?
     ) async throws -> UnreadMessagesResponse {
-        // One row per message, under the chat the scope lists it in, so the
-        // (date, ROWID) cursor never meets the same message twice.
-        let query = QueryBuilder()
-            .selectMessages(try database.schema(), MessageInChat.chatColumns)
-            .from("message m")
-            .join("chat c ON c.ROWID = \(scope.listedChat())")
-            .joinMessageHandles()
-            .where(SQLFragments.unreadInbound())
-        scope.narrow(query)
-        if let sinceApple {
-            query.where("m.date >= ?", sinceApple)
-        }
+        // One row per message, so the (date, ROWID) cursor never meets the
+        // same message twice.
+        let query = Self.unread(
+            QueryBuilder().selectMessages(try database.schema(), MessageInChat.chatColumns),
+            scope: scope,
+            sinceApple: sinceApple
+        )
+        .joinMessageHandles()
         if let after = cursor?.predicate(descending: false) {
             query.where(after.sql, params: after.params)
         }
@@ -304,7 +283,7 @@ final class GetUnread {
     ) async throws -> UnreadSummaryResponse {
         let (sql, params) = Self.unread(
             QueryBuilder().select(
-                "cmj.chat_id",
+                "c.ROWID",
                 "c.display_name as chat_display_name",
                 "COUNT(*) as unread_count",
                 "MIN(m.date) as oldest_unread_date",
@@ -315,8 +294,8 @@ final class GetUnread {
             scope: scope,
             sinceApple: sinceApple
         )
-        .groupBy("cmj.chat_id")
-        .orderBy("unread_count DESC", "newest_unread_date DESC", "cmj.chat_id DESC")
+        .groupBy("c.ROWID")
+        .orderBy("unread_count DESC", "newest_unread_date DESC", "c.ROWID DESC")
         .limit(limit + 1)
         .build()
 
@@ -377,8 +356,8 @@ final class GetUnread {
     ) throws -> (totalUnread: Int, chatsWithUnread: Int) {
         let (sql, params) = Self.unread(
             QueryBuilder().select(
-                "COUNT(DISTINCT m.ROWID) as total_unread",
-                "COUNT(DISTINCT cmj.chat_id) as chats_with_unread"
+                "COUNT(*) as total_unread",
+                "COUNT(DISTINCT c.ROWID) as chats_with_unread"
             ),
             scope: scope,
             sinceApple: sinceApple
@@ -390,13 +369,20 @@ final class GetUnread {
         return rows.first ?? (0, 0)
     }
 
+    /// Hidden chats holding an unread message, by membership, as search
+    /// counts the hidden chats it leaves out.
     private func getFilteredHiddenCount(sinceApple: Int64?) throws -> Int {
-        let (sql, params) = Self.unread(
-            QueryBuilder().select("COUNT(DISTINCT cmj.chat_id)"),
-            chatId: nil,
-            sinceApple: sinceApple,
-            chats: SQLFragments.hiddenChat()
-        ).build()
+        let query = QueryBuilder()
+            .select("COUNT(DISTINCT cmj.chat_id)")
+            .from("message m")
+            .join("chat_message_join cmj ON m.ROWID = cmj.message_id")
+            .join("chat c ON cmj.chat_id = c.ROWID")
+            .where(SQLFragments.unreadInbound())
+            .where(SQLFragments.hiddenChat())
+        if let sinceApple {
+            query.where("m.date >= ?", sinceApple)
+        }
+        let (sql, params) = query.build()
         let rows: [Int] = try database.query(sql, params: params) { row in
             Int(row.int(0))
         }
