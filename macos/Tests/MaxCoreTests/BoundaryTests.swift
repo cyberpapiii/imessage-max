@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import MaxTestSupport
 
 @testable import MaxCore
 

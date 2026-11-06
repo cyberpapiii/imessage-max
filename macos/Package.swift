@@ -17,8 +17,9 @@ let package = Package(
         .target(name: "MaxCore", dependencies: [contract]),
         .target(name: "MaxBrand"),
         .executableTarget(name: "iMessageMaxMenu", dependencies: ["MaxCore", "MaxBrand", contract]),
-        .testTarget(name: "MaxCoreTests", dependencies: ["MaxCore", contract]),
-        .testTarget(name: "CompanionTests", dependencies: ["iMessageMaxMenu", "MaxCore", "MaxBrand", contract])
+        .target(name: "MaxTestSupport", dependencies: [contract], path: "Tests/MaxTestSupport"),
+        .testTarget(name: "MaxCoreTests", dependencies: ["MaxCore", "MaxTestSupport", contract]),
+        .testTarget(name: "CompanionTests", dependencies: ["iMessageMaxMenu", "MaxCore", "MaxBrand", "MaxTestSupport", contract])
     ],
     swiftLanguageModes: [.v6]
 )

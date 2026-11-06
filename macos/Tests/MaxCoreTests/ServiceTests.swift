@@ -1,6 +1,7 @@
 import Foundation
 import IMessageMaxContract
 import Testing
+import MaxTestSupport
 
 @testable import MaxCore
 

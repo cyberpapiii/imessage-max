@@ -1,11 +1,9 @@
-// Shared by MaxCoreTests and CompanionTests: CompanionTests/DiagnosisFixture.swift
-// is a symlink to this file.
 import Foundation
 import IMessageMaxContract
 
 /// A decoded `diagnose` reply. `automation` is the state of both
 /// perm_automation and send_text_dm.
-func diagnosis(database: Bool = true, contacts: Bool = true, automation: String = "supported")
+public func diagnosis(database: Bool = true, contacts: Bool = true, automation: String = "supported")
   throws -> DiagnoseResult
 {
   let data = Data(

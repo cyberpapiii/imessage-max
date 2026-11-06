@@ -3,6 +3,7 @@ import IMessageMaxContract
 import MaxBrand
 import MaxCore
 import Testing
+import MaxTestSupport
 
 @testable import iMessageMaxMenu
 
