@@ -1,5 +1,6 @@
 import Foundation
 import MCP
+import Synchronization
 
 enum ToolCallDispatch {
 
@@ -26,7 +27,15 @@ enum ToolCallDispatch {
         }
     }
 
-    static func execute(name: String, arguments: [String: Value]?, lane: Lane, catalog: ToolCatalog) async -> Execution {
+    /// The tools/call requests this process has received from clients other
+    /// than the companion. diagnose reports it as `assistant_calls`, which
+    /// turns the companion's Try it step green.
+    static let assistantCalls = Mutex(0)
+
+    static func execute(
+        name: String, arguments: [String: Value]?, lane: Lane, catalog: ToolCatalog, fromCompanion: Bool = false
+    ) async -> Execution {
+        if !fromCompanion { assistantCalls.withLock { $0 += 1 } }
         let start = ContinuousClock.now
         let (execution, outcome) = await run(name, catalog.handler(named: name), arguments: arguments)
         let elapsed = ContinuousClock.now - start

@@ -30,6 +30,9 @@ public enum ServiceDefaults {
   public static let fallbackSocketName = "imessage-max.sock"
   /// The companion app's bundle identifier, also its log subsystem.
   public static let companionBundleID = "com.cyberpapiii.imessage-max.menubar"
+  /// The clientInfo name on the companion's diagnose requests. The helper
+  /// leaves those out of `DiagnoseResult.assistantCalls`.
+  public static let companionClientName = "iMessage Max Menu"
   /// Hosts that keep the listener local. Binding anywhere else needs
   /// `--allow-external-bind`, and the setup route is never offered there.
   public static let loopbackHosts: Set<String> = ["127.0.0.1", "::1", "localhost"]

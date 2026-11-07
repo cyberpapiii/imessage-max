@@ -66,19 +66,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         designWindow = design.showWindow(hosting, model: model)
         return
       }
-    } else {
+    }
+    // `make install` and uninstall scripts pass these. Launch arguments
+    // reach only a new launch of the app.
+    let arguments = CommandLine.arguments
+    let scripted = arguments.contains("--register-helper") || arguments.contains("--unregister-helper")
+    if !design.isActive {
       model.startMonitoring()
-      // `make install` and uninstall scripts pass these. Launch arguments
-      // reach only a new launch of the app.
-      let arguments = CommandLine.arguments
       if arguments.contains("--register-helper") { model.registerHelper() }
       if arguments.contains("--unregister-helper") { model.unregisterHelperAndQuit() }
     }
     popover.contentViewController = hosting
-    if !milestones.reached(.introducedMenuBar) {
-      milestones.mark(.introducedMenuBar)
+    // A person who opens the app sees the panel, on the first unfinished
+    // step. A launch at login stays quiet.
+    if design.isActive || !(scripted || Self.launchedAtLogin) { showPanelOnceItemIsPlaced() }
+  }
+
+  /// A new status item starts off screen and slides into the menu bar, and a
+  /// popover shown before it lands opens in the wrong place or not at all.
+  /// Waits up to 3 seconds for the item to sit at the top of a screen.
+  private func showPanelOnceItemIsPlaced(tries: Int = 30) {
+    let frame = statusItem?.button?.window?.frame ?? .zero
+    let placed =
+      frame.height > 0
+      && NSScreen.screens.contains { $0.frame.contains(frame) && $0.frame.maxY == frame.maxY }
+    guard tries > 0, !placed else {
       showPanel()
+      return
     }
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+      self.showPanelOnceItemIsPlaced(tries: tries - 1)
+    }
+  }
+
+  private static var launchedAtLogin: Bool {
+    let event = NSAppleEventManager.shared().currentAppleEvent
+    return event?.eventID == kAEOpenApplication
+      && event?.paramDescriptor(forKeyword: keyAEPropData)?.enumCodeValue
+        == keyAELaunchedAsLogInItem
   }
 
   func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool
@@ -127,7 +152,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         return handled ? nil : event
       }
     }
-    Task { await model.refresh() }
+    Task { await model.panelOpened() }
   }
 
   func popoverDidClose(_ notification: Notification) {

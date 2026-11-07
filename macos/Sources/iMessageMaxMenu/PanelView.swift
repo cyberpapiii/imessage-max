@@ -51,7 +51,7 @@ struct PanelView: View {
     .animation(motion[.step], value: model.section)
     .animation(motion[.swap], value: model.notice)
     .animation(motion[.glide], value: model.problem)
-    .animation(motion[.glide], value: model.diagnosis?.readiness)
+    .animation(motion[.glide], value: model.state.phase)
     .animation(motion[.swap], value: model.busy)
     .onChange(of: model.notice) {
       guard let notice = model.notice else { return }
@@ -80,9 +80,8 @@ struct PanelView: View {
         }
         .transition(.opacity)
       }
-      if model.diagnosis != nil {
-        if !model.ready { SetupStep(model: model).transition(.opacity) }
-        status
+      if let firstRun = state.firstRun {
+        StepList(model: model, firstRun: firstRun).transition(.opacity)
       }
       if state.primary != nil {
         Button(action: model.runPrimary) {
@@ -97,9 +96,7 @@ struct PanelView: View {
         .accessibilityIdentifier("primaryAction")
       }
       VStack(spacing: Space.hairline) {
-        if !model.ready {
-          NavRow(title: "Connection", glyph: .connection) { model.section = .connection }
-        }
+        NavRow(title: "Connection", glyph: .connection) { model.section = .connection }
         NavRow(title: "Details & help", glyph: .details) { model.section = .details }
         NavRow(title: "Preferences", glyph: .preferences) { model.section = .preferences }
       }
@@ -131,32 +128,6 @@ struct PanelView: View {
         Text(state.subtitle).font(.maxLine).foregroundStyle(Design.muted)
           .fixedSize(horizontal: false, vertical: true)
       }
-    }
-  }
-
-  private var status: some View {
-    let diagnosis = model.diagnosis
-    let sending = diagnosis?[.permAutomation]
-    return Card {
-      VStack(spacing: Space.hairline) {
-        StatusLine(
-          glyph: .messages, title: "Messages",
-          detail: diagnosis?.database.accessible == true ? "Ready" : "Needs access",
-          good: diagnosis?.database.accessible == true,
-          attention: diagnosis?.database.accessible == false)
-        StatusLine(
-          glyph: .contacts, title: "Contact names",
-          detail: diagnosis?.namesReady == true
-            ? (diagnosis?.contacts.status == .limited ? "Some names" : "Ready")
-            : (diagnosis?.contacts.authorized == true ? "Needs a check" : "Needs access"),
-          good: diagnosis?.namesReady == true, attention: diagnosis?.namesReady == false)
-        StatusLine(
-          glyph: .sending, title: "Sending",
-          detail: sending?.isSupported == true
-            ? "Ready" : (sending?.isPermissionGated == true ? "Needs access" : "Not checked"),
-          good: sending?.isSupported == true, attention: sending?.isPermissionGated == true)
-      }
-      .padding(.vertical, -Space.rowGap)
     }
   }
 

@@ -48,10 +48,14 @@ public struct DiagnoseResult: Codable, Sendable, Equatable {
   /// The keys are `CapabilityKey` raw values. The map is keyed by String so a
   /// reader still decodes keys that a newer server adds.
   public let capabilities: [String: Capability]
+  /// The tools/call requests this helper process has received from clients
+  /// other than the companion. The companion's Try it step turns green once it
+  /// is above zero. nil from a helper older than the field.
+  public let assistantCalls: Int?
 
   public init(
     version: String, processID: Int32, status: DiagnoseStatus, database: DatabaseAccess,
-    contacts: ContactsAccess, capabilities: [String: Capability]
+    contacts: ContactsAccess, capabilities: [String: Capability], assistantCalls: Int? = nil
   ) {
     self.version = version
     self.processID = processID
@@ -59,6 +63,7 @@ public struct DiagnoseResult: Codable, Sendable, Equatable {
     self.database = database
     self.contacts = contacts
     self.capabilities = capabilities
+    self.assistantCalls = assistantCalls
   }
 
   enum CodingKeys: String, CodingKey {
@@ -68,6 +73,7 @@ public struct DiagnoseResult: Codable, Sendable, Equatable {
     case database
     case contacts
     case capabilities
+    case assistantCalls = "assistant_calls"
   }
 
   public subscript(key: CapabilityKey) -> Capability? { capabilities[key.rawValue] }
