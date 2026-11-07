@@ -121,7 +121,10 @@ jobs:
         run: swift build --build-tests
 
       - name: Run tests
-        run: swift test --skip-build
+        run: |
+          swift test --skip-build --no-parallel 2>&1 | grep -E "started|passed|failed|signal|issue" || true
+          for f in ~/Library/Logs/DiagnosticReports/*.ips; do echo "== $f"; head -c 12000 "$f"; done
+          exit 1
 
       # The wire contract both packages above build against.
       - name: Contract tests
