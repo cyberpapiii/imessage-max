@@ -168,6 +168,8 @@ Open iMessage Max from Applications. It adds a speech bubble to the menu bar and
 
 The app starts a background helper that serves your assistants. The helper keeps running after you quit the app, and starts again at login.
 
+For contact names, choose Show names. The app asks macOS for Contacts on the helper's behalf, because macOS charges the helper's grants to the app, and then restarts the helper. A bare `imessage-max` from a source build cannot hold a Contacts grant of its own. Under launchd or an MCP client it still reads messages, and shows phone numbers in place of names. `--contacts-policy request|skip`, or `IMESSAGE_MAX_CONTACTS_POLICY`, overrides its terminal detection.
+
 ### 2. Connect your assistant
 
 The app's Connection page copies the settings for your assistant. Each assistant reaches the helper in one of three ways:
@@ -405,7 +407,9 @@ diagnose()  # Returns: database status, contacts count, permissions, capabilitie
 
 `database.features` lists which optional `chat.db` columns exist on this Mac, keyed `table.column` (for example `message.date_edited`). When one is `false`, the tools that read it degrade instead of failing: no `reply_to` or `reply_count` without `message.thread_originator_guid`, no `edited` without `message.date_edited`, no custom-emoji reaction text without `message.associated_message_emoji`.
 
-`contacts.status` is one of `authorized`, `limited`, `denied`, `restricted`, `not_determined`, `not_requested_headless`, or `<status>_load_failed`. A headless process that skipped the prompt reports `not_requested_headless` and the fix names `--request-contacts-access`.
+`contacts.status` is one of `authorized`, `limited`, `denied`, `restricted`, `not_determined`, `not_requested_headless`, or `<status>_load_failed`. A headless process that skipped the prompt reports `not_requested_headless`.
+
+Every `fix` names a step in the app for the helper inside `iMessage Max.app`, such as "Open iMessage Max and choose Read messages". The steps are Allow in the background, Read messages, Show names, Send messages, Connect an assistant, and Try it. For a bare executable, a fix names the System Settings switch to turn on. No fix names a terminal command.
 
 ## Release checks
 
@@ -461,10 +465,7 @@ Examples:
 
 ### Contacts showing as phone numbers
 
-Run `diagnose` and read `contacts.status`. If it is `denied` or `not_determined`:
-- Add the `imessage-max` binary to System Settings → Privacy & Security → Contacts
-
-If `diagnose` reports `contacts.status: "not_requested_headless"`, run `imessage-max --request-contacts-access` from a terminal. Names refresh within 30 seconds of a Contacts change. The server drops them as soon as access is revoked, and no restart is needed.
+Run `diagnose` and read `contacts.status`. If it is `denied`, `not_determined` or `not_requested_headless`, open iMessage Max and choose Show names. If it is `denied`, also turn on iMessage Max in System Settings → Privacy & Security → Contacts. A bare `imessage-max` executable cannot hold a Contacts grant of its own, so use the helper inside the app. Names refresh within 30 seconds of a Contacts change. The server drops them as soon as access is revoked, and no restart is needed.
 
 ### "Cannot read the iMessage database" / `permission_denied`
 
@@ -473,8 +474,9 @@ the helper inside `iMessage Max.app`, macOS charges the access to the app,
 so turn on iMessage Max. For a bare `imessage-max` launchd service, that
 process is the binary itself. Stdio clients reach the helper through the
 bridge, so they need no grant of their own. Only `--direct` makes the app
-that spawns the binary need it. Run `diagnose`. Its
-`database.fix` field names the executable and the steps:
+that spawns the binary need it. Run `diagnose`. For the helper inside the
+app, its `database.fix` field reads "Open iMessage Max and choose Read
+messages". For a bare executable, it names the executable and steps 1 to 3:
 
 1. System Settings → Privacy & Security → Full Disk Access → add that
    executable (or its launching app).
@@ -488,7 +490,7 @@ that spawns the binary need it. Run `diagnose`. Its
    from its menu bar app, or run `cd swift && make restart`, which runs
    `launchctl kickstart -k`. A restart within 10 seconds of the last launch
    waits out launchd's throttle.
-4. To narrow it down, run `sqlite3 -readonly ~/Library/Messages/chat.db 'pragma quick_check;'` from a terminal.
+4. To narrow it down yourself, run `sqlite3 -readonly ~/Library/Messages/chat.db 'pragma quick_check;'` from a terminal.
    `ok` means your terminal has access and the server process does not.
    `unable to open database file` means the grant is missing for your user.
 

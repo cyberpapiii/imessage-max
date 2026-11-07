@@ -113,12 +113,9 @@ enum SendError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .automationPermissionRequired:
-            return """
-                iMessage Max needs Automation permission for Messages.app. \
-                When macOS asks, click 'OK' to let iMessage Max send messages. \
-                If you missed the prompt, open System Settings, go to Privacy & Security, \
-                then Automation, and enable Messages.app for your terminal or application.
-                """
+            return "iMessage Max needs Automation permission for Messages.app. When macOS asks, "
+                + "click OK to let iMessage Max send messages. If you missed the prompt: "
+                + DiagnoseTool.automationFix(holder: .current)
         case .messagesAppUnavailable:
             return "Messages.app is not responding. Open Messages.app and try again."
         case .recipientNotFound(let recipient):
