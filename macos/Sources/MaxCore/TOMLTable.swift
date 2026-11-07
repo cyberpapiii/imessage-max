@@ -25,7 +25,7 @@ public struct TOMLTable: Sendable {
   public func upsert(
     _ text: String?, values: [(key: String, value: String)], removing: Set<String> = [],
     dropping subtables: Set<String> = []
-  ) throws(TOMLLayoutError) -> String {
+  ) throws -> String {
     let text = text ?? ""
     let document = Document(text)
     let newline = text.contains("\r\n") ? "\r\n" : "\n"
