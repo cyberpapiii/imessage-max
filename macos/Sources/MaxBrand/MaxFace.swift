@@ -42,7 +42,7 @@ public struct MaxPose: Equatable, Sendable {
 
   private static let none: (x: CGFloat, y: CGFloat, width: CGFloat, height: CGFloat) = (12, 11, 0, 0)
 
-  public static let rest = MaxPose(left: none, right: none, lean: -3)
+  public static let rest = MaxPose(left: none, right: none)
   public static let needsYou = MaxPose(left: none, right: none, lean: -5, badge: 1)
   public static let working = MaxPose(
     left: (8.2, 11, 2.7, 2.7), right: (15.8, 11, 2.7, 2.7), middle: 2.7)

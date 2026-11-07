@@ -20,18 +20,37 @@ public enum MessageMark {
     return path.copy(using: &transform)!
   }
 
+  /// One outline, so the tail leaves and rejoins the circle along its tangent
+  /// on both sides instead of meeting it at a corner.
   public static func round(in rect: CGRect) -> CGPath {
-    let wedge = CGMutablePath()
-    wedge.addLines(between: [
-      CGPoint(x: 3.6, y: 13.2), CGPoint(x: 11.4, y: 19.0), CGPoint(x: 3.0, y: 21.6),
-    ])
-    wedge.closeSubpath()
-    let path = filled(
-      CGPath(ellipseIn: CGRect(x: 2.5, y: 1.5, width: 19, height: 19), transform: nil)
-        .union(softened(wedge, by: 1.6)), by: 1.0)
+    let centre = CGPoint(x: 12, y: 11)
+    let radius: CGFloat = 9.5
+    func onCircle(_ degrees: CGFloat) -> (point: CGPoint, heading: CGPoint) {
+      let angle = degrees * .pi / 180
+      return (
+        CGPoint(x: centre.x - radius * cos(angle), y: centre.y + radius * sin(angle)),
+        CGPoint(x: sin(angle), y: cos(angle))
+      )
+    }
+    let outer = onCircle(32)
+    let inner = onCircle(70)
+    let tip = CGPoint(x: 2.6, y: 21.7)
+    let path = CGMutablePath()
+    path.move(to: inner.point)
+    path.addArc(
+      center: centre, radius: radius, startAngle: .pi * (180 - 70) / 180,
+      endAngle: .pi * (180 - 32 - 360) / 180, clockwise: true)
+    path.addCurve(
+      to: tip,
+      control1: CGPoint(x: outer.point.x + outer.heading.x * 2.4, y: outer.point.y + outer.heading.y * 2.4),
+      control2: CGPoint(x: tip.x + 0.8, y: tip.y - 0.8))
+    path.addCurve(
+      to: inner.point, control1: CGPoint(x: tip.x + 2.6, y: tip.y - 0.39),
+      control2: CGPoint(x: inner.point.x - inner.heading.x, y: inner.point.y - inner.heading.y))
+    path.closeSubpath()
     var transform = CGAffineTransform(
       a: rect.width / 24, b: 0, c: 0, d: rect.height / 24, tx: rect.minX, ty: rect.minY)
-    return path.copy(using: &transform)!
+    return softened(path, by: 0.5).copy(using: &transform)!
   }
 
   public static func softened(_ path: CGPath, by radius: CGFloat) -> CGPath {
