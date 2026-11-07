@@ -94,7 +94,6 @@ final class DiagnoseToolTests: XCTestCase {
         XCTAssertTrue(fix.contains("Full Disk Access"), fix)
         XCTAssertTrue(fix.contains("/opt/bin/imessage-max"), fix)
         XCTAssertTrue(fix.contains("toggle it off and on"), fix)
-        XCTAssertTrue(fix.contains("pragma quick_check"), fix)
         XCTAssertTrue(fix.contains("newly launched"), fix)
         XCTAssertEqual(result.capabilities["perm_full_disk"]?.fix, fix,
                        "perm_full_disk.fix must carry the same remediation")
@@ -147,16 +146,17 @@ final class DiagnoseToolTests: XCTestCase {
         )
 
         let fullDisk = try XCTUnwrap(denied.database.fix)
+        XCTAssertTrue(fullDisk.hasPrefix("Open iMessage Max and choose Read messages."), fullDisk)
         XCTAssertTrue(fullDisk.contains("turn on iMessage Max"), fullDisk)
-        XCTAssertTrue(fullDisk.contains("Restart iMessage Max from its menu bar app"), fullDisk)
         XCTAssertEqual(denied.contacts.status, "denied")
         let contactsDenied = try XCTUnwrap(denied.contacts.fix)
+        XCTAssertTrue(contactsDenied.hasPrefix("Open iMessage Max and choose Show names."), contactsDenied)
         XCTAssertTrue(contactsDenied.contains("turn on iMessage Max"), contactsDenied)
         let automation = try XCTUnwrap(denied.capabilities["perm_automation"]?.fix)
-        XCTAssertTrue(automation.contains("iMessage Max"), automation)
+        XCTAssertTrue(automation.hasPrefix("Open iMessage Max and choose Send messages."), automation)
         XCTAssertEqual(notRequested.contacts.status, "not_requested_headless")
         let contactsHeadless = try XCTUnwrap(notRequested.contacts.fix)
-        XCTAssertTrue(contactsHeadless.contains("Open iMessage Max and allow Contacts"), contactsHeadless)
+        XCTAssertTrue(contactsHeadless.hasPrefix("Open iMessage Max and choose Show names."), contactsHeadless)
         XCTAssertEqual(noUsageDescription.contacts.status, "missing_usage_description")
         let usage = try XCTUnwrap(noUsageDescription.contacts.fix)
 
@@ -166,6 +166,44 @@ final class DiagnoseToolTests: XCTestCase {
                 "--request-contacts-access", "swift build", "imessage-max",
             ] {
                 XCTAssertFalse(fix.contains(developerWord), "in-app fix names \(developerWord): \(fix)")
+            }
+        }
+    }
+
+    /// Someone who never opens Terminal must be able to follow every fix, for
+    /// the helper inside the app and for a bare executable alike.
+    func testNoFixNamesATerminalCommand() async throws {
+        let databases: [DatabaseProbe] = [
+            DiagnoseToolTests.dbDenied, { (false, .databaseNotFound) }, DiagnoseToolTests.dbAccessible,
+        ]
+        let contactStates: [(PermissionStatus, Bool)] = [(.denied, true), (.notDetermined, true), (.notDetermined, false)]
+        var fixes: [String] = []
+        for holder in [DiagnoseToolTests.inApp, DiagnoseToolTests.bareExecutable] {
+            for database in databases {
+                for (contacts, usageDescription) in contactStates {
+                    let resolver = ContactResolver(
+                        source: ContactResolver.Source(
+                            authorization: { (false, contacts) }, load: { [:] }, requestAccess: { false }),
+                        refreshInterval: 30,
+                        now: { 0 }
+                    )
+                    await resolver.requestAccessIfAllowed(policy: .skipIfNotDetermined)
+                    let result = try await DiagnoseTool.execute(
+                        resolver: resolver,
+                        dbProbe: database,
+                        automationProbe: { (false, .denied) },
+                        usageDescriptionProbe: { usageDescription },
+                        holder: holder
+                    )
+                    fixes += [result.database.fix, result.contacts.fix].compactMap { $0 }
+                    fixes += result.capabilities.values.compactMap(\.fix)
+                }
+            }
+        }
+        XCTAssertGreaterThan(Set(fixes).count, 10)
+        for fix in Set(fixes) {
+            for word in ["make", "swift build", "terminal", "--request-"] {
+                XCTAssertFalse(fix.lowercased().contains(word), "fix names \(word): \(fix)")
             }
         }
     }
@@ -220,7 +258,7 @@ final class DiagnoseToolTests: XCTestCase {
 
         XCTAssertEqual(result.contacts.status, "not_requested_headless")
         XCTAssertFalse(result.contacts.authorized)
-        XCTAssertTrue(result.contacts.fix?.contains("--request-contacts-access") == true)
+        XCTAssertTrue(result.contacts.fix?.contains("Open iMessage Max and choose Show names.") == true)
         XCTAssertEqual(result.status, "needs_setup")
         XCTAssertEqual(result.capabilities["perm_contacts"]?.state, "permission-gated")
         XCTAssertNotNil(result.capabilities["perm_contacts"]?.fix)
@@ -258,7 +296,7 @@ final class DiagnoseToolTests: XCTestCase {
         )
 
         XCTAssertEqual(result.contacts.status, "missing_usage_description")
-        XCTAssertTrue(result.contacts.fix?.contains("make build") == true)
+        XCTAssertTrue(result.contacts.fix?.contains("Info.plist") == true)
         XCTAssertEqual(result.capabilities["perm_contacts"]?.state, "permission-gated")
     }
 }
