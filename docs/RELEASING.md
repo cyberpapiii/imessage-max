@@ -98,7 +98,8 @@ git tag v2.0.1 && git push --tags
 ```
 
 The workflow runs on the tag push. It fails if the tag does not match
-`Version.swift`. It attaches the DMG and the extension to the GitHub
+`Version.swift`. The build checks and the `dmg` job run side by side, and
+the release job starts only when both pass. It attaches the DMG and the extension to the GitHub
 release, then commits `Casks/imessage-max.rb` to the tap and pushes it.
 The cask reaches the tap only after the release holds the DMG it names.
 Wait for the workflow to finish.

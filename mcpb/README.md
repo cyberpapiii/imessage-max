@@ -14,7 +14,8 @@ no path. When the helper is not running, the extension's first request fails
 with "Open iMessage Max to start it."
 
 The binary is left out of git. The release workflow builds the bundle with
-`scripts/sign-notarize-app.sh`, which notarizes the binary and then calls:
+`scripts/sign-notarize-app.sh`, which calls the command below and then
+notarizes the binary inside the bundle while the app notarizes:
 
 ```bash
 scripts/build-mcpb.sh <signed imessage-max> <output dir>
