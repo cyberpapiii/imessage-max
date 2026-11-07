@@ -26,6 +26,12 @@ struct iMessageMax: AsyncParsableCommand {
     @Option(name: .customLong("token-file"), help: "File holding the bearer token HTTP clients must send. Created with mode 0600 if absent; its folder must already exist and belong to you. An existing file that holds anything but a token is left alone and the server exits. Defaults to ~/\(ServiceDefaults.tokenPath).")
     var tokenFile: String?
 
+    @Option(name: .customLong("socket-path"), help: "Unix socket the helper listens on (with --http) or the stdio bridge connects to (without). Its folder must already exist and belong to you. Defaults to ~/\(ServiceDefaults.socketPath).")
+    var socketPath: String?
+
+    @Flag(name: .long, help: "Serve stdio in this process instead of bridging to the running iMessage Max helper. For development and tests: this process then needs Full Disk Access itself.")
+    var direct = false
+
     @Option(name: .customLong(ServerOption.contactsPolicy.rawValue), help: "What to do when Contacts authorization is not yet determined: auto (prompt only if stdin is a terminal), request, or skip. With auto, the server honours IMESSAGE_MAX_CONTACTS_POLICY=request|skip.")
     var contactsPolicy: ContactsAccessPolicy.Override = .auto
 
@@ -38,6 +44,12 @@ struct iMessageMax: AsyncParsableCommand {
     func validate() throws {
         if http, let message = HostBindingPolicy.validationError(host: host, allowExternalBind: allowExternalBind) {
             throw ValidationError(message)
+        }
+        if http && direct {
+            throw ValidationError("--direct serves stdio; it cannot be combined with --http.")
+        }
+        if direct && socketPath != nil {
+            throw ValidationError("--socket-path has no effect with --direct.")
         }
     }
 
@@ -74,7 +86,17 @@ struct iMessageMax: AsyncParsableCommand {
         }
 
         guard http else {
-            try await ServerStartup.runStdio(contactsPolicy: contactsPolicy)
+            if direct {
+                try await ServerStartup.runStdio(contactsPolicy: contactsPolicy)
+                return
+            }
+            let socket = try resolvedSocketPath()
+            // A departed client must surface as EPIPE, and a parent that
+            // ignores SIGTERM must not make the bridge unkillable.
+            signal(SIGPIPE, SIG_IGN)
+            signal(SIGTERM, SIG_DFL)
+            let outcome = await StdioBridge.run(socket: socket)
+            if outcome.exitCode != 0 { throw ExitCode(outcome.exitCode) }
             return
         }
 
@@ -85,7 +107,18 @@ struct iMessageMax: AsyncParsableCommand {
         let location = tokenFile.map { AccessToken.Location.custom(URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath)) }
             ?? .standard
         let accessToken = try AccessToken.loadOrCreate(location)
-        try await ServerStartup.runHTTP(host: host, port: port, accessToken: accessToken, contactsPolicy: contactsPolicy)
+        try await ServerStartup.runHTTP(
+            host: host, port: port, accessToken: accessToken, contactsPolicy: contactsPolicy,
+            socket: try resolvedSocketPath()
+        )
+    }
+
+    private func resolvedSocketPath() throws -> SocketPath {
+        do {
+            return try SocketPath.resolve(override: socketPath)
+        } catch {
+            throw ValidationError(error.description)
+        }
     }
 }
 

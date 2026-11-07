@@ -139,6 +139,17 @@ headers over HTTP. Legacy clients keep working without changes. No client
 has to migrate, and legacy support stays as long as real clients depend
 on it.
 
+Stdio clients do not run the server themselves. `imessage-max` launched
+with no transport flag is a bridge: it copies stdin and stdout to the running
+helper (`imessage-max --http`) over the Unix socket
+`~/Library/Application Support/iMessage Max/mcp.sock` (mode 0600), so only the
+helper needs Full Disk Access, Contacts and Automation. Each bridge connection
+is its own stdio session, serving both eras. When the helper is not running,
+the bridge answers the first request with "Open iMessage Max to start it." and
+exits. `imessage-max --direct` serves stdio in process, as before, for
+development. If the home folder path is too long for a socket address, both
+sides use `imessage-max.sock` in the per-user temporary folder instead.
+
 The server implements only tools. By design, it has no prompts, resources,
 completion, subscriptions, tasks, or MRTR flows. The official
 conformance suite runs against both eras with the documented baseline in
@@ -498,8 +509,9 @@ If `diagnose` reports `contacts.status: "not_requested_headless"`, run `imessage
 ### "Cannot read the iMessage database" / `permission_denied`
 
 Full Disk Access is missing for the **process that opens chat.db**. For
-the launchd service, that process is the `imessage-max` binary itself. For
-stdio clients, it is the app that spawns the binary. Run `diagnose`. Its
+the launchd service, that process is the `imessage-max` binary itself. Stdio
+clients reach that service through the bridge, so they need no grant of their
+own. Only `--direct` makes the app that spawns the binary need it. Run `diagnose`. Its
 `database.fix` field names the executable and the steps:
 
 1. System Settings → Privacy & Security → Full Disk Access → add that
