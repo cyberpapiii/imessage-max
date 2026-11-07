@@ -23,7 +23,7 @@ final class AppModel {
   /// The clients found on this Mac, in table order. Empty until the first scan.
   private(set) var clients: [ClientRow] = []
   private(set) var clientsScanned = false
-  private(set) var skippedConnect: Bool
+  private(set) var connectSettled: Bool
   private(set) var tried: Bool
   private var pendingOn: Bool?
   @ObservationIgnored private var timer: DispatchSourceTimer?
@@ -62,8 +62,10 @@ final class AppModel {
     self.clientContext = clientContext
     self.changeDeadline = changeDeadline
     self.permissionDeadline = permissionDeadline
-    skippedConnect = milestones.reached(.skippedConnect)
-    tried = milestones.reached(.triedAssistant)
+    let tried = milestones.reached(.triedAssistant)
+    self.tried = tried
+    connectSettled =
+      tried || milestones.reached(.skippedConnect) || milestones.reached(.connectedAssistant)
   }
 
   static func live(milestones: Milestones, clientRoot: URL? = nil) -> AppModel {
@@ -83,8 +85,8 @@ final class AppModel {
 
   var facts: SetupFacts {
     SetupFacts(
-      connected: clients.filter { $0.link == .connected }.map(\.name),
-      skippedConnect: skippedConnect, tried: tried)
+      connected: clientsScanned ? clients.filter { $0.link == .connected }.map(\.name) : nil,
+      connectSettled: connectSettled)
   }
 
   var state: PanelState {
@@ -228,6 +230,7 @@ final class AppModel {
       return row
     }
     clientsScanned = true
+    settleConnectIfConnected()
   }
 
   /// One click: writes the client's config, or opens the client's own
@@ -261,7 +264,16 @@ final class AppModel {
       guard let index = clients.firstIndex(where: { $0.id == id }) else { return }
       clients[index].activity = activity
       if let link { clients[index].link = link }
+      if link == .connected && section == nil { notice = .linked(clients[index].name) }
+      settleConnectIfConnected()
     }
+  }
+
+  /// A connected assistant retires the connect card for good.
+  private func settleConnectIfConnected() {
+    guard !connectSettled, clients.contains(where: { $0.link == .connected }) else { return }
+    connectSettled = true
+    milestones.mark(.connectedAssistant)
   }
 
   func runPrimary() {
@@ -305,10 +317,10 @@ final class AppModel {
     }
   }
 
-  /// Skipping keeps the step in the list, one click from coming back.
-  func skipConnect(_ skip: Bool) {
-    skippedConnect = skip
-    milestones.set(.skippedConnect, skip)
+  /// Not now on the connect card. The Connections page still connects.
+  func dismissConnect() {
+    connectSettled = true
+    milestones.mark(.skippedConnect)
   }
 
   func perform(_ action: ServiceAction) {
@@ -525,7 +537,8 @@ final class AppModel {
     lastCheck = .now
     if !tried, let calls = latest.diagnosis?.assistantCalls, calls > 0 {
       tried = true
-      milestones.set(.triedAssistant, true)
+      connectSettled = true
+      milestones.mark(.triedAssistant)
       if state.phase == .ready {
         celebration += 1
         notice = .tried

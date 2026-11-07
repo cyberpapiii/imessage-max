@@ -176,7 +176,7 @@ final class ModernDispatcherTests: XCTestCase {
     }
 
     /// The companion checks status with diagnose, and those checks must not
-    /// turn its Try it step green.
+    /// count as an assistant using the helper.
     func testOnlyCallsFromOtherClientsCountAsAssistantCalls() async throws {
         registerFakeTool(named: "modern_echo")
         let call = ["name": "modern_echo", "arguments": [:]] as [String: Any]

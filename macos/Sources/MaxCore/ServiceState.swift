@@ -133,12 +133,12 @@ public enum AppLocation: Sendable, Equatable {
 }
 
 extension DiagnoseResult {
-  /// The first of the permission steps this helper still lacks, nil once it
-  /// can read, show names and send. These are the steps diagnose alone judges.
+  /// The first permission this helper still lacks, nil once it can read,
+  /// show names and send. Background activity is on while it answers.
   public var missingGrant: SetupStep? {
-    if !database.accessible { return .readMessages }
-    if !namesReady { return .showNames }
-    if !sendingReady { return .sendMessages }
+    if !database.accessible { return .fullDiskAccess }
+    if !namesReady { return .contacts }
+    if !sendingReady { return .automation }
     return nil
   }
 
@@ -158,7 +158,7 @@ extension DiagnoseResult {
   }
 
   public var needsMessagesForSendingCheck: Bool {
-    missingGrant == .sendMessages
+    missingGrant == .automation
       && self[.permAutomation]?.detail == PermissionStatus.messagesNotRunning.rawValue
   }
 
@@ -167,8 +167,8 @@ extension DiagnoseResult {
   /// checking it means starting a new helper.
   public var grantNeedsRestartToCheck: Bool {
     switch missingGrant {
-    case .readMessages: database.status == .permissionDenied
-    case .showNames:
+    case .fullDiskAccess: database.status == .permissionDenied
+    case .contacts:
       contacts.authorized || [.denied, .restricted].contains(contacts.status)
     default: false
     }

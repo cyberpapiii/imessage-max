@@ -440,6 +440,7 @@ struct Card<Content: View>: View {
 
 struct NavRow: View {
   let title: String
+  var value: String?
   let glyph: Glyph
   let action: () -> Void
   @State private var hovering = false
@@ -450,7 +451,11 @@ struct NavRow: View {
       HStack(spacing: Space.snug) {
         AppGlyph(glyph: glyph).foregroundStyle(Design.muted)
         Text(title).font(.maxLine)
-        Spacer()
+        Spacer(minLength: Space.snug)
+        if let value {
+          Text(value).font(.maxLine).foregroundStyle(Design.muted).lineLimit(1)
+            .contentTransition(.interpolate)
+        }
         ActionGlyph(mark: .chevron, size: 12).foregroundStyle(Design.muted)
       }
       .padding(.horizontal, Space.snug).frame(minHeight: 32)

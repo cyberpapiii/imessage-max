@@ -67,3 +67,11 @@ import Testing
   #expect(ServerOption(flag: "contacts-policy") == nil)
   #expect(SetupPermissionRoute.path == "/setup/permissions")
 }
+
+/// Diagnose fixes and the companion's rows both use these titles, which are
+/// the names System Settings shows.
+@Test func permissionTitlesAreTheSystemSettingsNamesInPanelOrder() {
+  #expect(SetupStep.allCases.map(\.title) == [
+    "Background activity", "Full Disk Access", "Contacts", "Automation",
+  ])
+}

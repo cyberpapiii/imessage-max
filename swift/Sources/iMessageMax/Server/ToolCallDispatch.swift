@@ -28,8 +28,8 @@ enum ToolCallDispatch {
     }
 
     /// The tools/call requests this process has received from clients other
-    /// than the companion. diagnose reports it as `assistant_calls`, which
-    /// turns the companion's Try it step green.
+    /// than the companion. diagnose reports it as `assistant_calls`, and the
+    /// companion shows a one-time notice when it first rises above zero.
     static let assistantCalls = Mutex(0)
 
     static func execute(

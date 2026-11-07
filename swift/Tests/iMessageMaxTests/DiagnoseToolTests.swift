@@ -146,17 +146,17 @@ final class DiagnoseToolTests: XCTestCase {
         )
 
         let fullDisk = try XCTUnwrap(denied.database.fix)
-        XCTAssertTrue(fullDisk.hasPrefix("Open iMessage Max and choose Read messages."), fullDisk)
+        XCTAssertTrue(fullDisk.hasPrefix("Open iMessage Max and turn on Full Disk Access."), fullDisk)
         XCTAssertTrue(fullDisk.contains("turn on iMessage Max"), fullDisk)
         XCTAssertEqual(denied.contacts.status, "denied")
         let contactsDenied = try XCTUnwrap(denied.contacts.fix)
-        XCTAssertTrue(contactsDenied.hasPrefix("Open iMessage Max and choose Show names."), contactsDenied)
+        XCTAssertTrue(contactsDenied.hasPrefix("Open iMessage Max and turn on Contacts."), contactsDenied)
         XCTAssertTrue(contactsDenied.contains("turn on iMessage Max"), contactsDenied)
         let automation = try XCTUnwrap(denied.capabilities["perm_automation"]?.fix)
-        XCTAssertTrue(automation.hasPrefix("Open iMessage Max and choose Send messages."), automation)
+        XCTAssertTrue(automation.hasPrefix("Open iMessage Max and turn on Automation."), automation)
         XCTAssertEqual(notRequested.contacts.status, "not_requested_headless")
         let contactsHeadless = try XCTUnwrap(notRequested.contacts.fix)
-        XCTAssertTrue(contactsHeadless.hasPrefix("Open iMessage Max and choose Show names."), contactsHeadless)
+        XCTAssertTrue(contactsHeadless.hasPrefix("Open iMessage Max and turn on Contacts."), contactsHeadless)
         XCTAssertEqual(noUsageDescription.contacts.status, "missing_usage_description")
         let usage = try XCTUnwrap(noUsageDescription.contacts.fix)
 
@@ -174,7 +174,7 @@ final class DiagnoseToolTests: XCTestCase {
         XCTAssertTrue(contactsDenied.hasSuffix(DiagnoseTool.appRechecks), contactsDenied)
     }
 
-    /// The companion's Try it step turns green on this count.
+    /// The companion's first-use notice waits on this count.
     func testAssistantCallsReachDiagnose() async throws {
         let result = try await DiagnoseTool.execute(
             resolver: ContactResolver(seedCache: [:]),
@@ -274,7 +274,7 @@ final class DiagnoseToolTests: XCTestCase {
 
         XCTAssertEqual(result.contacts.status, "not_requested_headless")
         XCTAssertFalse(result.contacts.authorized)
-        XCTAssertTrue(result.contacts.fix?.contains("Open iMessage Max and choose Show names.") == true)
+        XCTAssertTrue(result.contacts.fix?.contains("Open iMessage Max and turn on Contacts.") == true)
         XCTAssertEqual(result.status, "needs_setup")
         XCTAssertEqual(result.capabilities["perm_contacts"]?.state, "permission-gated")
         XCTAssertNotNil(result.capabilities["perm_contacts"]?.fix)

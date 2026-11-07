@@ -3,7 +3,7 @@ import IMessageMaxContract
 import MaxCore
 import SwiftUI
 
-enum PanelSection: String { case connection, details, preferences }
+enum PanelSection: String { case connections, details, preferences }
 
 struct PanelView: View {
   let model: AppModel
@@ -80,8 +80,11 @@ struct PanelView: View {
         }
         .transition(.opacity)
       }
-      if let firstRun = state.firstRun {
-        StepList(model: model, firstRun: firstRun).transition(.opacity)
+      if let permissions = state.permissions {
+        PermissionList(model: model, permissions: permissions).transition(.opacity)
+      }
+      if state.offersConnect {
+        ConnectCard(model: model).transition(.opacity)
       }
       if state.primary != nil {
         Button(action: model.runPrimary) {
@@ -96,7 +99,9 @@ struct PanelView: View {
         .accessibilityIdentifier("primaryAction")
       }
       VStack(spacing: Space.hairline) {
-        NavRow(title: "Connection", glyph: .connection) { model.section = .connection }
+        NavRow(title: "Connections", value: state.connections, glyph: .connection) {
+          model.section = .connections
+        }
         NavRow(title: "Details & help", glyph: .details) { model.section = .details }
         NavRow(title: "Preferences", glyph: .preferences) { model.section = .preferences }
       }
@@ -148,7 +153,7 @@ struct PanelView: View {
       .buttonStyle(.plain)
       .accessibilityLabel("Back").accessibilityHint(section.heading)
       switch section {
-      case .connection: ConnectionView(model: model)
+      case .connections: ConnectionsView(model: model)
       case .details: DetailsView(model: model)
       case .preferences: PreferencesView(model: model)
       }
@@ -181,7 +186,7 @@ struct PanelView: View {
 extension PanelSection {
   var heading: String {
     switch self {
-    case .connection: "Connect your assistant"
+    case .connections: "Connections"
     case .details: "Details & help"
     case .preferences: "Preferences"
     }
