@@ -22,9 +22,9 @@ LAUNCHD_LABEL := local.imessage-max
 PLIST        := $(HOME)/Library/LaunchAgents/$(LAUNCHD_LABEL).plist
 # The port the installed agent listens on (`--port N` or `--port=N` in its
 # ProgramArguments), so verify and status probe the service that is running.
-# Falls back to the template's 8080. Override with `make status PORT=9191`.
+# Falls back to the default 47821. Override with `make status PORT=9191`.
 PORT         := $(or $(shell [ -f "$(PLIST)" ] && plutil -extract ProgramArguments json -o - "$(PLIST)" 2>/dev/null | \
-	tr -d '[]"' | tr ',' '\n' | awk 'take { print; exit } $$0 == "--port" { take = 1 } sub(/^--port=/, "") { print; exit }'),8080)
+	tr -d '[]"' | tr ',' '\n' | awk 'take { print; exit } $$0 == "--port" { take = 1 } sub(/^--port=/, "") { print; exit }'),47821)
 URL          := http://127.0.0.1:$(PORT)
 # The probes send the service's bearer token. Override for a server started
 # with --token-file, as in `make verify-db PORT=18484 TOKEN_FILE=/tmp/token`.

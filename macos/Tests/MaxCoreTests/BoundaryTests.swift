@@ -1,4 +1,5 @@
 import Foundation
+import IMessageMaxContract
 import Testing
 import MaxTestSupport
 
@@ -53,7 +54,7 @@ import MaxTestSupport
   }
   #expect(
     try config(["/tmp/imessage-max", "--http", "--host=::1"]).endpoint.absoluteString
-      == "http://[::1]:8080/")
+      == "http://[::1]:\(ServiceDefaults.port)/")
 }
 
 @Test func distinguishesOwnedFailureFromForeignListener() {
