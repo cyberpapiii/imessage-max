@@ -20,8 +20,11 @@ struct iMessageMax: AsyncParsableCommand {
     @Option(name: .customLong(ServerOption.port.rawValue), help: "Port for HTTP transport")
     var port: Int = ServiceDefaults.port
 
-    @Flag(name: .customLong(ServerOption.allowExternalBind.rawValue), help: "Allow binding the HTTP transport to a non-loopback host (this exposes iMessage data to the network, and the server provides no authentication)")
+    @Flag(name: .customLong(ServerOption.allowExternalBind.rawValue), help: "Allow binding the HTTP transport to a non-loopback host (this exposes iMessage data and the access token to the network over unencrypted HTTP)")
     var allowExternalBind = false
+
+    @Option(name: .customLong("token-file"), help: "File holding the bearer token HTTP clients must send. Created with mode 0600 if absent; its folder must already exist and belong to you. An existing file that holds anything but a token is left alone and the server exits. Defaults to ~/\(ServiceDefaults.tokenPath).")
+    var tokenFile: String?
 
     @Option(name: .customLong(ServerOption.contactsPolicy.rawValue), help: "What to do when Contacts authorization is not yet determined: auto (prompt only if stdin is a terminal), request, or skip. With auto, the server honours IMESSAGE_MAX_CONTACTS_POLICY=request|skip.")
     var contactsPolicy: ContactsAccessPolicy.Override = .auto
@@ -79,7 +82,10 @@ struct iMessageMax: AsyncParsableCommand {
             Log.warning("Binding to '\(host)' exposes iMessage data to the network. Use 127.0.0.1 for local-only access.")
         }
 
-        try await ServerStartup.runHTTP(host: host, port: port, contactsPolicy: contactsPolicy)
+        let location = tokenFile.map { AccessToken.Location.custom(URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath)) }
+            ?? .standard
+        let accessToken = try AccessToken.loadOrCreate(location)
+        try await ServerStartup.runHTTP(host: host, port: port, accessToken: accessToken, contactsPolicy: contactsPolicy)
     }
 }
 

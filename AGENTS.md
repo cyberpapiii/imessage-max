@@ -30,9 +30,11 @@ Other Makefile targets:
 - `make version` checks that the five version sites agree, and `make release-check` runs everything that must pass before tagging (see `docs/RELEASING.md`)
 - `make install-agent` renders `swift/launchd/local.imessage-max.plist` (binary path and `~/` log paths filled in) into `~/Library/LaunchAgents/` and loads it (do not hand-write the plist)
 
-The server runs as a launchd service (`local.imessage-max`) on port 8080. It starts at login and restarts after a crash.
+The server runs as a launchd service (`local.imessage-max`). The default port is 47821, and an installed plist can pin another with `--port`. It starts at login and restarts after a crash.
 
-Clients reach it through plug (HTTP, `protocol = "legacy"`) at `http://127.0.0.1:8080`. After restarting the service, clients may need to reconnect (for example with `/mcp` in Codex).
+Every HTTP request needs `Authorization: Bearer <token>`, on every route and both eras. On first start the server writes a random token to `~/Library/Application Support/iMessage Max/token` (mode 0600, folder 0700) and reuses it after that. It refuses to start if the file is readable by other users, owned by someone else, or holds anything but a token, and it never overwrites that file. `--token-file <path>` points a dev or test server at another file, in a folder that already exists and belongs to you; the server leaves that folder's mode alone. A missing or wrong token gets 401 and one `auth=rejected` stderr line, which never holds the token. Stdio needs no token.
+
+Clients reach it through plug (HTTP, `protocol = "legacy"`, with the token as `auth_token`). After restarting the service, clients may need to reconnect (for example with `/mcp` in Codex).
 
 `make build` passes `--build-system native` so the binary stays at `.build/arm64-apple-macosx/release/imessage-max`. macOS grants Full Disk Access by path, and the grant names that path. Swift 6.4's default build system writes elsewhere, so a bare `swift build -c release` binary is not the one launchd runs, and it cannot read chat.db.
 
@@ -46,8 +48,10 @@ BIN=.build/arm64-apple-macosx/release/imessage-max
 # stdio mode (for Codex Desktop)
 $BIN
 
-# HTTP mode (for plug, Inspector, etc.)
-$BIN --http --port 8080
+# HTTP mode (for plug, Inspector, etc.), with a scratch token so it
+# does not share the installed service's port or token
+mkdir -m 700 -p /tmp/imax-dev
+$BIN --http --port 18484 --token-file /tmp/imax-dev/token
 
 # one-shot Contacts prompt; re-launches itself disclaimed so the grant is
 # recorded for this executable, not the terminal
@@ -75,18 +79,22 @@ The wire contract shared with the companion app has its own tests: `cd contract 
 
 ### Test via MCP protocol
 
+The HTTP examples pass the token to curl on stdin (`-K -`), because other users can read a process's arguments with `ps`.
+
 ```bash
 # stdio mode
 echo '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' | ./.build/release/imessage-max
 
 # HTTP mode, legacy era (session-based)
-curl -X POST http://localhost:8080 \
+printf 'header = "Authorization: Bearer %s"\n' "$(cat ~/Library/Application\ Support/iMessage\ Max/token)" |
+curl -K - -X POST http://localhost:47821 \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}'
 
 # HTTP mode, modern era (MCP 2026-07-28, stateless)
-curl -X POST http://localhost:8080 \
+printf 'header = "Authorization: Bearer %s"\n' "$(cat ~/Library/Application\ Support/iMessage\ Max/token)" |
+curl -K - -X POST http://localhost:47821 \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -H "MCP-Protocol-Version: 2026-07-28" \
@@ -150,10 +158,15 @@ requestState, Tasks, MCP Apps, OAuth (loopback-only posture), and
 The official conformance suite (@0.2.0-alpha.11) runs against both eras with a
 documented expected-failures baseline. The suite is pinned to that alpha tag because it tracks the 2026-07-28 draft the modern lane implements; npm `latest` (0.1.16) does not.
 
+The suite has no option for request headers, so `scripts/conformance-auth.mjs` adds the token to each request it makes to the `--url` host (or `IMESSAGE_MAX_URL`), and to no other host. Run it against a scratch server, not the installed service:
+
 ```bash
-npx @modelcontextprotocol/conformance@0.2.0-alpha.11 server --url http://127.0.0.1:8080 \
+mkdir -m 700 -p /tmp/imax-conf
+swift/.build/arm64-apple-macosx/release/imessage-max --http --port 18484 --token-file /tmp/imax-conf/token &
+export NODE_OPTIONS="--import $PWD/scripts/conformance-auth.mjs" IMESSAGE_MAX_TOKEN_FILE=/tmp/imax-conf/token
+npx @modelcontextprotocol/conformance@0.2.0-alpha.11 server --url http://127.0.0.1:18484 \
   --suite draft  --expected-failures docs/conformance-baseline.yml
-npx @modelcontextprotocol/conformance@0.2.0-alpha.11 server --url http://127.0.0.1:8080 \
+npx @modelcontextprotocol/conformance@0.2.0-alpha.11 server --url http://127.0.0.1:18484 \
   --suite active --expected-failures docs/conformance-baseline.yml
 ```
 

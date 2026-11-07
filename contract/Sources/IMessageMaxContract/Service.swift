@@ -5,7 +5,7 @@ import Foundation
 /// these; ServiceFilesContractTests in swift/Tests keeps them in step.
 public enum ServiceDefaults {
   public static let host = "127.0.0.1"
-  public static let port = 8080
+  public static let port = 47821
   public static let executableName = "imessage-max"
   public static let launchdLabel = "local.imessage-max"
   /// These paths are relative to the home directory.
@@ -14,6 +14,9 @@ public enum ServiceDefaults {
   public static let stderrLogPath = "Library/Logs/imessage-max.stderr.log"
   /// Where the companion installs its bundled helper on a fresh Mac.
   public static let helperInstallPath = "Library/Application Support/iMessage Max/bin/\(executableName)"
+  /// The bearer token every HTTP request must send. The helper creates it,
+  /// mode 0600, on first start.
+  public static let tokenPath = "Library/Application Support/iMessage Max/token"
   /// The companion app's bundle identifier, also its log subsystem.
   public static let companionBundleID = "com.cyberpapiii.imessage-max.menubar"
   /// Hosts that keep the listener local. Binding anywhere else needs

@@ -12,7 +12,7 @@ final class SetupPermissionTests: XCTestCase {
         let app = await transport.application()
         try await app.test(TestingSetup.router) { client in
             let response = try await client.executeRequest(uri: "/setup/permissions", method: .post,
-                headers: [.contentType: "application/json"],
+                headers: [.contentType: "application/json", .authorization: testAuthorization],
                 body: ByteBuffer(string: "{\"permission\":\"automation\"}"))
             XCTAssertEqual(response.head.status, .forbidden)
         }
@@ -23,7 +23,7 @@ final class SetupPermissionTests: XCTestCase {
         let app = await transport.application()
         try await app.test(TestingSetup.router) { client in
             let response = try await client.executeRequest(uri: "/setup/permissions", method: .post,
-                headers: [.contentType: "application/json", HTTPField.Name("Origin")!: "http://localhost:8080",
+                headers: [.contentType: "application/json", .authorization: testAuthorization, HTTPField.Name("Origin")!: "http://localhost:8080",
                           HTTPField.Name("X-iMessage-Max-Setup")!: "permission-request-v1"],
                 body: ByteBuffer(string: "{\"permission\":\"automation\"}"))
             XCTAssertEqual(response.head.status, .forbidden)
@@ -90,10 +90,11 @@ final class SetupPermissionTests: XCTestCase {
 }
 
 private func setupHeaders() -> HTTPFields {
-    [.contentType: "application/json", HTTPField.Name("X-iMessage-Max-Setup")!: "permission-request-v1"]
+    [.contentType: "application/json", .authorization: testAuthorization,
+     HTTPField.Name("X-iMessage-Max-Setup")!: "permission-request-v1"]
 }
 
 private func setupTestTransport(host: String = "127.0.0.1") -> HTTPTransport {
-    HTTPTransport(host: host, catalog: makeTestCatalog(),
+    HTTPTransport(host: host, accessToken: testAccessToken, catalog: makeTestCatalog(),
         setupPermissions: SetupPermissionService(contactsRequest: { (true, "authorized") }, automationRequest: { (true, "authorized") }))
 }

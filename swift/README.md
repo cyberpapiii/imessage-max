@@ -43,7 +43,7 @@ make clean
 ```
 
 The launchd label used by this workflow is `local.imessage-max`, and the
-default HTTP port is `8080`.
+default HTTP port is `47821`.
 
 ## Requirements
 
@@ -89,6 +89,11 @@ endpoint. In HTTP mode:
   and can reconnect cleanly.
 - Sessions time out after 1 hour, and the server then removes them.
 - Server-Sent Events carry server-to-client messages.
+- Every request needs `Authorization: Bearer <token>`. The server creates the token on first start in
+  `~/Library/Application Support/iMessage Max/token` (mode 0600) and reuses it after that.
+  `--token-file <path>` reads or creates another file in a folder you own. The server never
+  overwrites a file that holds anything but a token; it exits instead. A missing or wrong token
+  gets HTTP 401.
 - Origin validation blocks DNS rebinding. By default, only localhost is allowed.
 - Request bodies must arrive within 30 seconds. A stalled upload gets HTTP 408 with a JSON-RPC error body, and the server closes connections that are idle for 60 seconds.
 - JSON-shaped tools return both legacy text content and MCP `structuredContent`.
@@ -96,19 +101,21 @@ endpoint. In HTTP mode:
   carry compact PNG icon metadata.
 
 ```bash
-./imessage-max --http --port 8080
+./imessage-max --http
 ```
 
 Test with curl:
 ```bash
 # Initialize session
-curl -X POST http://localhost:8080 \
+printf 'header = "Authorization: Bearer %s"\n' "$(cat ~/Library/Application\ Support/iMessage\ Max/token)" |
+curl -K - -X POST http://localhost:47821 \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}'
 
 # Use session (include Mcp-Session-Id from response)
-curl -X POST http://localhost:8080 \
+printf 'header = "Authorization: Bearer %s"\n' "$(cat ~/Library/Application\ Support/iMessage\ Max/token)" |
+curl -K - -X POST http://localhost:47821 \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -H "Mcp-Session-Id: <session-id>" \
@@ -119,15 +126,22 @@ curl -X POST http://localhost:8080 \
 ### CLI options
 
 ```
-USAGE: imessage-max [--http] [--host <host>] [--port <port>] [--allow-external-bind] [--contacts-policy <contacts-policy>] [--request-contacts-access] [--request-messages-access]
+USAGE: imessage-max [--http] [--host <host>] [--port <port>] [--allow-external-bind] [--token-file <token-file>] [--contacts-policy <contacts-policy>] [--request-contacts-access] [--request-messages-access]
 
 OPTIONS:
   --http                  Run with HTTP transport instead of stdio
   --host <host>           Host for HTTP transport (default: 127.0.0.1)
-  --port <port>           Port for HTTP transport (default: 8080)
+  --port <port>           Port for HTTP transport (default: 47821)
   --allow-external-bind   Allow binding the HTTP transport to a non-loopback
-                          host (this exposes iMessage data to the network, and
-                          the server provides no authentication)
+                          host (this exposes iMessage data and the access token
+                          to the network over unencrypted HTTP)
+  --token-file <token-file>
+                          File holding the bearer token HTTP clients must send.
+                          Created with mode 0600 if absent; its folder must
+                          already exist and belong to you. An existing file
+                          that holds anything but a token is left alone and the
+                          server exits. Defaults to ~/Library/Application
+                          Support/iMessage Max/token.
   --contacts-policy <contacts-policy>
                           What to do when Contacts authorization is not yet
                           determined: auto (prompt only if stdin is a

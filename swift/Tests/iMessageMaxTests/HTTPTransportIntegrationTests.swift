@@ -87,7 +87,7 @@ final class HTTPTransportIntegrationTests: XCTestCase {
 
         try await app.test(TestingSetup.router) { client in
             let response = try await client.post(
-                initializeBody(), headers: [.contentType: "application/json", .accept: "application/json"]
+                initializeBody(), headers: [.contentType: "application/json", .accept: "application/json", .authorization: testAuthorization]
             )
 
             XCTAssertEqual(response.head.status, .notAcceptable)
@@ -434,7 +434,7 @@ final class HTTPTransportIntegrationTests: XCTestCase {
 
         try await app.test(TestingSetup.router) { client in
             let response = try await client.executeRequest(
-                uri: "/", method: .get, headers: [.accept: "application/json"], body: nil
+                uri: "/", method: .get, headers: [.accept: "application/json", .authorization: testAuthorization], body: nil
             )
 
             let body = try decodeJSONString(from: response.body)
@@ -448,7 +448,7 @@ final class HTTPTransportIntegrationTests: XCTestCase {
 
         try await app.test(TestingSetup.router) { client in
             let response = try await client.executeRequest(
-                uri: "/", method: .get, headers: [.accept: "text/event-stream"], body: nil
+                uri: "/", method: .get, headers: [.accept: "text/event-stream", .authorization: testAuthorization], body: nil
             )
 
             let body = try decodeJSONString(from: response.body)
@@ -461,7 +461,7 @@ final class HTTPTransportIntegrationTests: XCTestCase {
         let app = await makeTestTransport().application()
 
         try await app.test(TestingSetup.router) { client in
-            var headers: HTTPFields = [.accept: "text/event-stream"]
+            var headers: HTTPFields = [.accept: "text/event-stream", .authorization: testAuthorization]
             headers[.mcpSessionId] = "not-a-real-session"
 
             let response = try await client.executeRequest(uri: "/", method: .get, headers: headers, body: nil)
