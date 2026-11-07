@@ -35,6 +35,23 @@ struct Notice: Equatable {
   }
 }
 
+/// One detected client on the Connection page.
+struct ClientRow: Identifiable, Equatable {
+  let id: ClientID
+  let name: String
+  var link: ClientLink
+  var activity = ClientActivity.idle
+}
+
+enum ClientActivity: Equatable {
+  case idle, connecting
+  /// What the last Connect changed.
+  case finished(String)
+  /// The client shows its own Install step.
+  case waiting(String)
+  case failed(String)
+}
+
 struct PanelState: Equatable {
   enum Phase: Equatable {
     case checking
@@ -44,10 +61,12 @@ struct PanelState: Equatable {
     case blocked
     case notSetUp
     case stopped
+    /// The helper answered 401: it holds another token than this app reads.
+    case keyMismatch
     case disconnected
   }
 
-  enum Primary { case connect, start, migrate, move, openLoginItems, recheck }
+  enum Primary { case connect, start, restart, migrate, move, openLoginItems, recheck }
 
   let phase: Phase
   let busy: Busy?
@@ -66,6 +85,7 @@ struct PanelState: Equatable {
       case .blockedInLoginItems: .blocked
       case .notRegistered: .notSetUp
       case .stopped: .stopped
+      case .tokenRejected: .keyMismatch
       case .portConflict, .unresponsive: .disconnected
       }
   }
@@ -83,6 +103,7 @@ struct PanelState: Equatable {
     case .blocked: "Turned off in Login Items"
     case .notSetUp: "Hello, iMessage Max"
     case .stopped: "Taking a break"
+    case .keyMismatch: "Access key doesn’t match"
     case .disconnected: "Let’s get connected"
     }
   }
@@ -105,6 +126,8 @@ struct PanelState: Equatable {
       "macOS lets the helper run only when it’s on in Login Items. Turn on iMessage Max there."
     case .notSetUp: "A small helper connects your assistants to Messages."
     case .stopped: "Start whenever you need your assistants again."
+    case .keyMismatch:
+      "iMessage Max is running but turned this app away, because its access key changed. Restart it so both use the same key."
     case .checking, .disconnected:
       "Your messages stay on this Mac. Let’s check the connection."
     }
@@ -118,6 +141,7 @@ struct PanelState: Equatable {
     case .olderInstall: .migrate
     case .blocked: .openLoginItems
     case .notSetUp, .stopped: .start
+    case .keyMismatch: .restart
     case .checking, .disconnected: .recheck
     }
   }
@@ -131,6 +155,7 @@ struct PanelState: Equatable {
     case .blocked: "Open Login Items"
     case .notSetUp: "Set up iMessage Max"
     case .stopped: "Start iMessage Max"
+    case .keyMismatch: "Restart iMessage Max"
     case .checking, .disconnected: "Check again"
     }
   }
@@ -138,7 +163,7 @@ struct PanelState: Equatable {
   var primaryMark: ActionMark {
     if busy != nil { return .more }
     return switch phase {
-    case .notSetUp, .stopped, .olderInstall: .play
+    case .notSetUp, .stopped, .olderInstall, .keyMismatch: .play
     default: .arrow
     }
   }
@@ -152,7 +177,7 @@ struct PanelState: Equatable {
     case .stopped, .notSetUp: .resting
     case .connected(.ready, _): .ready
     case .connected, .misplaced, .olderInstall, .blocked: .needsYou
-    case .checking, .disconnected: .trouble
+    case .checking, .disconnected, .keyMismatch: .trouble
     }
   }
 }

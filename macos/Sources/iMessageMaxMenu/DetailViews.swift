@@ -143,46 +143,151 @@ struct FlowRow: Layout {
 
 struct ConnectionView: View {
   let model: AppModel
+
   var body: some View {
+    let access = model.clientAccess
     VStack(alignment: .leading, spacing: Space.regular) {
       Text(
-        "Add iMessage Max as a local MCP server in your assistant’s settings. Then reconnect the assistant."
+        "Connect an assistant in one click. iMessage Max adds itself to the assistant’s settings and saves a backup of any file it changes."
       )
       .font(.maxLine).fixedSize(horizontal: false, vertical: true)
-      HStack(spacing: Space.snug) {
-        AppGlyph(glyph: .connection, size: 14).foregroundStyle(Design.muted)
-        Text(model.endpoint).font(.maxCode)
-          .textSelection(.enabled).lineLimit(nil)
+      if access == nil {
+        IconLabel(title: "Start iMessage Max first. Its access key appears on first start.", glyph: .warning)
+          .font(.maxSmall).foregroundStyle(Design.attention)
           .fixedSize(horizontal: false, vertical: true)
       }
-      .frame(maxWidth: .infinity, alignment: .leading)
-      .padding(Space.snug)
-      .background(
-        Design.well, in: RoundedRectangle(cornerRadius: Radius.control, style: .continuous))
-      FlowRow(spacing: Space.tight) {
-        CopyButton(title: "Copy address") {
-          model.copy(model.endpoint, acknowledgement: "Address copied.")
+      if !model.clients.isEmpty {
+        Card {
+          VStack(spacing: Space.snug) {
+            ForEach(model.clients) { row in
+              ClientRowView(row: row, canConnect: access != nil) { model.connect(row.id) }
+              if row.id != model.clients.last?.id { Divider() }
+            }
+          }
         }
-        Menu {
-          Button("Codex configuration") {
-            model.copy(model.codexConfiguration, acknowledgement: "Codex configuration copied.")
-          }
-          Button("MCP HTTP configuration") {
-            model.copy(model.clientConfiguration, acknowledgement: "MCP configuration copied.")
-          }
-          Button("Plug configuration") {
-            model.copy(model.plugConfiguration, acknowledgement: "Plug configuration copied.")
-          }
-        } label: {
-          IconLabel(title: "Copy setup", glyph: .document)
+      } else if model.clientsScanned {
+        Card {
+          Text("No assistants found on this Mac").font(.maxStrong)
+          Text(
+            "iMessage Max looks for Claude, Claude Code, Codex, Cursor and Plug. Any other MCP client can connect with the address and access header below."
+          )
+          .font(.maxLine).foregroundStyle(Design.muted).fixedSize(horizontal: false, vertical: true)
         }
-        .menuStyle(.button).fixedSize()
       }
-      .buttonStyle(MaxButtonStyle())
-      .disabled(model.service == nil)
+      VStack(alignment: .leading, spacing: Space.tight) {
+        Text("Any other MCP client").font(.maxStrong)
+        Text(
+          "Add a streamable HTTP server with this address, and have it send the access header with every request."
+        )
+        .font(.maxSmall).foregroundStyle(Design.muted).fixedSize(horizontal: false, vertical: true)
+        HStack(spacing: Space.snug) {
+          AppGlyph(glyph: .connection, size: 14).foregroundStyle(Design.muted)
+          Text(model.endpoint).font(.maxCode)
+            .textSelection(.enabled).lineLimit(nil)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(Space.snug)
+        .background(
+          Design.well, in: RoundedRectangle(cornerRadius: Radius.control, style: .continuous))
+        FlowRow(spacing: Space.tight) {
+          CopyButton(title: "Copy address") {
+            model.copy(model.endpoint, acknowledgement: "Address copied.")
+          }
+          CopyButton(title: "Copy access header") {
+            if let header = model.accessHeader {
+              model.copy(header, acknowledgement: "Access header copied. Keep it private.")
+            }
+          }
+          .disabled(access == nil)
+        }
+        .buttonStyle(MaxButtonStyle())
+      }
       Text("This address works only on this Mac. Each assistant controls its own tool approvals.")
         .font(.maxSmall).foregroundStyle(Design.muted).fixedSize(horizontal: false, vertical: true)
     }
+    .task { await model.refreshClients() }
+  }
+}
+
+struct ClientRowView: View {
+  let row: ClientRow
+  let canConnect: Bool
+  let connect: () -> Void
+  @PanelMotion private var motion
+
+  private var connected: Bool {
+    if case .waiting = row.activity { return false }
+    return row.link == .connected && row.activity != .connecting
+  }
+
+  private var status: String {
+    switch row.activity {
+    case .connecting: return "Connecting…"
+    case .waiting: return "Finish in \(row.name)"
+    case .failed: return "Not connected"
+    case .idle, .finished:
+      return switch row.link {
+      case .connected: "Uses iMessage Max on this Mac"
+      case .outdated: "Set up for an older iMessage Max"
+      case .notConnected: "Not connected"
+      }
+    }
+  }
+
+  private var note: (text: String, problem: Bool)? {
+    switch row.activity {
+    case .finished(let text), .waiting(let text): (text, false)
+    case .failed(let text): (text, true)
+    case .idle, .connecting: nil
+    }
+  }
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: Space.tight) {
+      HStack(spacing: Space.snug) {
+        VStack(alignment: .leading, spacing: Space.hairline) {
+          Text(row.name).font(.maxLine)
+          Text(status).font(.maxSmall).foregroundStyle(Design.muted)
+            .contentTransition(.interpolate)
+        }
+        .accessibilityElement(children: .combine)
+        Spacer(minLength: Space.snug)
+        trailing
+      }
+      .frame(minHeight: 32)
+      if let note {
+        Text(note.text).font(.maxSmall)
+          .foregroundStyle(note.problem ? Design.attention : Design.muted)
+          .fixedSize(horizontal: false, vertical: true)
+          .transition(.opacity)
+      }
+    }
+    .animation(motion[.swap], value: row)
+    .accessibilityElement(children: .contain)
+  }
+
+  @ViewBuilder private var trailing: some View {
+    if row.activity == .connecting {
+      ProgressView().controlSize(.small).accessibilityLabel("Connecting \(row.name)")
+    } else if connected {
+      HStack(spacing: Space.rowGap) {
+        Text("Connected").font(.maxSmall)
+        ActionGlyph(mark: .check, size: 12)
+      }
+      .foregroundStyle(Design.ready)
+      .accessibilityElement(children: .ignore)
+      .accessibilityLabel("\(row.name) connected")
+    } else {
+      Button(isFailure ? "Try again" : "Connect", action: connect)
+        .buttonStyle(MaxButtonStyle())
+        .disabled(!canConnect)
+        .accessibilityLabel(isFailure ? "Try connecting \(row.name) again" : "Connect \(row.name)")
+    }
+  }
+
+  private var isFailure: Bool {
+    if case .failed = row.activity { true } else { false }
   }
 }
 

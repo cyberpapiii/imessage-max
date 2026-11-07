@@ -1,4 +1,5 @@
 import AppKit
+import IMessageMaxContract
 import MaxCore
 
 @MainActor
@@ -50,5 +51,51 @@ enum MessagesApp {
     let configuration = NSWorkspace.OpenConfiguration()
     configuration.activates = false
     _ = try await NSWorkspace.shared.openApplication(at: url, configuration: configuration)
+  }
+}
+
+extension ClientContext {
+  /// The clients of the person using this Mac.
+  static func live(home: URL) -> ClientContext {
+    ClientContext(
+      home: home,
+      application: { NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) },
+      open: { target, app in
+        if let app {
+          _ = try await NSWorkspace.shared.open(
+            [target], withApplicationAt: app, configuration: NSWorkspace.OpenConfiguration())
+        } else if !NSWorkspace.shared.open(target) {
+          throw CoreError.commandFailed("macOS could not open \(target.scheme ?? "the file").")
+        }
+      },
+      extensionFiles: Bundle.main.resourceURL?.appendingPathComponent("mcpb"),
+      helper: Bundle.main.bundleURL.appendingPathComponent(ServiceDefaults.helperBundlePath),
+      scratch: FileManager.default.temporaryDirectory.appendingPathComponent("iMessage Max"))
+  }
+
+  /// `--client-root`, which only a test build honors. Client configs live
+  /// under `root`, apps are found only in `root/Applications`, and opening a
+  /// file or link appends it to `root/open-requests.log` instead, so a live
+  /// check never installs anything into a real client.
+  static func sandbox(root: URL) -> ClientContext {
+    var context = live(home: root)
+    let names = [Client.claudeDesktopID: "Claude", Client.cursorID: "Cursor"]
+    context.application = { id in
+      names[id].map { root.appendingPathComponent("Applications/\($0).app") }
+        .flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0 : nil }
+    }
+    context.open = { target, app in
+      let log = root.appendingPathComponent("open-requests.log")
+      if !FileManager.default.fileExists(atPath: log.path) {
+        FileManager.default.createFile(
+          atPath: log.path, contents: nil, attributes: [.posixPermissions: 0o600])
+      }
+      let handle = try FileHandle(forWritingTo: log)
+      defer { try? handle.close() }
+      try handle.seekToEnd()
+      try handle.write(contentsOf: Data("\(app?.path ?? "-") \(target.absoluteString)\n".utf8))
+    }
+    context.scratch = root.appendingPathComponent("scratch")
+    return context
   }
 }

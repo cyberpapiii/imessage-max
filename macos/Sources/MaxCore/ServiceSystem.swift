@@ -9,8 +9,7 @@ public protocol ServiceSystem: Sendable {
   func agentStatus(plistName: String) async -> AgentStatus
   /// nil when launchd has no job with this label.
   func job(label: String) async -> Job?
-  /// nil when nothing answers on the endpoint with a valid diagnose reply.
-  func diagnose(endpoint: URL) async -> DiagnoseResult?
+  func diagnose(endpoint: URL) async -> DiagnoseReply
   func listeners(port: Int) async -> Set<Int32>
   func run(_ command: SystemCommand) async throws
   /// Whether `pid` started before the file at `executable` was last replaced.
@@ -35,9 +34,11 @@ public enum SystemCommand: Sendable, Equatable {
 }
 
 public struct LiveServiceSystem: ServiceSystem {
-  private let client = ServiceClient()
+  private let client: ServiceClient
 
-  public init() {}
+  public init(tokenFile: URL? = nil) {
+    client = tokenFile.map(ServiceClient.init(tokenFile:)) ?? ServiceClient()
+  }
 
   public func agentStatus(plistName: String) async -> AgentStatus {
     switch SMAppService.agent(plistName: plistName).status {
@@ -56,8 +57,8 @@ public struct LiveServiceSystem: ServiceSystem {
     return Job(launchctlPrint: result.output)
   }
 
-  public func diagnose(endpoint: URL) async -> DiagnoseResult? {
-    try? await client.diagnose(endpoint: endpoint)
+  public func diagnose(endpoint: URL) async -> DiagnoseReply {
+    await client.diagnose(endpoint: endpoint)
   }
 
   public func listeners(port: Int) async -> Set<Int32> {

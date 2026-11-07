@@ -6,12 +6,16 @@ public struct ProcessResult: Sendable {
 }
 
 public enum ProcessRunner {
-  public static func run(_ executable: String, arguments: [String], timeout: TimeInterval = 8)
-    async throws -> ProcessResult
-  {
+  /// `environment`, when given, is the child's whole environment, and its
+  /// HOME is the child's working folder.
+  public static func run(
+    _ executable: String, arguments: [String], environment: [String: String]? = nil,
+    timeout: TimeInterval = 8
+  ) async throws -> ProcessResult {
     let execution = CommandExecution()
     return try await withTaskCancellationHandler {
-      try await execution.start(executable, arguments: arguments, timeout: timeout)
+      try await execution.start(
+        executable, arguments: arguments, environment: environment, timeout: timeout)
     } onCancel: {
       Task { await execution.cancel() }
     }
@@ -30,9 +34,10 @@ private actor CommandExecution {
   private var failure: (any Error)?
   private var cancelled = false
 
-  func start(_ executable: String, arguments: [String], timeout: TimeInterval) async throws
-    -> ProcessResult
-  {
+  func start(
+    _ executable: String, arguments: [String], environment: [String: String]?,
+    timeout: TimeInterval
+  ) async throws -> ProcessResult {
     guard !cancelled, !Task.isCancelled else { throw CancellationError() }
     return try await withCheckedThrowingContinuation { continuation in
       self.continuation = continuation
@@ -51,6 +56,10 @@ private actor CommandExecution {
         let child = Process()
         child.executableURL = URL(fileURLWithPath: executable)
         child.arguments = arguments
+        if let environment {
+          child.environment = environment
+          if let home = environment["HOME"] { child.currentDirectoryURL = URL(fileURLWithPath: home) }
+        }
         child.standardInput = FileHandle.nullDevice
         child.standardOutput = handle
         child.standardError = handle

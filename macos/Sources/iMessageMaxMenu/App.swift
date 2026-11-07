@@ -39,10 +39,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     self.design = design
     if let fixture = design.fixture {
       milestones = Milestones(defaults: nil)
-      model = .designFixture(fixture, milestones: milestones)
+      model = .designFixture(fixture, milestones: milestones, clientRoot: design.clientRoot)
     } else {
       milestones = Milestones(defaults: .standard)
-      model = .live(milestones: milestones)
+      model = .live(milestones: milestones, clientRoot: design.clientRoot)
     }
   }
 

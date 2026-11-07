@@ -45,12 +45,13 @@ public enum ServerOption: String, CaseIterable, Sendable {
   case allowExternalBind = "allow-external-bind"
   case logFile = "log-file"
   case socketPath = "socket-path"
+  case tokenFile = "token-file"
 
   public var flag: String { "--\(rawValue)" }
 
   public var takesValue: Bool {
     switch self {
-    case .host, .port, .contactsPolicy, .logFile, .socketPath: true
+    case .host, .port, .contactsPolicy, .logFile, .socketPath, .tokenFile: true
     case .http, .allowExternalBind: false
     }
   }

@@ -23,7 +23,7 @@ struct iMessageMax: AsyncParsableCommand {
     @Flag(name: .customLong(ServerOption.allowExternalBind.rawValue), help: "Allow binding the HTTP transport to a non-loopback host (this exposes iMessage data and the access token to the network over unencrypted HTTP)")
     var allowExternalBind = false
 
-    @Option(name: .customLong("token-file"), help: "File holding the bearer token HTTP clients must send. Created with mode 0600 if absent; its folder must already exist and belong to you. An existing file that holds anything but a token is left alone and the server exits. Defaults to ~/\(ServiceDefaults.tokenPath).")
+    @Option(name: .customLong(ServerOption.tokenFile.rawValue), help: "File holding the bearer token HTTP clients must send. Created with mode 0600 if absent; its folder must already exist and belong to you. An existing file that holds anything but a token is left alone and the server exits. Defaults to ~/\(ServiceDefaults.tokenPath).")
     var tokenFile: String?
 
     @Option(name: .customLong(ServerOption.socketPath.rawValue), help: "Unix socket the helper listens on (with --http) or the stdio bridge connects to (without). Its folder must already exist and belong to you. Defaults to ~/\(ServiceDefaults.socketPath).")

@@ -47,6 +47,11 @@ mkdir -p "$APP_BUNDLE/Contents/MacOS" "$APP_BUNDLE/Contents/Resources" \
   "$APP_BUNDLE/Contents/Library/LaunchAgents"
 cp "$MENU_BIN_DIR/iMessageMaxMenu" "$APP_BUNDLE/Contents/MacOS/iMessageMaxMenu"
 cp "$ROOT_DIR/swift/.build/release/imessage-max" "$APP_BUNDLE/Contents/MacOS/imessage-max"
+# The Claude Desktop extension's manifest and icons. The companion packs them
+# with the helper above into a .mcpb when the user connects Claude.
+mkdir -p "$APP_BUNDLE/Contents/Resources/mcpb"
+cp "$ROOT_DIR/mcpb/manifest.json" "$APP_BUNDLE/Contents/Resources/mcpb/manifest.json"
+cp -R "$ROOT_DIR/mcpb/assets" "$APP_BUNDLE/Contents/Resources/mcpb/assets"
 
 AGENT_PLIST="$APP_BUNDLE/Contents/Library/LaunchAgents/$HELPER_LABEL.plist"
 cp "$AGENT_TEMPLATE" "$AGENT_PLIST"

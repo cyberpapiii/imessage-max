@@ -20,6 +20,9 @@ final class AppModel {
   private(set) var notice: Notice?
   private(set) var celebration = 0
   private(set) var loginStatus = SMAppService.mainApp.status
+  /// The clients found on this Mac, in table order. Empty until the first scan.
+  private(set) var clients: [ClientRow] = []
+  private(set) var clientsScanned = false
   private var pendingOn: Bool?
   @ObservationIgnored private var timer: DispatchSourceTimer?
   @ObservationIgnored private var observers: [NSObjectProtocol] = []
@@ -31,6 +34,8 @@ final class AppModel {
   @ObservationIgnored private let controller: ServiceController?
   @ObservationIgnored private let milestones: Milestones
   @ObservationIgnored private let prepareMessages: @MainActor () async throws -> Void
+  /// nil leaves the client list empty, as in the design harness.
+  @ObservationIgnored private let clientContext: ClientContext?
   /// How long a service change, or a permission request with its prompt, may
   /// hold `busy`. Past it the panel shows an error and the buttons return,
   /// because SMAppService and a prompt can fail to answer at all.
@@ -42,20 +47,30 @@ final class AppModel {
   init(
     controller: ServiceController?, milestones: Milestones,
     prepareMessages: @escaping @MainActor () async throws -> Void,
+    clientContext: ClientContext? = nil,
     changeDeadline: Double = 60, permissionDeadline: Double = 180
   ) {
     self.controller = controller
     self.milestones = milestones
     self.prepareMessages = prepareMessages
+    self.clientContext = clientContext
     self.changeDeadline = changeDeadline
     self.permissionDeadline = permissionDeadline
   }
 
-  static func live(milestones: Milestones) -> AppModel {
-    AppModel(
-      controller: (try? ServiceConfiguration.load()).map { ServiceController(configuration: $0) },
+  static func live(milestones: Milestones, clientRoot: URL? = nil) -> AppModel {
+    let configuration = try? ServiceConfiguration.load()
+    let home = FileManager.default.homeDirectoryForCurrentUser
+    // Only a test build may point the connectors at a sandbox.
+    let sandbox = configuration?.isProduction == false ? clientRoot : nil
+    return AppModel(
+      controller: configuration.map {
+        ServiceController(
+          configuration: $0, system: LiveServiceSystem(tokenFile: $0.tokenFile))
+      },
       milestones: milestones,
-      prepareMessages: { try await MessagesApp.ensureRunning() })
+      prepareMessages: { try await MessagesApp.ensureRunning() },
+      clientContext: sandbox.map(ClientContext.sandbox(root:)) ?? .live(home: home))
   }
 
   var state: PanelState {
@@ -142,12 +157,84 @@ final class AppModel {
     let elapsed = start.duration(to: .now).components
     checkMilliseconds = Int(elapsed.seconds * 1000 + elapsed.attoseconds / 1_000_000_000_000_000)
     loginStatus = SMAppService.mainApp.status
+    if panelOpen { await refreshClients() }
+  }
+
+  /// What a client needs to reach the helper. nil until the helper has
+  /// written its token, which it does on first start.
+  var clientAccess: ClientAccess? {
+    guard let configuration = controller?.configuration,
+      let token = ServiceClient.readToken(configuration.tokenFile)
+    else { return nil }
+    return ClientAccess(endpoint: configuration.endpoint, token: token)
+  }
+
+  /// Finds the clients on this Mac and whether each reaches the helper. A
+  /// client the user is finishing in its own app keeps that note until it
+  /// shows as connected.
+  func refreshClients() async {
+    guard let context = clientContext else {
+      clientsScanned = true
+      return
+    }
+    let access = clientAccess
+    let found =
+      (try? await Self.offMainActor {
+        Client.all.filter { $0.detect(context) }.map { client in
+          (client.id, client.name, access.map { client.link(context, $0) } ?? .notConnected)
+        }
+      }) ?? []
+    clients = found.map { id, name, link in
+      var row = ClientRow(id: id, name: name, link: link)
+      if let previous = clients.first(where: { $0.id == id })?.activity {
+        if case .waiting = previous, link == .connected {
+          row.activity = .idle
+        } else {
+          row.activity = previous
+        }
+      }
+      return row
+    }
+    clientsScanned = true
+  }
+
+  /// One click: writes the client's config, or opens the client's own
+  /// install step, then reads the config back to show the result.
+  func connect(_ id: ClientID) {
+    guard let context = clientContext, let access = clientAccess,
+      let index = clients.firstIndex(where: { $0.id == id }),
+      clients[index].activity != .connecting
+    else { return }
+    clients[index].activity = .connecting
+    let client = Client.client(id)
+    let start = ContinuousClock.now
+    Task {
+      var activity: ClientActivity
+      var link: ClientLink?
+      do {
+        let result = try await client.connect(context, access)
+        link = try await Self.offMainActor { client.link(context, access) }
+        activity =
+          result.finishInClient && link != .connected
+          ? .waiting(result.summary) : .finished(result.summary)
+      } catch {
+        activity = .failed(error.localizedDescription)
+      }
+      let elapsed = start.duration(to: .now).components
+      let milliseconds = elapsed.seconds * 1000 + elapsed.attoseconds / 1_000_000_000_000_000
+      log.info(
+        "Connect \(id.rawValue, privacy: .public) finished in \(milliseconds, privacy: .public) ms, link \(String(describing: link), privacy: .public)")
+      guard let index = clients.firstIndex(where: { $0.id == id }) else { return }
+      clients[index].activity = activity
+      if let link { clients[index].link = link }
+    }
   }
 
   func runPrimary() {
     switch state.primary {
     case .connect: section = .connection
     case .start: perform(.start)
+    case .restart: perform(.restart)
     case .migrate: migrate()
     case .move: moveToApplications()
     case .openLoginItems: SMAppService.openSystemSettingsLoginItems()
@@ -384,33 +471,8 @@ final class AppModel {
     }
   }
 
-  var clientConfiguration: String {
-    """
-    {
-      "mcpServers": {
-        "imessage-max": {
-          "url": "\(endpoint)"
-        }
-      }
-    }
-    """
-  }
-
-  var plugConfiguration: String {
-    """
-    [servers.imessage-max]
-    transport = "http"
-    url = "\(endpoint)"
-    protocol = "legacy"
-    """
-  }
-
-  var codexConfiguration: String {
-    """
-    [mcp_servers.imessage-max]
-    url = "\(endpoint)"
-    """
-  }
+  /// The header any MCP client must send, for the manual setup.
+  var accessHeader: String? { clientAccess.map { "Authorization: \($0.authorization)" } }
 
   var diagnosticReport: String {
     """
@@ -439,6 +501,7 @@ extension ServiceState {
     case .notRegistered: "not set up"
     case .stopped: "stopped"
     case .unresponsive: "not answering"
+    case .tokenRejected: "access key refused"
     case .running: "running"
     }
   }

@@ -10,6 +10,8 @@ actor FakeServiceSystem: ServiceSystem {
   var loaded = false
   var pid: Int32?
   var answering = true
+  /// The helper holds another token than the app reads, so it answers 401.
+  var refusing = false
   var legacyLoaded = false
   var foreign: Set<Int32> = []
   var contactsAnswer: PermissionStatus = .authorized
@@ -40,9 +42,13 @@ actor FakeServiceSystem: ServiceSystem {
     return loaded ? Job(pid: pid) : nil
   }
 
-  func diagnose(endpoint: URL) async -> DiagnoseResult? {
-    guard answering, let pid else { return nil }
-    return try? diagnosis(contacts: contactsGranted, processID: pid)
+  func diagnose(endpoint: URL) async -> DiagnoseReply {
+    guard let pid else { return .silent }
+    if refusing { return .refused }
+    guard answering, let result = try? diagnosis(contacts: contactsGranted, processID: pid) else {
+      return .silent
+    }
+    return .answered(result)
   }
 
   func listeners(port: Int) async -> Set<Int32> {
@@ -99,8 +105,9 @@ actor FakeServiceSystem: ServiceSystem {
 
   func pause() async { pauses += 1 }
 
-  /// A helper reads Contacts access once, at launch.
+  /// A helper reads Contacts access and its token once, at launch.
   private func launch() {
+    refusing = false
     pid = nextPID
     nextPID += 1
   }
