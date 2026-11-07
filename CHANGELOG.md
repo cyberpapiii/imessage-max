@@ -1,5 +1,49 @@
 # Changelog
 
+## 2.0.0
+
+iMessage Max is now a Mac app. Someone who never opens Terminal can install it, grant its permissions, connect an assistant and try it, all from one panel. It installs from a notarized DMG or with `brew install --cask cyberpapiii/tap/imessage-max`, and the Homebrew formula is retired.
+
+### Install
+
+- Every build is signed with Developer ID and hardened runtime. The release is `iMessage-Max-<version>.dmg`, holding `iMessage Max.app`, with the app and the DMG notarized and stapled.
+- The server runs as a helper inside the app (`Contents/MacOS/imessage-max`), registered with `SMAppService` under the label `com.cyberpapiii.imessage-max.helper`. It starts at login and restarts after a crash. macOS charges its Full Disk Access, Contacts and Automation to the app, so each Privacy list shows one "iMessage Max", and the grants survive updates.
+- The cask `imessage-max` in `cyberpapiii/tap` installs the same DMG on Apple silicon with macOS 15 or later, and links `imessage-max` into Homebrew's `bin`. `brew upgrade --cask` leaves the helper running for the companion to restart on the new binary. `brew uninstall --cask` stops the helper and removes the app. `--zap` also removes the launchd job, token, socket, logs and preferences.
+- Releases no longer ship `imessage-max-macos.tar.gz`, and the formula `cyberpapiii/tap/imessage-max` is disabled with a message that points at the cask.
+- A Claude Desktop extension, `iMessage-Max-<version>.mcpb`, ships with each release. It runs the stdio bridge, so Claude Desktop needs no permissions of its own.
+- `make install` builds the app, installs it over the released copy in `/Applications` or else in `~/Applications`, and registers the helper. `make install-agent` and `swift/launchd/local.imessage-max.plist` are gone.
+
+### Companion app
+
+- First run is six steps on the home page, in order: Allow in the background, Read messages, Show names, Send messages, Connect an assistant, and Try it. The first unfinished step opens in place with its buttons. Each step is judged again on every check, so reopening the app resumes where you left off, and a grant turned off in System Settings sends the panel back to its step.
+- Connect an assistant, and the Connection page, find Claude, Claude Code, Codex, Plug and Cursor on this Mac and connect each with one button. The app edits only its own entry in a client's config and keeps a backup of the old file.
+- Try it turns green once the helper serves its first tool call from an assistant. `diagnose` reports that count as `assistant_calls`.
+- Contacts is asked by the app on the helper's behalf, then the helper restarts, because a helper inside an app cannot prompt for Contacts itself.
+
+### Server
+
+- Every `diagnose` fix names the step in the app that fixes it, not a Terminal command.
+- `imessage-max` with no transport flag is a bridge that copies stdio to the running helper over `~/Library/Application Support/iMessage Max/mcp.sock` (mode 0600). Only the helper needs permissions. `--direct` serves stdio in process, as 1.x did.
+
+### Breaking
+
+- The HTTP endpoint moved from port 8080 to 47821, and every request needs `Authorization: Bearer <token>`. The token is in `~/Library/Application Support/iMessage Max/token`. The Connection page reconnects each client with it.
+- Stdio clients that run `imessage-max` reach the helper through the bridge, so iMessage Max must be running.
+- `--request-contacts-access` and `--request-messages-access` are gone. The app's Show names and Send messages steps ask for those grants.
+
+### Upgrading from 1.x
+
+1. Run `brew uninstall imessage-max`. The formula's `imessage-max` link would block the cask's.
+2. Install the app from the DMG or the cask, then open it.
+3. The panel opens on Finish the update. Choose **Replace the older helper**. It boots out the `local.imessage-max` agent, removes `~/Library/LaunchAgents/local.imessage-max.plist`, and registers the app's helper.
+4. Follow the steps for the permissions, then connect each assistant again, because the port and token changed.
+
+The 1.x logs, `~/Library/Logs/imessage-max.stdout.log` and `~/Library/Logs/imessage-max.stderr.log`, stay until you delete them or run `brew uninstall --zap --cask imessage-max`.
+
+### Fixes
+
+- SIGTERM exits 0 instead of aborting in the shutdown drain, so `make restart` and updates no longer leave a crash report.
+
 ## 1.8.0
 
 ### Performance

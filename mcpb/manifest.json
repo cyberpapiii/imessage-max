@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "imessage-max",
   "display_name": "iMessage Max",
-  "version": "1.8.0",
+  "version": "2.0.0",
   "description": "Local MCP server for reading, searching, and sending iMessages on macOS.",
   "long_description": "iMessage Max gives AI agents MCP tools that match what users ask for: search local iMessages, inspect a conversation, fetch attachments, triage unread messages, and send through Messages.app. The extension connects Claude to the iMessage Max app running on this Mac, which holds the permissions to read Messages, so Claude needs none of its own. Install and open the iMessage Max app first.",
   "author": {

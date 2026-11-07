@@ -47,7 +47,23 @@ final class ServiceFilesContractTests: XCTestCase {
         ] {
             XCTAssertTrue(makefile.contains(expected), "swift/Makefile lacks \(expected.debugDescription)")
         }
-        XCTAssertFalse(makefile.contains("install-agent"), "the app registers the helper; no hand-rendered plist")
+    }
+
+    func testCaskNamesTheBundledLayout() throws {
+        let url = try root.appendingPathComponent("scripts/generate-cask.sh")
+        XCTAssertTrue(FileManager.default.isExecutableFile(atPath: url.path), "release.yml runs the script directly")
+        let script = try String(contentsOf: url, encoding: .utf8)
+        let appSupport = (ServiceDefaults.tokenPath as NSString).deletingLastPathComponent
+        XCTAssertEqual(appSupport, (ServiceDefaults.socketPath as NSString).deletingLastPathComponent)
+        for expected in [
+            "APP_ID=\"\(ServiceDefaults.companionBundleID)\"\n",
+            "AGENT_LABEL=\"\(ServiceDefaults.launchdLabel)\"\n",
+            "binary \"#{appdir}/$APP/\(ServiceDefaults.helperBundlePath)\"\n",
+            "\"~/\(appSupport)\",\n",
+            "\"~/\((ServiceDefaults.logPath as NSString).deletingLastPathComponent)\",\n",
+        ] {
+            XCTAssertTrue(script.contains(expected), "scripts/generate-cask.sh lacks \(expected.debugDescription)")
+        }
     }
 
     func testCompanionAssemblyScriptMatchesContract() throws {

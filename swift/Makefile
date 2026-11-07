@@ -1,7 +1,8 @@
 # iMessage Max: build, sign, install
 #
 # Usage:
-#   make install       Build the app, install it to ~/Applications, register the helper, verify
+#   make install       Build the app, install it over the released copy in /Applications
+#                      or else to ~/Applications, register the helper, verify
 #   make build         Build release binary only
 #   make test          Run the full test suite (FILTER=ClassOrMethod for a subset)
 #   make restart       Restart the helper
@@ -21,9 +22,12 @@ LAUNCHD_LABEL := com.cyberpapiii.imessage-max.helper
 AGENT_PLIST  := ../macos/Resources/LaunchAgents/$(LAUNCHD_LABEL).plist
 APP_NAME     := iMessage Max
 APP_BUILD    := ../dist/$(APP_NAME).app
-# The app installs here and the helper runs from inside it. These paths hold
-# spaces, so recipes quote them.
-APP          := $(HOME)/Applications/$(APP_NAME).app
+# The app installs over a released copy in /Applications, where the DMG and
+# the cask put it, so the Mac never holds two bundles that register the same
+# helper label. With no copy there it goes to ~/Applications. The helper runs
+# from inside it. These paths hold spaces, so recipes quote them.
+APP_DIR      := $(shell [ -d "/Applications/$(APP_NAME).app" ] && echo /Applications || echo "$(HOME)/Applications")
+APP          := $(APP_DIR)/$(APP_NAME).app
 LOG          := $(HOME)/Library/Logs/iMessage Max/imessage-max.log
 # The port in the agent plist's ProgramArguments (`--port N` or `--port=N`),
 # so verify and status probe the helper that is running. Falls back to the
@@ -92,7 +96,6 @@ release-check: build test version ## Everything that must pass before tagging
 	@# The SIGTERM abort (#27) only happened in optimized builds.
 	@IMESSAGE_MAX_BINARY=$(BINARY) swift test --skip-build --filter SignalShutdownTests
 	@../scripts/check-version.sh --tag || echo "Not on a matching tag yet (expected before tagging)."
-	@ruby -c Formula/imessage-max.rb
 	@echo "Release checks passed. Next: git tag v$$(../scripts/check-version.sh --print) && git push --tags"
 
 sign: build ## Build and sign with the Developer ID, else ad hoc
@@ -193,14 +196,14 @@ sys.exit(0 if ok else 1)' \
 	|| { echo "  Run: open -R \"$(APP)\"   # then turn on iMessage Max in Full Disk Access, then make restart"; exit 1; }
 
 # The app registers the helper when it starts with --register-helper, which
-# also replaces an install of the old local.imessage-max agent. Arguments reach
+# also replaces a pre-2.0 install. Arguments reach
 # only a new launch, so the installed companion quits first. Only that copy:
 # a build running from dist/ or a test variant keeps running. The bundle is removed,
 # then copied: writing over the running helper's file makes macOS kill it.
-install: app ## Build the app, install it to ~/Applications, register the helper, verify
+install: app ## Build the app, install it over the released copy or to ~/Applications, register the helper, verify
 	@pkill -f "$(APP)/Contents/MacOS/iMessageMaxMenu" 2>/dev/null || true
 	@i=0; while pgrep -f "$(APP)/Contents/MacOS/iMessageMaxMenu" >/dev/null && [ $$i -lt 50 ]; do sleep 0.1; i=$$((i + 1)); done
-	@mkdir -p "$(HOME)/Applications"
+	@mkdir -p "$(APP_DIR)"
 	@rm -rf "$(APP)"
 	@ditto "$(APP_BUILD)" "$(APP)"
 	@echo "✓ Installed $(APP)"

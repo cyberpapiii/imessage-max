@@ -24,7 +24,8 @@ The companion requires macOS 15 or newer and the repository's Swift toolchain. I
 From the repository root:
 
 ```sh
-# Builds the app, installs it to ~/Applications and registers its helper.
+# Builds the app, installs it over the copy in /Applications or else in
+# ~/Applications, and registers its helper.
 make -C swift install
 
 # Build, sign, install in ~/Applications, and launch the companion.
@@ -42,6 +43,8 @@ The build script also supports `--build-only`, `--verify`, `--debug`, `--logs`, 
 The build produces `dist/iMessage Max.app`. The helper is `Contents/MacOS/imessage-max`, and its agent plist, `Contents/Library/LaunchAgents/com.cyberpapiii.imessage-max.helper.plist`, comes from `macos/Resources/LaunchAgents/`. The build targets the host architecture, and the current local build is for Apple silicon.
 
 ## Installing, updating and replacing an older install
+
+People install the app from the notarized DMG on the GitHub release, or with `brew install --cask cyberpapiii/tap/imessage-max`. The cask also links `imessage-max`, the stdio bridge, into Homebrew's `bin`. `brew upgrade --cask imessage-max` replaces the app and leaves the helper running. If the companion was open, brew quits and reopens it, and the reopened companion restarts the helper on the new binary. Otherwise the helper moves to the new binary the next time you open the app or log in. `brew uninstall --cask imessage-max` quits the companion, stops the helper and removes the app. Adding `--zap` also removes the launchd job, the token, the socket, the logs and the preferences.
 
 The helper runs from inside the app. **Set up iMessage Max** registers it with `SMAppService`, so it starts at login, restarts after a crash, and appears once, as iMessage Max, under "App Background Activity" in System Settings → General → Login Items & Extensions. Nothing is copied out of the bundle. The companion reads the label, port and log path from the bundled plist, so a test variant with its own label and port manages only its own helper.
 
