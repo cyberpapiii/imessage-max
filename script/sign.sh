@@ -12,5 +12,9 @@ TIMESTAMP="--timestamp"
 if [ "$IDENTITY" = "-" ]; then
   TIMESTAMP=""
 fi
-codesign --force --options runtime ${TIMESTAMP:+"$TIMESTAMP"} "$@" --sign "$IDENTITY" "$TARGET"
+if ! codesign --force --options runtime ${TIMESTAMP:+"$TIMESTAMP"} "$@" --sign "$IDENTITY" "$TARGET"; then
+  [ -n "$TIMESTAMP" ] || exit 1
+  echo "WARNING: signing with a timestamp failed, likely offline. Signing without one; notarization needs it." >&2
+  codesign --force --options runtime --timestamp=none "$@" --sign "$IDENTITY" "$TARGET"
+fi
 echo "✓ Signed $TARGET with $IDENTITY"

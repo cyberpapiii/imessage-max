@@ -49,6 +49,8 @@ final class ServiceFilesContractTests: XCTestCase {
             PropertyListSerialization.propertyList(from: Data(contentsOf: url), format: nil) as? [String: Any])
         XCTAssertEqual(entitlements["com.apple.security.automation.apple-events"] as? Bool, true)
         XCTAssertEqual(entitlements["com.apple.security.personal-information.addressbook"] as? Bool, true)
+        let makefile = try String(contentsOf: root.appendingPathComponent("swift/Makefile"), encoding: .utf8)
+        XCTAssertTrue(makefile.contains("--entitlements iMessageMax.entitlements"), "make sign applies the entitlements")
     }
 
     func testServerParsesEveryCompanionOption() throws {

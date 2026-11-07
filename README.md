@@ -508,7 +508,8 @@ stdio clients, it is the app that spawns the binary. Run `diagnose`. Its
    earlier code signature looks present but does not work. `make sign`
    uses the Developer ID in your keychain when one exists, which gives the
    binary a stable identity so rebuilds keep the grant. An ad-hoc build
-   does not.
+   does not. The first build after moving from the old self-signed
+   "iMessage Max Dev" identity to Developer ID needs this toggle once.
 3. The grant applies only to newly launched processes. Relaunch with
    `cd swift && make restart`, which runs launchctl bootout and then bootstrap.
    `kickstart -k` can hit the launchd crash throttle.

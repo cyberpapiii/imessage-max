@@ -24,6 +24,8 @@ tags:
 
 # A stable self-signed code-signing identity keeps Full Disk Access across rebuilds
 
+> **Superseded by plan 087 P1.** Builds now sign with the newest valid "Developer ID Application" identity in the keychain, chosen by `script/signing_identity.sh`, or with the SHA-1 in `SIGN_IDENTITY`. With no Developer ID, they sign ad hoc and print a warning. `make setup-signing` and the "iMessage Max Dev" identity no longer exist. The root cause below still holds: Full Disk Access follows the signature, so a stable identity keeps the grant. The fix steps are historical.
+
 ## Problem
 
 iMessage Max reads `~/Library/Messages/chat.db`, which requires Full Disk Access.

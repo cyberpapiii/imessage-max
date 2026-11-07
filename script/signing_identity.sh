@@ -23,7 +23,7 @@ while IFS= read -r LINE; do
       PEM+="$LINE"$'\n'
       grep -qxF "$HASH" <<<"$VALID" || continue
       NOT_AFTER="$(openssl x509 -noout -enddate <<<"$PEM")"
-      EXPIRY="$(date -j -u -f '%b %e %T %Y %Z' "${NOT_AFTER#notAfter=}" +%s)"
+      EXPIRY="$(LC_ALL=C date -j -u -f '%b %e %T %Y %Z' "${NOT_AFTER#notAfter=}" +%s)"
       if [ "$EXPIRY" -gt "$BEST_EXPIRY" ]; then
         BEST_HASH="$HASH"
         BEST_EXPIRY="$EXPIRY"
