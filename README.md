@@ -172,7 +172,7 @@ For contact names, choose Show names. The app asks macOS for Contacts on the hel
 
 ### 2. Connect your assistant
 
-The app's Connection page copies the settings for your assistant. Each assistant reaches the helper in one of three ways:
+The app's Connection page lists the assistants it finds on this Mac (Claude, Claude Code, Codex, Plug and Cursor) and connects each with one button. To set up another client by hand, use one of three ways to reach the helper:
 
 - HTTP, for Plug, Codex and Claude Code: `http://127.0.0.1:47821`, with the header `Authorization: Bearer <token>`. The token is in `~/Library/Application Support/iMessage Max/token`.
 - stdio, for any client that runs a command: `imessage-max`. The cask links that command. With the DMG, use `/Applications/iMessage Max.app/Contents/MacOS/imessage-max`. It is a bridge to the helper, so it needs no permissions of its own.

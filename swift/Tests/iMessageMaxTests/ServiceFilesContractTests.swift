@@ -50,8 +50,9 @@ final class ServiceFilesContractTests: XCTestCase {
     }
 
     func testCaskNamesTheBundledLayout() throws {
-        let script = try String(
-            contentsOf: root.appendingPathComponent("scripts/generate-cask.sh"), encoding: .utf8)
+        let url = try root.appendingPathComponent("scripts/generate-cask.sh")
+        XCTAssertTrue(FileManager.default.isExecutableFile(atPath: url.path), "release.yml runs the script directly")
+        let script = try String(contentsOf: url, encoding: .utf8)
         let appSupport = (ServiceDefaults.tokenPath as NSString).deletingLastPathComponent
         XCTAssertEqual(appSupport, (ServiceDefaults.socketPath as NSString).deletingLastPathComponent)
         for expected in [
