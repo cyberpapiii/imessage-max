@@ -228,7 +228,7 @@ struct ClientRowView: View {
     case .failed: return "Not connected"
     case .idle, .finished:
       return switch row.link {
-      case .connected: "Uses iMessage Max on this Mac"
+      case .connected: "Ready to use"
       case .outdated: "Set up for an older iMessage Max"
       case .notConnected: "Not connected"
       }
@@ -249,6 +249,7 @@ struct ClientRowView: View {
         VStack(alignment: .leading, spacing: Space.hairline) {
           Text(row.name).font(.maxLine)
           Text(status).font(.maxSmall).foregroundStyle(Design.muted)
+            .fixedSize(horizontal: false, vertical: true)
             .contentTransition(.interpolate)
         }
         .accessibilityElement(children: .combine)
@@ -277,6 +278,7 @@ struct ClientRowView: View {
       }
       .foregroundStyle(Design.ready)
       .accessibilityElement(children: .ignore)
+      .accessibilityAddTraits(.isStaticText)
       .accessibilityLabel("\(row.name) connected")
     } else {
       Button(isFailure ? "Try again" : "Connect", action: connect)

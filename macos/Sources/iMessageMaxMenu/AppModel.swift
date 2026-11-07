@@ -222,7 +222,7 @@ final class AppModel {
       }
       let elapsed = start.duration(to: .now).components
       let milliseconds = elapsed.seconds * 1000 + elapsed.attoseconds / 1_000_000_000_000_000
-      log.info(
+      log.notice(
         "Connect \(id.rawValue, privacy: .public) finished in \(milliseconds, privacy: .public) ms, link \(String(describing: link), privacy: .public)")
       guard let index = clients.firstIndex(where: { $0.id == id }) else { return }
       clients[index].activity = activity

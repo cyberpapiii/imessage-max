@@ -7,9 +7,10 @@
 # The helper runs from Contents/MacOS under SMAppService, using the agent plist
 # in Contents/Library/LaunchAgents, so macOS charges its privacy access to the
 # app. A test build that must run next to the real app overrides APP_NAME,
-# APP_BUNDLE_ID, HELPER_LABEL, HELPER_PORT and HELPER_SOCKET, so it shares no
-# registration, port, socket or log with it. HELPER_SOCKET becomes the helper's
-# --socket-path, whose folder must already exist with mode 0700.
+# APP_BUNDLE_ID, HELPER_LABEL, HELPER_PORT, HELPER_SOCKET and HELPER_TOKEN_FILE,
+# so it shares no registration, port, socket, token or log with it.
+# HELPER_SOCKET and HELPER_TOKEN_FILE become the helper's --socket-path and
+# --token-file, whose folders must already exist with mode 0700.
 set -euo pipefail
 
 if [ "$#" -ne 2 ]; then
@@ -30,6 +31,7 @@ BUNDLE_ID="${APP_BUNDLE_ID:-com.cyberpapiii.imessage-max.menubar}"
 HELPER_LABEL="${HELPER_LABEL:-$(plutil -extract Label raw -o - "$AGENT_TEMPLATE")}"
 HELPER_PORT="${HELPER_PORT:-}"
 HELPER_SOCKET="${HELPER_SOCKET:-}"
+HELPER_TOKEN_FILE="${HELPER_TOKEN_FILE:-}"
 
 # Resolved once so an ad hoc warning prints once for both signatures.
 SIGN_IDENTITY="$("$ROOT_DIR/script/signing_identity.sh")"
@@ -70,6 +72,10 @@ done
 if [ -n "$HELPER_SOCKET" ]; then
   /usr/libexec/PlistBuddy -c "Add :ProgramArguments: string --socket-path" \
     -c "Add :ProgramArguments: string $HELPER_SOCKET" "$AGENT_PLIST"
+fi
+if [ -n "$HELPER_TOKEN_FILE" ]; then
+  /usr/libexec/PlistBuddy -c "Add :ProgramArguments: string --token-file" \
+    -c "Add :ProgramArguments: string $HELPER_TOKEN_FILE" "$AGENT_PLIST"
 fi
 plutil -lint -s "$AGENT_PLIST"
 
