@@ -187,7 +187,11 @@ the cancellable `DispatchSourceTimer` pattern in
 can be cancelled. A cancelled asyncAfter work item stays enqueued until
 its deadline, and under load it retains each request's timeout timer. `Task.sleep` crashed production on
 2026-06-11 in the send-confirmation timeout path. Do not reintroduce it.
-`LaunchdSafetyTests` enforces this rule.
+The rule covers library code you configure into a sleep too. ServiceGroup's
+`maximumGracefulShutdownDuration` made every release-build SIGTERM abort
+(#27), so `HTTPTransport` bounds the drain with its own Dispatch timer.
+`LaunchdSafetyTests` enforces this rule, and `SignalShutdownTests` checks
+that a spawned server exits 0 on SIGTERM.
 
 ### Send contract (no confirmation gate)
 
