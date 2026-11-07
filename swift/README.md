@@ -14,24 +14,26 @@ make build
 
 `make build` passes `--build-system native`. Swift 6.4's default build
 system writes the binary to `.build/out/Products/Release` instead, a path
-the launchd service and its Full Disk Access grant do not use.
+`script/assemble_app.sh` does not copy into the app.
 
 ## Dev install workflow
 
 Use the `Makefile` for normal development updates:
 
 ```bash
-make install         # build, sign, restart launchd service, verify health
+make install         # build the app, install it to ~/Applications, register the helper, verify health
 ```
 
 The workflow exists so that:
-- the release binary path stays stable
-- the binary is signed with the Developer ID in your keychain, with hardened
-  runtime and `iMessageMax.entitlements`, so Full Disk Access survives
+- the helper runs from inside `~/Applications/iMessage Max.app` under
+  `SMAppService`, so macOS charges Full Disk Access, Contacts and Automation
+  to the app, and each Privacy list shows one "iMessage Max"
+- the app and the helper are signed with the Developer ID in your keychain,
+  with hardened runtime and `iMessageMax.entitlements`, so grants survive
   rebuilds. Set `SIGN_IDENTITY` to a certificate SHA-1 to pick one. With no
   Developer ID the build signs ad hoc, prints a warning, and Full Disk Access
   must be granted again after each build
-- the launchd-managed HTTP service restarts automatically
+- the running helper restarts on the new binary
 
 Other targets:
 
@@ -42,8 +44,10 @@ make logs
 make clean
 ```
 
-The launchd label used by this workflow is `local.imessage-max`, and the
-default HTTP port is `8080`.
+The helper's launchd label is `com.cyberpapiii.imessage-max.helper`, its
+log is `~/Library/Logs/iMessage Max/imessage-max.log`, and the default HTTP
+port is `8080`. Opening the app with `--register-helper` replaces an install
+of the pre-2.0 `local.imessage-max` agent.
 
 ## Requirements
 
