@@ -385,7 +385,7 @@ Live lanes cannot run on cloud VMs, because they need macOS privacy prompts, lau
   - [ ] Claude Desktop opens the bundled `.mcpb`.
   - [ ] Claude Code runs `claude mcp add --transport http imessage <url> --header "Authorization: Bearer <token>"`.
   - [ ] Codex writes an `[mcp_servers.imessage]` table with `url` and `http_headers` to `~/.codex/config.toml`.
-  - [ ] Plug writes `auth_token` and the new URL into Plug's `[servers.imessage]` table.
+  - [ ] Plug stores the token with `plug secret set imessage-max-token` (stdin) and points `[servers.imessage]` at the new URL with `--bearer-token keychain:imessage-max-token`. Without the `plug` command, it writes `auth_token` and the URL into the table.
   - [ ] Cursor opens its `mcp/install` deeplink with the URL and header.
 - [ ] Show only clients the app detects on this Mac. Each row shows Connect or Connected.
 - [ ] Every file write backs up the original next to it, edits only the iMessage entry, and shows what it changed.

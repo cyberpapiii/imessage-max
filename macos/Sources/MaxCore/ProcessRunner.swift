@@ -3,15 +3,24 @@ import Foundation
 public struct ProcessResult: Sendable {
   public let exitCode: Int32
   public let output: String
+
+  /// The output's last line, which is where a CLI says why it failed.
+  public var lastLine: String { output.split(separator: "\n").last.map(String.init) ?? "" }
 }
 
 public enum ProcessRunner {
-  public static func run(_ executable: String, arguments: [String], timeout: TimeInterval = 8)
-    async throws -> ProcessResult
-  {
+  /// `environment`, when given, is the child's whole environment, and its
+  /// HOME is the child's working folder. `input`, when given, is the child's
+  /// whole stdin; it must fit in a pipe's buffer.
+  public static func run(
+    _ executable: String, arguments: [String], environment: [String: String]? = nil,
+    input: Data? = nil, timeout: TimeInterval = 8
+  ) async throws -> ProcessResult {
     let execution = CommandExecution()
     return try await withTaskCancellationHandler {
-      try await execution.start(executable, arguments: arguments, timeout: timeout)
+      try await execution.start(
+        executable, arguments: arguments, environment: environment, input: input,
+        timeout: timeout)
     } onCancel: {
       Task { await execution.cancel() }
     }
@@ -30,9 +39,10 @@ private actor CommandExecution {
   private var failure: (any Error)?
   private var cancelled = false
 
-  func start(_ executable: String, arguments: [String], timeout: TimeInterval) async throws
-    -> ProcessResult
-  {
+  func start(
+    _ executable: String, arguments: [String], environment: [String: String]?, input: Data?,
+    timeout: TimeInterval
+  ) async throws -> ProcessResult {
     guard !cancelled, !Task.isCancelled else { throw CancellationError() }
     return try await withCheckedThrowingContinuation { continuation in
       self.continuation = continuation
@@ -51,7 +61,20 @@ private actor CommandExecution {
         let child = Process()
         child.executableURL = URL(fileURLWithPath: executable)
         child.arguments = arguments
-        child.standardInput = FileHandle.nullDevice
+        if let environment {
+          child.environment = environment
+          if let home = environment["HOME"] { child.currentDirectoryURL = URL(fileURLWithPath: home) }
+        }
+        if let input {
+          // Written and closed before launch, so a child that exits early
+          // cannot raise SIGPIPE in this process.
+          let pipe = Pipe()
+          try pipe.fileHandleForWriting.write(contentsOf: input)
+          try pipe.fileHandleForWriting.close()
+          child.standardInput = pipe
+        } else {
+          child.standardInput = FileHandle.nullDevice
+        }
         child.standardOutput = handle
         child.standardError = handle
         child.terminationHandler = { process in
@@ -98,7 +121,7 @@ private actor CommandExecution {
     }
     let output: String
     if let file = outputFile, let reader = try? FileHandle(forReadingFrom: file) {
-      let data = (try? reader.read(upToCount: 65536)) ?? Data()
+      let data = (try? reader.read(upToCount: 1 << 20)) ?? Data()
       try? reader.close()
       output = String(decoding: data, as: UTF8.self)
     } else {
