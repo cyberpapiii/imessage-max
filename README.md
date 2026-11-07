@@ -160,7 +160,7 @@ The source PNGs are committed under `assets/icons/` in these sizes: `16x16`,
 
 ### 1. Open iMessage Max and grant its permissions
 
-Open iMessage Max from Applications. It adds a speech bubble to the menu bar and walks you through three permissions, each listed in System Settings as "iMessage Max":
+Open iMessage Max from Applications. It adds a speech bubble to the menu bar and walks you through six steps: Allow in the background, Read messages, Show names, Send messages, Connect an assistant, and Try it. The three permissions are each listed in System Settings as "iMessage Max":
 
 - Full Disk Access, to read `~/Library/Messages/chat.db`
 - Contacts, to turn phone numbers into names
