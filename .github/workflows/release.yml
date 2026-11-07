@@ -52,6 +52,11 @@ jobs:
           xcodebuild -version
           swift --version
 
+      # The signed build uses exactly the pinned versions, and fails if
+      # Package.resolved is out of date.
+      - name: Resolve pinned dependencies
+        run: swift package --package-path swift resolve --force-resolved-versions
+
       - name: Build, sign, notarize, and staple the DMG and the Claude Desktop extension
         env:
           MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
