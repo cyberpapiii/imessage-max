@@ -16,8 +16,12 @@ actor FakeServiceSystem: ServiceSystem {
   var contactsGranted = false
   var outdated = false
   var failNextRegister = false
+  /// Registering leaves the helper off in Login Items, as after the user
+  /// turned it off there.
+  var registerNeedsApproval = false
   private(set) var commands: [SystemCommand] = []
   private(set) var contactRequests = 0
+  private(set) var pauses = 0
   private var nextPID: Int32 = 200
 
   func set(_ change: @Sendable (isolated FakeServiceSystem) -> Void) { change(self) }
@@ -54,6 +58,10 @@ actor FakeServiceSystem: ServiceSystem {
         failNextRegister = false
         throw CoreError.commandFailed("register failed")
       }
+      if registerNeedsApproval {
+        agent = .requiresApproval
+        return
+      }
       agent = .enabled
       loaded = true
       launch()
@@ -89,7 +97,7 @@ actor FakeServiceSystem: ServiceSystem {
       permission: permission, authorized: true, status: .authorized, processID: processID)
   }
 
-  func pause() async {}
+  func pause() async { pauses += 1 }
 
   /// A helper reads Contacts access once, at launch.
   private func launch() {

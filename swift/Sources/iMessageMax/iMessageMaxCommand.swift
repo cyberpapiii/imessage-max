@@ -42,7 +42,7 @@ struct iMessageMax: AsyncParsableCommand {
     }
 
     mutating func run() async throws {
-        if let logFile { try Log.redirectStandardError(to: logFile) }
+        if let logFile { Log.redirectStandardError(to: logFile) }
 
         if requestMessagesAccess {
             let (_, status) = await AutomationPermission.requestAccess()

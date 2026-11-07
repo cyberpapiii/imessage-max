@@ -98,7 +98,7 @@ struct PanelState: Equatable {
         : "Your assistants can read messages. Let’s check sending access."
     case .connected(.ready, _): "Your assistants can now use Messages on this Mac."
     case .misplaced:
-      "iMessage Max runs from your Applications folder, so its helper keeps working after this window closes."
+      "Move iMessage Max to Applications so it can register its helper and start at login."
     case .olderInstall:
       "An older iMessage Max helper is still installed. We’ll replace it with the one in this app. Then you’ll allow access once more, for the app."
     case .blocked:

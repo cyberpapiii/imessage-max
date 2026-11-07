@@ -31,19 +31,32 @@ enum Log {
         FileHandle.standardError.write(Data(format(level, message()).utf8))
     }
 
+    /// The size above which the log moves to `<path>.1` when the helper starts.
+    static let rotationThreshold = 10 * 1024 * 1024
+
     /// Points stderr at `path`, appending, so launchd needs no StandardErrorPath.
     /// A leading `~` expands here because launchd passes arguments verbatim.
-    static func redirectStandardError(to path: String) throws {
+    /// A file that cannot be opened leaves stderr where it was and says why
+    /// there: the helper runs under KeepAlive, and exiting would only loop.
+    static func redirectStandardError(to path: String, rotateAbove threshold: Int = rotationThreshold) {
         let url = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
-        try FileManager.default.createDirectory(
-            at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        let file = open(url.path, O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0o644)
-        guard file >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
-        defer { close(file) }
-        guard dup2(file, STDERR_FILENO) >= 0 else {
-            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        do {
+            try FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            if let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size > threshold {
+                // rename(2) replaces an older .1 in one step.
+                guard rename(url.path, url.path + ".1") == 0 else { throw posixError() }
+            }
+            let file = open(url.path, O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0o600)
+            guard file >= 0 else { throw posixError() }
+            defer { close(file) }
+            guard fchmod(file, 0o600) == 0, dup2(file, STDERR_FILENO) >= 0 else { throw posixError() }
+        } catch {
+            warning("Could not open the log file \(url.path), so logging stays on stderr: \(error.localizedDescription)")
         }
     }
+
+    private static func posixError() -> POSIXError { POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
 
     static func info(_ message: @autoclosure () -> String) { write(.info, message()) }
     static func warning(_ message: @autoclosure () -> String) { write(.warning, message()) }

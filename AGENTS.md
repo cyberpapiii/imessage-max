@@ -30,15 +30,15 @@ Other Makefile targets:
 - `make status` checks process, version, signature, health
 - `make app` builds and signs `dist/iMessage Max.app` without installing it
 - `make logs` tails the helper log, `~/Library/Logs/iMessage Max/imessage-max.log`. launchd cannot expand `~`, so the plist passes `--log-file` and the server opens the file itself
-- `make restart` runs `launchctl kickstart -k` on the helper. A kickstart within the plist's 10 second `ThrottleInterval` of the last launch waits out the rest of it. Do not stop the helper with `launchctl kill`: the server aborts while shutting down, so `KeepAlive` treats a SIGTERM as a crash and relaunches it. The companion stops it with `launchctl bootout` and starts it again by registering
+- `make restart` runs `launchctl kickstart -k` on the helper. A kickstart within the plist's 10 second `ThrottleInterval` of the last launch waits out the rest of it. Do not stop the helper with `launchctl kill`: the server aborts while shutting down ([#27](https://github.com/cyberpapiii/imessage-max/issues/27)), so `KeepAlive` treats a SIGTERM as a crash and relaunches it. The companion stops it with `launchctl bootout` and starts it again by registering
 - `make clean` removes debug artifacts and clears the helper log
 - `make version` checks that the five version sites agree, and `make release-check` runs everything that must pass before tagging (see `docs/RELEASING.md`)
 
-The server runs as the launchd agent `com.cyberpapiii.imessage-max.helper` on port 8080. It starts at login and restarts after a crash. Login Items lists it under "Allow in the Background" as iMessage Max.
+The server runs as the launchd agent `com.cyberpapiii.imessage-max.helper` on port 8080. It starts at login and restarts after a crash. System Settings → General → Login Items & Extensions lists it once, as iMessage Max, under "App Background Activity".
 
 Clients reach it through plug (HTTP, `protocol = "legacy"`) at `http://127.0.0.1:8080`. After restarting the service, clients may need to reconnect (for example with `/mcp` in Codex).
 
-`make build` passes `--build-system native` so the binary stays at `.build/arm64-apple-macosx/release/imessage-max`, the path `script/assemble_app.sh` copies into the app. Swift 6.4's default build system writes elsewhere.
+`make build` passes `--build-system native` so the binary stays at `.build/arm64-apple-macosx/release/imessage-max`, which `.build/release` links to. `script/assemble_app.sh` copies `swift/.build/release/imessage-max` into the app. Swift 6.4's default build system writes elsewhere.
 
 ### Manual build and run (without Makefile)
 

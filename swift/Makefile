@@ -164,11 +164,12 @@ sys.exit(0 if ok else 1)' \
 
 # The app registers the helper when it starts with --register-helper, which
 # also replaces an install of the old local.imessage-max agent. Arguments reach
-# only a new launch, so a running companion quits first. The bundle is removed,
+# only a new launch, so the installed companion quits first. Only that copy:
+# a build running from dist/ or a test variant keeps running. The bundle is removed,
 # then copied: writing over the running helper's file makes macOS kill it.
 install: app ## Build the app, install it to ~/Applications, register the helper, verify
-	@pkill -x iMessageMaxMenu 2>/dev/null || true
-	@i=0; while pgrep -x iMessageMaxMenu >/dev/null && [ $$i -lt 50 ]; do sleep 0.1; i=$$((i + 1)); done
+	@pkill -f "$(APP)/Contents/MacOS/iMessageMaxMenu" 2>/dev/null || true
+	@i=0; while pgrep -f "$(APP)/Contents/MacOS/iMessageMaxMenu" >/dev/null && [ $$i -lt 50 ]; do sleep 0.1; i=$$((i + 1)); done
 	@mkdir -p "$(HOME)/Applications"
 	@rm -rf "$(APP)"
 	@ditto "$(APP_BUILD)" "$(APP)"
@@ -201,6 +202,7 @@ status: ## Show service status and version
 	fi
 
 logs: ## Tail the helper log
+	@mkdir -p "$$(dirname "$(LOG)")" && touch "$(LOG)"
 	@tail -f "$(LOG)"
 
 clean: ## Remove debug artifacts and old logs

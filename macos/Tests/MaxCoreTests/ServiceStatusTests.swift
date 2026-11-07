@@ -221,3 +221,15 @@ import Testing
   await system.set { $0.outdated = true }
   #expect(try await controller.restartIfOutdated().diagnosis?.processID == 201)
 }
+
+@Test func turnedOffInLoginItemsEndsTheWaitAtOnce() async throws {
+  let home = try temporaryHome()
+  let system = FakeServiceSystem()
+  await system.set { $0.registerNeedsApproval = true }
+  let controller = ServiceController(
+    configuration: try configuration(home: home), system: system, home: home)
+  await #expect(throws: CoreError.notReady(.blockedInLoginItems)) {
+    try await controller.perform(.start)
+  }
+  #expect(await system.pauses == 0)
+}

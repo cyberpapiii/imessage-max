@@ -52,16 +52,19 @@ public actor ServiceController {
 
   /// Replaces the pre-2.0 install: boots out its job, removes its plist and
   /// copied helper, then registers this app's helper. Each step reads what is
-  /// there now, so a second run, or a run after a crash, finishes the rest.
+  /// there now, so a run after a crash that left the old files finishes the
+  /// rest. A crash after the files are gone leaves `.notRegistered`, which
+  /// `perform(.start)` finishes.
   public func migrate() async throws -> ServiceState {
     guard let legacy else { throw CoreError.notReady(await inspect()) }
     return try await exclusively {
+      let state = await inspect()
+      guard state == .legacyInstall else { throw CoreError.notReady(state) }
       if await system.job(label: LegacyInstall.label) != nil {
         try await system.run(.bootout(label: LegacyInstall.label))
-        for _ in 1..<Self.attempts {
-          if await system.listeners(port: configuration.port).isEmpty { break }
-          await system.pause()
-        }
+        // The old files stay until the port is free, so a listener that
+        // outlives the bootout leaves the old install whole.
+        guard await portFrees() else { throw CoreError.conflict }
       }
       try legacy.removeFiles()
       if await system.agentStatus(plistName: configuration.plistName) == .notRegistered {
@@ -151,13 +154,28 @@ public actor ServiceController {
     }
   }
 
+  /// Waits until `done`. Turned off in Login Items is an end state: launchd
+  /// will not run the helper until the user turns it on, so waiting is futile.
   private func converge(until done: (ServiceState) -> Bool) async throws -> ServiceState {
     for attempt in 1...Self.attempts {
       let state = await inspect()
       if done(state) { return state }
+      if state == .blockedInLoginItems { throw CoreError.notReady(state) }
       if attempt < Self.attempts { await system.pause() }
     }
     throw CoreError.commandFailed("The service hasn’t responded yet. Check again in a moment.")
+  }
+
+  /// Whether the port has no listener but this app's own helper, within the wait.
+  private func portFrees() async -> Bool {
+    for attempt in 1...Self.attempts {
+      let ours = await system.job(label: configuration.label)?.pid
+      if await system.listeners(port: configuration.port).subtracting(ours.map { [$0] } ?? []).isEmpty {
+        return true
+      }
+      if attempt < Self.attempts { await system.pause() }
+    }
+    return false
   }
 
   private func exclusively<T: Sendable>(_ body: () async throws -> T) async throws -> T {

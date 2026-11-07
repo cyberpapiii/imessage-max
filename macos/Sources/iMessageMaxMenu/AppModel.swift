@@ -31,16 +31,24 @@ final class AppModel {
   @ObservationIgnored private let controller: ServiceController?
   @ObservationIgnored private let milestones: Milestones
   @ObservationIgnored private let prepareMessages: @MainActor () async throws -> Void
+  /// How long a service change, or a permission request with its prompt, may
+  /// hold `busy`. Past it the panel shows an error and the buttons return,
+  /// because SMAppService and a prompt can fail to answer at all.
+  @ObservationIgnored private let changeDeadline: Double
+  @ObservationIgnored private let permissionDeadline: Double
   @ObservationIgnored private let log = Logger(
     subsystem: ServiceDefaults.companionBundleID, category: "Service")
 
   init(
     controller: ServiceController?, milestones: Milestones,
-    prepareMessages: @escaping @MainActor () async throws -> Void
+    prepareMessages: @escaping @MainActor () async throws -> Void,
+    changeDeadline: Double = 60, permissionDeadline: Double = 180
   ) {
     self.controller = controller
     self.milestones = milestones
     self.prepareMessages = prepareMessages
+    self.changeDeadline = changeDeadline
+    self.permissionDeadline = permissionDeadline
   }
 
   static func live(milestones: Milestones) -> AppModel {
@@ -172,13 +180,16 @@ final class AppModel {
     busy = permission == .automation && messagesNeedOpening ? .checkingSending : .askingPermission
     notice = nil
     problem = nil
+    let prepareMessages = prepareMessages
     actionTask = Task {
       var permissionProblem: String?
       do {
-        if permission == .automation { try await prepareMessages() }
-        // The Contacts prompt belongs to this app, so bring it forward.
-        if permission == .contacts { NSApp.activate(ignoringOtherApps: true) }
-        let result = try await controller.requestPermission(permission)
+        let result = try await withDeadline(seconds: permissionDeadline) { @MainActor in
+          if permission == .automation { try await prepareMessages() }
+          // The Contacts prompt belongs to this app, so bring it forward.
+          if permission == .contacts { NSApp.activate(ignoringOtherApps: true) }
+          return try await controller.requestPermission(permission)
+        }
         if !result.authorized {
           permissionProblem =
             result.status == .denied
@@ -207,24 +218,61 @@ final class AppModel {
     guard busy == nil else { return }
     busy = .moving
     problem = nil
+    let source = Bundle.main.bundleURL
+    let destination = AppMover.destination(home: FileManager.default.homeDirectoryForCurrentUser)
     actionTask = Task {
       do {
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        let target = try AppMover.install(
-          Bundle.main.bundleURL, into: AppMover.destination(home: home))
-        _ = try? await ProcessRunner.run(
+        let target = try await Self.offMainActor {
+          try AppMover.install(source, into: destination, beforeReplacing: Self.quitCopy(at:))
+        }
+        let strip = try? await ProcessRunner.run(
           "/usr/bin/xattr", arguments: ["-dr", "com.apple.quarantine", target.path])
+        if strip?.exitCode != 0 {
+          log.error(
+            "Quarantine strip failed, exit \(strip.map { String($0.exitCode) } ?? "none", privacy: .public)")
+        }
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.createsNewApplicationInstance = true
         _ = try await NSWorkspace.shared.openApplication(at: target, configuration: configuration)
         NSApp.terminate(nil)
+      } catch let error as AppMover.Failure {
+        problem = error.localizedDescription
+        log.error("Move to Applications refused: \(error.localizedDescription, privacy: .public)")
       } catch {
         problem =
           "iMessage Max could not move itself. Drag it into Applications, then open it from there."
-        log.error("Move to Applications failed")
+        log.error("Move to Applications failed: \(error.localizedDescription, privacy: .public)")
       }
       busy = nil
       actionTask = nil
+    }
+  }
+
+  /// The copy in Applications may be running. Its files are about to be
+  /// replaced, so it quits first, within five seconds, or the move stops.
+  nonisolated private static func quitCopy(at target: URL) throws {
+    let target = target.standardizedFileURL
+    let running = NSWorkspace.shared.runningApplications.filter {
+      $0.bundleURL?.standardizedFileURL == target && $0 != NSRunningApplication.current
+        && $0.processIdentifier > 0
+    }
+    running.forEach { $0.terminate() }
+    for _ in 0..<50 {
+      if running.allSatisfy({ kill($0.processIdentifier, 0) != 0 && errno == ESRCH }) { return }
+      usleep(100_000)
+    }
+    throw AppMover.Failure.copyStillRunning
+  }
+
+  /// Runs file work on a Dispatch queue, so a large copy or the wait for a
+  /// running copy to quit never blocks the main thread.
+  nonisolated private static func offMainActor<T: Sendable>(
+    _ work: @escaping @Sendable () throws -> T
+  ) async throws -> T {
+    try await withCheckedThrowingContinuation { continuation in
+      DispatchQueue.global(qos: .userInitiated).async {
+        continuation.resume(with: Result { try work() })
+      }
     }
   }
 
@@ -299,9 +347,10 @@ final class AppModel {
     busy = kind
     problem = nil
     notice = nil
+    let deadline = changeDeadline
     actionTask = Task {
       do {
-        let latest = try await operation(controller)
+        let latest = try await withDeadline(seconds: deadline) { try await operation(controller) }
         show(latest)
         then(latest)
         log.info("Service change verified")

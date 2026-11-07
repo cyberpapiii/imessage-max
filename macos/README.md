@@ -40,7 +40,7 @@ The build produces `dist/iMessage Max.app`. The helper is `Contents/MacOS/imessa
 
 ## Installing, updating and replacing an older install
 
-The helper runs from inside the app. **Set up iMessage Max** registers it with `SMAppService`, so it starts at login, restarts after a crash, and appears in Login Items under "Allow in the Background". Nothing is copied out of the bundle. The companion reads the label, port and log path from the bundled plist, so a test variant with its own label and port manages only its own helper.
+The helper runs from inside the app. **Set up iMessage Max** registers it with `SMAppService`, so it starts at login, restarts after a crash, and appears once, as iMessage Max, under "App Background Activity" in System Settings → General → Login Items & Extensions. Nothing is copied out of the bundle. The companion reads the label, port and log path from the bundled plist, so a test variant with its own label and port manages only its own helper.
 
 An app run from outside `/Applications` or `~/Applications`, or translocated by Gatekeeper, offers **Move to Applications** and never registers from there. If the helper is turned off in Login Items, the panel says so and opens Login Items. After an update replaces the app, the next launch of the companion restarts a helper that started before the new binary landed.
 
