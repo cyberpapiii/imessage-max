@@ -107,7 +107,7 @@ Or run `brew install --cask cyberpapiii/tap/imessage-max`.
 
 ### Upgrading from 1.x
 
-Version 1.x installed a Homebrew formula and a launch agent you set up by hand. The formula is retired. Run `brew uninstall imessage-max` first, because the cask links the same `imessage-max` command. Then install the app and open it. It offers **Replace the older helper**, which stops the old agent and removes its files. The new helper listens on port 47821 and needs a token, so reconnect each assistant from the app's Connection page.
+Version 1.x installed a Homebrew formula and a launch agent you set up by hand. The formula is retired. Run `brew uninstall imessage-max` first, because the cask links the same `imessage-max` command. Then install the app and open it. It offers **Replace the older helper**, which stops the old agent and removes its files. The new helper listens on port 47821 and needs a token, so reconnect each assistant from the app's Connections page.
 
 ## Protocol support
 
@@ -160,19 +160,20 @@ The source PNGs are committed under `assets/icons/` in these sizes: `16x16`,
 
 ### 1. Open iMessage Max and grant its permissions
 
-Open iMessage Max from Applications. It adds a speech bubble to the menu bar and walks you through six steps: Allow in the background, Read messages, Show names, Send messages, Connect an assistant, and Try it. The three permissions are each listed in System Settings as "iMessage Max":
+Open iMessage Max from Applications. It adds a speech bubble to the menu bar, and its panel lists four permissions with the status of each. The first one that is missing opens with a button that grants it:
 
+- Background activity, so the helper keeps serving your assistants after you close the panel or quit the app, and starts again at login
 - Full Disk Access, to read `~/Library/Messages/chat.db`
 - Contacts, to turn phone numbers into names
 - Automation for Messages, to send
 
-The app starts a background helper that serves your assistants. The helper keeps running after you quit the app, and starts again at login.
+System Settings lists each of them as "iMessage Max".
 
-For contact names, choose Show names. The app asks macOS for Contacts on the helper's behalf, because macOS charges the helper's grants to the app, and then restarts the helper. A bare `imessage-max` from a source build cannot hold a Contacts grant of its own. Under launchd or an MCP client it still reads messages, and shows phone numbers in place of names. `--contacts-policy request|skip`, or `IMESSAGE_MAX_CONTACTS_POLICY`, overrides its terminal detection.
+For contact names, choose Allow Contacts under Contacts. The app asks macOS for Contacts on the helper's behalf, because macOS charges the helper's grants to the app, and then restarts the helper. A bare `imessage-max` from a source build cannot hold a Contacts grant of its own. Under launchd or an MCP client it still reads messages, and shows phone numbers in place of names. `--contacts-policy request|skip`, or `IMESSAGE_MAX_CONTACTS_POLICY`, overrides its terminal detection.
 
 ### 2. Connect your assistant
 
-The app's Connection page lists the assistants it finds on this Mac (Claude, Claude Code, Codex, Plug and Cursor) and connects each with one button. To set up another client by hand, use one of three ways to reach the helper:
+Once every permission is on, the panel offers to connect the assistant you use. The app's Connections page lists the assistants it finds on this Mac (Claude, Claude Code, Codex, Plug and Cursor) and connects each with one button. To set up another client by hand, use one of three ways to reach the helper:
 
 - HTTP, for Plug, Codex and Claude Code: `http://127.0.0.1:47821`, with the header `Authorization: Bearer <token>`. The token is in `~/Library/Application Support/iMessage Max/token`.
 - stdio, for any client that runs a command: `imessage-max`. The cask links that command. With the DMG, use `/Applications/iMessage Max.app/Contents/MacOS/imessage-max`. It is a bridge to the helper, so it needs no permissions of its own.
@@ -409,9 +410,9 @@ diagnose()  # Returns: database status, contacts count, permissions, capabilitie
 
 `contacts.status` is one of `authorized`, `limited`, `denied`, `restricted`, `not_determined`, `not_requested_headless`, or `<status>_load_failed`. A headless process that skipped the prompt reports `not_requested_headless`.
 
-Every `fix` names a step in the app for the helper inside `iMessage Max.app`, such as "Open iMessage Max and choose Read messages". The steps are Allow in the background, Read messages, Show names, Send messages, Connect an assistant, and Try it. For a bare executable, a fix names the System Settings switch to turn on. No fix names a terminal command.
+Every `fix` for the helper inside `iMessage Max.app` names a permission in the app, such as "Open iMessage Max and turn on Full Disk Access." The permissions are Background activity, Full Disk Access, Contacts and Automation. For a bare executable, a fix names the System Settings switch to turn on. No fix names a terminal command.
 
-`assistant_calls` counts the `tools/call` requests this helper process has received from clients other than the companion app. The app's Try it step turns green when it is above zero.
+`assistant_calls` counts the `tools/call` requests this helper process has received from clients other than the companion app. The app tells you once, the first time it is above zero.
 
 ## Release checks
 
@@ -467,7 +468,7 @@ Examples:
 
 ### Contacts showing as phone numbers
 
-Run `diagnose` and read `contacts.status`. If it is `denied`, `not_determined` or `not_requested_headless`, open iMessage Max and choose Show names. If it is `denied`, also turn on iMessage Max in System Settings → Privacy & Security → Contacts. A bare `imessage-max` executable cannot hold a Contacts grant of its own, so use the helper inside the app. Names refresh within 30 seconds of a Contacts change. The server drops them as soon as access is revoked, and no restart is needed.
+Run `diagnose` and read `contacts.status`. If it is `denied`, `not_determined` or `not_requested_headless`, open iMessage Max and turn on Contacts. If it is `denied`, also turn on iMessage Max in System Settings → Privacy & Security → Contacts. A bare `imessage-max` executable cannot hold a Contacts grant of its own, so use the helper inside the app. Names refresh within 30 seconds of a Contacts change. The server drops them as soon as access is revoked, and no restart is needed.
 
 ### "Cannot read the iMessage database" / `permission_denied`
 
@@ -477,8 +478,8 @@ so turn on iMessage Max. For a bare `imessage-max` launchd service, that
 process is the binary itself. Stdio clients reach the helper through the
 bridge, so they need no grant of their own. Only `--direct` makes the app
 that spawns the binary need it. Run `diagnose`. For the helper inside the
-app, its `database.fix` field reads "Open iMessage Max and choose Read
-messages". For a bare executable, it names the executable and steps 1 to 3:
+app, its `database.fix` field reads "Open iMessage Max and turn on Full
+Disk Access." For a bare executable, it names the executable and steps 1 to 3:
 
 1. System Settings → Privacy & Security → Full Disk Access → add that
    executable (or its launching app).
@@ -489,8 +490,8 @@ messages". For a bare executable, it names the executable and steps 1 to 3:
    does not. The first build after moving from the old self-signed
    "iMessage Max Dev" identity to Developer ID needs this toggle once.
 3. The grant applies only to newly launched processes. For the helper inside
-   the app, open iMessage Max again: its Read messages step restarts the
-   helper and checks. For a bare service, run `cd swift && make restart`, which runs
+   the app, open iMessage Max again: while Full Disk Access shows Not
+   allowed, it restarts the helper and checks. For a bare service, run `cd swift && make restart`, which runs
    `launchctl kickstart -k`. A restart within 10 seconds of the last launch
    waits out launchd's throttle.
 4. To narrow it down yourself, run `sqlite3 -readonly ~/Library/Messages/chat.db 'pragma quick_check;'` from a terminal.

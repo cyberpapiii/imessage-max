@@ -88,7 +88,6 @@ extension AppModel {
         bundleIdentifier: ServiceDefaults.companionBundleID,
         bundleURL: URL(fileURLWithPath: "\(app)/iMessage Max.app"), home: home)
     }
-    if name == "try-it" { milestones.mark(.skippedConnect) }
     return AppModel(
       controller: configuration.map {
         ServiceController(configuration: $0, system: FixtureSystem(name), home: home)
@@ -201,7 +200,7 @@ actor FixtureSystem: ServiceSystem {
     case "setup-sending":
       diagnosis(
         messages: true, contacts: .authorized, sending: .unverified, detail: .messagesNotRunning)
-    case "connect", "try-it": diagnosis(messages: true, contacts: .authorized, sending: .supported)
+    case "connect": diagnosis(messages: true, contacts: .authorized, sending: .supported)
     case "revoked":
       diagnosis(messages: false, contacts: .authorized, sending: .supported, calls: 1)
     default: diagnosis(messages: true, contacts: .authorized, sending: .supported, calls: 1)

@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Companion app
+
+- The home page shows one Permissions card in place of the numbered setup steps, and it looks the same during first run and after. It lists Background activity, Full Disk Access, Contacts and Automation by their System Settings names, each with what it is for and its status: On or Off, Allowed or Not allowed, and Some contacts for limited Contacts access. The first missing permission opens in place with its explanation and buttons.
+- Connecting an assistant is a card under Permissions. It shows once every permission is on and no assistant is connected, and leaves for good once one connects, an assistant calls a tool, or you choose Not now.
+- The Connection page is now Connections. Its row on the home page names what is connected, such as "Plug" or "Plug and 1 more", or None.
+- The Try it step and its sample prompt are gone. The app still says so the first time an assistant uses iMessage Max.
+
+### Server
+
+- `diagnose` fixes for the helper inside the app name the permission by its System Settings name, such as "Open iMessage Max and turn on Full Disk Access." `assistant_calls` is unchanged.
+
 ## 2.0.0
 
 iMessage Max is now a Mac app. Someone who never opens Terminal can install it, grant its permissions, connect an assistant and try it, all from one panel. It installs from a notarized DMG or with `brew install --cask cyberpapiii/tap/imessage-max`, and the Homebrew formula is retired.

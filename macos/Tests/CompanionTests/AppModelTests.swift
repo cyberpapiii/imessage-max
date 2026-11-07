@@ -140,12 +140,12 @@ private actor LaunchGrantSystem: ServiceSystem {
   let system = LaunchGrantSystem(fullDiskOn: false)
   let model = try model(system)
   await model.refresh()
-  #expect(model.state.phase == .setup(.readMessages))
+  #expect(model.state.phase == .setup(.fullDiskAccess))
   await system.turnOnFullDisk()
   await model.panelOpened()
   await model.prepareToQuit()
   #expect(await system.restarts == 1)
-  #expect(model.state.phase == .setup(.connectAssistant))
+  #expect(model.state.phase == .ready)
   #expect(model.notice == nil)
 }
 
@@ -157,7 +157,7 @@ private actor LaunchGrantSystem: ServiceSystem {
   #expect(model.busy == .checkingAccess)
   await model.prepareToQuit()
   #expect(await system.restarts == 1)
-  #expect(model.state.phase == .setup(.readMessages))
+  #expect(model.state.phase == .setup(.fullDiskAccess))
   #expect(model.notice == .setupUnfinished)
   // A panel opened right after holds off: launchd would throttle the restart.
   await model.panelOpened()
@@ -171,28 +171,27 @@ private actor LaunchGrantSystem: ServiceSystem {
   await model.panelOpened()
   await model.prepareToQuit()
   #expect(await system.restarts == 0)
-  #expect(model.state.phase == .setup(.connectAssistant))
+  #expect(model.state.phase == .ready)
 }
 
-@MainActor @Test func theFirstAssistantCallFinishesSetupAndOutlivesTheHelper() async throws {
+@MainActor @Test func theFirstAssistantCallCelebratesOnceAndOutlivesTheHelper() async throws {
   let system = LaunchGrantSystem(fullDiskOn: true)
   let milestones = Milestones(defaults: nil)
   let app = try model(system, milestones: milestones)
   await app.refresh()
-  #expect(app.state.phase == .setup(.connectAssistant))
+  #expect(app.notice == nil)
   await system.call()
   await app.refresh()
-  #expect(app.state.phase == .ready)
   #expect(app.notice == .tried)
   #expect(app.celebration == 1)
 
   try await system.run(.kickstart(label: ServiceDefaults.launchdLabel, restart: true))
   await app.refresh()
-  #expect(app.state.phase == .ready)
   #expect(app.celebration == 1)
   let reopened = try model(system, milestones: milestones)
   await reopened.refresh()
-  #expect(reopened.state.phase == .ready)
+  #expect(reopened.tried)
+  #expect(reopened.celebration == 0)
 }
 
 @MainActor @Test func anAssistantCallBeforeTheGrantsAreDoneIsKeptQuietly() async throws {
@@ -201,22 +200,35 @@ private actor LaunchGrantSystem: ServiceSystem {
   await system.call()
   await app.refresh()
   #expect(app.tried)
-  #expect(app.state.phase == .setup(.readMessages))
+  #expect(app.state.phase == .setup(.fullDiskAccess))
   #expect(app.notice == nil)
   #expect(app.celebration == 0)
 }
 
-@MainActor @Test func reopeningResumesAtTheFirstUnfinishedStep() async throws {
+@MainActor @Test func notNowRetiresTheConnectCardAcrossLaunches() async throws {
   let system = LaunchGrantSystem(fullDiskOn: true)
   let milestones = Milestones(defaults: nil)
   let first = try model(system, milestones: milestones)
+  await first.refreshClients()
   await first.refresh()
-  first.skipConnect(true)
-  #expect(first.state.phase == .setup(.tryIt))
+  #expect(first.state.offersConnect)
+  #expect(first.state.connections == "None")
+  first.dismissConnect()
+  #expect(!first.state.offersConnect)
   let reopened = try model(system, milestones: milestones)
+  await reopened.refreshClients()
   await reopened.refresh()
-  #expect(reopened.state.phase == .setup(.tryIt))
-  reopened.skipConnect(false)
-  #expect(reopened.state.phase == .setup(.connectAssistant))
-  #expect(!milestones.reached(.skippedConnect))
+  #expect(reopened.state.phase == .ready)
+  #expect(!reopened.state.offersConnect)
+}
+
+@MainActor @Test func anAssistantCallRetiresTheConnectCard() async throws {
+  let system = LaunchGrantSystem(fullDiskOn: true)
+  let app = try model(system)
+  await app.refreshClients()
+  await app.refresh()
+  #expect(app.state.offersConnect)
+  await system.call()
+  await app.refresh()
+  #expect(!app.state.offersConnect)
 }

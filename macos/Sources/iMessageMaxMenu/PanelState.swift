@@ -28,16 +28,18 @@ struct Notice: Equatable {
   static let resting = Notice(text: "Resting until you start it again.")
   static let connected = Notice(text: "Connected. iMessage Max is running.")
   static let setupUnfinished = Notice(
-    text: "Setup isn’t finished yet. Check the step below.", tone: .neutral)
+    text: "That permission isn’t on yet. See Permissions below.", tone: .neutral)
   static let noLog = Notice(text: "No service log yet. Start iMessage Max first.")
   static let tried = Notice(text: "Your assistant just used iMessage Max. You’re all set.")
+
+  static func linked(_ name: String) -> Notice { Notice(text: "\(name) is connected.") }
 
   static func granted(_ permission: SetupPermission) -> Notice {
     Notice(text: permission == .automation ? "Sending is ready." : "Contact names are ready.")
   }
 }
 
-/// One detected client on the Connection page.
+/// One detected client on the Connections page.
 struct ClientRow: Identifiable, Equatable {
   let id: ClientID
   let name: String
@@ -54,91 +56,105 @@ enum ClientActivity: Equatable {
   case failed(String)
 }
 
-/// What the first-run steps are judged on besides diagnose.
+/// What the home panel judges besides diagnose.
 struct SetupFacts: Equatable {
-  /// Detected clients whose config reaches the helper, in table order.
-  var connected: [String] = []
-  var skippedConnect = false
-  /// A client other than this app has called a tool. The app keeps it once
-  /// seen, because the helper's count starts over at every launch.
-  var tried = false
+  /// Detected clients whose config reaches the helper, in table order. nil
+  /// until the first scan.
+  var connected: [String]?
+  /// The user chose Not now, or an assistant has connected or called a
+  /// tool. Kept across launches, so the connect card does not come back.
+  var connectSettled = false
 }
 
-enum StepProgress: Equatable {
-  /// The word the row shows, such as Ready.
-  case done(String)
-  case current
-  case skipped
-  case upcoming
+enum Grant: Equatable {
+  /// The word the row shows, such as Allowed.
+  case granted(String)
+  case missing(String)
+  /// The helper is not running, so nothing can check.
+  case unknown
+
+  static let notChecked = "Not checked"
 }
 
-struct StepRow: Identifiable, Equatable {
+struct PermissionRow: Identifiable, Equatable {
   let step: SetupStep
-  let progress: StepProgress
+  let grant: Grant
   var id: SetupStep { step }
-}
 
-extension SetupStep {
-  /// The step's done check against a running helper: nil while it is not
-  /// done, else the word its row shows. Answering diagnose is itself the
-  /// check for Allow in the background.
-  func done(_ diagnosis: DiagnoseResult, _ facts: SetupFacts) -> String? {
-    switch self {
-    case .allowInBackground: "On"
-    case .readMessages: diagnosis.database.accessible ? "Ready" : nil
-    case .showNames:
-      diagnosis.namesReady ? (diagnosis.contacts.status == .limited ? "Some names" : "Ready") : nil
-    case .sendMessages: diagnosis.sendingReady ? "Ready" : nil
-    case .connectAssistant:
-      if let first = facts.connected.first {
-        facts.connected.count == 1 ? first : "\(first) and \(facts.connected.count - 1) more"
-      } else {
-        facts.tried ? "Connected" : nil
-      }
-    case .tryIt: facts.tried ? "Worked" : nil
+  var word: String {
+    switch grant {
+    case .granted(let word), .missing(let word): word
+    case .unknown: Grant.notChecked
     }
   }
 }
 
-/// First run as one ordered list. Each row is judged on its own, so a revoked
-/// grant turns its row back while later rows keep their state, and the first
-/// row that is neither done nor skipped is the current step.
-struct FirstRun: Equatable {
-  let rows: [StepRow]
+extension SetupStep {
+  var purpose: String {
+    switch self {
+    case .backgroundActivity: "Keeps running when this panel is closed."
+    case .fullDiskAccess: "Lets your assistants read your messages."
+    case .contacts: "Shows people’s names instead of phone numbers."
+    case .automation: "Lets your assistants send messages when you ask."
+    }
+  }
 
-  /// nil for a helper no step can fix, such as one that is stopped or misplaced.
-  init?(service: ServiceState?, facts: SetupFacts) {
+  /// The permission as a running helper reports it. Answering diagnose is
+  /// itself the check for background activity.
+  func grant(_ diagnosis: DiagnoseResult) -> Grant {
+    switch self {
+    case .backgroundActivity:
+      return .granted("On")
+    case .fullDiskAccess:
+      if diagnosis.database.accessible { return .granted("Allowed") }
+      return .missing(diagnosis.database.status == .permissionDenied ? "Not allowed" : Grant.notChecked)
+    case .contacts:
+      if diagnosis.namesReady {
+        return .granted(diagnosis.contacts.status == .limited ? "Some contacts" : "Allowed")
+      }
+      return .missing(diagnosis.contacts.authorized ? Grant.notChecked : "Not allowed")
+    case .automation:
+      if diagnosis.sendingReady { return .granted("Allowed") }
+      return .missing(diagnosis[.permAutomation]?.isPermissionGated == true ? "Not allowed" : Grant.notChecked)
+    }
+  }
+}
+
+/// The four permissions, the same during first run and after. The first
+/// missing one is the one the panel walks the user through.
+struct Permissions: Equatable {
+  let rows: [PermissionRow]
+
+  /// nil for a helper no permission can fix, such as one that is stopped or
+  /// misplaced.
+  init?(service: ServiceState?) {
     switch service {
     case .notRegistered?, .blockedInLoginItems?:
       rows = SetupStep.allCases.map {
-        StepRow(step: $0, progress: $0 == .allowInBackground ? .current : .upcoming)
+        PermissionRow(step: $0, grant: $0 == .backgroundActivity ? .missing("Off") : .unknown)
       }
     case .running(let diagnosis)?:
-      var found = false
-      rows = SetupStep.allCases.map { step in
-        if let word = step.done(diagnosis, facts) { return StepRow(step: step, progress: .done(word)) }
-        if step == .connectAssistant && facts.skippedConnect {
-          return StepRow(step: step, progress: .skipped)
-        }
-        defer { found = true }
-        return StepRow(step: step, progress: found ? .upcoming : .current)
-      }
+      rows = SetupStep.allCases.map { PermissionRow(step: $0, grant: $0.grant(diagnosis)) }
     default:
       return nil
     }
   }
 
-  var current: SetupStep? { rows.first { $0.progress == .current }?.step }
+  var current: SetupStep? {
+    rows.first {
+      if case .missing = $0.grant { true } else { false }
+    }?.step
+  }
 }
 
 struct PanelState: Equatable {
   enum Phase: Equatable {
     case checking
-    /// Step one, before the helper was ever registered.
+    /// Background activity is off, before the helper was ever registered.
     case notSetUp
-    /// Step one, after the user turned the helper off in Login Items.
+    /// Background activity is off, because the user turned it off in Login Items.
     case blocked
-    /// A running helper's first unfinished step.
+    /// A running helper's first missing permission.
     case setup(SetupStep)
     case ready
     case misplaced
@@ -152,7 +168,12 @@ struct PanelState: Equatable {
   enum Primary { case start, restart, migrate, move, recheck }
 
   let phase: Phase
-  let firstRun: FirstRun?
+  let permissions: Permissions?
+  /// Every permission is on, and no assistant has connected yet.
+  let offersConnect: Bool
+  /// The Connections row's value: who is connected, or None. nil until the
+  /// first scan.
+  let connections: String?
   let busy: Busy?
   let troubled: Bool
 
@@ -162,12 +183,12 @@ struct PanelState: Equatable {
   ) {
     self.busy = busy
     troubled = problem != nil
-    let firstRun = FirstRun(service: service, facts: facts)
-    self.firstRun = firstRun
+    let permissions = Permissions(service: service)
+    self.permissions = permissions
     phase =
       switch service {
       case nil: !checked && problem == nil ? .checking : .disconnected
-      case .running: firstRun?.current.map(Phase.setup) ?? .ready
+      case .running: permissions?.current.map(Phase.setup) ?? .ready
       case .misplaced: .misplaced
       case .legacyInstall: .olderInstall
       case .blockedInLoginItems: .blocked
@@ -176,21 +197,23 @@ struct PanelState: Equatable {
       case .tokenRejected: .keyMismatch
       case .portConflict, .unresponsive: .disconnected
       }
-  }
-
-  /// The step the panel walks the user through now.
-  var step: SetupStep? {
-    switch phase {
-    case .notSetUp, .blocked: .allowInBackground
-    case .setup(let step): step
-    default: nil
+    offersConnect = phase == .ready && facts.connected == [] && !facts.connectSettled
+    connections = facts.connected.map { names in
+      switch names.count {
+      case 0: "None"
+      case 1: names[0]
+      default: "\(names[0]) and \(names.count - 1) more"
+      }
     }
   }
 
-  /// Steps one to four. Until they are done no assistant can use Messages.
-  var needsGrant: Bool {
-    guard let step else { return false }
-    return step != .connectAssistant && step != .tryIt
+  /// The permission the panel walks the user through now.
+  var step: SetupStep? {
+    switch phase {
+    case .notSetUp, .blocked: .backgroundActivity
+    case .setup(let step): step
+    default: nil
+    }
   }
 
   var title: String {
@@ -199,10 +222,9 @@ struct PanelState: Equatable {
     case .checking: "Checking in…"
     case .notSetUp: "Hello, iMessage Max"
     case .blocked: "Turned off in Login Items"
-    case .setup(.allowInBackground), .setup(.readMessages): "A little setup first"
-    case .setup(.showNames): "Let’s add names"
-    case .setup(.sendMessages): "Ready to read"
-    case .setup(.connectAssistant), .setup(.tryIt), .ready: "Ready to help"
+    case .setup(.contacts), .setup(.automation): "Almost ready"
+    case .setup: "A little setup first"
+    case .ready: "Ready to help"
     case .misplaced: "Move me to Applications"
     case .olderInstall: "Finish the update"
     case .stopped: "Taking a break"
@@ -214,16 +236,12 @@ struct PanelState: Equatable {
   var subtitle: String {
     if busy != nil { return "We’ll check that everything worked." }
     return switch phase {
-    case .notSetUp: "A small helper connects your assistants to Messages. A few steps set it up."
-    case .blocked:
-      "macOS lets the helper run only when it’s on in Login Items. Turn on iMessage Max there."
-    case .setup(.allowInBackground), .setup(.readMessages):
-      "Give iMessage Max access to Messages on this Mac."
-    case .setup(.showNames): "Messages are available. Allow Contacts to show names."
-    case .setup(.sendMessages): "Your assistants can read messages. Let’s check sending access."
-    case .setup(.connectAssistant): "Connect the assistant you use. It takes one click."
-    case .setup(.tryIt): "Ask your assistant something, and this step turns green."
-    case .ready: "Your assistants can now use Messages on this Mac."
+    case .notSetUp: "A small helper connects your assistants to Messages. Allow what it needs below."
+    case .blocked: "Background activity is off, so your assistants can’t reach Messages."
+    case .setup(.contacts): "Your assistants can read messages. Allow Contacts to show names."
+    case .setup(.automation): "Your assistants can read messages. Allow Automation so they can send."
+    case .setup: "Give iMessage Max access to Messages on this Mac."
+    case .ready: "Your assistants can use Messages on this Mac."
     case .misplaced:
       "Move iMessage Max to Applications so it can register its helper and start at login."
     case .olderInstall:
@@ -236,7 +254,8 @@ struct PanelState: Equatable {
     }
   }
 
-  /// The big button, for states outside the steps. A step carries its own.
+  /// The big button, for states outside the permissions. A missing
+  /// permission carries its own.
   var primary: Primary? {
     switch phase {
     case .misplaced: .move
@@ -274,7 +293,7 @@ struct PanelState: Equatable {
     if troubled { return .trouble }
     return switch phase {
     case .stopped, .notSetUp: .resting
-    case .ready, .setup(.connectAssistant), .setup(.tryIt): .ready
+    case .ready: .ready
     case .setup, .blocked, .misplaced, .olderInstall: .needsYou
     case .checking, .disconnected, .keyMismatch: .trouble
     }

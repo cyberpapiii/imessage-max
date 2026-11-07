@@ -8,6 +8,7 @@ final class Milestones {
     case welcomedConnection = "hasWelcomedConnection"
     case welcomedSetup = "hasWelcomedSetup"
     case skippedConnect = "hasSkippedConnect"
+    case connectedAssistant = "hasConnectedAssistant"
     case triedAssistant = "hasTriedAssistant"
   }
 
@@ -22,15 +23,11 @@ final class Milestones {
     defaults?.bool(forKey: key.rawValue) ?? reachedInMemory.contains(key)
   }
 
-  func mark(_ key: Key) { set(key, true) }
-
-  func set(_ key: Key, _ value: Bool) {
+  func mark(_ key: Key) {
     if let defaults {
-      defaults.set(value, forKey: key.rawValue)
-    } else if value {
-      reachedInMemory.insert(key)
+      defaults.set(true, forKey: key.rawValue)
     } else {
-      reachedInMemory.remove(key)
+      reachedInMemory.insert(key)
     }
   }
 }

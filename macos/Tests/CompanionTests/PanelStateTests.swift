@@ -14,8 +14,14 @@ private func panel(
   PanelState(service: service, facts: facts, busy: busy, problem: problem, checked: true)
 }
 
-private func progress(_ state: PanelState) -> [SetupStep: StepProgress] {
-  Dictionary(uniqueKeysWithValues: (state.firstRun?.rows ?? []).map { ($0.step, $0.progress) })
+private func words(_ state: PanelState) -> [SetupStep: String] {
+  Dictionary(uniqueKeysWithValues: (state.permissions?.rows ?? []).map { ($0.step, $0.word) })
+}
+
+private func granted(_ state: PanelState) -> [SetupStep] {
+  (state.permissions?.rows ?? []).compactMap {
+    if case .granted = $0.grant { $0.step } else { nil }
+  }
 }
 
 @Test func firstCheckIsWorkingAndOffersNothingYet() {
@@ -24,113 +30,115 @@ private func progress(_ state: PanelState) -> [SetupStep: StepProgress] {
   #expect(state.mood == .working)
   #expect(state.primary == .recheck)
   #expect(!state.primaryEnabled)
-  #expect(state.firstRun == nil)
+  #expect(state.permissions == nil)
 }
 
-@Test func theStepsAreTheContractsStepsInOrder() throws {
-  let rows = try #require(panel(.notRegistered).firstRun).rows
-  #expect(rows.map(\.step) == SetupStep.allCases)
-  #expect(rows.map(\.step.title) == [
-    "Allow in the background", "Read messages", "Show names", "Send messages",
-    "Connect an assistant", "Try it",
+@Test func thePermissionsAreTheMacOSNamesInOrder() throws {
+  let rows = try #require(panel(.notRegistered).permissions).rows
+  #expect(rows.map(\.step.title) == ["Background activity", "Full Disk Access", "Contacts", "Automation"])
+  #expect(rows.allSatisfy { !$0.step.purpose.isEmpty })
+}
+
+@Test func aFreshInstallOpensBackgroundActivityAndChecksNothingElse() {
+  let state = panel(.notRegistered)
+  #expect(state.permissions?.current == .backgroundActivity)
+  #expect(words(state) == [
+    .backgroundActivity: "Off", .fullDiskAccess: "Not checked", .contacts: "Not checked",
+    .automation: "Not checked",
   ])
+  #expect(!state.offersConnect)
 }
 
-/// Each row: the state that leaves the step unfinished, the state that passes
-/// its done check, and the facts both are judged with.
-@Test func eachStepIsCurrentUntilItsDoneCheckPasses() throws {
-  let table: [(SetupStep, ServiceState, ServiceState, SetupFacts)] = [
-    (.allowInBackground, .notRegistered, .running(try diagnosis(database: false)), SetupFacts()),
+/// Each row: a helper missing that permission, which opens its row, and the
+/// words every row shows for it.
+@Test func theFirstMissingPermissionIsTheOpenRow() throws {
+  let table: [(ServiceState, SetupStep, [SetupStep: String])] = [
     (
-      .readMessages, .running(try diagnosis(database: false)),
-      .running(try diagnosis(contacts: false)), SetupFacts()
+      .running(try diagnosis(database: false, contacts: false)), .fullDiskAccess,
+      [.backgroundActivity: "On", .fullDiskAccess: "Not allowed", .contacts: "Not allowed", .automation: "Allowed"]
     ),
     (
-      .showNames, .running(try diagnosis(contacts: false)),
-      .running(try diagnosis(automation: "unverified")), SetupFacts()
+      .running(try diagnosis(contacts: false)), .contacts,
+      [.backgroundActivity: "On", .fullDiskAccess: "Allowed", .contacts: "Not allowed", .automation: "Allowed"]
     ),
     (
-      .sendMessages, .running(try diagnosis(automation: "permission-gated")),
-      .running(try diagnosis()), SetupFacts()
+      .running(try diagnosis(automation: "permission-gated")), .automation,
+      [.backgroundActivity: "On", .fullDiskAccess: "Allowed", .contacts: "Allowed", .automation: "Not allowed"]
     ),
     (
-      .connectAssistant, .running(try diagnosis()), .running(try diagnosis()),
-      SetupFacts(connected: ["Codex"])
-    ),
-    (
-      .tryIt, .running(try diagnosis()), .running(try diagnosis()),
-      SetupFacts(connected: ["Codex"], tried: true)
+      .running(try diagnosis(automation: "unverified")), .automation,
+      [.backgroundActivity: "On", .fullDiskAccess: "Allowed", .contacts: "Allowed", .automation: "Not checked"]
     ),
   ]
-  for (index, (step, unfinished, finished, facts)) in table.enumerated() {
-    let before = facts.tried ? SetupFacts(connected: facts.connected) : SetupFacts()
-    let waiting = panel(unfinished, facts: before)
-    #expect(waiting.step == step, "\(step)")
-    #expect(progress(waiting)[step] == .current, "\(step)")
-    let next = panel(finished, facts: facts)
-    if case .done = progress(next)[step] {} else { Issue.record("\(step) not done: \(next.phase)") }
-    #expect(next.step == table.dropFirst(index + 1).first?.0, "after \(step)")
+  for (service, open, expected) in table {
+    let state = panel(service)
+    #expect(state.phase == .setup(open), "\(open)")
+    #expect(state.permissions?.current == open, "\(open)")
+    #expect(words(state) == expected, "\(open)")
+    #expect(state.mood == .needsYou)
+    #expect(state.primary == nil)
+    #expect(!state.offersConnect)
   }
 }
 
-@Test func doneRowsNameWhatTheyFound() throws {
-  let limited = panel(.running(try diagnosis(contactsStatus: "limited")))
-  #expect(progress(limited)[.showNames] == .done("Some names"))
-  let two = panel(.running(try diagnosis()), facts: SetupFacts(connected: ["Codex", "Plug"]))
-  #expect(progress(two)[.connectAssistant] == .done("Codex and 1 more"))
-  let used = panel(.running(try diagnosis()), facts: SetupFacts(tried: true))
-  #expect(progress(used)[.connectAssistant] == .done("Connected"))
-  #expect(progress(used)[.tryIt] == .done("Worked"))
-  #expect(progress(used)[.allowInBackground] == .done("On"))
+@Test func limitedContactsCountAsGranted() throws {
+  let state = panel(.running(try diagnosis(contactsStatus: "limited")))
+  #expect(words(state)[.contacts] == "Some contacts")
+  #expect(state.phase == .ready)
 }
 
-@Test func finishingEveryStepIsReady() throws {
-  let state = panel(.running(try diagnosis()), facts: SetupFacts(connected: ["Codex"], tried: true))
+@Test func everyPermissionOnIsReady() throws {
+  let state = panel(.running(try diagnosis()), facts: SetupFacts(connected: ["Codex"]))
   #expect(state.phase == .ready)
   #expect(state.title == "Ready to help")
+  #expect(state.subtitle == "Your assistants can use Messages on this Mac.")
   #expect(state.mood == .ready)
   #expect(state.primary == nil)
-  #expect(state.firstRun?.rows.allSatisfy { if case .done = $0.progress { true } else { false } } == true)
+  #expect(state.permissions?.current == nil)
+  #expect(granted(state) == SetupStep.allCases)
 }
 
-@Test func skippingConnectStillReachesReadyAndKeepsTheStepInTheList() throws {
-  let skipped = panel(.running(try diagnosis()), facts: SetupFacts(skippedConnect: true))
-  #expect(skipped.step == .tryIt)
-  #expect(skipped.title == "Ready to help")
-  #expect(skipped.mood == .ready)
-  #expect(progress(skipped)[.connectAssistant] == .skipped)
-  let used = panel(.running(try diagnosis()), facts: SetupFacts(skippedConnect: true, tried: true))
-  #expect(used.phase == .ready)
-  #expect(progress(used)[.connectAssistant] == .done("Connected"))
+@Test func theConnectCardShowsOnlyBetweenTheLastPermissionAndTheFirstAssistant() throws {
+  let ready = ServiceState.running(try diagnosis())
+  #expect(panel(ready, facts: SetupFacts(connected: [])).offersConnect)
+  // Not before the clients are scanned, so it never flashes.
+  #expect(!panel(ready, facts: SetupFacts()).offersConnect)
+  #expect(!panel(ready, facts: SetupFacts(connected: ["Plug"])).offersConnect)
+  #expect(!panel(ready, facts: SetupFacts(connected: [], connectSettled: true)).offersConnect)
+  #expect(!panel(.running(try diagnosis(contacts: false)), facts: SetupFacts(connected: [])).offersConnect)
 }
 
-@Test func aRevokedGrantSendsTheListBackToItsStep() throws {
-  let facts = SetupFacts(connected: ["Codex"], tried: true)
-  let revoked = panel(.running(try diagnosis(database: false)), facts: facts)
-  #expect(revoked.phase == .setup(.readMessages))
+@Test func theConnectionsRowNamesWhatIsConnected() throws {
+  let ready = ServiceState.running(try diagnosis())
+  #expect(panel(ready).connections == nil)
+  #expect(panel(ready, facts: SetupFacts(connected: [])).connections == "None")
+  #expect(panel(ready, facts: SetupFacts(connected: ["Plug"])).connections == "Plug")
+  #expect(panel(ready, facts: SetupFacts(connected: ["Plug", "Codex"])).connections == "Plug and 1 more")
+  #expect(panel(.stopped, facts: SetupFacts(connected: ["Plug"])).connections == "Plug")
+}
+
+@Test func aRevokedGrantReopensItsRowAndKeepsTheOthers() throws {
+  let revoked = panel(.running(try diagnosis(database: false)), facts: SetupFacts(connected: ["Codex"]))
+  #expect(revoked.phase == .setup(.fullDiskAccess))
   #expect(revoked.mood == .needsYou)
-  #expect(progress(revoked)[.readMessages] == .current)
-  for step in [SetupStep.showNames, .sendMessages, .connectAssistant, .tryIt] {
-    if case .done = progress(revoked)[step] {} else { Issue.record("\(step) lost its state") }
-  }
-  let blocked = panel(.blockedInLoginItems, facts: facts)
+  #expect(granted(revoked) == [.backgroundActivity, .contacts, .automation])
+  let blocked = panel(.blockedInLoginItems)
   #expect(blocked.phase == .blocked)
-  #expect(blocked.step == .allowInBackground)
+  #expect(blocked.step == .backgroundActivity)
+  #expect(blocked.permissions?.current == .backgroundActivity)
 }
 
-@Test func onlyTheGrantStepsNeedTheUser() throws {
-  #expect(panel(.notRegistered).needsGrant)
-  #expect(panel(.running(try diagnosis(contacts: false))).needsGrant)
-  #expect(!panel(.running(try diagnosis())).needsGrant)
-  #expect(!panel(.running(try diagnosis()), facts: SetupFacts(tried: true)).needsGrant)
-  #expect(!panel(.stopped).needsGrant)
-}
-
-@Test func aWaitingSetupStepHidesThePrimaryButton() throws {
-  let state = panel(.running(try diagnosis(contacts: false)))
-  #expect(state.title == "Let’s add names")
-  #expect(state.primary == nil)
-  #expect(state.mood == .needsYou)
+@Test func noHeadlineNamesARetiredStep() throws {
+  let states = [
+    panel(.notRegistered), panel(.blockedInLoginItems),
+    panel(.running(try diagnosis(database: false))), panel(.running(try diagnosis(contacts: false))),
+    panel(.running(try diagnosis(automation: "unverified"))), panel(.running(try diagnosis())),
+  ]
+  for state in states {
+    for retired in ["Allow in the background", "Read messages", "Show names", "Send messages", "Try it", "names"] {
+      #expect(!state.title.contains(retired), "\(state.phase)")
+    }
+  }
 }
 
 @Test func busyOverridesTheHeadlineButKeepsTheButtonsPlace() {
@@ -144,7 +152,7 @@ private func progress(_ state: PanelState) -> [SetupStep: StepProgress] {
 @Test func aProblemTroublesTheFaceNotTheHeadline() {
   let state = panel(.notRegistered, problem: "x")
   #expect(state.title == "Hello, iMessage Max")
-  #expect(state.step == .allowInBackground)
+  #expect(state.step == .backgroundActivity)
   #expect(state.mood == .trouble)
 }
 
@@ -162,7 +170,7 @@ private func progress(_ state: PanelState) -> [SetupStep: StepProgress] {
     let state = panel(service)
     #expect(state.primary == primary, "\(service)")
     #expect(state.primaryTitle == title, "\(service)")
-    #expect(state.firstRun == nil, "\(service)")
+    #expect(state.permissions == nil, "\(service)")
   }
 }
 

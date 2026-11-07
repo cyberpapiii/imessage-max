@@ -244,11 +244,12 @@ return [
 
 ## Required macOS permissions
 
-macOS charges the helper's grants to `iMessage Max.app`, so the app is where a user grants them. Every `diagnose` fix for the helper inside the app names a first-run step in the app, such as "Open iMessage Max and choose Read messages", and never a terminal command. The step titles live in `contract/Sources/IMessageMaxContract/SetupStep.swift`, which both the server and the companion read. A bare executable (`--direct`, or a build run outside the app) gets fixes that name the System Settings switch, and no fix names `make`, `swift build` or Terminal.
+macOS charges the helper's grants to `iMessage Max.app`, so the app is where a user grants them. Every `diagnose` fix for the helper inside the app names a permission in the app by its System Settings name, such as "Open iMessage Max and turn on Full Disk Access.", and never a terminal command. The titles live in `contract/Sources/IMessageMaxContract/SetupStep.swift`, which both the server and the companion read. A bare executable (`--direct`, or a build run outside the app) gets fixes that name the System Settings switch, and no fix names `make`, `swift build` or Terminal.
 
-- Full Disk Access, for ~/Library/Messages/chat.db (step Read messages)
-- Contacts, for AddressBook resolution (step Show names). The companion asks in its own process and then restarts the helper, which reads Contacts access only at launch. A helper inside an app that asks for itself is denied with no prompt. A bare executable cannot hold a Contacts grant of its own (see the build section above). A bare `swift build` also omits the embedded Info.plist, and diagnose then reports `missing_usage_description`
-- Automation, for Messages.app, sending only (step Send messages). The helper's own request shows a prompt that names the app
+- Background activity, so launchd runs the helper (the app's Login Items registration)
+- Full Disk Access, for ~/Library/Messages/chat.db
+- Contacts, for AddressBook resolution. The companion asks in its own process and then restarts the helper, which reads Contacts access only at launch. A helper inside an app that asks for itself is denied with no prompt. A bare executable cannot hold a Contacts grant of its own (see the build section above). A bare `swift build` also omits the embedded Info.plist, and diagnose then reports `missing_usage_description`
+- Automation, for Messages.app, sending only. The helper's own request shows a prompt that names the app
 
 ## Maintainer notes
 

@@ -39,14 +39,14 @@ struct FlowRow: Layout {
   }
 }
 
-struct ConnectionView: View {
+struct ConnectionsView: View {
   let model: AppModel
 
   var body: some View {
     let access = model.clientAccess
     VStack(alignment: .leading, spacing: Space.regular) {
       Text(
-        "Connect an assistant in one click. iMessage Max adds itself to the assistant’s settings and saves a backup of any file it changes."
+        "Connect each assistant you use with one click. iMessage Max adds itself to the assistant’s settings and saves a backup of any file it changes."
       )
       .font(.maxLine).fixedSize(horizontal: false, vertical: true)
       if access == nil {
@@ -111,7 +111,7 @@ struct ConnectionView: View {
 struct ClientRowView: View {
   let row: ClientRow
   let canConnect: Bool
-  /// The first-run step makes its first Connect the panel's one blue button.
+  /// The connect card makes its first Connect the panel's one blue button.
   var prominent = false
   let connect: () -> Void
   @PanelMotion private var motion

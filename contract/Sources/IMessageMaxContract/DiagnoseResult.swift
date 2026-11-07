@@ -49,7 +49,7 @@ public struct DiagnoseResult: Codable, Sendable, Equatable {
   /// reader still decodes keys that a newer server adds.
   public let capabilities: [String: Capability]
   /// The tools/call requests this helper process has received from clients
-  /// other than the companion. The companion's Try it step turns green once it
+  /// other than the companion. The companion shows a one-time notice once it
   /// is above zero. nil from a helper older than the field.
   public let assistantCalls: Int?
 

@@ -60,7 +60,7 @@ enum DiagnoseTool {
     }
 
     /// Who holds this process's privacy grants. macOS charges a helper inside
-    /// an app bundle to that app, so its fixes are steps in the app, not commands.
+    /// an app bundle to that app, so its fixes name a permission in the app, not commands.
     enum GrantHolder: Equatable {
         case app(String)
         case executable(String)
@@ -87,17 +87,17 @@ enum DiagnoseTool {
     }
 
     static func openStep(_ step: SetupStep) -> String {
-        "Open iMessage Max and choose \(step.title)."
+        "Open iMessage Max and turn on \(step.title)."
     }
 
-    /// The grant reaches only a new helper process, and the app's step
-    /// restarts the helper itself when it opens again.
+    /// The grant reaches only a new helper process, and the app restarts the
+    /// helper itself when it opens again.
     static let appRechecks = "Then open iMessage Max again: it restarts its helper and checks by itself."
 
     static func fullDiskAccessFix(holder: GrantHolder = .current) -> String {
         switch holder {
         case .app(let app):
-            return openStep(.readMessages)
+            return openStep(.fullDiskAccess)
                 + " Then turn on iMessage Max (\(app)) in System Settings -> Privacy & Security -> "
                 + "Full Disk Access. If it is already on there, turn it off and on again: "
                 + "a grant made for an older copy of the app looks present but does not work. "
@@ -121,40 +121,40 @@ enum DiagnoseTool {
         case .executable:
             "This executable was built without its embedded Info.plist, so macOS cannot ask for "
                 + "or record a Contacts grant for it. Use the helper inside iMessage Max instead. "
-                + openStep(.showNames)
+                + openStep(.contacts)
         }
     }
 
     static func contactsNotRequestedFix(holder: GrantHolder) -> String {
         switch holder {
         case .app:
-            openStep(.showNames) + " The app asks macOS for Contacts on the helper's behalf, "
+            openStep(.contacts) + " The app asks macOS for Contacts on the helper's behalf, "
                 + "because macOS does not let the helper ask on its own."
         case .executable(let executable):
             "This process (\(executable)) runs headless, so it did not ask for Contacts "
                 + "access, and System Settings cannot add it to Contacts by hand. Use the helper "
-                + "inside iMessage Max instead. " + openStep(.showNames)
+                + "inside iMessage Max instead. " + openStep(.contacts)
         }
     }
 
     static func contactsDeniedFix(holder: GrantHolder) -> String {
         switch holder {
         case .app:
-            openStep(.showNames)
+            openStep(.contacts)
                 + " Then turn on iMessage Max in System Settings -> Privacy & Security -> Contacts. "
                 + appRechecks
         case .executable(let executable):
             "Grant Contacts access: System Settings -> Privacy & Security -> Contacts -> "
                 + "turn on imessage-max (\(executable)). If it is not listed, macOS never "
                 + "recorded a request from it. Use the helper inside iMessage Max instead. "
-                + openStep(.showNames)
+                + openStep(.contacts)
         }
     }
 
     static func automationFix(holder: GrantHolder) -> String {
         switch holder {
         case .app:
-            openStep(.sendMessages)
+            openStep(.automation)
                 + " Then turn on Messages under iMessage Max in System Settings -> "
                 + "Privacy & Security -> Automation."
         case .executable(let executable):
