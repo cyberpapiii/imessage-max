@@ -21,6 +21,9 @@ public enum ServiceState: Sendable, Equatable {
   case stopped
   /// launchd runs the helper but it does not answer yet.
   case unresponsive
+  /// launchd runs the helper and it answers 401: the token file changed after
+  /// the helper read it at launch. A restart makes both read the same token.
+  case tokenRejected
   case running(DiagnoseResult)
 
   public init(_ observation: ServiceObservation) {
@@ -41,7 +44,9 @@ public enum ServiceState: Sendable, Equatable {
       } else if observation.agent == .notRegistered {
         self = .notRegistered
       } else {
-        self = observation.job?.pid == nil ? .stopped : .unresponsive
+        self =
+          observation.job?.pid == nil
+          ? .stopped : (observation.refused ? .tokenRejected : .unresponsive)
       }
     }
   }
@@ -53,12 +58,14 @@ public enum ServiceState: Sendable, Equatable {
   /// The helper is registered and launchd may run it.
   public var isRegistered: Bool {
     switch self {
-    case .stopped, .unresponsive, .running: true
+    case .stopped, .unresponsive, .tokenRejected, .running: true
     default: false
     }
   }
 
-  public var isRunning: Bool { self == .unresponsive || diagnosis != nil }
+  public var isRunning: Bool {
+    self == .unresponsive || self == .tokenRejected || diagnosis != nil
+  }
 }
 
 /// The raw facts the state comes from. A test builds any case from a literal.
@@ -68,18 +75,22 @@ public struct ServiceObservation: Sendable, Equatable {
   public var agent: AgentStatus
   public var job: Job?
   public var diagnosis: DiagnoseResult?
+  /// The endpoint answered 401 to this app's token.
+  public var refused: Bool
   /// A listener on the port that is not launchd's process for the helper.
   public var foreignListener: Bool
 
   public init(
     location: AppLocation = .installed, legacy: Bool = false, agent: AgentStatus,
-    job: Job? = nil, diagnosis: DiagnoseResult? = nil, foreignListener: Bool = false
+    job: Job? = nil, diagnosis: DiagnoseResult? = nil, refused: Bool = false,
+    foreignListener: Bool = false
   ) {
     self.location = location
     self.legacy = legacy
     self.agent = agent
     self.job = job
     self.diagnosis = diagnosis
+    self.refused = refused
     self.foreignListener = foreignListener
   }
 }

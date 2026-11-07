@@ -16,8 +16,10 @@ private actor StuckSystem: ServiceSystem {
 
   func agentStatus(plistName: String) async -> AgentStatus { running ? .enabled : .notRegistered }
   func job(label: String) async -> Job? { running && label != LegacyInstall.label ? Job(pid: 300) : nil }
-  func diagnose(endpoint: URL) async -> DiagnoseResult? {
-    running ? try? diagnosis(automation: "permission-gated", processID: 300) : nil
+  func diagnose(endpoint: URL) async -> DiagnoseReply {
+    guard running, let result = try? diagnosis(automation: "permission-gated", processID: 300)
+    else { return .silent }
+    return .answered(result)
   }
   func listeners(port: Int) async -> Set<Int32> { running ? [300] : [] }
   func run(_ command: SystemCommand) async throws { await hang() }

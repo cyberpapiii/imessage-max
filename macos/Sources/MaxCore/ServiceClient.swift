@@ -16,7 +16,7 @@ public struct ServiceClient: Sendable {
   static let unauthorized = CoreError.commandFailed(
     "iMessage Max refused this app's access token. Restart the service so it reads the token again.")
 
-  static func readToken(_ file: URL) -> String? {
+  public static func readToken(_ file: URL) -> String? {
     guard let contents = try? String(contentsOf: file, encoding: .utf8) else { return nil }
     let token = contents.trimmingCharacters(in: .whitespacesAndNewlines)
     return token.isEmpty ? nil : token
@@ -98,14 +98,17 @@ public struct ServiceClient: Sendable {
     return request
   }
 
-  public func diagnose(endpoint: URL) async throws -> DiagnoseResult {
-    let (data, response) = try await URLSession.shared.data(
-      for: Self.request(endpoint: endpoint, token: Self.readToken(tokenFile)))
-    if (response as? HTTPURLResponse)?.statusCode == 401 { throw Self.unauthorized }
-    guard let response = response as? HTTPURLResponse, response.statusCode == 200,
-      data.count <= DiagnoseResult.maxReplyBytes
-    else { throw CoreError.invalidResponse }
-    return try Self.decode(data)
+  public func diagnose(endpoint: URL) async -> DiagnoseReply {
+    guard
+      let request = try? Self.request(endpoint: endpoint, token: Self.readToken(tokenFile)),
+      let (data, response) = try? await URLSession.shared.data(for: request),
+      let response = response as? HTTPURLResponse
+    else { return .silent }
+    if response.statusCode == 401 { return .refused }
+    guard response.statusCode == 200, data.count <= DiagnoseResult.maxReplyBytes,
+      let diagnosis = try? Self.decode(data)
+    else { return .silent }
+    return .answered(diagnosis)
   }
 
   public static func decode(_ data: Data) throws -> DiagnoseResult {
@@ -129,5 +132,18 @@ public struct ServiceClient: Sendable {
       diagnosis[.permAutomation] != nil
     else { throw CoreError.invalidResponse }
     return diagnosis
+  }
+}
+
+/// What the helper said to a diagnose request.
+public enum DiagnoseReply: Sendable, Equatable {
+  case answered(DiagnoseResult)
+  /// HTTP 401: something listens and rejects this app's token.
+  case refused
+  /// No reply, or one that is not a valid diagnosis.
+  case silent
+
+  public var diagnosis: DiagnoseResult? {
+    if case .answered(let diagnosis) = self { diagnosis } else { nil }
   }
 }

@@ -67,9 +67,17 @@ import MaxTestSupport
 }
 
 @Test func processCapturesLargeOutputWithoutPipeDeadlock() async throws {
-  let result = try await ProcessRunner.run("/usr/bin/seq", arguments: ["1", "50000"], timeout: 3)
+  let result = try await ProcessRunner.run("/usr/bin/seq", arguments: ["1", "200000"], timeout: 3)
   #expect(result.exitCode == 0)
-  #expect(result.output.utf8.count <= 65536)
+  #expect(result.output.utf8.count > 65536 && result.output.utf8.count <= 1 << 20)
+}
+
+@Test func processHandsItsInputToTheChildOnStdin() async throws {
+  let result = try await ProcessRunner.run("/bin/cat", arguments: [], input: Data("tok-123".utf8))
+  #expect(result.exitCode == 0)
+  #expect(result.output == "tok-123")
+  let early = try await ProcessRunner.run("/usr/bin/true", arguments: [], input: Data("x".utf8))
+  #expect(early.exitCode == 0, "a child that never reads its stdin still finishes")
 }
 
 @Test func tokenIsReadFreshFromTheFileTheHelperWrites() throws {

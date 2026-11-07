@@ -11,6 +11,8 @@ struct DesignOptions {
   var window = false
   var page: PanelSection?
   var act: String?
+  /// `--client-root <folder>`: client configs are read and written there.
+  var clientRoot: URL?
   var motion = MotionSettings()
 
   init(arguments: [String] = CommandLine.arguments) {
@@ -26,6 +28,7 @@ struct DesignOptions {
     window = arguments.contains("--design-window")
     page = value("--design-open").flatMap(PanelSection.init(rawValue:))
     act = value("--design-act")
+    clientRoot = value("--client-root").map { URL(fileURLWithPath: $0, isDirectory: true) }
     motion = MotionSettings(
       scale: arguments.contains("--design-slow-motion") ? 4 : 1,
       reduce: arguments.contains("--design-reduce-motion"))
@@ -69,7 +72,7 @@ struct DesignOptions {
 extension AppModel {
   /// A fixture drives the real controller through a fake system, so the
   /// design states are the states the controller derives.
-  static func designFixture(_ name: String, milestones: Milestones) -> AppModel {
+  static func designFixture(_ name: String, milestones: Milestones, clientRoot: URL?) -> AppModel {
     let home = FileManager.default.temporaryDirectory.appendingPathComponent("imessage-max-design")
     let app = name == "misplaced" ? "/Users/Shared/Downloads" : "/Applications"
     let plist = try? PropertyListSerialization.data(
@@ -89,7 +92,8 @@ extension AppModel {
       controller: configuration.map {
         ServiceController(configuration: $0, system: FixtureSystem(name), home: home)
       },
-      milestones: milestones, prepareMessages: {})
+      milestones: milestones, prepareMessages: {},
+      clientContext: clientRoot.map(ClientContext.sandbox(root:)))
   }
 }
 
@@ -118,9 +122,10 @@ actor FixtureSystem: ServiceSystem {
     }
   }
 
-  func diagnose(endpoint: URL) async -> DiagnoseResult? {
+  func diagnose(endpoint: URL) async -> DiagnoseReply {
     while name == "checking" { await withCheckedContinuation { waiting.append($0) } }
-    return Self.diagnosis(name)
+    if name == "refused" { return .refused }
+    return Self.diagnosis(name).map(DiagnoseReply.answered) ?? .silent
   }
 
   func listeners(port: Int) async -> Set<Int32> { [] }

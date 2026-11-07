@@ -20,6 +20,8 @@ import Testing
     (.init(agent: .enabled), .stopped),
     (.init(agent: .enabled, job: Job(pid: nil)), .stopped),
     (.init(agent: .enabled, job: running), .unresponsive),
+    (.init(agent: .enabled, job: running, refused: true), .tokenRejected),
+    (.init(agent: .enabled, refused: true, foreignListener: true), .portConflict),
     (.init(agent: .enabled, job: running, diagnosis: mine), .running(mine)),
   ]
   for (observation, expected) in table {
@@ -31,6 +33,7 @@ import Testing
   let running = ServiceState.running(try diagnosis())
   #expect(running.isRegistered && running.isRunning)
   #expect(ServiceState.unresponsive.isRegistered && ServiceState.unresponsive.isRunning)
+  #expect(ServiceState.tokenRejected.isRegistered && ServiceState.tokenRejected.isRunning)
   #expect(ServiceState.stopped.isRegistered && !ServiceState.stopped.isRunning)
   for state in [ServiceState.notRegistered, .blockedInLoginItems, .legacyInstall, .portConflict] {
     #expect(!state.isRegistered)
@@ -68,6 +71,7 @@ import Testing
   #expect(config.label == ServiceDefaults.launchdLabel)
   #expect(config.endpoint.absoluteString == "http://127.0.0.1:\(ServiceDefaults.port)/")
   #expect(config.log.path == "/Users/someone/\(ServiceDefaults.logPath)")
+  #expect(config.tokenFile.path == "/Users/someone/\(ServiceDefaults.tokenPath)")
   #expect(config.helper.path == "/Applications/iMessage Max.app/Contents/MacOS/imessage-max")
   #expect(config.isProduction)
 
@@ -93,6 +97,12 @@ import Testing
     bundleURL: URL(fileURLWithPath: "/Applications/iMessage Max.app"), home: home)
   #expect(ipv6.endpoint.absoluteString == "http://[::1]:9191/")
   try parse(agentPlist(arguments: ["imessage-max", "--http", "--socket-path", "/tmp/test/mcp.sock"]))
+  let custom = try ServiceConfiguration(
+    plist: agentPlist(arguments: ["imessage-max", "--http", "--token-file", "~/test/token"]),
+    plistName: "\(ServiceDefaults.launchdLabel).plist",
+    bundleIdentifier: ServiceDefaults.companionBundleID,
+    bundleURL: URL(fileURLWithPath: "/Applications/iMessage Max.app"), home: home)
+  #expect(custom.tokenFile.path == "/tmp/home/test/token")
   #expect(throws: CoreError.self) { try parse(agentPlist(), name: "other.plist") }
   #expect(throws: CoreError.self) { try parse(agentPlist(bundleID: "com.example.other")) }
   #expect(throws: CoreError.self) { try parse(agentPlist(program: "Contents/MacOS/other")) }
@@ -233,4 +243,18 @@ import Testing
     try await controller.perform(.start)
   }
   #expect(await system.pauses == 0)
+}
+
+@Test func aHelperThatRefusesTheTokenAsksForARestartThatClearsIt() async throws {
+  let home = try temporaryHome()
+  let system = FakeServiceSystem()
+  await system.set {
+    $0.startRunning()
+    $0.refusing = true
+  }
+  let controller = ServiceController(
+    configuration: try configuration(home: home), system: system, home: home)
+  #expect(await controller.inspect() == .tokenRejected)
+  let restarted = try await controller.perform(.restart)
+  #expect(restarted.diagnosis != nil)
 }

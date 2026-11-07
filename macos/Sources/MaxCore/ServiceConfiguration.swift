@@ -9,6 +9,8 @@ public struct ServiceConfiguration: Sendable, Equatable {
   public let bundleURL: URL
   public let endpoint: URL
   public let log: URL
+  /// The bearer token file the helper reads at launch, from `--token-file`.
+  public let tokenFile: URL
   /// Only the released identity may touch an install of the old agent.
   public let isProduction: Bool
 
@@ -46,6 +48,7 @@ public struct ServiceConfiguration: Sendable, Equatable {
     var host = ServiceDefaults.host
     var port = ServiceDefaults.port
     var log = home.appendingPathComponent(ServiceDefaults.logPath)
+    var tokenFile = home.appendingPathComponent(ServiceDefaults.tokenPath)
     var index = 1
     var seen: Set<ServerOption> = []
     while index < args.count {
@@ -75,11 +78,8 @@ public struct ServiceConfiguration: Sendable, Equatable {
           guard ContactsPolicyOption(rawValue: value) != nil else {
             throw CoreError.invalidConfiguration
           }
-        case .logFile:
-          log =
-            value.hasPrefix("~/")
-            ? home.appendingPathComponent(String(value.dropFirst(2)))
-            : URL(fileURLWithPath: value)
+        case .logFile: log = Self.path(value, home: home)
+        case .tokenFile: tokenFile = Self.path(value, home: home)
         case .http, .allowExternalBind, .socketPath: break
         }
       }
@@ -98,7 +98,14 @@ public struct ServiceConfiguration: Sendable, Equatable {
     self.bundleURL = bundleURL
     self.endpoint = endpoint
     self.log = log
+    self.tokenFile = tokenFile
     isProduction =
       label == ServiceDefaults.launchdLabel && bundleIdentifier == ServiceDefaults.companionBundleID
+  }
+
+  /// launchd does not expand `~`, so the helper does, and so must this.
+  private static func path(_ value: String, home: URL) -> URL {
+    value.hasPrefix("~/")
+      ? home.appendingPathComponent(String(value.dropFirst(2))) : URL(fileURLWithPath: value)
   }
 }

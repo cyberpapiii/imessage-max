@@ -60,6 +60,7 @@ private func panel(_ service: ServiceState?, busy: Busy? = nil, problem: String?
     (.stopped, .start, "Start iMessage Max"),
     (.portConflict, .recheck, "Check again"),
     (.unresponsive, .recheck, "Check again"),
+    (.tokenRejected, .restart, "Restart iMessage Max"),
   ]
   for (service, primary, title) in table {
     let state = panel(service)
