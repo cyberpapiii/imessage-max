@@ -69,6 +69,7 @@ jobs:
           xcodebuild -version
           swift --version
           echo "id=$({ xcodebuild -version; swift --version 2>&1 | head -n 1; } | shasum -a 256 | cut -c1-16)" >> "$GITHUB_OUTPUT"
+          echo "image=${ImageVersion:-unknown}" >> "$GITHUB_OUTPUT"
 
       # Version check runs before the build on purpose (fail fast).
       - name: Check version consistency
@@ -77,15 +78,17 @@ jobs:
 
       # Holds the debug and release builds of the dependencies, so the
       # release build below compiles only this package. Saved only when the
-      # key misses, and never restored across toolchains. The dmg job in
-      # release.yml builds what it signs from scratch and reads no cache.
+      # key misses. A runner image with another macOS rebuilds every module
+      # even with the same Xcode, so the key names the image as well as the
+      # toolchain. The dmg job in release.yml builds what it signs from
+      # scratch and reads no cache.
       - name: Cache Swift build
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: swift/.build
-          key: ${{ runner.os }}-${{ runner.arch }}-swift-${{ steps.toolchain.outputs.id }}-${{ hashFiles('swift/Package.resolved') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.image }}-swift-${{ steps.toolchain.outputs.id }}-${{ hashFiles('swift/Package.resolved') }}
           restore-keys: |
-            ${{ runner.os }}-${{ runner.arch }}-swift-${{ steps.toolchain.outputs.id }}-
+            ${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.image }}-swift-${{ steps.toolchain.outputs.id }}-
 
       # Tests are compiled in this step on purpose, so a compile error is
       # attributed to "Build" rather than "Run tests".
