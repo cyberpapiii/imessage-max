@@ -36,6 +36,9 @@ final class AppModel {
   @ObservationIgnored private let prepareMessages: @MainActor () async throws -> Void
   /// nil leaves the client list empty, as in the design harness.
   @ObservationIgnored private let clientContext: ClientContext?
+  /// Bumped by every connect, so a scan that started before a write cannot
+  /// put back what the write replaced.
+  @ObservationIgnored private var clientWrites = 0
   /// How long a service change, or a permission request with its prompt, may
   /// hold `busy`. Past it the panel shows an error and the buttons return,
   /// because SMAppService and a prompt can fail to answer at all.
@@ -178,12 +181,14 @@ final class AppModel {
       return
     }
     let access = clientAccess
+    let writes = clientWrites
     let found =
       (try? await Self.offMainActor {
         Client.all.filter { $0.detect(context) }.map { client in
           (client.id, client.name, access.map { client.link(context, $0) } ?? .notConnected)
         }
       }) ?? []
+    guard writes == clientWrites else { return }
     clients = found.map { id, name, link in
       var row = ClientRow(id: id, name: name, link: link)
       if let previous = clients.first(where: { $0.id == id })?.activity {
@@ -206,6 +211,7 @@ final class AppModel {
       clients[index].activity != .connecting
     else { return }
     clients[index].activity = .connecting
+    clientWrites += 1
     let client = Client.client(id)
     let start = ContinuousClock.now
     Task {
@@ -224,6 +230,7 @@ final class AppModel {
       let milliseconds = elapsed.seconds * 1000 + elapsed.attoseconds / 1_000_000_000_000_000
       log.notice(
         "Connect \(id.rawValue, privacy: .public) finished in \(milliseconds, privacy: .public) ms, link \(String(describing: link), privacy: .public)")
+      clientWrites += 1
       guard let index = clients.firstIndex(where: { $0.id == id }) else { return }
       clients[index].activity = activity
       if let link { clients[index].link = link }
