@@ -77,20 +77,97 @@ final class DiagnoseToolTests: XCTestCase {
         XCTAssertEqual(counter.calls, 2)
     }
 
+    private static let bareExecutable = DiagnoseTool.GrantHolder(executable: "/opt/bin/imessage-max")
+    private static let inApp = DiagnoseTool.GrantHolder(
+        executable: "/Applications/iMessage Max.app/Contents/MacOS/imessage-max")
+
     func testPermissionDeniedFixIsActionable() async throws {
-        let (result, json) = try await encodedResponse(dbProbe: DiagnoseToolTests.dbDenied)
+        let result = try await DiagnoseTool.execute(
+            resolver: ContactResolver(seedCache: [:]),
+            dbProbe: DiagnoseToolTests.dbDenied,
+            automationProbe: DiagnoseToolTests.automationGranted,
+            holder: DiagnoseToolTests.bareExecutable
+        )
+        let json = try FormatUtils.encodeJSON(result)
         let fix = try XCTUnwrap(result.database.fix)
 
         XCTAssertTrue(fix.contains("Full Disk Access"), fix)
+        XCTAssertTrue(fix.contains("/opt/bin/imessage-max"), fix)
         XCTAssertTrue(fix.contains("toggle it off and on"), fix)
-        XCTAssertTrue(fix.contains("make restart"), fix)
-        XCTAssertFalse(fix.contains("kickstart"), "kickstart hits the launchd crash throttle")
         XCTAssertTrue(fix.contains("pragma quick_check"), fix)
         XCTAssertTrue(fix.contains("newly launched"), fix)
         XCTAssertEqual(result.capabilities["perm_full_disk"]?.fix, fix,
                        "perm_full_disk.fix must carry the same remediation")
 
         XCTAssertFalse(json.contains(NSHomeDirectory()), "fix must not leak the home directory: \(json)")
+    }
+
+    func testGrantHolderIsTheAppForAnInBundleHelper() {
+        XCTAssertEqual(DiagnoseToolTests.inApp, .app("/Applications/iMessage Max.app"))
+        XCTAssertEqual(DiagnoseToolTests.bareExecutable, .executable("/opt/bin/imessage-max"))
+        XCTAssertEqual(
+            DiagnoseTool.GrantHolder(executable: "/tmp/Contents/MacOS/imessage-max"),
+            .executable("/tmp/Contents/MacOS/imessage-max"))
+    }
+
+    /// A user of the app never opens Terminal, so no step for the in-app
+    /// helper may name a developer command.
+    func testInAppFixesAreStepsInTheApp() async throws {
+        let holder = DiagnoseToolTests.inApp
+        let headless = ContactResolver(
+            source: ContactResolver.Source(
+                authorization: { (false, "not_determined") },
+                load: { [:] },
+                requestAccess: { XCTFail("must not prompt"); return false }
+            ),
+            refreshInterval: 30,
+            now: { 0 }
+        )
+        await headless.requestAccessIfAllowed(policy: .skipIfNotDetermined)
+
+        let denied = try await DiagnoseTool.execute(
+            resolver: ContactResolver(seedCache: [:], authorization: (false, "denied")),
+            dbProbe: DiagnoseToolTests.dbDenied,
+            automationProbe: { (false, "denied") },
+            holder: holder
+        )
+        let notRequested = try await DiagnoseTool.execute(
+            resolver: headless,
+            dbProbe: DiagnoseToolTests.dbAccessible,
+            automationProbe: DiagnoseToolTests.automationGranted,
+            usageDescriptionProbe: { true },
+            holder: holder
+        )
+        let noUsageDescription = try await DiagnoseTool.execute(
+            resolver: headless,
+            dbProbe: DiagnoseToolTests.dbAccessible,
+            automationProbe: DiagnoseToolTests.automationGranted,
+            usageDescriptionProbe: { false },
+            holder: holder
+        )
+
+        let fullDisk = try XCTUnwrap(denied.database.fix)
+        XCTAssertTrue(fullDisk.contains("turn on iMessage Max"), fullDisk)
+        XCTAssertTrue(fullDisk.contains("Restart iMessage Max from its menu bar app"), fullDisk)
+        XCTAssertEqual(denied.contacts.status, "denied")
+        let contactsDenied = try XCTUnwrap(denied.contacts.fix)
+        XCTAssertTrue(contactsDenied.contains("turn on iMessage Max"), contactsDenied)
+        let automation = try XCTUnwrap(denied.capabilities["perm_automation"]?.fix)
+        XCTAssertTrue(automation.contains("iMessage Max"), automation)
+        XCTAssertEqual(notRequested.contacts.status, "not_requested_headless")
+        let contactsHeadless = try XCTUnwrap(notRequested.contacts.fix)
+        XCTAssertTrue(contactsHeadless.contains("Open iMessage Max and allow Contacts"), contactsHeadless)
+        XCTAssertEqual(noUsageDescription.contacts.status, "missing_usage_description")
+        let usage = try XCTUnwrap(noUsageDescription.contacts.fix)
+
+        for fix in [fullDisk, contactsDenied, automation, contactsHeadless, usage] {
+            for developerWord in [
+                "make", "launchctl", "kickstart", "Terminal", "terminal", "sqlite3",
+                "--request-contacts-access", "swift build", "imessage-max",
+            ] {
+                XCTAssertFalse(fix.contains(developerWord), "in-app fix names \(developerWord): \(fix)")
+            }
+        }
     }
 
     func testFeaturesReportedWhenDatabaseAccessible() async throws {
@@ -137,7 +214,8 @@ final class DiagnoseToolTests: XCTestCase {
             resolver: resolver,
             dbProbe: DiagnoseToolTests.dbAccessible,
             automationProbe: DiagnoseToolTests.automationGranted,
-            usageDescriptionProbe: { true }
+            usageDescriptionProbe: { true },
+            holder: DiagnoseToolTests.bareExecutable
         )
 
         XCTAssertEqual(result.contacts.status, "not_requested_headless")
@@ -175,7 +253,8 @@ final class DiagnoseToolTests: XCTestCase {
             resolver: resolver,
             dbProbe: DiagnoseToolTests.dbAccessible,
             automationProbe: DiagnoseToolTests.automationGranted,
-            usageDescriptionProbe: { false }
+            usageDescriptionProbe: { false },
+            holder: DiagnoseToolTests.bareExecutable
         )
 
         XCTAssertEqual(result.contacts.status, "missing_usage_description")

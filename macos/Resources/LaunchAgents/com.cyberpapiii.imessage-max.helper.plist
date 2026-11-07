@@ -3,13 +3,21 @@
 <plist version="1.0">
 <dict>
 	<key>Label</key>
-	<string>local.imessage-max</string>
+	<string>com.cyberpapiii.imessage-max.helper</string>
+	<key>BundleProgram</key>
+	<string>Contents/MacOS/imessage-max</string>
 	<key>ProgramArguments</key>
 	<array>
-		<string>__BIN__</string>
+		<string>imessage-max</string>
 		<string>--http</string>
 		<string>--port</string>
-		<string>8080</string>
+		<string>47821</string>
+		<string>--log-file</string>
+		<string>~/Library/Logs/iMessage Max/imessage-max.log</string>
+	</array>
+	<key>AssociatedBundleIdentifiers</key>
+	<array>
+		<string>com.cyberpapiii.imessage-max.menubar</string>
 	</array>
 	<key>RunAtLoad</key>
 	<true/>
@@ -21,11 +29,7 @@
 		<false/>
 	</dict>
 	<key>ThrottleInterval</key>
-	<integer>30</integer>
-	<key>StandardOutPath</key>
-	<string>~/Library/Logs/imessage-max.stdout.log</string>
-	<key>StandardErrorPath</key>
-	<string>~/Library/Logs/imessage-max.stderr.log</string>
+	<integer>10</integer>
 	<key>ProcessType</key>
 	<string>Standard</string>
 </dict>

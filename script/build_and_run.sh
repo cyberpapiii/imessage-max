@@ -25,6 +25,9 @@ if [ "$MODE" = "--install" ]; then
       exit 1
     fi
   fi
+  # Remove, then copy. Writing over the running helper's file makes macOS
+  # kill it; a new file leaves it running until the app restarts it.
+  rm -rf "$INSTALL_BUNDLE"
   ditto "$APP_BUNDLE" "$INSTALL_BUNDLE"
   LAUNCH_BUNDLE="$INSTALL_BUNDLE"
 fi

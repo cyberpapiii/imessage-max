@@ -11,7 +11,7 @@ final class AppModel {
   var section: PanelSection?
   var maximumPanelHeight = Design.maximumPanelHeight
   var panelOpen = false
-  private(set) var inspection: ServiceInspection?
+  private(set) var service: ServiceState?
   private(set) var problem: String?
   private(set) var busy: Busy?
   private(set) var checking = false
@@ -27,46 +27,50 @@ final class AppModel {
   @ObservationIgnored private var sleeping = false
   @ObservationIgnored private var generation = 0
   @ObservationIgnored private var noticeTimer: DispatchWorkItem?
-  @ObservationIgnored private let service: any ServiceControlling
+  /// nil when this copy of the app has no valid agent plist.
+  @ObservationIgnored private let controller: ServiceController?
   @ObservationIgnored private let milestones: Milestones
   @ObservationIgnored private let prepareMessages: @MainActor () async throws -> Void
+  /// How long a service change, or a permission request with its prompt, may
+  /// hold `busy`. Past it the panel shows an error and the buttons return,
+  /// because SMAppService and a prompt can fail to answer at all.
+  @ObservationIgnored private let changeDeadline: Double
+  @ObservationIgnored private let permissionDeadline: Double
   @ObservationIgnored private let log = Logger(
     subsystem: ServiceDefaults.companionBundleID, category: "Service")
 
   init(
-    service: any ServiceControlling, milestones: Milestones,
-    prepareMessages: @escaping @MainActor () async throws -> Void
+    controller: ServiceController?, milestones: Milestones,
+    prepareMessages: @escaping @MainActor () async throws -> Void,
+    changeDeadline: Double = 60, permissionDeadline: Double = 180
   ) {
-    self.service = service
+    self.controller = controller
     self.milestones = milestones
     self.prepareMessages = prepareMessages
+    self.changeDeadline = changeDeadline
+    self.permissionDeadline = permissionDeadline
   }
 
   static func live(milestones: Milestones) -> AppModel {
-    let resources = Bundle.main.resourceURL ?? Bundle.main.bundleURL
-    return AppModel(
-      service: ServiceController(
-        bundledHelper: resources.appendingPathComponent(ServiceDefaults.executableName),
-        template: resources.appendingPathComponent("\(ServiceDefaults.launchdLabel).plist")),
+    AppModel(
+      controller: (try? ServiceConfiguration.load()).map { ServiceController(configuration: $0) },
       milestones: milestones,
       prepareMessages: { try await MessagesApp.ensureRunning() })
   }
 
   var state: PanelState {
-    PanelState(inspection: inspection, busy: busy, problem: problem, checked: lastCheck != nil)
+    PanelState(service: service, busy: busy, problem: problem, checked: lastCheck != nil)
   }
-  var diagnosis: DiagnoseResult? { inspection?.diagnosis }
-  var stopped: Bool {
-    inspection != nil && inspection?.loaded == false && inspection?.conflict == false
-  }
+  var diagnosis: DiagnoseResult? { service?.diagnosis }
+  var stopped: Bool { service == .stopped }
   var endpoint: String {
-    inspection?.configuration.endpoint.absoluteString
+    controller?.configuration.endpoint.absoluteString
       ?? "http://\(ServiceDefaults.host):\(ServiceDefaults.port)/"
   }
-  var canControl: Bool { inspection != nil && inspection?.conflict == false && busy == nil }
+  var canControl: Bool { service?.isRegistered == true && busy == nil }
   var ready: Bool { diagnosis?.readiness == .ready }
-  var switchOn: Bool { pendingOn ?? (inspection?.loaded == true) }
-  var showsSwitch: Bool { inspection?.configuration.isInstalled == true }
+  var switchOn: Bool { pendingOn ?? (service?.isRunning == true) }
+  var showsSwitch: Bool { service?.isRegistered == true }
   var messagesNeedOpening: Bool {
     diagnosis?.needsMessagesForSendingCheck == true
   }
@@ -94,28 +98,49 @@ final class AppModel {
           await self?.refresh()
         }
       })
-    Task { await refresh() }
+    Task {
+      await refresh()
+      change(.starting) { try await $0.restartIfOutdated() }
+    }
+  }
+
+  /// `--register-helper` from `make install`: the command is the consent to
+  /// replace an older install, and a running helper restarts on the new binary.
+  func registerHelper() {
+    change(.starting) { controller in
+      switch await controller.inspect() {
+      case .legacyInstall: try await controller.migrate()
+      case .notRegistered: try await controller.perform(.start)
+      default: try await controller.perform(.restart)
+      }
+    }
+  }
+
+  /// `--unregister-helper`: removes the background item, then quits.
+  func unregisterHelperAndQuit() {
+    change(.stopping) { try await $0.unregister() }
+    Task {
+      await actionTask?.value
+      NSApp.terminate(nil)
+    }
   }
 
   func refresh() async {
     guard !checking, busy == nil, !sleeping else { return }
+    guard let controller else {
+      problem = CoreError.invalidConfiguration.localizedDescription
+      lastCheck = .now
+      return
+    }
     checking = true
     defer { checking = false }
     let expectedGeneration = generation
     let start = ContinuousClock.now
-    do {
-      let latest = try await service.inspect()
-      guard generation == expectedGeneration, busy == nil else { return }
-      inspection = latest
-      problem = inspection?.problem
-      lastCheck = .now
-      let elapsed = start.duration(to: .now).components
-      checkMilliseconds = Int(elapsed.seconds * 1000 + elapsed.attoseconds / 1_000_000_000_000_000)
-    } catch {
-      guard generation == expectedGeneration, busy == nil else { return }
-      inspection = nil
-      problem = error.localizedDescription
-    }
+    let latest = await controller.inspect()
+    guard generation == expectedGeneration, busy == nil else { return }
+    show(latest)
+    let elapsed = start.duration(to: .now).components
+    checkMilliseconds = Int(elapsed.seconds * 1000 + elapsed.attoseconds / 1_000_000_000_000_000)
     loginStatus = SMAppService.mainApp.status
   }
 
@@ -123,76 +148,48 @@ final class AppModel {
     switch state.primary {
     case .connect: section = .connection
     case .start: perform(.start)
+    case .migrate: migrate()
+    case .move: moveToApplications()
+    case .openLoginItems: SMAppService.openSystemSettingsLoginItems()
     case .recheck: Task { await refresh() }
     case nil: break
     }
   }
 
   func perform(_ action: ServiceAction) {
-    guard busy == nil else { return }
-    generation += 1
     let recovering = problem != nil
-    busy = action == .stop ? .stopping : .starting
-    problem = nil
-    notice = nil
-    if action != .restart { pendingOn = action == .start }
-    actionTask = Task {
-      var operationProblem: String?
-      do {
-        try await service.perform(action)
-        let deadline = Date().addingTimeInterval(12)
-        var latest: ServiceInspection?
-        repeat {
-          latest = try await service.inspect()
-          if action == .stop ? latest?.loaded == false : latest?.diagnosis != nil { break }
-          await Self.pause()
-        } while Date() < deadline && !Task.isCancelled
-        inspection = latest
-        let verified = action == .stop ? latest?.loaded == false : latest?.diagnosis != nil
-        guard verified else {
-          throw CoreError.commandFailed(
-            "The service hasn’t responded yet. Check again in a moment.")
-        }
-        lastCheck = .now
-        if action == .stop {
-          notice = .resting
-        } else {
-          notice = .connected
-          if diagnosis?.database.accessible == true
-            && (recovering || !milestones.reached(.welcomedConnection))
-          {
-            celebration += 1
-            milestones.mark(.welcomedConnection)
-          }
-        }
-        log.info("Service action verified")
-      } catch {
-        operationProblem = error.localizedDescription
-        log.error("Service action failed")
+    if busy == nil, action != .restart { pendingOn = action == .start }
+    change(action == .stop ? .stopping : .starting) {
+      try await $0.perform(action)
+    } then: { latest in
+      self.notice = action == .stop ? .resting : .connected
+      if action != .stop, latest.diagnosis?.database.accessible == true {
+        self.celebrateConnection(recovering: recovering)
       }
-      if let operationProblem {
-        await reconcile()
-        problem = operationProblem
-      } else {
-        problem = inspection?.problem
-      }
-      busy = nil
-      pendingOn = nil
-      actionTask = nil
     }
   }
 
+  /// The consent button for replacing an install from before 2.0.
+  func migrate() {
+    change(.starting) { try await $0.migrate() } then: { _ in self.notice = .connected }
+  }
+
   func request(_ permission: SetupPermission) {
-    guard busy == nil else { return }
+    guard let controller, busy == nil else { return }
     generation += 1
     busy = permission == .automation && messagesNeedOpening ? .checkingSending : .askingPermission
     notice = nil
     problem = nil
+    let prepareMessages = prepareMessages
     actionTask = Task {
       var permissionProblem: String?
       do {
-        if permission == .automation { try await prepareMessages() }
-        let result = try await service.requestPermission(permission)
+        let result = try await withDeadline(seconds: permissionDeadline) { @MainActor in
+          if permission == .automation { try await prepareMessages() }
+          // The Contacts prompt belongs to this app, so bring it forward.
+          if permission == .contacts { NSApp.activate(ignoringOtherApps: true) }
+          return try await controller.requestPermission(permission)
+        }
         if !result.authorized {
           permissionProblem =
             result.status == .denied
@@ -202,7 +199,7 @@ final class AppModel {
               : "macOS did not finish the permission request. Open Privacy & Security and check again.")
         }
       } catch { permissionProblem = error.localizedDescription }
-      await reconcile()
+      show(await controller.inspect())
       let confirmed = diagnosis?.grants(permission) == true
       if confirmed { problem = nil } else if let permissionProblem { problem = permissionProblem }
       notice = confirmed ? .granted(permission) : .setupUnfinished
@@ -212,6 +209,70 @@ final class AppModel {
         milestones.mark(.welcomedSetup)
       }
       actionTask = nil
+    }
+  }
+
+  /// Copies the app into Applications, opens the copy and quits. The copy
+  /// loses the quarantine flag so it is not translocated again.
+  func moveToApplications() {
+    guard busy == nil else { return }
+    busy = .moving
+    problem = nil
+    let source = Bundle.main.bundleURL
+    let destination = AppMover.destination(home: FileManager.default.homeDirectoryForCurrentUser)
+    actionTask = Task {
+      do {
+        let target = try await Self.offMainActor {
+          try AppMover.install(source, into: destination, beforeReplacing: Self.quitCopy(at:))
+        }
+        let strip = try? await ProcessRunner.run(
+          "/usr/bin/xattr", arguments: ["-dr", "com.apple.quarantine", target.path])
+        if strip?.exitCode != 0 {
+          log.error(
+            "Quarantine strip failed, exit \(strip.map { String($0.exitCode) } ?? "none", privacy: .public)")
+        }
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.createsNewApplicationInstance = true
+        _ = try await NSWorkspace.shared.openApplication(at: target, configuration: configuration)
+        NSApp.terminate(nil)
+      } catch let error as AppMover.Failure {
+        problem = error.localizedDescription
+        log.error("Move to Applications refused: \(error.localizedDescription, privacy: .public)")
+      } catch {
+        problem =
+          "iMessage Max could not move itself. Drag it into Applications, then open it from there."
+        log.error("Move to Applications failed: \(error.localizedDescription, privacy: .public)")
+      }
+      busy = nil
+      actionTask = nil
+    }
+  }
+
+  /// The copy in Applications may be running. Its files are about to be
+  /// replaced, so it quits first, within five seconds, or the move stops.
+  nonisolated private static func quitCopy(at target: URL) throws {
+    let target = target.standardizedFileURL
+    let running = NSWorkspace.shared.runningApplications.filter {
+      $0.bundleURL?.standardizedFileURL == target && $0 != NSRunningApplication.current
+        && $0.processIdentifier > 0
+    }
+    running.forEach { $0.terminate() }
+    for _ in 0..<50 {
+      if running.allSatisfy({ kill($0.processIdentifier, 0) != 0 && errno == ESRCH }) { return }
+      usleep(100_000)
+    }
+    throw AppMover.Failure.copyStillRunning
+  }
+
+  /// Runs file work on a Dispatch queue, so a large copy or the wait for a
+  /// running copy to quit never blocks the main thread.
+  nonisolated private static func offMainActor<T: Sendable>(
+    _ work: @escaping @Sendable () throws -> T
+  ) async throws -> T {
+    try await withCheckedThrowingContinuation { continuation in
+      DispatchQueue.global(qos: .userInitiated).async {
+        continuation.resume(with: Result { try work() })
+      }
     }
   }
 
@@ -254,15 +315,14 @@ final class AppModel {
     }
   }
 
-  func revealHelper() {
-    guard let binary = inspection?.configuration.binary else { return }
-    NSWorkspace.shared.activateFileViewerSelecting([binary])
+  /// Full Disk Access lists the app, because macOS charges the helper inside
+  /// it to the app.
+  func revealApp() {
+    NSWorkspace.shared.activateFileViewerSelecting([Bundle.main.bundleURL])
   }
 
   func openLogs() {
-    let file = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(
-      ServiceDefaults.stderrLogPath)
-    if FileManager.default.fileExists(atPath: file.path) {
+    if let file = controller?.configuration.log, FileManager.default.fileExists(atPath: file.path) {
       NSWorkspace.shared.open(file)
     } else {
       notice = .noLog
@@ -276,14 +336,51 @@ final class AppModel {
     await actionTask?.value
   }
 
-  private func reconcile() async {
-    do {
-      inspection = try await service.inspect()
-      lastCheck = .now
-      problem = inspection?.problem
-    } catch {
-      inspection = nil
-      problem = error.localizedDescription
+  /// Runs one service change, then shows the state it settled on, or the
+  /// error and the state as it is now.
+  private func change(
+    _ kind: Busy, _ operation: @escaping @Sendable (ServiceController) async throws -> ServiceState,
+    then: @escaping (ServiceState) -> Void = { _ in }
+  ) {
+    guard let controller, busy == nil else { return }
+    generation += 1
+    busy = kind
+    problem = nil
+    notice = nil
+    let deadline = changeDeadline
+    actionTask = Task {
+      do {
+        let latest = try await withDeadline(seconds: deadline) { try await operation(controller) }
+        show(latest)
+        then(latest)
+        log.info("Service change verified")
+      } catch {
+        show(await controller.inspect())
+        problem = error.localizedDescription
+        log.error("Service change failed")
+      }
+      busy = nil
+      pendingOn = nil
+      actionTask = nil
+    }
+  }
+
+  private func show(_ latest: ServiceState) {
+    service = latest
+    lastCheck = .now
+    problem =
+      switch latest {
+      case .portConflict: CoreError.conflict.localizedDescription
+      case .unresponsive:
+        "iMessage Max is running but not answering yet. Restart it if this lasts."
+      default: nil
+      }
+  }
+
+  private func celebrateConnection(recovering: Bool) {
+    if recovering || !milestones.reached(.welcomedConnection) {
+      celebration += 1
+      milestones.mark(.welcomedConnection)
     }
   }
 
@@ -320,7 +417,7 @@ final class AppModel {
     iMessage Max diagnostic report
     Checked: \(lastCheck?.ISO8601Format() ?? "Not checked")
     Version: \(diagnosis?.version ?? "Unknown")
-    Service loaded: \(inspection?.loaded == true)
+    Service: \(service.map(\.summary) ?? "Unknown")
     Messages: \(diagnosis?.database.status.rawValue ?? "Unknown")
     Contacts: \(diagnosis?.contacts.status.rawValue ?? "Unknown")
     Sending permission: \(diagnosis?[.permAutomation]?.state.rawValue ?? "unknown")
@@ -329,10 +426,20 @@ final class AppModel {
     Check duration: \(checkMilliseconds.map { "\($0) ms" } ?? "Unknown")
     """
   }
+}
 
-  private static func pause() async {
-    await withCheckedContinuation { continuation in
-      DispatchQueue.global().asyncAfter(deadline: .now() + 0.35) { continuation.resume() }
+extension ServiceState {
+  /// One word for the diagnostic report.
+  var summary: String {
+    switch self {
+    case .misplaced(let translocated): translocated ? "translocated" : "outside Applications"
+    case .legacyInstall: "older install present"
+    case .blockedInLoginItems: "off in Login Items"
+    case .portConflict: "port in use"
+    case .notRegistered: "not set up"
+    case .stopped: "stopped"
+    case .unresponsive: "not answering"
+    case .running: "running"
     }
   }
 }

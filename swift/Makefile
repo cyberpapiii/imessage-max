@@ -1,13 +1,12 @@
 # iMessage Max: build, sign, install
 #
 # Usage:
-#   make install       Build, sign, restart service, verify health
+#   make install       Build the app, install it to ~/Applications, register the helper, verify
 #   make build         Build release binary only
 #   make test          Run the full test suite (FILTER=ClassOrMethod for a subset)
-#   make restart       Restart the launchd service
-#   make install-agent Install the launchd plist from swift/launchd/
+#   make restart       Restart the helper
 #   make status        Show service health and version
-#   make logs          Tail stderr log
+#   make logs          Tail the helper log
 #   make clean         Remove debug build artifacts
 #   make version       Print the version and check all copies agree
 #   make release-check Everything that must pass before tagging a release
@@ -18,12 +17,18 @@
 # granted again after every build.
 
 BINARY       := .build/release/imessage-max
-LAUNCHD_LABEL := local.imessage-max
-PLIST        := $(HOME)/Library/LaunchAgents/$(LAUNCHD_LABEL).plist
-# The port the installed agent listens on (`--port N` or `--port=N` in its
-# ProgramArguments), so verify and status probe the service that is running.
-# Falls back to the default 47821. Override with `make status PORT=9191`.
-PORT         := $(or $(shell [ -f "$(PLIST)" ] && plutil -extract ProgramArguments json -o - "$(PLIST)" 2>/dev/null | \
+LAUNCHD_LABEL := com.cyberpapiii.imessage-max.helper
+AGENT_PLIST  := ../macos/Resources/LaunchAgents/$(LAUNCHD_LABEL).plist
+APP_NAME     := iMessage Max
+APP_BUILD    := ../dist/$(APP_NAME).app
+# The app installs here and the helper runs from inside it. These paths hold
+# spaces, so recipes quote them.
+APP          := $(HOME)/Applications/$(APP_NAME).app
+LOG          := $(HOME)/Library/Logs/iMessage Max/imessage-max.log
+# The port in the agent plist's ProgramArguments (`--port N` or `--port=N`),
+# so verify and status probe the helper that is running. Falls back to the
+# default 47821. Override with `make status PORT=9191`.
+PORT         := $(or $(shell plutil -extract ProgramArguments json -o - "$(AGENT_PLIST)" 2>/dev/null | \
 	tr -d '[]"' | tr ',' '\n' | awk 'take { print; exit } $$0 == "--port" { take = 1 } sub(/^--port=/, "") { print; exit }'),47821)
 URL          := http://127.0.0.1:$(PORT)
 # The probes send the service's bearer token. Override for a server started
@@ -62,7 +67,7 @@ require_server = LISTENER=$$(lsof -nP +c 0 -iTCP:$(PORT) -sTCP:LISTEN -Fc 2>/dev
 # initialize reply on stdin.
 server_info = python3 -c "import sys,json; print(json.load(sys.stdin)['result']['serverInfo']['$(1)'])"
 
-.PHONY: build test sign install restart status logs clean verify verify-db help version release-check install-agent
+.PHONY: build test sign app install restart status logs clean verify verify-db help version release-check
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
@@ -94,24 +99,14 @@ sign: build ## Build and sign with the Developer ID, else ad hoc
 	@SIGN_IDENTITY="$(SIGN_IDENTITY)" ../script/sign.sh $(BINARY) --entitlements iMessageMax.entitlements \
 		--identifier "$$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$(INFO_PLIST)")"
 
-restart: ## Restart the launchd service
-	@echo "Restarting service..."
-	@test -f $(PLIST) || (echo "Install the launch agent first: make install-agent" && exit 1)
-	@launchctl bootout gui/$$(id -u) $(PLIST) 2>/dev/null || true
-	@launchctl bootstrap gui/$$(id -u) $(PLIST)
-	@echo "✓ Service restarted"
+app: ## Build and sign the app with the helper inside it, into ../dist
+	@../script/assemble_app.sh "$(APP_BUILD)" release
 
-# launchd does not expand ~, so the log paths get $(HOME) here, as the
-# companion's ServiceConfiguration.renderTemplate does. A loaded agent is
-# booted out first: bootstrap refuses a label that is already loaded.
-install-agent: ## Install the launchd plist from swift/launchd/
-	@if launchctl print gui/$$(id -u)/$(LAUNCHD_LABEL) >/dev/null 2>&1; then \
-		launchctl bootout gui/$$(id -u)/$(LAUNCHD_LABEL); \
-	fi
-	@sed -e "s|__BIN__|$(shell pwd)/.build/release/imessage-max|" -e "s|~/|$(HOME)/|g" \
-		launchd/local.imessage-max.plist > $(PLIST)
-	@launchctl bootstrap gui/$$(id -u) $(PLIST)
-	@echo "✓ Installed $(PLIST)"
+restart: ## Restart the helper
+	@echo "Restarting service..."
+	@launchctl kickstart -k gui/$$(id -u)/$(LAUNCHD_LABEL) \
+		|| { echo "The helper is not loaded. Start it from the iMessage Max menu, or run: make install"; exit 1; }
+	@echo "✓ Service restarted"
 
 verify: ## Verify server is healthy
 	@echo "Waiting for server..."
@@ -195,20 +190,34 @@ print(("✓ Database accessible: " if ok else "✗ Database NOT accessible: ") +
 fix = db.get("fix"); \
 print("  " + fix) if (not ok and fix) else None; \
 sys.exit(0 if ok else 1)' \
-	|| { echo "  Run: open -R $(BINARY)   # then drag it into Full Disk Access, then make restart"; exit 1; }
+	|| { echo "  Run: open -R \"$(APP)\"   # then turn on iMessage Max in Full Disk Access, then make restart"; exit 1; }
 
-install: sign restart verify verify-db ## Build, sign, restart, verify (the full workflow)
+# The app registers the helper when it starts with --register-helper, which
+# also replaces an install of the old local.imessage-max agent. Arguments reach
+# only a new launch, so the installed companion quits first. Only that copy:
+# a build running from dist/ or a test variant keeps running. The bundle is removed,
+# then copied: writing over the running helper's file makes macOS kill it.
+install: app ## Build the app, install it to ~/Applications, register the helper, verify
+	@pkill -f "$(APP)/Contents/MacOS/iMessageMaxMenu" 2>/dev/null || true
+	@i=0; while pgrep -f "$(APP)/Contents/MacOS/iMessageMaxMenu" >/dev/null && [ $$i -lt 50 ]; do sleep 0.1; i=$$((i + 1)); done
+	@mkdir -p "$(HOME)/Applications"
+	@rm -rf "$(APP)"
+	@ditto "$(APP_BUILD)" "$(APP)"
+	@echo "✓ Installed $(APP)"
+	@open "$(APP)" --args --register-helper
+	@$(MAKE) --no-print-directory verify verify-db
 	@echo "Done. Database access verified."
 
 status: ## Show service status and version
-	@echo "=== Process ==="
-	@pgrep -fl "imessage-max.*$(PORT)" || echo "Not running"
+	@echo "=== Agent ==="
+	@launchctl print gui/$$(id -u)/$(LAUNCHD_LABEL) 2>/dev/null | grep -E '^\s+(state|pid|program) =' \
+		|| echo "Not registered"
 	@echo ""
 	@echo "=== Version ==="
-	@$(BINARY) --version 2>/dev/null || echo "Binary not found"
+	@"$(APP)/Contents/MacOS/imessage-max" --version 2>/dev/null || echo "App not installed"
 	@echo ""
 	@echo "=== Signature ==="
-	@codesign -dvv $(BINARY) 2>&1 | grep -E "Signature|Authority|CDHash" || echo "Not signed"
+	@codesign -dvv "$(APP)" 2>&1 | grep -E "Signature|Authority|CDHash" || echo "Not signed"
 	@echo ""
 	@echo "=== Health ==="
 	@$(require_server); \
@@ -225,14 +234,14 @@ status: ## Show service status and version
 		echo "✗ Unexpected response (not JSON)"; \
 	fi
 
-logs: ## Tail the stderr log
-	@tail -f ~/Library/Logs/imessage-max.stderr.log
+logs: ## Tail the helper log
+	@mkdir -p "$$(dirname "$(LOG)")" && touch "$(LOG)"
+	@tail -f "$(LOG)"
 
 clean: ## Remove debug artifacts and old logs
 	@echo "Cleaning..."
 	@rm -rf .build/debug .build/arm64-apple-macosx/debug .build/debug.yaml
 	@echo "  Removed debug build artifacts"
-	@cat /dev/null > ~/Library/Logs/imessage-max.stderr.log 2>/dev/null || true
-	@cat /dev/null > ~/Library/Logs/imessage-max.stdout.log 2>/dev/null || true
-	@echo "  Cleared log files"
+	@[ ! -f "$(LOG)" ] || : > "$(LOG)"
+	@echo "  Cleared the helper log"
 	@echo "✓ Clean"

@@ -68,6 +68,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
       }
     } else {
       model.startMonitoring()
+      // `make install` and uninstall scripts pass these. Launch arguments
+      // reach only a new launch of the app.
+      let arguments = CommandLine.arguments
+      if arguments.contains("--register-helper") { model.registerHelper() }
+      if arguments.contains("--unregister-helper") { model.unregisterHelperAndQuit() }
     }
     popover.contentViewController = hosting
     if !milestones.reached(.introducedMenuBar) {

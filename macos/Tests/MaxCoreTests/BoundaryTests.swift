@@ -24,46 +24,6 @@ import MaxTestSupport
   #expect(try ServiceClient.decode(data).version == "1.8.0")
 }
 
-@Test func honorsLocalPortAndRejectsNetworkHost() throws {
-  let home = URL(fileURLWithPath: "/tmp/max-home")
-  func plist(_ host: String) throws -> Data {
-    try PropertyListSerialization.data(
-      fromPropertyList: [
-        "Label": "local.imessage-max",
-        "ProgramArguments": ["/tmp/imessage-max", "--http", "--host", host, "--port", "9191"],
-      ], format: .xml, options: 0)
-  }
-  let local = try ServiceConfiguration(data: plist("127.0.0.1"), home: home)
-  #expect(local.endpoint.port == 9191)
-  #expect(throws: (any Error).self) { try ServiceConfiguration(data: plist("0.0.0.0"), home: home) }
-}
-
-@Test func supportsEqualsOptionsAndIPv6WithoutBypassingHostValidation() throws {
-  func config(_ args: [String]) throws -> ServiceConfiguration {
-    let data = try PropertyListSerialization.data(
-      fromPropertyList: ["Label": "local.imessage-max", "ProgramArguments": args], format: .xml,
-      options: 0)
-    return try ServiceConfiguration(data: data, home: URL(fileURLWithPath: "/tmp/home"))
-  }
-  #expect(try config(["/tmp/imessage-max", "--http", "--port=9191"]).endpoint.port == 9191)
-  #expect(throws: (any Error).self) {
-    try config(["/tmp/imessage-max", "--http", "--host=0.0.0.0", "--allow-external-bind"])
-  }
-  #expect(throws: (any Error).self) {
-    try config(["/tmp/imessage-max", "--http", "--port", "8080", "--port=9191"])
-  }
-  #expect(
-    try config(["/tmp/imessage-max", "--http", "--host=::1"]).endpoint.absoluteString
-      == "http://[::1]:\(ServiceDefaults.port)/")
-}
-
-@Test func distinguishesOwnedFailureFromForeignListener() {
-  #expect(!ServiceController.hasForeignListener(ownedPID: 123, listeners: [123]))
-  #expect(ServiceController.hasForeignListener(ownedPID: 123, listeners: [456]))
-  #expect(ServiceController.hasForeignListener(ownedPID: nil, listeners: [456]))
-  #expect(!ServiceController.hasForeignListener(ownedPID: 123, listeners: []))
-}
-
 @Test func cancellationTerminatesAnAlreadyRunningChild() async throws {
   let file = FileManager.default.temporaryDirectory.appendingPathComponent(
     "max-test-pid-\(UUID().uuidString)")
@@ -86,21 +46,6 @@ import MaxTestSupport
   task.cancel()
   await #expect(throws: CancellationError.self) { try await task.value }
   #expect(kill(pid, 0) == -1)
-}
-
-@Test func rendersCanonicalTemplateWithoutDroppingKeepalive() throws {
-  let template = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-    .deletingLastPathComponent()
-    .deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent(
-      "swift/launchd/local.imessage-max.plist")
-  let data = try ServiceConfiguration.renderTemplate(
-    Data(contentsOf: template), binary: URL(fileURLWithPath: "/tmp/a & b/imessage-max"),
-    home: URL(fileURLWithPath: "/tmp/home"))
-  let plist = try #require(
-    try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any])
-  #expect((plist["KeepAlive"] as? [String: Bool])?["Crashed"] == true)
-  #expect((plist["ProgramArguments"] as? [String])?.first == "/tmp/a & b/imessage-max")
-  #expect(plist["StandardErrorPath"] as? String == "/tmp/home/Library/Logs/imessage-max.stderr.log")
 }
 
 @Test func requestContainsRequiredModernMetadata() throws {

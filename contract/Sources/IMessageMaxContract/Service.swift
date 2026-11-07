@@ -1,19 +1,24 @@
 import Foundation
 
-/// How the service is installed and reached. The launchd plist template
-/// (swift/launchd), swift/Makefile and script/assemble_app.sh repeat some of
-/// these; ServiceFilesContractTests in swift/Tests keeps them in step.
+/// How the service is installed and reached. The agent plist
+/// (macos/Resources/LaunchAgents), swift/Makefile and script/assemble_app.sh
+/// repeat some of these; ServiceFilesContractTests in swift/Tests keeps them
+/// in step.
 public enum ServiceDefaults {
   public static let host = "127.0.0.1"
   public static let port = 47821
   public static let executableName = "imessage-max"
-  public static let launchdLabel = "local.imessage-max"
-  /// These paths are relative to the home directory.
-  public static let launchAgentPath = "Library/LaunchAgents/\(launchdLabel).plist"
-  public static let stdoutLogPath = "Library/Logs/imessage-max.stdout.log"
-  public static let stderrLogPath = "Library/Logs/imessage-max.stderr.log"
-  /// Where the companion installs its bundled helper on a fresh Mac.
-  public static let helperInstallPath = "Library/Application Support/iMessage Max/bin/\(executableName)"
+  /// The label of the agent the app registers with SMAppService. A test build
+  /// may bundle a plist with another label; the companion reads the label from
+  /// its bundled plist, never from here.
+  public static let launchdLabel = "com.cyberpapiii.imessage-max.helper"
+  /// The helper's path inside the app bundle, the plist's BundleProgram.
+  public static let helperBundlePath = "Contents/MacOS/\(executableName)"
+  /// Where the agent plist lives inside the app bundle, as SMAppService requires.
+  public static let agentPlistDirectory = "Contents/Library/LaunchAgents"
+  /// The helper's log, relative to the home directory. The plist passes it to
+  /// `--log-file` with a leading `~/`, because launchd does not expand `~`.
+  public static let logPath = "Library/Logs/iMessage Max/imessage-max.log"
   /// The bearer token every HTTP request must send. The helper creates it,
   /// mode 0600, on first start.
   public static let tokenPath = "Library/Application Support/iMessage Max/token"
@@ -31,19 +36,21 @@ public enum ServiceDefaults {
 }
 
 /// Server command-line options that the companion reads back out of the
-/// installed plist's ProgramArguments.
+/// bundled agent plist's ProgramArguments.
 public enum ServerOption: String, CaseIterable, Sendable {
   case http
   case host
   case port
   case contactsPolicy = "contacts-policy"
   case allowExternalBind = "allow-external-bind"
+  case logFile = "log-file"
+  case socketPath = "socket-path"
 
   public var flag: String { "--\(rawValue)" }
 
   public var takesValue: Bool {
     switch self {
-    case .host, .port, .contactsPolicy: true
+    case .host, .port, .contactsPolicy, .logFile, .socketPath: true
     case .http, .allowExternalBind: false
     }
   }

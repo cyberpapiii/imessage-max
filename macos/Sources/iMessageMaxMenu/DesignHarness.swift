@@ -36,7 +36,7 @@ struct DesignOptions {
   @MainActor func prepare(_ model: AppModel) {
     Task {
       await model.refresh()
-      if fixture == "working" { model.perform(.start) }
+      if fixture == "working" { model.perform(.restart) }
     }
   }
 
@@ -67,12 +67,33 @@ struct DesignOptions {
 }
 
 extension AppModel {
+  /// A fixture drives the real controller through a fake system, so the
+  /// design states are the states the controller derives.
   static func designFixture(_ name: String, milestones: Milestones) -> AppModel {
-    AppModel(service: FixtureService(name), milestones: milestones, prepareMessages: {})
+    let home = FileManager.default.temporaryDirectory.appendingPathComponent("imessage-max-design")
+    let app = name == "misplaced" ? "/Users/Shared/Downloads" : "/Applications"
+    let plist = try? PropertyListSerialization.data(
+      fromPropertyList: [
+        "Label": ServiceDefaults.launchdLabel,
+        "BundleProgram": ServiceDefaults.helperBundlePath,
+        "AssociatedBundleIdentifiers": [ServiceDefaults.companionBundleID],
+        "ProgramArguments": [ServiceDefaults.executableName, ServerOption.http.flag],
+      ], format: .xml, options: 0)
+    let configuration = plist.flatMap {
+      try? ServiceConfiguration(
+        plist: $0, plistName: "\(ServiceDefaults.launchdLabel).plist",
+        bundleIdentifier: ServiceDefaults.companionBundleID,
+        bundleURL: URL(fileURLWithPath: "\(app)/iMessage Max.app"), home: home)
+    }
+    return AppModel(
+      controller: configuration.map {
+        ServiceController(configuration: $0, system: FixtureSystem(name), home: home)
+      },
+      milestones: milestones, prepareMessages: {})
   }
 }
 
-actor FixtureService: ServiceControlling {
+actor FixtureSystem: ServiceSystem {
   private static let processID: Int32 = 4242
   private var name: String
   private var waiting: [CheckedContinuation<Void, Never>] = []
@@ -81,23 +102,56 @@ actor FixtureService: ServiceControlling {
     self.name = name
   }
 
-  func inspect() async throws -> ServiceInspection {
+  func agentStatus(plistName: String) async -> AgentStatus {
+    switch name {
+    case "fresh", "legacy": .notRegistered
+    case "blocked": .requiresApproval
+    default: .enabled
+    }
+  }
+
+  func job(label: String) async -> Job? {
+    if label == LegacyInstall.label { return name == "legacy" ? Job(pid: 77) : nil }
+    return switch name {
+    case "fresh", "legacy", "blocked", "stopped": nil
+    default: Job(pid: Self.processID)
+    }
+  }
+
+  func diagnose(endpoint: URL) async -> DiagnoseResult? {
     while name == "checking" { await withCheckedContinuation { waiting.append($0) } }
-    return try Self.inspection(name)
+    return Self.diagnosis(name)
   }
 
-  func perform(_ action: ServiceAction) async throws {
+  func listeners(port: Int) async -> Set<Int32> { [] }
+
+  func run(_ command: SystemCommand) async throws {
     while name == "working" { await withCheckedContinuation { waiting.append($0) } }
-    await Self.pause()
-    land(on: action == .stop ? "stopped" : "ready")
+    await Self.pause(1.2)
+    switch command {
+    case .unregister: land(on: "fresh")
+    case .bootout(let label): land(on: label == LegacyInstall.label ? "fresh" : "stopped")
+    case .register, .kickstart: land(on: "ready")
+    }
   }
 
-  func requestPermission(_ permission: SetupPermission) async throws -> SetupPermissionReply {
-    await Self.pause()
+  func isOutdated(pid: Int32, executable: URL) async -> Bool { false }
+
+  func requestContactsAccess() async -> PermissionStatus {
+    await Self.pause(1.2)
+    return .authorized
+  }
+
+  func requestHelperPermission(_ permission: SetupPermission, endpoint: URL, processID: Int32)
+    async throws -> SetupPermissionReply
+  {
+    await Self.pause(1.2)
     land(on: "ready")
     return SetupPermissionReply(
-      permission: permission, authorized: true, status: .authorized, processID: Self.processID)
+      permission: permission, authorized: true, status: .authorized, processID: processID)
   }
+
+  func pause() async { await Self.pause(0.1) }
 
   private func land(on state: String) {
     name = state
@@ -105,20 +159,13 @@ actor FixtureService: ServiceControlling {
     waiting.removeAll()
   }
 
-  private static func pause() async {
+  private static func pause(_ seconds: Double) async {
     await withCheckedContinuation { continuation in
-      DispatchQueue.global().asyncAfter(deadline: .now() + 1.2) { continuation.resume() }
+      DispatchQueue.global().asyncAfter(deadline: .now() + seconds) { continuation.resume() }
     }
   }
 
-  private static func inspection(_ name: String) throws -> ServiceInspection {
-    let installed = try PropertyListSerialization.data(
-      fromPropertyList: [
-        "Label": ServiceConfiguration.label,
-        "ProgramArguments": [
-          "/usr/local/bin/\(ServiceDefaults.executableName)", ServerOption.http.flag,
-        ],
-      ], format: .xml, options: 0)
+  private static func diagnosis(_ name: String) -> DiagnoseResult? {
     func diagnosis(
       messages: Bool, contacts: PermissionStatus, sending: CapabilityState,
       detail: PermissionStatus? = nil
@@ -137,31 +184,20 @@ actor FixtureService: ServiceControlling {
           CapabilityKey.liveInbox.rawValue: Capability(state: .supported),
         ])
     }
-    let ready = diagnosis(messages: true, contacts: .authorized, sending: .supported)
-    var loaded = true
-    var data: Data? = installed
-    var result: DiagnoseResult?
-    var trouble: String?
-    switch name {
-    case "fresh": (loaded, data) = (false, nil)
-    case "stopped": loaded = false
+    return switch name {
+    case "fresh", "stopped", "legacy", "blocked", "problem": nil
     case "setup-messages":
-      result = diagnosis(messages: false, contacts: .notDetermined, sending: .unverified)
+      diagnosis(messages: false, contacts: .notDetermined, sending: .unverified)
     case "setup-contacts":
-      result = diagnosis(messages: true, contacts: .notDetermined, sending: .unverified)
+      diagnosis(messages: true, contacts: .notDetermined, sending: .unverified)
     case "setup-sending":
-      result = diagnosis(
+      diagnosis(
         messages: true, contacts: .authorized, sending: .unverified, detail: .messagesNotRunning)
-    case "problem": trouble = CoreError.invalidResponse.errorDescription
-    default: result = ready
+    default: diagnosis(messages: true, contacts: .authorized, sending: .supported)
     }
-    return ServiceInspection(
-      configuration: try ServiceConfiguration(
-        data: data, home: FileManager.default.homeDirectoryForCurrentUser),
-      loaded: loaded, processID: loaded ? processID : nil,
-      diagnosis: result, problem: trouble, conflict: false)
   }
 }
+
 
 @MainActor func writeArtworkSheet(to url: URL) {
   let moods = CompanionMood.allCases

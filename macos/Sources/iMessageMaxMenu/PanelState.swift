@@ -3,7 +3,7 @@ import MaxBrand
 import MaxCore
 
 enum Busy: Equatable {
-  case starting, stopping, askingPermission, checkingSending
+  case starting, stopping, askingPermission, checkingSending, moving
 
   var title: String {
     switch self {
@@ -11,6 +11,7 @@ enum Busy: Equatable {
     case .stopping: "Taking a break…"
     case .askingPermission: "Waiting for permission…"
     case .checkingSending: "Checking sending…"
+    case .moving: "Moving to Applications…"
     }
   }
 
@@ -38,28 +39,35 @@ struct PanelState: Equatable {
   enum Phase: Equatable {
     case checking
     case connected(Readiness, opensMessages: Bool)
-    case stopped(installed: Bool)
+    case misplaced
+    case olderInstall
+    case blocked
+    case notSetUp
+    case stopped
     case disconnected
   }
 
-  enum Primary { case connect, start, recheck }
+  enum Primary { case connect, start, migrate, move, openLoginItems, recheck }
 
   let phase: Phase
   let busy: Busy?
   let troubled: Bool
 
-  init(inspection: ServiceInspection?, busy: Busy?, problem: String?, checked: Bool) {
+  init(service: ServiceState?, busy: Busy?, problem: String?, checked: Bool) {
     self.busy = busy
     troubled = problem != nil
-    if !checked && problem == nil {
-      phase = .checking
-    } else if let diagnosis = inspection?.diagnosis {
-      phase = .connected(diagnosis.readiness, opensMessages: diagnosis.needsMessagesForSendingCheck)
-    } else if let inspection, !inspection.loaded, !inspection.conflict {
-      phase = .stopped(installed: inspection.configuration.isInstalled)
-    } else {
-      phase = .disconnected
-    }
+    phase =
+      switch service {
+      case nil: !checked && problem == nil ? .checking : .disconnected
+      case .running(let diagnosis):
+        .connected(diagnosis.readiness, opensMessages: diagnosis.needsMessagesForSendingCheck)
+      case .misplaced: .misplaced
+      case .legacyInstall: .olderInstall
+      case .blockedInLoginItems: .blocked
+      case .notRegistered: .notSetUp
+      case .stopped: .stopped
+      case .portConflict, .unresponsive: .disconnected
+      }
   }
 
   var title: String {
@@ -70,7 +78,11 @@ struct PanelState: Equatable {
     case .connected(.contacts, _): "Let’s add names"
     case .connected(.sending, _): "Ready to read"
     case .connected(.ready, _): "Ready to help"
-    case .stopped(let installed): installed ? "Taking a break" : "Hello, iMessage Max"
+    case .misplaced: "Move me to Applications"
+    case .olderInstall: "Finish the update"
+    case .blocked: "Turned off in Login Items"
+    case .notSetUp: "Hello, iMessage Max"
+    case .stopped: "Taking a break"
     case .disconnected: "Let’s get connected"
     }
   }
@@ -85,10 +97,14 @@ struct PanelState: Equatable {
         ? "Open Messages so we can check sending. Your assistants can already read messages."
         : "Your assistants can read messages. Let’s check sending access."
     case .connected(.ready, _): "Your assistants can now use Messages on this Mac."
-    case .stopped(let installed):
-      installed
-        ? "Start whenever you need your assistants again."
-        : "A small helper connects your assistants to Messages."
+    case .misplaced:
+      "Move iMessage Max to Applications so it can register its helper and start at login."
+    case .olderInstall:
+      "An older iMessage Max helper is still installed. We’ll replace it with the one in this app. Then you’ll allow access once more, for the app."
+    case .blocked:
+      "macOS lets the helper run only when it’s on in Login Items. Turn on iMessage Max there."
+    case .notSetUp: "A small helper connects your assistants to Messages."
+    case .stopped: "Start whenever you need your assistants again."
     case .checking, .disconnected:
       "Your messages stay on this Mac. Let’s check the connection."
     }
@@ -98,7 +114,10 @@ struct PanelState: Equatable {
     switch phase {
     case .connected(.ready, _): .connect
     case .connected: nil
-    case .stopped: .start
+    case .misplaced: .move
+    case .olderInstall: .migrate
+    case .blocked: .openLoginItems
+    case .notSetUp, .stopped: .start
     case .checking, .disconnected: .recheck
     }
   }
@@ -107,15 +126,21 @@ struct PanelState: Equatable {
     if busy != nil { return "Working…" }
     return switch phase {
     case .connected: "Connect an assistant"
-    case .stopped(let installed): installed ? "Start iMessage Max" : "Set up iMessage Max"
+    case .misplaced: "Move to Applications"
+    case .olderInstall: "Replace the older helper"
+    case .blocked: "Open Login Items"
+    case .notSetUp: "Set up iMessage Max"
+    case .stopped: "Start iMessage Max"
     case .checking, .disconnected: "Check again"
     }
   }
 
   var primaryMark: ActionMark {
     if busy != nil { return .more }
-    if case .stopped = phase { return .play }
-    return .arrow
+    return switch phase {
+    case .notSetUp, .stopped, .olderInstall: .play
+    default: .arrow
+    }
   }
 
   var primaryEnabled: Bool { busy == nil && phase != .checking }
@@ -124,9 +149,9 @@ struct PanelState: Equatable {
     if busy != nil || phase == .checking { return .working }
     if troubled { return .trouble }
     return switch phase {
-    case .stopped: .resting
+    case .stopped, .notSetUp: .resting
     case .connected(.ready, _): .ready
-    case .connected: .needsYou
+    case .connected, .misplaced, .olderInstall, .blocked: .needsYou
     case .checking, .disconnected: .trouble
     }
   }

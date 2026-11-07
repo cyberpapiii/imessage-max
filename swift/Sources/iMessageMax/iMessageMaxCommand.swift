@@ -26,7 +26,7 @@ struct iMessageMax: AsyncParsableCommand {
     @Option(name: .customLong("token-file"), help: "File holding the bearer token HTTP clients must send. Created with mode 0600 if absent; its folder must already exist and belong to you. An existing file that holds anything but a token is left alone and the server exits. Defaults to ~/\(ServiceDefaults.tokenPath).")
     var tokenFile: String?
 
-    @Option(name: .customLong("socket-path"), help: "Unix socket the helper listens on (with --http) or the stdio bridge connects to (without). Its folder must already exist and belong to you. Defaults to ~/\(ServiceDefaults.socketPath).")
+    @Option(name: .customLong(ServerOption.socketPath.rawValue), help: "Unix socket the helper listens on (with --http) or the stdio bridge connects to (without). Its folder must already exist and belong to you. Defaults to ~/\(ServiceDefaults.socketPath).")
     var socketPath: String?
 
     @Flag(name: .long, help: "Serve stdio in this process instead of bridging to the running iMessage Max helper. For development and tests: this process then needs Full Disk Access itself.")
@@ -34,6 +34,9 @@ struct iMessageMax: AsyncParsableCommand {
 
     @Option(name: .customLong(ServerOption.contactsPolicy.rawValue), help: "What to do when Contacts authorization is not yet determined: auto (prompt only if stdin is a terminal), request, or skip. With auto, the server honours IMESSAGE_MAX_CONTACTS_POLICY=request|skip.")
     var contactsPolicy: ContactsAccessPolicy.Override = .auto
+
+    @Option(name: .customLong(ServerOption.logFile.rawValue), help: "Append diagnostics to this file instead of stderr. A leading ~/ means the home directory, because launchd does not expand it.")
+    var logFile: String?
 
     @Flag(name: .long, help: "Ask macOS for Contacts access once, print the resulting status, and exit. Run this from a terminal; the server never prompts when it has no terminal.")
     var requestContactsAccess = false
@@ -54,6 +57,8 @@ struct iMessageMax: AsyncParsableCommand {
     }
 
     mutating func run() async throws {
+        if let logFile { Log.redirectStandardError(to: logFile) }
+
         if requestMessagesAccess {
             let (_, status) = await AutomationPermission.requestAccess()
             print("Messages automation: \(status)")

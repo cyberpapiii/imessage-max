@@ -14,29 +14,33 @@ The project is written in Swift and lives in `/swift/`.
 
 ```bash
 cd swift
-make install    # builds, signs, restarts the launchd service, verifies health
+make install    # builds the app, installs it to ~/Applications, registers the helper, verifies health
 ```
 
-`make install` replaces the live service that every MCP client uses through plug. Run it when a change needs to reach that service, for example to check behaviour on real data. Code-only work verified by tests does not need it. Before installing, copy the current release binary to a scratch folder so `make restart` can bring it back.
+`make install` replaces the live service that every MCP client uses through plug. Run it when a change needs to reach that service, for example to check behaviour on real data. Code-only work verified by tests does not need it. Before installing, copy the current `~/Applications/iMessage Max.app` to a scratch folder so you can put it back.
 
-It signs the binary with hardened runtime and the entitlements in `swift/iMessageMax.entitlements`. The identity comes from `script/signing_identity.sh`: `SIGN_IDENTITY` (a certificate SHA-1) when set, otherwise the valid "Developer ID Application" identity in the keychain that expires last. A stable Developer ID signature keeps macOS from revoking Full Disk Access on every rebuild. A contributor without a Developer ID gets an ad-hoc signature and a printed warning, and must grant Full Disk Access again after each build. `make sign` builds and signs without touching the service.
+It builds `dist/iMessage Max.app` with `script/assemble_app.sh`, removes `~/Applications/iMessage Max.app` and copies the new bundle there (never copy over a running signed binary: macOS kills the process), then opens the app with `--register-helper`. That flag registers the helper with `SMAppService`, restarts a running one on the new binary, and replaces an install of the pre-2.0 `local.imessage-max` agent. The helper runs from `Contents/MacOS/imessage-max` inside the app, under the agent plist `macos/Resources/LaunchAgents/com.cyberpapiii.imessage-max.helper.plist`, which the app bundles in `Contents/Library/LaunchAgents/`. macOS charges an in-bundle helper's Full Disk Access, Contacts and Automation to the app, so each Privacy list shows one "iMessage Max". Do not hand-write a plist into `~/Library/LaunchAgents`.
+
+A live check that must not disturb the installed helper builds a test variant: `APP_NAME`, `APP_BUNDLE_ID`, `HELPER_LABEL`, `HELPER_PORT` and `HELPER_SOCKET` override the app name, bundle id, label, port and socket path in `script/assemble_app.sh`. The socket's folder must already exist with mode 0700. A test variant never touches a pre-2.0 install. Remove it with `open "<app>" --args --unregister-helper`, then delete the app.
+
+The binaries are signed with hardened runtime and the entitlements in `swift/iMessageMax.entitlements`, the app and the helper alike. The identity comes from `script/signing_identity.sh`: `SIGN_IDENTITY` (a certificate SHA-1) when set, otherwise the valid "Developer ID Application" identity in the keychain that expires last. A stable Developer ID signature keeps macOS from revoking Full Disk Access on every rebuild. A contributor without a Developer ID gets an ad-hoc signature and a printed warning, and must grant Full Disk Access again after each build. `make sign` builds and signs without touching the service.
 
 Other Makefile targets:
 - `make test` runs the full test suite (`FILTER=ClassOrMethod` for a subset)
 - `make status` checks process, version, signature, health
-- `make logs` tails the stderr log
-- `make restart` restarts the service. Use it, not `launchctl kill`. The plist's `KeepAlive` has `SuccessfulExit` false, so launchd does not relaunch after a clean SIGTERM
-- `make clean` removes debug artifacts and clears logs
+- `make app` builds and signs `dist/iMessage Max.app` without installing it
+- `make logs` tails the helper log, `~/Library/Logs/iMessage Max/imessage-max.log`. launchd cannot expand `~`, so the plist passes `--log-file` and the server opens the file itself
+- `make restart` runs `launchctl kickstart -k` on the helper. A kickstart within the plist's 10 second `ThrottleInterval` of the last launch waits out the rest of it. The server exits 0 on SIGTERM, and the plist's `KeepAlive` has `SuccessfulExit` false, so launchd does not relaunch after a clean `launchctl kill`. The companion still stops the helper with `launchctl bootout`, which unloads the job so no exit status can relaunch it, and starts it again by registering.
+- `make clean` removes debug artifacts and clears the helper log
 - `make version` checks that the five version sites agree, and `make release-check` runs everything that must pass before tagging (see `docs/RELEASING.md`)
-- `make install-agent` renders `swift/launchd/local.imessage-max.plist` (binary path and `~/` log paths filled in) into `~/Library/LaunchAgents/` and loads it (do not hand-write the plist)
 
-The server runs as a launchd service (`local.imessage-max`). The default port is 47821, and an installed plist can pin another with `--port`. It starts at login and restarts after a crash.
+The server runs as the launchd agent `com.cyberpapiii.imessage-max.helper`. The default port is 47821, and the bundled agent plist can pin another with `--port`. It starts at login and restarts after a crash. System Settings → General → Login Items & Extensions lists it once, as iMessage Max, under "App Background Activity".
 
 Every HTTP request needs `Authorization: Bearer <token>`, on every route and both eras. On first start the server writes a random token to `~/Library/Application Support/iMessage Max/token` (mode 0600, folder 0700) and reuses it after that. It refuses to start if the file is readable by other users, owned by someone else, or holds anything but a token, and it never overwrites that file. `--token-file <path>` points a dev or test server at another file, in a folder that already exists and belongs to you; the server leaves that folder's mode alone. A missing or wrong token gets 401 and one `auth=rejected` stderr line, which never holds the token. Stdio needs no token.
 
 Clients reach it through plug (HTTP, `protocol = "legacy"`, with the token as `auth_token`). After restarting the service, clients may need to reconnect (for example with `/mcp` in Codex).
 
-`make build` passes `--build-system native` so the binary stays at `.build/arm64-apple-macosx/release/imessage-max`. macOS grants Full Disk Access by path, and the grant names that path. Swift 6.4's default build system writes elsewhere, so a bare `swift build -c release` binary is not the one launchd runs, and it cannot read chat.db.
+`make build` passes `--build-system native` so the binary stays at `.build/arm64-apple-macosx/release/imessage-max`, which `.build/release` links to. `script/assemble_app.sh` copies `swift/.build/release/imessage-max` into the app. Swift 6.4's default build system writes elsewhere.
 
 ### Manual build and run (without Makefile)
 
@@ -243,7 +247,7 @@ return [
 ## Required macOS permissions
 
 - Full Disk Access, for ~/Library/Messages/chat.db
-- Contacts, for AddressBook resolution (granted with `--request-contacts-access`, because headless starts never prompt). MCP clients such as Claude desktop launch the server disclaimed, so only a grant held by the imessage-max executable itself counts. A Contacts switch for Terminal or the client app does not count. A bare `swift build` omits the embedded Info.plist, macOS then cannot grant Contacts at all, and diagnose reports `missing_usage_description`
+- Contacts, for AddressBook resolution. For the helper inside the app, the companion asks in its own process and then restarts the helper, which reads Contacts access only at launch. A helper inside an app that asks for itself is denied with no prompt. For a bare executable, grant it with `--request-contacts-access`, because headless starts never prompt. MCP clients such as Claude desktop launch the server disclaimed, so only a grant held by the imessage-max executable itself counts. A Contacts switch for Terminal or the client app does not count. A bare `swift build` omits the embedded Info.plist, macOS then cannot grant Contacts at all, and diagnose reports `missing_usage_description`
 - Automation, for Messages.app (sending only)
 
 ## Maintainer notes

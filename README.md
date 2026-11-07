@@ -509,9 +509,11 @@ If `diagnose` reports `contacts.status: "not_requested_headless"`, run `imessage
 ### "Cannot read the iMessage database" / `permission_denied`
 
 Full Disk Access is missing for the **process that opens chat.db**. For
-the launchd service, that process is the `imessage-max` binary itself. Stdio
-clients reach that service through the bridge, so they need no grant of their
-own. Only `--direct` makes the app that spawns the binary need it. Run `diagnose`. Its
+the helper inside `iMessage Max.app`, macOS charges the access to the app,
+so turn on iMessage Max. For a bare `imessage-max` launchd service, that
+process is the binary itself. Stdio clients reach the helper through the
+bridge, so they need no grant of their own. Only `--direct` makes the app
+that spawns the binary need it. Run `diagnose`. Its
 `database.fix` field names the executable and the steps:
 
 1. System Settings → Privacy & Security → Full Disk Access → add that
@@ -522,9 +524,10 @@ own. Only `--direct` makes the app that spawns the binary need it. Run `diagnose
    binary a stable identity so rebuilds keep the grant. An ad-hoc build
    does not. The first build after moving from the old self-signed
    "iMessage Max Dev" identity to Developer ID needs this toggle once.
-3. The grant applies only to newly launched processes. Relaunch with
-   `cd swift && make restart`, which runs launchctl bootout and then bootstrap.
-   `kickstart -k` can hit the launchd crash throttle.
+3. The grant applies only to newly launched processes. Restart iMessage Max
+   from its menu bar app, or run `cd swift && make restart`, which runs
+   `launchctl kickstart -k`. A restart within 10 seconds of the last launch
+   waits out launchd's throttle.
 4. To narrow it down, run `sqlite3 -readonly ~/Library/Messages/chat.db 'pragma quick_check;'` from a terminal.
    `ok` means your terminal has access and the server process does not.
    `unable to open database file` means the grant is missing for your user.
