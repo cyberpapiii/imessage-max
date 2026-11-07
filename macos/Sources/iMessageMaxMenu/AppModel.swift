@@ -182,12 +182,12 @@ final class AppModel {
     }
     let access = clientAccess
     let writes = clientWrites
-    let found =
-      (try? await Self.offMainActor {
-        Client.all.filter { $0.detect(context) }.map { client in
-          (client.id, client.name, access.map { client.link(context, $0) } ?? .notConnected)
-        }
-      }) ?? []
+    let present = (try? await Self.offMainActor { Client.all.filter { $0.detect(context) } }) ?? []
+    var found: [(ClientID, String, ClientLink)] = []
+    for client in present {
+      let link = if let access { await client.link(context, access) } else { ClientLink.notConnected }
+      found.append((client.id, client.name, link))
+    }
     guard writes == clientWrites else { return }
     clients = found.map { id, name, link in
       var row = ClientRow(id: id, name: name, link: link)
@@ -219,7 +219,7 @@ final class AppModel {
       var link: ClientLink?
       do {
         let result = try await client.connect(context, access)
-        link = try await Self.offMainActor { client.link(context, access) }
+        link = await client.link(context, access)
         activity =
           result.finishInClient && link != .connected
           ? .waiting(result.summary) : .finished(result.summary)

@@ -6,27 +6,29 @@ import Testing
 private let access = ClientAccess(
   endpoint: URL(string: "http://127.0.0.1:47821/")!, token: "tok-123_ABC")
 
+private typealias Run = (String, [String], [String: String], Data?)
+
 private final class Recorder: @unchecked Sendable {
   private let lock = NSLock()
-  private var items: [(String, [String], [String: String])] = []
+  private var items: [Run] = []
   private var opened: [(URL, URL?)] = []
 
-  var runs: [(String, [String], [String: String])] { lock.withLock { items } }
+  var runs: [Run] { lock.withLock { items } }
   var opens: [(URL, URL?)] { lock.withLock { opened } }
-  func run(_ entry: (String, [String], [String: String])) { lock.withLock { items.append(entry) } }
+  func run(_ entry: Run) { lock.withLock { items.append(entry) } }
   func open(_ entry: (URL, URL?)) { lock.withLock { opened.append(entry) } }
 }
 
 private func context(
   _ home: URL, apps: [String: URL] = [:], recorder: Recorder = Recorder(),
-  run: (@Sendable (String, [String], [String: String]) async throws -> ProcessResult)? = nil
+  run: (@Sendable (String, [String], [String: String], Data?) async throws -> ProcessResult)? = nil
 ) -> ClientContext {
   ClientContext(
     home: home, commandFolders: [home.appendingPathComponent("bin")],
     application: { apps[$0] },
     open: { recorder.open(($0, $1)) },
-    run: run ?? { executable, arguments, environment in
-      recorder.run((executable, arguments, environment))
+    run: run ?? { executable, arguments, environment, input in
+      recorder.run((executable, arguments, environment, input))
       return ProcessResult(exitCode: 0, output: "")
     },
     scratch: home.appendingPathComponent("scratch"))
@@ -58,14 +60,14 @@ private let codexBlock = """
     at: home.appendingPathComponent(".codex"), withIntermediateDirectories: true)
   let context = context(home)
   #expect(Client.codex.detect(context))
-  #expect(Client.codex.link(context, access) == .notConnected)
+  #expect(await Client.codex.link(context, access) == .notConnected)
 
   let result = try await Client.codex.connect(context, access)
   let file = home.appendingPathComponent(".codex/config.toml")
   #expect(try read(file) == codexBlock)
   #expect(try mode(file) == 0o600)
   #expect(result.summary.hasPrefix("Created ~/.codex/config.toml"))
-  #expect(Client.codex.link(context, access) == .connected)
+  #expect(await Client.codex.link(context, access) == .connected)
 }
 
 @Test func codexWriterLeavesEveryOtherTableByteIdentical() async throws {
@@ -99,7 +101,7 @@ private let codexBlock = """
   #expect(try read(ConfigFile.backup(of: file)) == before)
   #expect(try mode(ConfigFile.backup(of: file)) == 0o640)
   #expect(result.summary.contains("config.toml.imessage-max-backup"))
-  #expect(Client.codex.link(context, access) == .connected)
+  #expect(await Client.codex.link(context, access) == .connected)
 }
 
 @Test func codexWriterRewritesAnOldEntryInPlace() async throws {
@@ -125,7 +127,7 @@ private let codexBlock = """
 
     """, to: file)
   let context = context(home)
-  #expect(Client.codex.link(context, access) == .outdated)
+  #expect(await Client.codex.link(context, access) == .outdated)
 
   _ = try await Client.codex.connect(context, access)
   #expect(
@@ -143,7 +145,7 @@ private let codexBlock = """
       url = "http://example.org"
 
       """)
-  #expect(Client.codex.link(context, access) == .connected)
+  #expect(await Client.codex.link(context, access) == .connected)
 }
 
 @Test func connectingTwiceWritesOneEntryAndNoSecondBackup() async throws {
@@ -227,7 +229,7 @@ private let codexBlock = """
     """, to: file)
   let context = context(home)
   #expect(Client.plug.detect(context))
-  #expect(Client.plug.link(context, access) == .outdated)
+  #expect(await Client.plug.link(context, access) == .outdated)
 
   _ = try await Client.plug.connect(context, access)
   #expect(
@@ -250,7 +252,163 @@ private let codexBlock = """
       [servers.imessage.tool_renames]
 
       """)
-  #expect(Client.plug.link(context, access) == .connected)
+  #expect(await Client.plug.link(context, access) == .connected)
+}
+
+private let plugConfigPath = "Library/Application Support/plug/config.toml"
+
+/// Rob's entry, as `plug secret set` and `plug server edit` left it.
+private let plugKeychainEntry = """
+  [servers.imessage]
+  args = []
+  enabled = true
+  transport = "http"
+  protocol = "legacy"
+  url = "http://127.0.0.1:47821"
+  auth_token = "keychain:imessage-max-token"
+
+  """
+
+@Test func aKeychainReferenceInPlugsFileCountsAsConnected() async throws {
+  let home = try temporaryHome()
+  let file = home.appendingPathComponent(plugConfigPath)
+  try write(plugKeychainEntry, to: file)
+  let recorder = Recorder()
+  let context = context(home, recorder: recorder)
+  #expect(await Client.plug.link(context, access) == .connected)
+
+  let result = try await Client.plug.connect(context, access)
+  #expect(result.summary == "Plug already has iMessage Max.")
+  #expect(try read(file) == plugKeychainEntry, "the reference is never replaced by the token")
+  #expect(recorder.runs.isEmpty)
+
+  try write(plugKeychainEntry.replacingOccurrences(of: "47821", with: "8080"), to: file)
+  #expect(await Client.plug.link(context, access) == .outdated)
+}
+
+/// Plug's CLI as the connector sees it: a running service that lists
+/// `servers`, and `secret set`, `server add` and `server edit` that change
+/// what it lists.
+private final class FakePlug: @unchecked Sendable {
+  private let lock = NSLock()
+  private var calls: [Run] = []
+  var running = true
+  var server: (url: String, health: String)?
+  var secretExit: Int32 = 0
+
+  init(server: (url: String, health: String)? = nil) { self.server = server }
+
+  var runs: [Run] { lock.withLock { calls } }
+
+  func run(_ executable: String, _ arguments: [String], _ environment: [String: String], _ input: Data?)
+    -> ProcessResult
+  {
+    lock.withLock {
+      calls.append((executable, arguments, environment, input))
+      let command = Array(arguments.drop { $0 != "servers" && $0 != "secret" && $0 != "server" })
+      switch command.first {
+      case "servers":
+        guard running else {
+          return ProcessResult(exitCode: 0, output: #"{"runtime_available":false,"servers":{}}"#)
+        }
+        let listed = server.map {
+          #"[{"server_id":"imessage","health":"\#($0.health)","source":{"url":"\#($0.url)"}}]"#
+        }
+        return ProcessResult(
+          exitCode: 0, output: #"{"runtime_available":true,"servers":\#(listed ?? "[]")}"#)
+      case "secret":
+        return ProcessResult(exitCode: secretExit, output: secretExit == 0 ? "" : "Keychain locked")
+      default:
+        if let url = command.firstIndex(of: "--url").map({ command[$0 + 1] }) {
+          server = (url, "Healthy")
+        }
+        return ProcessResult(exitCode: 0, output: "")
+      }
+    }
+  }
+}
+
+private func plugContext(_ home: URL, _ plug: FakePlug) throws -> ClientContext {
+  try write("#!/bin/sh\n", to: home.appendingPathComponent("bin/plug"), mode: 0o755)
+  return context(home) { plug.run($0, $1, $2, $3) }
+}
+
+@Test func plugsServiceDecidesWhenItRuns() async throws {
+  let home = try temporaryHome()
+  try write(plugKeychainEntry, to: home.appendingPathComponent(plugConfigPath))
+  let plug = FakePlug(server: ("http://127.0.0.1:47821", "Healthy"))
+  let context = try plugContext(home, plug)
+  #expect(await Client.plug.link(context, access) == .connected)
+  let (executable, arguments, environment, input) = try #require(plug.runs.first)
+  #expect(executable == home.appendingPathComponent("bin/plug").path)
+  #expect(
+    arguments == [
+      "--config", home.appendingPathComponent(plugConfigPath).path, "servers", "--output", "json",
+    ])
+  #expect(environment["HOME"] == home.path && input == nil)
+
+  plug.server = ("http://127.0.0.1:47821", "Failed")
+  #expect(await Client.plug.link(context, access) == .outdated, "a token Plug cannot use")
+  plug.server = ("http://127.0.0.1:8080", "Healthy")
+  #expect(await Client.plug.link(context, access) == .outdated)
+  plug.server = nil
+  #expect(await Client.plug.link(context, access) == .notConnected)
+  plug.running = false
+  #expect(await Client.plug.link(context, access) == .connected, "the file decides")
+}
+
+@Test func plugsCLIStoresTheTokenOnStdinAndNeverInArgv() async throws {
+  let home = try temporaryHome()
+  let file = home.appendingPathComponent(plugConfigPath)
+  let before = "[servers.exa]\ntransport = \"http\"\n"
+  try write(before, to: file)
+  let plug = FakePlug()
+  let context = try plugContext(home, plug)
+  #expect(await Client.plug.link(context, access) == .notConnected)
+
+  let result = try await Client.plug.connect(context, access)
+  let config = ["--config", file.path]
+  let changes = plug.runs.filter { !$0.1.contains("servers") }
+  #expect(
+    changes.map(\.1) == [
+      config + ["secret", "set", "imessage-max-token"],
+      config + [
+        "server", "add", "imessage", "--transport", "http", "--url", "http://127.0.0.1:47821/",
+        "--auth", "bearer", "--bearer-token", "keychain:imessage-max-token",
+      ],
+    ])
+  #expect(changes.first?.3 == Data("tok-123_ABC".utf8))
+  #expect(plug.runs.allSatisfy { run in !run.1.contains { $0.contains("tok-123_ABC") } })
+  #expect(plug.runs.allSatisfy { !$0.2.values.contains { $0.contains("tok-123_ABC") } })
+  #expect(try read(file) == before, "Plug's CLI writes the file, not the connector")
+  #expect(try read(ConfigFile.backup(of: file)) == before)
+  #expect(result.summary.contains("added iMessage Max in Plug"))
+  #expect(await Client.plug.link(context, access) == .connected)
+}
+
+@Test func plugsCLIEditsAnEntryThatIsThere() async throws {
+  let home = try temporaryHome()
+  let file = home.appendingPathComponent(plugConfigPath)
+  try write(plugKeychainEntry, to: file)
+  let plug = FakePlug(server: ("http://127.0.0.1:47821", "Failed"))
+  let context = try plugContext(home, plug)
+  #expect(await Client.plug.link(context, access) == .outdated)
+
+  _ = try await Client.plug.connect(context, access)
+  #expect(plug.runs.contains { $0.1.contains("edit") && $0.1.contains("imessage") })
+  #expect(!plug.runs.contains { $0.1.contains("add") })
+  #expect(await Client.plug.link(context, access) == .connected)
+}
+
+@Test func plugsCLIStopsWhenTheKeychainRefusesTheToken() async throws {
+  let home = try temporaryHome()
+  try write("[servers.exa]\n", to: home.appendingPathComponent(plugConfigPath))
+  let plug = FakePlug()
+  plug.secretExit = 1
+  await #expect(throws: CoreError.commandFailed("Plug did not store the token. Keychain locked")) {
+    try await Client.plug.connect(plugContext(home, plug), access)
+  }
+  #expect(!plug.runs.contains { $0.1.contains("server") })
 }
 
 @Test func claudeCodeAddsAUserScopedServerThroughItsCLI() async throws {
@@ -263,7 +421,7 @@ private let codexBlock = """
   let recorder = Recorder()
   let context = context(home, recorder: recorder)
   #expect(Client.claudeCode.detect(context))
-  #expect(Client.claudeCode.link(context, access) == .outdated)
+  #expect(await Client.claudeCode.link(context, access) == .outdated)
 
   _ = try await Client.claudeCode.connect(context, access)
   let runs = recorder.runs
@@ -280,7 +438,7 @@ private let codexBlock = """
   try write(
     #"{"mcpServers":{"imessage":{"type":"http","url":"http://127.0.0.1:47821/","headers":{"Authorization":"Bearer tok-123_ABC"}}}}"#,
     to: config)
-  #expect(Client.claudeCode.link(context, access) == .connected)
+  #expect(await Client.claudeCode.link(context, access) == .connected)
   let again = try await Client.claudeCode.connect(context, access)
   #expect(recorder.runs.count == 2, "a connected client runs no command")
   #expect(again.summary == "Claude Code already has iMessage Max.")
@@ -289,7 +447,7 @@ private let codexBlock = """
 @Test func claudeCodeReportsAFailedAdd() async throws {
   let home = try temporaryHome()
   try write("#!/bin/sh\n", to: home.appendingPathComponent("bin/claude"), mode: 0o755)
-  let failing = context(home) { _, _, _ in ProcessResult(exitCode: 1, output: "boom\nlast line") }
+  let failing = context(home) { _, _, _, _ in ProcessResult(exitCode: 1, output: "boom\nlast line") }
   await #expect(throws: CoreError.commandFailed("Claude Code did not add iMessage Max. last line")) {
     try await Client.claudeCode.connect(failing, access)
   }
@@ -320,7 +478,7 @@ private let codexBlock = """
   try write(
     #"{"mcpServers":{"imessage":{"url":"http://127.0.0.1:47821/","headers":{"Authorization":"Bearer tok-123_ABC"}},"plug":{"url":"x"}}}"#,
     to: home.appendingPathComponent(".cursor/mcp.json"))
-  #expect(Client.cursor.link(context, access) == .connected)
+  #expect(await Client.cursor.link(context, access) == .connected)
 }
 
 @Test func claudeDesktopOpensAnExtensionPackedFromTheHelper() async throws {
@@ -339,7 +497,7 @@ private let codexBlock = """
     scratch: home.appendingPathComponent("scratch"))
   context.commandFolders = []
   #expect(Client.claudeDesktop.detect(context))
-  #expect(Client.claudeDesktop.link(context, access) == .notConnected)
+  #expect(await Client.claudeDesktop.link(context, access) == .notConnected)
 
   let result = try await Client.claudeDesktop.connect(context, access)
   #expect(result.finishInClient)
@@ -353,7 +511,7 @@ private let codexBlock = """
   try write(
     #"{"extensions":{"local.mcpb.rob-dezendorf.imessage-max":{"version":"1.8.0"}}}"#,
     to: home.appendingPathComponent("Library/Application Support/Claude/extensions-installations.json"))
-  #expect(Client.claudeDesktop.link(context, access) == .connected)
+  #expect(await Client.claudeDesktop.link(context, access) == .connected)
 }
 
 @Test func onlyClientsPresentOnThisMacAreListed() throws {

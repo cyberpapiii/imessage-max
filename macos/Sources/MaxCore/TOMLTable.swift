@@ -19,6 +19,11 @@ public struct TOMLTable: Sendable {
     return document.value(of: entry)
   }
 
+  /// Whether `text` has this table.
+  public func exists(in text: String) -> Bool {
+    Document(text).tables.contains { $0.path == path && !$0.isArray }
+  }
+
   /// Sets `values` in this table, in order, and deletes `removing` keys and
   /// the `dropping` subtables. Keys already present keep their place. A
   /// missing table is appended at the end.

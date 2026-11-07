@@ -75,9 +75,10 @@ extension ClientContext {
   }
 
   /// `--client-root`, which only a test build honors. Client configs live
-  /// under `root`, apps are found only in `root/Applications`, and opening a
-  /// file or link appends it to `root/open-requests.log` instead, so a live
-  /// check never installs anything into a real client.
+  /// under `root`, apps are found only in `root/Applications`, commands only
+  /// under `root`, and opening a file or link appends it to
+  /// `root/open-requests.log` instead, so a live check never installs
+  /// anything into a real client.
   static func sandbox(root: URL) -> ClientContext {
     var context = live(home: root)
     let names = [Client.claudeDesktopID: "Claude", Client.cursorID: "Cursor"]
@@ -97,6 +98,9 @@ extension ClientContext {
       try handle.write(contentsOf: Data("\(app?.path ?? "-") \(target.absoluteString)\n".utf8))
     }
     context.scratch = root.appendingPathComponent("scratch")
+    // Only commands under `root`: Plug's CLI writes the real Keychain
+    // whatever HOME it runs with.
+    context.commandFolders = context.commandFolders.filter { $0.path.hasPrefix(root.path + "/") }
     return context
   }
 }

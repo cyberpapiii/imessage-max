@@ -12,6 +12,14 @@ public struct ClientAccess: Sendable, Equatable {
 
   public var url: String { endpoint.absoluteString }
   public var authorization: String { "Bearer \(token)" }
+
+  /// Whether `url` names this endpoint, with or without the trailing slash.
+  func isEndpoint(_ url: String) -> Bool {
+    func trimmed(_ text: String) -> Substring {
+      text.hasSuffix("/") ? text.dropLast() : Substring(text)
+    }
+    return trimmed(url) == trimmed(self.url)
+  }
 }
 
 /// Everything on this Mac a connector reads or touches. The app passes the
@@ -25,7 +33,8 @@ public struct ClientContext: Sendable {
   public var application: @Sendable (String) -> URL?
   /// Opens a file or a URL, in a given app when one is named.
   public var open: @Sendable (URL, URL?) async throws -> Void
-  public var run: @Sendable (String, [String], [String: String]) async throws -> ProcessResult
+  /// Runs a command with an environment and, when given, bytes on its stdin.
+  public var run: @Sendable (String, [String], [String: String], Data?) async throws -> ProcessResult
   /// The Claude Desktop extension's manifest and icons, and the helper it runs.
   public var extensionFiles: URL?
   public var helper: URL?
@@ -35,7 +44,8 @@ public struct ClientContext: Sendable {
   public init(
     home: URL, commandFolders: [URL]? = nil, application: @escaping @Sendable (String) -> URL?,
     open: @escaping @Sendable (URL, URL?) async throws -> Void,
-    run: @escaping @Sendable (String, [String], [String: String]) async throws -> ProcessResult,
+    run: @escaping @Sendable (String, [String], [String: String], Data?) async throws ->
+      ProcessResult,
     extensionFiles: URL? = nil, helper: URL? = nil, scratch: URL
   ) {
     self.home = home
@@ -55,10 +65,10 @@ public struct ClientContext: Sendable {
   /// The real `run`. Passed explicitly: Swift 6.3 aborts when an async
   /// closure literal is a default argument here.
   @Sendable public static func runProcess(
-    _ executable: String, _ arguments: [String], _ environment: [String: String]
+    _ executable: String, _ arguments: [String], _ environment: [String: String], _ input: Data?
   ) async throws -> ProcessResult {
     try await ProcessRunner.run(
-      executable, arguments: arguments, environment: environment, timeout: 30)
+      executable, arguments: arguments, environment: environment, input: input, timeout: 30)
   }
 
   func file(_ path: String) -> URL { home.appendingPathComponent(path) }
@@ -68,6 +78,17 @@ public struct ClientContext: Sendable {
   func command(_ name: String) -> URL? {
     commandFolders.map { $0.appendingPathComponent(name) }
       .first { FileManager.default.isExecutableFile(atPath: $0.path) }
+  }
+
+  /// The whole environment a client's command runs with: this home folder,
+  /// and a PATH that starts at the command's own folder.
+  func environment(for command: URL) -> [String: String] {
+    [
+      "HOME": home.path,
+      "PATH": ([command.deletingLastPathComponent().path]
+        + ["/usr/bin", "/bin", "/usr/sbin", "/sbin", "/opt/homebrew/bin", "/usr/local/bin"])
+        .joined(separator: ":"),
+    ]
   }
 
   /// `~/…` for a file under the home folder, for messages.
@@ -116,7 +137,7 @@ public struct Client: Sendable, Identifiable {
   public let id: ClientID
   public let name: String
   public let detect: @Sendable (ClientContext) -> Bool
-  public let link: @Sendable (ClientContext, ClientAccess) -> ClientLink
+  public let link: @Sendable (ClientContext, ClientAccess) async -> ClientLink
   public let connect: @Sendable (ClientContext, ClientAccess) async throws -> ConnectResult
 
   public static let all: [Client] = [.claudeDesktop, .claudeCode, .codex, .plug, .cursor]
@@ -174,25 +195,19 @@ extension Client {
       }
       let file = context.file(claudeCodeConfig)
       let backup = try ConfigFile.saveBackup(of: file, display: context.display(file))
-      let environment = [
-        "HOME": context.home.path,
-        "PATH": ([claude.deletingLastPathComponent().path]
-          + ["/usr/bin", "/bin", "/usr/sbin", "/sbin", "/opt/homebrew/bin", "/usr/local/bin"])
-          .joined(separator: ":"),
-      ]
+      let environment = context.environment(for: claude)
       if before == .outdated {
         _ = try await context.run(
-          claude.path, ["mcp", "remove", "--scope", "user", entry], environment)
+          claude.path, ["mcp", "remove", "--scope", "user", entry], environment, nil)
       }
       let added = try await context.run(
         claude.path,
         [
           "mcp", "add", "--scope", "user", "--transport", "http", entry, access.url,
           "--header", "Authorization: \(access.authorization)",
-        ], environment)
+        ], environment, nil)
       guard added.exitCode == 0 else {
-        let reason = added.output.split(separator: "\n").last.map(String.init) ?? ""
-        throw CoreError.commandFailed("Claude Code did not add iMessage Max. \(reason)")
+        throw CoreError.commandFailed("Claude Code did not add iMessage Max. \(added.lastLine)")
       }
       return ConnectResult(
         summary: "Added iMessage Max to Claude Code for every project"
@@ -226,32 +241,125 @@ extension Client {
         next: "Restart Codex, or run /mcp, to load it.")
     })
 
-  /// Plug's `[servers.imessage]`: HTTP, the legacy protocol, and the token as
-  /// `auth_token`. Plug reloads its config when the file changes.
+  /// Plug's `[servers.imessage]`. With the `plug` command, Plug's own CLI
+  /// does the work: the token goes to the Keychain on stdin, never in argv,
+  /// and the entry refers to it. Without the command, the entry is written
+  /// into the file with the token in `auth_token`.
   static let plug = Client(
     id: .plug, name: "Plug",
     detect: { $0.exists(plugConfig) },
-    link: { context, access in
-      tomlLink(
-        context, plugConfig, TOMLTable("servers", entry),
-        expect: { table, text in
-          table.value("url", in: text).flatMap(TOMLTable.decodeString) == access.url
-            && table.value("auth_token", in: text).flatMap(TOMLTable.decodeString) == access.token
-            && table.value("transport", in: text).flatMap(TOMLTable.decodeString) == "http"
-        })
-    },
+    link: { await plugLink($0, $1) },
     connect: { context, access in
-      try writeTOML(
-        context, plugConfig, TOMLTable("servers", entry), client: "Plug",
-        values: [
-          ("transport", TOMLTable.string("http")),
-          ("url", TOMLTable.string(access.url)),
-          ("protocol", TOMLTable.string("legacy")),
-          ("auth_token", TOMLTable.string(access.token)),
-        ],
-        removing: ["command", "auth", "oauth_client_id", "oauth_scopes"],
-        next: "Plug picks up the change by itself.")
+      if await plugLink(context, access) == .connected {
+        return ConnectResult(summary: "Plug already has iMessage Max.")
+      }
+      guard let plug = context.command("plug") else {
+        return try writeTOML(
+          context, plugConfig, TOMLTable("servers", entry), client: "Plug",
+          values: [
+            ("transport", TOMLTable.string("http")),
+            ("url", TOMLTable.string(access.url)),
+            ("protocol", TOMLTable.string("legacy")),
+            ("auth_token", TOMLTable.string(access.token)),
+          ],
+          removing: ["command", "auth", "oauth_client_id", "oauth_scopes"],
+          next: "Plug picks up the change by itself.")
+      }
+      return try await connectPlug(context, plug, access)
     })
+
+  /// The Keychain item, as `plug secret set` names it, that Plug's entry
+  /// refers to for the token.
+  static let plugSecret = "imessage-max-token"
+
+  /// Plug's running service, when it answers, says whether the entry reaches
+  /// this helper: a healthy connection to this address proves the token
+  /// works, whether the file holds it or refers to the Keychain. Otherwise
+  /// the file decides, and a `keychain:` reference counts, since only Plug
+  /// can read it.
+  static func plugLink(_ context: ClientContext, _ access: ClientAccess) async -> ClientLink {
+    if let plug = context.command("plug"), let link = await plugService(context, plug, access) {
+      return link
+    }
+    return tomlLink(
+      context, plugConfig, TOMLTable("servers", entry),
+      expect: { table, text in
+        let token = table.value("auth_token", in: text).flatMap(TOMLTable.decodeString)
+        return table.value("url", in: text).flatMap(TOMLTable.decodeString)
+          .map(access.isEndpoint) == true
+          && (token == access.token || token?.hasPrefix("keychain:") == true)
+          && table.value("transport", in: text).flatMap(TOMLTable.decodeString) == "http"
+      })
+  }
+
+  /// What `plug servers` says of the entry, or nil when Plug's service is
+  /// not running or the command fails. Plug routes calls to a server that is
+  /// Healthy or Degraded, so both count.
+  private static func plugService(_ context: ClientContext, _ plug: URL, _ access: ClientAccess)
+    async -> ClientLink?
+  {
+    let arguments = ["--config", context.file(plugConfig).path, "servers", "--output", "json"]
+    guard
+      let result = try? await context.run(
+        plug.path, arguments, context.environment(for: plug), nil),
+      result.exitCode == 0,
+      let json = try? JSONSerialization.jsonObject(with: Data(result.output.utf8)) as? [String: Any],
+      json["runtime_available"] as? Bool == true,
+      let servers = json["servers"] as? [[String: Any]]
+    else { return nil }
+    guard let server = servers.first(where: { $0["server_id"] as? String == entry }) else {
+      return .notConnected
+    }
+    let url = (server["source"] as? [String: Any])?["url"] as? String
+    let routable = ["Healthy", "Degraded"].contains(server["health"] as? String ?? "")
+    return routable && url.map(access.isEndpoint) == true ? .connected : .outdated
+  }
+
+  private static func connectPlug(_ context: ClientContext, _ plug: URL, _ access: ClientAccess)
+    async throws -> ConnectResult
+  {
+    let file = context.file(plugConfig)
+    let config = ["--config", file.path]
+    let environment = context.environment(for: plug)
+    let backup = try ConfigFile.saveBackup(of: file, display: context.display(file))
+    let stored = try await context.run(
+      plug.path, config + ["secret", "set", plugSecret], environment, Data(access.token.utf8))
+    guard stored.exitCode == 0 else {
+      throw CoreError.commandFailed("Plug did not store the token. \(stored.lastLine)")
+    }
+    let present = FileManager.default.contents(atPath: file.path).map {
+      TOMLTable("servers", entry).exists(in: String(decoding: $0, as: UTF8.self))
+    } ?? false
+    let saved = try await context.run(
+      plug.path,
+      config + ["server", present ? "edit" : "add", entry]
+        + [
+          "--transport", "http", "--url", access.url, "--auth", "bearer",
+          "--bearer-token", "keychain:\(plugSecret)",
+        ], environment, nil)
+    guard saved.exitCode == 0 else {
+      throw CoreError.commandFailed("Plug did not save iMessage Max. \(saved.lastLine)")
+    }
+    await waitForPlug(context, plug, access)
+    return ConnectResult(
+      summary:
+        "Stored the token in the Keychain and \(present ? "updated" : "added") iMessage Max in Plug"
+        + (backup.map { ". The old \(context.display(file)) is saved as \($0.lastPathComponent)" }
+          ?? "") + ". Plug picks up the change by itself.")
+  }
+
+  /// Plug's service reloads its config a moment after the file changes. Up
+  /// to five seconds of waiting lets the row read Connected after the click.
+  private static func waitForPlug(_ context: ClientContext, _ plug: URL, _ access: ClientAccess)
+    async
+  {
+    for _ in 0..<10 {
+      guard let link = await plugService(context, plug, access), link != .connected else { return }
+      await withCheckedContinuation { continuation in
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) { continuation.resume() }
+      }
+    }
+  }
 
   /// Cursor installs from its `mcp/install` deeplink after the user accepts,
   /// and keeps global servers in ~/.cursor/mcp.json.
@@ -354,7 +462,7 @@ enum ExtensionBundle {
     } catch { throw ConfigFileError.writeFailed("The Claude extension") }
     let zipped = try await context.run(
       "/usr/bin/ditto", ["-c", "-k", "--norsrc", "--noextattr", stage.path, bundle.path],
-      ["HOME": context.home.path])
+      ["HOME": context.home.path], nil)
     try? manager.removeItem(at: stage)
     guard zipped.exitCode == 0 else { throw ConfigFileError.writeFailed("The Claude extension") }
     return bundle
