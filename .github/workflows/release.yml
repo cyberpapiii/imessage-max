@@ -5,6 +5,11 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Build, notarize, and upload artifacts only. Never create a release.
+        type: boolean
+        default: true
 
 jobs:
   # The same build, test, and companion checks as a push to main.
@@ -15,8 +20,8 @@ jobs:
     needs: checks
     runs-on: macos-26
     timeout-minutes: 30
-    permissions:
-      contents: write
+    outputs:
+      sha256: ${{ steps.tarball.outputs.sha256 }}
     defaults:
       run:
         working-directory: swift
@@ -81,12 +86,62 @@ jobs:
           name: imessage-max-macos
           path: imessage-max-macos.tar.gz
 
+  dmg:
+    needs: checks
+    runs-on: macos-26
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: Build, sign, notarize, and staple the DMG
+        env:
+          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          MACOS_CERTIFICATE_PASS: ${{ secrets.MACOS_CERTIFICATE_PASS }}
+          MACOS_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+          MACOS_NOTARY_KEY_P8: ${{ secrets.MACOS_NOTARY_KEY_P8 }}
+          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+        run: scripts/sign-notarize-app.sh dist
+
+      - name: Upload DMG as workflow artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: iMessage-Max-dmg
+          path: dist/*.dmg
+          if-no-files-found: error
+
+  # One job creates the release, so the tarball and DMG jobs never race to
+  # create it.
+  release:
+    needs: [build-and-release, dmg]
+    if: startsWith(github.ref, 'refs/tags/v') && !inputs.dry_run
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: assets
+          merge-multiple: true
+
       - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
-          files: imessage-max-macos.tar.gz
+          files: |
+            assets/imessage-max-macos.tar.gz
+            assets/iMessage-Max-*.dmg
+          fail_on_unmatched_files: true
           generate_release_notes: true
           append_body: true
           body: |
-            `imessage-max-macos.tar.gz` sha256: `${{ steps.tarball.outputs.sha256 }}`
+            `imessage-max-macos.tar.gz` sha256: `${{ needs.build-and-release.outputs.sha256 }}`
