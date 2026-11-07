@@ -122,7 +122,7 @@ jobs:
 
       - name: Run tests
         run: |
-          swift test --skip-build --no-parallel 2>&1 | grep -E "started|passed|failed|signal|issue" || true
+          swift test --skip-build --no-parallel --filter probe 2>&1 | grep -E "started|passed|failed|signal|issue" || true
           for f in ~/Library/Logs/DiagnosticReports/*.ips; do echo "== $f"; head -c 12000 "$f"; done
           exit 1
 
