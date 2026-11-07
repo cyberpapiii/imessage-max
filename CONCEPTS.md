@@ -35,3 +35,5 @@ This file defines the terms that mean something specific in this project: entiti
 ## Diagnostics
 
 - **Capability contract**: The fixed set of capability keys that the diagnose tool reports. Each key gives a state for what the install can do right now (supported, permission-gated, degraded, unverified, unsupported, unavailable), instead of a single healthy or unhealthy verdict. When the server cannot probe a capability, for example because the target application is not running, the key reports "unverified" instead of guessing. The keys and state words live in `contract/Sources/IMessageMaxContract/`, which the server and the companion app share.
+
+- **Setup step**: One of the companion's first-run steps, in order: Allow in the background, Read messages, Show names, Send messages, Connect an assistant, Try it. A diagnose `fix` for the helper inside the app names the step that grants the missing permission ("Open iMessage Max and choose Read messages"), never a terminal command. The titles live in `contract/Sources/IMessageMaxContract/SetupStep.swift`.
