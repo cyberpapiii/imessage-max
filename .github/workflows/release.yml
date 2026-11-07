@@ -11,9 +11,24 @@ on:
         type: boolean
         default: true
 
+permissions:
+  contents: read
+
 jobs:
+  # A dispatch that is not a dry run can publish only from a v* tag. Fail
+  # instead of finishing green with nothing released.
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refuse a real release from a branch
+        if: github.event_name == 'workflow_dispatch' && !inputs.dry_run && !startsWith(github.ref, 'refs/tags/v')
+        run: |
+          echo "error: turn dry_run off only when dispatching from a v* tag" >&2
+          exit 1
+
   # The same build, test, and companion checks as a push to main.
   checks:
+    needs: guard
     uses: ./.github/workflows/build.yml
 
   build-and-release:
@@ -59,6 +74,11 @@ jobs:
           codesign --force --sign - --identifier "$BUNDLE_ID" "$BINARY"
           echo "Verifying code signature..."
           codesign -dvvv "$BINARY" 2>&1 | grep -E "(Identifier|Info.plist)"
+          # A non-weak link fails to load on macOS 15, which lacks this dylib.
+          if otool -L "$BINARY" | awk '/libswiftCompatibilitySpan\.dylib/ && !/, weak\)/ { found = 1 } END { exit !found }'; then
+            echo "error: $BINARY links libswiftCompatibilitySpan.dylib non-weak" >&2
+            exit 1
+          fi
 
       - name: Assert architecture, identifier, and version
         run: |
@@ -89,7 +109,8 @@ jobs:
   dmg:
     needs: checks
     runs-on: macos-26
-    timeout-minutes: 60
+    # Two notarizations, each allowed up to 30 minutes.
+    timeout-minutes: 90
 
     steps:
       - name: Checkout code

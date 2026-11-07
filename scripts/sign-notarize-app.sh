@@ -63,10 +63,12 @@ cleanup() {
 trap cleanup EXIT
 
 if [[ "$LOCAL" -eq 0 ]]; then
+  KEYCHAIN_LIST="$(security list-keychains -d user)" || fail "cannot read the keychain search list"
+  [[ -n "$KEYCHAIN_LIST" ]] || fail "the keychain search list is empty"
   while IFS= read -r line; do
     line="${line#"${line%%[![:space:]]*}"}"
     ORIGINAL_KEYCHAINS+=("${line//\"/}")
-  done < <(security list-keychains -d user)
+  done <<<"$KEYCHAIN_LIST"
   KEYCHAIN_PASS="$(head -c 32 /dev/urandom | base64)"
   security create-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN"
   security set-keychain-settings -lut 3600 "$KEYCHAIN"
@@ -79,12 +81,14 @@ if [[ "$LOCAL" -eq 0 ]]; then
   security list-keychains -d user -s "$KEYCHAIN" "${ORIGINAL_KEYCHAINS[@]}"
 fi
 IDENTITIES="$(security find-identity -v -p codesigning)"
-grep -q "$MACOS_SIGNING_IDENTITY" <<<"$IDENTITIES" || fail "identity $MACOS_SIGNING_IDENTITY is not on the keychain search list"
+grep -qF "$MACOS_SIGNING_IDENTITY" <<<"$IDENTITIES" || fail "identity $MACOS_SIGNING_IDENTITY is not on the keychain search list"
 export SIGN_IDENTITY="$MACOS_SIGNING_IDENTITY"
 
 NOTARY_KEY="$WORK_DIR/notary.p8"
 printf '%s' "$MACOS_NOTARY_KEY_P8" | base64 --decode > "$NOTARY_KEY"
 chmod 600 "$NOTARY_KEY"
+# Keep the credentials out of the environment of every build step below.
+unset MACOS_CERTIFICATE_P12 MACOS_CERTIFICATE_PASS MACOS_NOTARY_KEY_P8
 NOTARY_AUTH=(--key "$NOTARY_KEY" --key-id "$MACOS_NOTARY_KEY_ID" --issuer "$MACOS_NOTARY_ISSUER_ID")
 
 notarize() {
@@ -134,7 +138,7 @@ grep -qx "Identifier=$HELPER_ID" <<<"$(codesign -dvv "$HELPER" 2>&1)" || fail "h
 grep -qx "Identifier=$APP_ID" <<<"$(codesign -dvv "$APP" 2>&1)" || fail "app identifier is not $APP_ID"
 entitlements="$(codesign -d --entitlements - --xml "$HELPER" 2>/dev/null)"
 for key in "${HELPER_ENTITLEMENTS[@]}"; do
-  grep -q "<key>$key</key>" <<<"$entitlements" || fail "helper lacks entitlement $key"
+  grep -A1 "<key>$key</key>" <<<"$entitlements" | grep -q "<true/>" || fail "helper lacks entitlement $key"
 done
 APP_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")"
 [[ "$APP_VERSION" == "$VERSION" ]] || fail "app version $APP_VERSION is not $VERSION"
