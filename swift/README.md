@@ -91,7 +91,9 @@ endpoint. In HTTP mode:
 - Server-Sent Events carry server-to-client messages.
 - Every request needs `Authorization: Bearer <token>`. The server creates the token on first start in
   `~/Library/Application Support/iMessage Max/token` (mode 0600) and reuses it after that.
-  `--token-file <path>` reads or creates another file. A missing or wrong token gets HTTP 401.
+  `--token-file <path>` reads or creates another file in a folder you own. The server never
+  overwrites a file that holds anything but a token; it exits instead. A missing or wrong token
+  gets HTTP 401.
 - Origin validation blocks DNS rebinding. By default, only localhost is allowed.
 - Request bodies must arrive within 30 seconds. A stalled upload gets HTTP 408 with a JSON-RPC error body, and the server closes connections that are idle for 60 seconds.
 - JSON-shaped tools return both legacy text content and MCP `structuredContent`.
@@ -135,8 +137,11 @@ OPTIONS:
                           to the network over unencrypted HTTP)
   --token-file <token-file>
                           File holding the bearer token HTTP clients must send.
-                          Created with mode 0600 if absent. Defaults to
-                          ~/Library/Application Support/iMessage Max/token.
+                          Created with mode 0600 if absent; its folder must
+                          already exist and belong to you. An existing file
+                          that holds anything but a token is left alone and the
+                          server exits. Defaults to ~/Library/Application
+                          Support/iMessage Max/token.
   --contacts-policy <contacts-policy>
                           What to do when Contacts authorization is not yet
                           determined: auto (prompt only if stdin is a

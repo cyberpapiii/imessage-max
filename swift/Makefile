@@ -50,6 +50,14 @@ mcp_initialize = $(AUTH_CURL) -s$(2) --max-time $(CURL_MAX_TIME) "$(URL)" -X POS
 # the token instead of reporting the service as down.
 token_refused = [ "$$($(AUTH_CURL) -s -o /dev/null -w '%{http_code}' --max-time $(CURL_MAX_TIME) "$(URL)" -X POST)" = 401 ]
 token_refused_message = ✗ The service refused the token in $(TOKEN_FILE)
+# require_server sets LISTENER to the command name of each process listening
+# on $(PORT), empty when none, and exits when one is not imessage-max, so the
+# probes never hand the token to another program. +c 0 stops lsof cutting
+# the name to 9 characters.
+require_server = LISTENER=$$(lsof -nP +c 0 -iTCP:$(PORT) -sTCP:LISTEN -Fc 2>/dev/null | sed -n 's/^c//p' | sort -u | paste -sd ' ' -); \
+	if [ -n "$$LISTENER" ] && [ "$$LISTENER" != imessage-max ]; then \
+		echo "✗ Port $(PORT) is held by $$LISTENER, not imessage-max. The token was not sent."; exit 1; \
+	fi
 # $(call server_info,<field>): read result.serverInfo.<field> from an
 # initialize reply on stdin.
 server_info = python3 -c "import sys,json; print(json.load(sys.stdin)['result']['serverInfo']['$(1)'])"
@@ -111,9 +119,13 @@ verify: ## Verify server is healthy
 	CURL_OK=0; \
 	while [ $$i -le $(VERIFY_ATTEMPTS) ]; do \
 		[ $$i -gt 1 ] && sleep 1; \
-		CURL_STATUS=0; \
-		RESULT=$$($(call mcp_initialize,verify,f)) || CURL_STATUS=$$?; \
-		if [ $$CURL_STATUS -ne 0 ] && $(token_refused); then echo "$(token_refused_message)"; exit 1; fi; \
+		$(require_server); \
+		CURL_STATUS=7; \
+		if [ -n "$$LISTENER" ]; then \
+			CURL_STATUS=0; \
+			RESULT=$$($(call mcp_initialize,verify,f)) || CURL_STATUS=$$?; \
+			if [ $$CURL_STATUS -ne 0 ] && $(token_refused); then echo "$(token_refused_message)"; exit 1; fi; \
+		fi; \
 		if [ $$CURL_STATUS -eq 0 ]; then \
 			CURL_OK=1; \
 			LAST_BODY=$$RESULT; \
@@ -155,7 +167,9 @@ verify: ## Verify server is healthy
 	exit 1
 
 verify-db: ## Call diagnose over HTTP and fail if the service cannot read chat.db
-	@INIT=$$($(call mcp_initialize,verify-db,i)) \
+	@$(require_server); \
+	[ -n "$$LISTENER" ] || { echo "✗ Server not responding on $(URL)"; exit 1; }; \
+	INIT=$$($(call mcp_initialize,verify-db,i)) \
 		|| { echo "✗ Server not responding on $(URL)"; exit 1; }; \
 	SESSION=$$(printf '%s' "$$INIT" | tr -d '\r' | awk 'tolower($$1)=="mcp-session-id:" {print $$2}'); \
 	if [ -z "$$SESSION" ]; then \
@@ -195,7 +209,9 @@ status: ## Show service status and version
 	@codesign -dvv $(BINARY) 2>&1 | grep -E "Signature|Authority|CDHash" || echo "Not signed"
 	@echo ""
 	@echo "=== Health ==="
-	@BODY=$$($(call mcp_initialize,status,f)) || { \
+	@$(require_server); \
+	[ -n "$$LISTENER" ] || { echo "✗ Not responding"; exit 0; }; \
+	BODY=$$($(call mcp_initialize,status,f)) || { \
 		if $(token_refused); then echo "$(token_refused_message)"; else echo "✗ Not responding"; fi; exit 0; }; \
 	if command -v python3 >/dev/null 2>&1; then \
 		VERSION=$$(echo "$$BODY" | $(call server_info,version) 2>/dev/null) && echo "✓ Responding, v$$VERSION" \

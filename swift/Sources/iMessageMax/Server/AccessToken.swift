@@ -10,6 +10,7 @@ struct AccessToken: Sendable {
     enum LoadError: Error, CustomStringConvertible, Equatable {
         case insecurePermissions(path: String, mode: mode_t)
         case wrongOwner(path: String)
+        case unsafeFolder(path: String)
         case notRegularFile(path: String)
         case malformed(path: String)
         case io(path: String, operation: String, reason: String)
@@ -24,10 +25,12 @@ struct AccessToken: Sendable {
                 "Token file \(path) has mode \(String(mode & 0o777, radix: 8)). Other users could read it. Run `chmod 600 '\(path)'`, or delete it so the server creates a new one."
             case .wrongOwner(let path):
                 "\(path) belongs to another user. Remove it, or pass --token-file with a path you own."
+            case .unsafeFolder(let path):
+                "Folder \(path) belongs to another user, or is not a folder. Pass --token-file with a path in a folder you own."
             case .notRegularFile(let path):
                 "\(path) is a link or special file, not the expected file or folder. Remove it so the server can create the token."
             case .malformed(let path):
-                "Token file \(path) does not hold a valid token. Delete it so the server creates a new one."
+                "\(path) exists but does not hold an iMessage Max token, so the server left it alone. Pass --token-file with another path, or delete the file if it is a damaged token."
             case .io(let path, let operation, let reason):
                 "Cannot \(operation) \(path): \(reason)"
             }
@@ -62,8 +65,21 @@ struct AccessToken: Sendable {
 
     var encoded: String { String(decoding: bytes, as: UTF8.self) }
 
-    static func defaultFile(home: URL = FileManager.default.homeDirectoryForCurrentUser) -> URL {
-        home.appendingPathComponent(ServiceDefaults.tokenPath)
+    /// Where the token lives. The server creates and tightens only its own
+    /// app-support folder. A `--token-file` folder must already exist and
+    /// belong to the user, and its mode is left alone.
+    enum Location: Equatable {
+        case appSupport(home: URL)
+        case custom(URL)
+
+        static var standard: Location { .appSupport(home: FileManager.default.homeDirectoryForCurrentUser) }
+
+        var file: URL {
+            switch self {
+            case .appSupport(let home): home.appendingPathComponent(ServiceDefaults.tokenPath)
+            case .custom(let file): file
+            }
+        }
     }
 
     /// Accepts an `Authorization` header value of the form `Bearer <token>`.
@@ -84,23 +100,28 @@ struct AccessToken: Sendable {
         return difference == 0
     }
 
-    /// Returns the token in `file`, creating it first when the file is absent
-    /// or holds no valid token. An existing valid token is never replaced, so
-    /// clients that already hold it keep working across restarts.
-    static func loadOrCreate(at file: URL) throws -> AccessToken {
-        let path = file.path
-        try ensurePrivateDirectory(file.deletingLastPathComponent().path)
+    /// Returns the token at `location`, creating it first when the file is
+    /// absent. An existing file is never replaced: a valid token keeps
+    /// clients working across restarts, and any other content may be the
+    /// user's data, so the server refuses to start instead.
+    static func loadOrCreate(_ location: Location) throws -> AccessToken {
+        let path = location.file.path
+        let folder = location.file.deletingLastPathComponent().path
+        switch location {
+        case .appSupport: try ensurePrivateDirectory(folder)
+        case .custom: try requireOwnedDirectory(folder)
+        }
         if let existing = try read(path) {
             return existing
         }
-        let token = generate()
-        try install(token, at: path)
+        try install(generate(), at: path)
         guard let stored = try read(path) else { throw LoadError.malformed(path: path) }
         return stored
     }
 
-    /// nil when the file is absent or holds no valid token. Throws when the
-    /// file exists but other users could have read or replaced it.
+    /// nil only when no file exists at `path`. Throws when the file exists
+    /// but other users could have read or replaced it, or when it holds
+    /// anything but a token.
     static func read(_ path: String) throws -> AccessToken? {
         let fd = open(path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
         if fd < 0 {
@@ -117,8 +138,18 @@ struct AccessToken: Sendable {
         var buffer = [UInt8](repeating: 0, count: maxFileBytes + 1)
         let count = Darwin.read(fd, &buffer, buffer.count)
         guard count >= 0 else { throw LoadError.posix(path, "read", errno) }
-        guard count <= maxFileBytes else { return nil }
-        return AccessToken(String(decoding: buffer.prefix(count), as: UTF8.self))
+        guard count <= maxFileBytes,
+              let token = AccessToken(String(decoding: buffer.prefix(count), as: UTF8.self))
+        else { throw LoadError.malformed(path: path) }
+        return token
+    }
+
+    private static func requireOwnedDirectory(_ path: String) throws {
+        var info = stat()
+        guard stat(path, &info) == 0 else { throw LoadError.posix(path, "find folder", errno) }
+        guard info.st_mode & S_IFMT == S_IFDIR, info.st_uid == geteuid() else {
+            throw LoadError.unsafeFolder(path: path)
+        }
     }
 
     private static func ensurePrivateDirectory(_ path: String) throws {
@@ -137,9 +168,9 @@ struct AccessToken: Sendable {
         }
     }
 
-    /// Writes a temporary file, then links it into place. `link` fails when
-    /// another process created the token first, and that token wins. A
-    /// malformed file is replaced with `rename`.
+    /// Writes a temporary file, then links it into place. `link` never
+    /// replaces a file: when another process created the token first, that
+    /// token wins, and the caller's read decides whether it is valid.
     private static func install(_ token: AccessToken, at path: String) throws {
         let temporary = "\(path).\(getpid()).\(UInt32.random(in: 0...UInt32.max)).tmp"
         let fd = open(temporary, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
@@ -153,10 +184,7 @@ struct AccessToken: Sendable {
             throw LoadError.io(path: path, operation: "write", reason: "short write")
         }
         guard fsync(fd) == 0 else { throw LoadError.posix(path, "sync", errno) }
-        if link(temporary, path) == 0 || errno == EEXIST && (try? read(path)) != nil {
-            return
-        }
-        guard rename(temporary, path) == 0 else { throw LoadError.posix(path, "install", errno) }
+        guard link(temporary, path) == 0 || errno == EEXIST else { throw LoadError.posix(path, "install", errno) }
     }
 
     private static func isBase64URL(_ byte: UInt8) -> Bool {

@@ -4,7 +4,10 @@ import IMessageMaxContract
 
 final class AccessTokenTests: XCTestCase {
     private var directory: URL!
-    private var file: URL { directory.appendingPathComponent("iMessage Max/token") }
+    private var standard: AccessToken.Location { .appSupport(home: directory) }
+    private var file: URL { standard.file }
+    private var customFolder: URL { directory.appendingPathComponent("custom") }
+    private var customFile: URL { customFolder.appendingPathComponent("token") }
 
     override func setUpWithError() throws {
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("AccessTokenTests-\(UUID().uuidString)")
@@ -16,7 +19,7 @@ final class AccessTokenTests: XCTestCase {
     }
 
     func testFirstStartCreatesPrivateFileAndDirectory() throws {
-        let token = try AccessToken.loadOrCreate(at: file)
+        let token = try AccessToken.loadOrCreate(standard)
 
         XCTAssertEqual(try permissions(file.path), 0o600)
         XCTAssertEqual(try permissions(file.deletingLastPathComponent().path), 0o700)
@@ -29,8 +32,8 @@ final class AccessTokenTests: XCTestCase {
     }
 
     func testRestartReusesTheExistingToken() throws {
-        let first = try AccessToken.loadOrCreate(at: file)
-        let second = try AccessToken.loadOrCreate(at: file)
+        let first = try AccessToken.loadOrCreate(standard)
+        let second = try AccessToken.loadOrCreate(standard)
         XCTAssertEqual(first.encoded, second.encoded)
     }
 
@@ -39,10 +42,10 @@ final class AccessTokenTests: XCTestCase {
     }
 
     func testGroupOrWorldReadableFileIsRejectedAndLeftAlone() throws {
-        let original = try AccessToken.loadOrCreate(at: file)
+        let original = try AccessToken.loadOrCreate(standard)
         for mode: mode_t in [0o644, 0o640, 0o604] {
             XCTAssertEqual(chmod(file.path, mode), 0)
-            XCTAssertThrowsError(try AccessToken.loadOrCreate(at: file)) { error in
+            XCTAssertThrowsError(try AccessToken.loadOrCreate(standard)) { error in
                 XCTAssertEqual(error as? AccessToken.LoadError, .insecurePermissions(path: file.path, mode: S_IFREG | mode))
                 XCTAssertTrue("\(error)".contains("chmod 600"), "\(error)")
             }
@@ -57,29 +60,61 @@ final class AccessTokenTests: XCTestCase {
         try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
         try FileManager.default.createSymbolicLink(at: file, withDestinationURL: target)
 
-        XCTAssertThrowsError(try AccessToken.loadOrCreate(at: file)) { error in
+        XCTAssertThrowsError(try AccessToken.loadOrCreate(standard)) { error in
             XCTAssertEqual(error as? AccessToken.LoadError, .notRegularFile(path: file.path))
         }
     }
 
-    func testMalformedFileIsReplaced() throws {
+    func testFileThatIsNotATokenIsLeftAloneAndStartupFails() throws {
+        try FileManager.default.createDirectory(at: customFolder, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
         let oversized = String(repeating: "a", count: 2048)
-        for contents in ["", "short", String(repeating: "a", count: 42), String(repeating: "+", count: 43), oversized] {
-            try contents.write(to: file, atomically: false, encoding: .utf8)
-            XCTAssertEqual(chmod(file.path, 0o600), 0)
+        let contents = ["", "precious data", String(repeating: "a", count: 42), String(repeating: "+", count: 43), oversized]
+        for location in [AccessToken.Location.custom(customFile), standard] {
+            for content in contents {
+                try content.write(to: location.file, atomically: false, encoding: .utf8)
+                XCTAssertEqual(chmod(location.file.path, 0o600), 0)
 
-            let token = try AccessToken.loadOrCreate(at: file)
-            XCTAssertEqual(try String(contentsOf: file, encoding: .utf8), token.encoded + "\n")
-            XCTAssertEqual(try permissions(file.path), 0o600)
+                XCTAssertThrowsError(try AccessToken.loadOrCreate(location)) { error in
+                    XCTAssertEqual(error as? AccessToken.LoadError, .malformed(path: location.file.path))
+                }
+                XCTAssertEqual(try String(contentsOf: location.file, encoding: .utf8), content)
+            }
         }
+    }
+
+    func testCustomPathCreatesTheTokenAndLeavesItsFolderAlone() throws {
+        try FileManager.default.createDirectory(
+            at: customFolder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o755])
+
+        let token = try AccessToken.loadOrCreate(.custom(customFile))
+        XCTAssertEqual(try String(contentsOf: customFile, encoding: .utf8), token.encoded + "\n")
+        XCTAssertEqual(try permissions(customFile.path), 0o600)
+        XCTAssertEqual(try permissions(customFolder.path), 0o755)
+        XCTAssertEqual(try AccessToken.loadOrCreate(.custom(customFile)).encoded, token.encoded)
+    }
+
+    func testCustomPathNeedsAnExistingFolder() throws {
+        XCTAssertThrowsError(try AccessToken.loadOrCreate(.custom(customFile))) { error in
+            guard case .io(let path, _, _) = error as? AccessToken.LoadError else { return XCTFail("\(error)") }
+            XCTAssertEqual(path, customFolder.path)
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: customFolder.path))
+    }
+
+    func testCustomPathInAnotherUsersFolderIsRefused() throws {
+        let rootOwned = URL(fileURLWithPath: "/private/tmp/imessage-max-token-\(UUID().uuidString)")
+        XCTAssertThrowsError(try AccessToken.loadOrCreate(.custom(rootOwned))) { error in
+            XCTAssertEqual(error as? AccessToken.LoadError, .unsafeFolder(path: "/private/tmp"))
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: rootOwned.path))
     }
 
     func testFifoIsRejectedWithoutBlocking() throws {
         try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
         XCTAssertEqual(mkfifo(file.path, 0o600), 0)
 
-        XCTAssertThrowsError(try AccessToken.loadOrCreate(at: file)) { error in
+        XCTAssertThrowsError(try AccessToken.loadOrCreate(standard)) { error in
             XCTAssertEqual(error as? AccessToken.LoadError, .notRegularFile(path: file.path))
         }
     }
@@ -89,7 +124,7 @@ final class AccessTokenTests: XCTestCase {
         try FileManager.default.createDirectory(
             at: parent, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o755])
 
-        _ = try AccessToken.loadOrCreate(at: file)
+        _ = try AccessToken.loadOrCreate(standard)
         XCTAssertEqual(try permissions(parent.path), 0o700)
     }
 
@@ -99,7 +134,7 @@ final class AccessTokenTests: XCTestCase {
         try "\(encoded)\n".write(to: file, atomically: false, encoding: .utf8)
         XCTAssertEqual(chmod(file.path, 0o600), 0)
 
-        XCTAssertEqual(try AccessToken.loadOrCreate(at: file).encoded, encoded)
+        XCTAssertEqual(try AccessToken.loadOrCreate(standard).encoded, encoded)
     }
 
     func testTokenFileOptionOverridesTheDefault() throws {
@@ -107,7 +142,7 @@ final class AccessTokenTests: XCTestCase {
         XCTAssertEqual(command.tokenFile, file.path)
         XCTAssertNil(try iMessageMax.parse(["--http"]).tokenFile)
         XCTAssertEqual(
-            AccessToken.defaultFile(home: URL(fileURLWithPath: "/Users/someone")).path,
+            AccessToken.Location.appSupport(home: URL(fileURLWithPath: "/Users/someone")).file.path,
             "/Users/someone/Library/Application Support/iMessage Max/token")
     }
 

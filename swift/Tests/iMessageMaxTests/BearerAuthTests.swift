@@ -190,6 +190,43 @@ final class BearerAuthTests: XCTestCase {
         }
     }
 
+    func testTwoSeparateAuthorizationFieldsAreRejected() async throws {
+        let app = await makeTestTransport().application()
+        try await app.test(TestingSetup.router) { client in
+            var headers = modernHeaders(method: "server/discover")
+            headers.append(HTTPField(name: .authorization, value: testAuthorization))
+            XCTAssertEqual(headers[values: .authorization], [testAuthorization, testAuthorization])
+            let response = try await client.post(modernBody(method: "server/discover"), headers: headers)
+            XCTAssertEqual(response.head.status, .unauthorized)
+        }
+    }
+
+    func testTokenInThePathNeverReachesTheLog() async throws {
+        let secret = testAccessToken.encoded
+        let capture = Log.Capture()
+        let app = await makeTestTransport().application()
+        try await Log.$capture.withValue(capture) {
+            try await app.test(TestingSetup.router) { client in
+                for uri in ["/\(secret)", "/setup/\(secret)", "/?token=\(secret)"] {
+                    let response = try await client.executeRequest(uri: uri, method: .get, headers: [:], body: nil)
+                    XCTAssertEqual(response.head.status, .unauthorized, uri)
+                }
+                _ = try await client.executeRequest(
+                    uri: "/", method: HTTPRequest.Method(secret)!, headers: [:], body: nil)
+            }
+        }
+        let rejections = capture.lines.filter { $0.hasPrefix("auth=rejected") }
+        XCTAssertEqual(rejections, [
+            "auth=rejected reason=missing_token http=GET path=other",
+            "auth=rejected reason=missing_token http=GET path=other",
+            "auth=rejected reason=missing_token http=GET path=/",
+            "auth=rejected reason=missing_token http=other path=/",
+        ])
+        for line in capture.lines {
+            XCTAssertFalse(line.contains(secret), line)
+        }
+    }
+
     private static func send(_ probe: Probe, authorization: String?, client: some TestClientProtocol) async throws -> TestResponse {
         var headers = jsonHeaders()
         headers[.authorization] = authorization

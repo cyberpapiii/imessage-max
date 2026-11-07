@@ -1,6 +1,7 @@
 import Foundation
 import Hummingbird
 import HTTPTypes
+import IMessageMaxContract
 
 /// Refuses every request that lacks `Authorization: Bearer <token>`, before
 /// any route reads the body. Hummingbird applies router middleware only to
@@ -25,12 +26,13 @@ struct BearerAuthMiddleware<Context: RequestContext>: RouterMiddleware {
         return try await next(request, context)
     }
 
-    /// Every field comes from the client, so each is cut down to a short
-    /// run of safe characters. The Authorization value is never logged.
+    /// Every field comes from the client. The path and HTTP method appear
+    /// only when they are known values, and the MCP method is cut down to a
+    /// short run of safe characters. The Authorization value is never logged.
     static func rejectionLine(_ request: Request, presented: Bool) -> String {
         var line = "auth=rejected reason=\(presented ? "invalid_token" : "missing_token")"
-        line += " http=\(loggable(request.method.rawValue, pathCharacters))"
-        line += " path=\(loggable(request.uri.path, pathCharacters))"
+        line += " http=\(knownMethods.contains(request.method) ? request.method.rawValue : "other")"
+        line += " path=\(knownPaths.contains(request.uri.path) ? request.uri.path : "other")"
         if let method = request.headers[.mcpMethod] {
             line += " method=\(loggable(method, methodCharacters))"
         }
@@ -40,8 +42,10 @@ struct BearerAuthMiddleware<Context: RequestContext>: RouterMiddleware {
     /// MCP method names are lowercase words joined by `/` and `_`. Keeping
     /// only those characters keeps a whole base64url token out of the log.
     private static var methodCharacters: CharacterSet { CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyz/_") }
-    private static var pathCharacters: CharacterSet { CharacterSet(
-        charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/_.-") }
+    /// Any other path or method is logged as `other`, because a client can
+    /// put the token itself in either.
+    private static var knownPaths: Set<String> { ["/", SetupPermissionRoute.path] }
+    private static var knownMethods: Set<HTTPRequest.Method> { [.get, .post, .delete, .put, .head, .options, .patch] }
 
     private static func loggable(_ value: String, _ allowed: CharacterSet) -> String {
         let kept = String(String.UnicodeScalarView(value.unicodeScalars.filter(allowed.contains).prefix(64)))

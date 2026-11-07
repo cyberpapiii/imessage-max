@@ -32,7 +32,7 @@ Other Makefile targets:
 
 The server runs as a launchd service (`local.imessage-max`). The default port is 47821, and an installed plist can pin another with `--port`. It starts at login and restarts after a crash.
 
-Every HTTP request needs `Authorization: Bearer <token>`, on every route and both eras. On first start the server writes a random token to `~/Library/Application Support/iMessage Max/token` (mode 0600, folder 0700) and reuses it after that. It refuses to start if the file is readable by other users or owned by someone else. `--token-file <path>` points a dev or test server at another file. A missing or wrong token gets 401 and one `auth=rejected` stderr line, which never holds the token. Stdio needs no token.
+Every HTTP request needs `Authorization: Bearer <token>`, on every route and both eras. On first start the server writes a random token to `~/Library/Application Support/iMessage Max/token` (mode 0600, folder 0700) and reuses it after that. It refuses to start if the file is readable by other users, owned by someone else, or holds anything but a token, and it never overwrites that file. `--token-file <path>` points a dev or test server at another file, in a folder that already exists and belongs to you; the server leaves that folder's mode alone. A missing or wrong token gets 401 and one `auth=rejected` stderr line, which never holds the token. Stdio needs no token.
 
 Clients reach it through plug (HTTP, `protocol = "legacy"`, with the token as `auth_token`). After restarting the service, clients may need to reconnect (for example with `/mcp` in Codex).
 
@@ -50,6 +50,7 @@ $BIN
 
 # HTTP mode (for plug, Inspector, etc.), with a scratch token so it
 # does not share the installed service's port or token
+mkdir -m 700 -p /tmp/imax-dev
 $BIN --http --port 18484 --token-file /tmp/imax-dev/token
 
 # one-shot Contacts prompt; re-launches itself disclaimed so the grant is
@@ -157,9 +158,10 @@ requestState, Tasks, MCP Apps, OAuth (loopback-only posture), and
 The official conformance suite (@0.2.0-alpha.11) runs against both eras with a
 documented expected-failures baseline. The suite is pinned to that alpha tag because it tracks the 2026-07-28 draft the modern lane implements; npm `latest` (0.1.16) does not.
 
-The suite has no option for request headers, so `scripts/conformance-auth.mjs` adds the token to each request it makes. Run it against a scratch server, not the installed service:
+The suite has no option for request headers, so `scripts/conformance-auth.mjs` adds the token to each request it makes to the `--url` host (or `IMESSAGE_MAX_URL`), and to no other host. Run it against a scratch server, not the installed service:
 
 ```bash
+mkdir -m 700 -p /tmp/imax-conf
 swift/.build/arm64-apple-macosx/release/imessage-max --http --port 18484 --token-file /tmp/imax-conf/token &
 export NODE_OPTIONS="--import $PWD/scripts/conformance-auth.mjs" IMESSAGE_MAX_TOKEN_FILE=/tmp/imax-conf/token
 npx @modelcontextprotocol/conformance@0.2.0-alpha.11 server --url http://127.0.0.1:18484 \
