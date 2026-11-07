@@ -11,7 +11,7 @@
 		<string>imessage-max</string>
 		<string>--http</string>
 		<string>--port</string>
-		<string>8080</string>
+		<string>47821</string>
 		<string>--log-file</string>
 		<string>~/Library/Logs/iMessage Max/imessage-max.log</string>
 	</array>

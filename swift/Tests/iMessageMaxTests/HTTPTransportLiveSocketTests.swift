@@ -10,7 +10,7 @@ final class HTTPTransportLiveSocketTests: XCTestCase {
             defer { close(fd) }
             setRecvTimeout(fd, seconds: 2)
 
-            let request = "POST / HTTP/1.1\r\nHost: x\r\nContent-Length: 10\r\n\r\n{"
+            let request = "POST / HTTP/1.1\r\nHost: x\r\nAuthorization: \(testAuthorization)\r\nContent-Length: 10\r\n\r\n{"
             try writeAll(fd, request)
 
             var sawEOF = false
@@ -45,6 +45,7 @@ final class HTTPTransportLiveSocketTests: XCTestCase {
             let post = """
                 POST / HTTP/1.1\r\n\
                 Host: 127.0.0.1\r\n\
+                Authorization: \(testAuthorization)\r\n\
                 Content-Type: application/json\r\n\
                 Accept: application/json, text/event-stream\r\n\
                 Content-Length: \(body.utf8.count)\r\n\
@@ -64,6 +65,7 @@ final class HTTPTransportLiveSocketTests: XCTestCase {
             let get = """
                 GET / HTTP/1.1\r\n\
                 Host: 127.0.0.1\r\n\
+                Authorization: \(testAuthorization)\r\n\
                 Accept: text/event-stream\r\n\
                 Mcp-Session-Id: \(sessionId)\r\n\
                 \r\n
@@ -88,6 +90,7 @@ final class HTTPTransportLiveSocketTests: XCTestCase {
             let get = """
                 GET / HTTP/1.1\r\n\
                 Host: 127.0.0.1\r\n\
+                Authorization: \(testAuthorization)\r\n\
                 Accept: text/event-stream\r\n\
                 Mcp-Session-Id: \(sessionA)\r\n\
                 \r\n
@@ -127,6 +130,7 @@ final class HTTPTransportLiveSocketTests: XCTestCase {
             try writeAll(getFd, """
                 GET / HTTP/1.1\r\n\
                 Host: 127.0.0.1\r\n\
+                Authorization: \(testAuthorization)\r\n\
                 Accept: text/event-stream\r\n\
                 Mcp-Session-Id: \(session)\r\n\
                 \r\n
@@ -139,6 +143,7 @@ final class HTTPTransportLiveSocketTests: XCTestCase {
             try writeAll(deleteFd, """
                 DELETE / HTTP/1.1\r\n\
                 Host: 127.0.0.1\r\n\
+                Authorization: \(testAuthorization)\r\n\
                 Mcp-Session-Id: \(session)\r\n\
                 \r\n
                 """)
@@ -167,6 +172,7 @@ final class HTTPTransportLiveSocketTests: XCTestCase {
             try writeAll(getFd, """
                 GET / HTTP/1.1\r\n\
                 Host: 127.0.0.1\r\n\
+                Authorization: \(testAuthorization)\r\n\
                 Accept: text/event-stream\r\n\
                 Mcp-Session-Id: \(session)\r\n\
                 \r\n
@@ -192,6 +198,7 @@ final class HTTPTransportLiveSocketTests: XCTestCase {
             try writeAll(getFd, """
                 GET / HTTP/1.1\r\n\
                 Host: 127.0.0.1\r\n\
+                Authorization: \(testAuthorization)\r\n\
                 Accept: text/event-stream\r\n\
                 Mcp-Session-Id: \(session)\r\n\
                 \r\n
@@ -276,6 +283,7 @@ private func initializeSession(port: Int) throws -> String {
     let post = """
         POST / HTTP/1.1\r\n\
         Host: 127.0.0.1\r\n\
+        Authorization: \(testAuthorization)\r\n\
         Content-Type: application/json\r\n\
         Accept: application/json, text/event-stream\r\n\
         Content-Length: \(body.utf8.count)\r\n\

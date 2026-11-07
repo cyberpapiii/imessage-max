@@ -46,13 +46,16 @@ enum ServerStartup {
         await stdio.drain()
     }
 
-    static func runHTTP(host: String, port: Int, contactsPolicy: ContactsAccessPolicy.Override) async throws {
+    static func runHTTP(
+        host: String, port: Int, accessToken: AccessToken, contactsPolicy: ContactsAccessPolicy.Override
+    ) async throws {
         let resolver = ContactResolver()
         let (newRows, newRowsSink) = AsyncStream<Int64>.makeStream()
         let watcher = MessageWatcher(databasePath: Database.defaultPath) { newRowsSink.yield($0) }
         let transport = HTTPTransport(
             host: host,
             port: port,
+            accessToken: accessToken,
             catalog: ToolCatalog(database: Database(), resolver: resolver, liveInbox: { watcher.isLive }),
             setupPermissions: SetupPermissionService(resolver: resolver)
         )

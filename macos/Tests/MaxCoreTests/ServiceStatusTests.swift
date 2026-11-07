@@ -66,7 +66,7 @@ import Testing
     bundleIdentifier: ServiceDefaults.companionBundleID,
     bundleURL: URL(fileURLWithPath: "/Applications/iMessage Max.app"), home: home)
   #expect(config.label == ServiceDefaults.launchdLabel)
-  #expect(config.endpoint.absoluteString == "http://127.0.0.1:8080/")
+  #expect(config.endpoint.absoluteString == "http://127.0.0.1:\(ServiceDefaults.port)/")
   #expect(config.log.path == "/Users/someone/\(ServiceDefaults.logPath)")
   #expect(config.helper.path == "/Applications/iMessage Max.app/Contents/MacOS/imessage-max")
   #expect(config.isProduction)

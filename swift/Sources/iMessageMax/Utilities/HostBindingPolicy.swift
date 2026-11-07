@@ -9,8 +9,8 @@ enum HostBindingPolicy {
     static func validationError(host: String, allowExternalBind: Bool) -> String? {
         if isLoopback(host) || allowExternalBind { return nil }
         return """
-        Refusing to bind to '\(host)': this would expose iMessage data to the network \
-        without authentication. Use the default \(ServiceDefaults.host), or pass \(ServerOption.allowExternalBind.flag) \
+        Refusing to bind to '\(host)': this would expose iMessage data and the access \
+        token to the network over unencrypted HTTP. Use the default \(ServiceDefaults.host), or pass \(ServerOption.allowExternalBind.flag) \
         if you really intend to expose the server.
         """
     }

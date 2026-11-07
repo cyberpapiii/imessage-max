@@ -40,6 +40,7 @@ final class ServiceFilesContractTests: XCTestCase {
             "LOG          := $(HOME)/\(ServiceDefaults.logPath)\n",
             "),\(ServiceDefaults.port))\n",
             "URL          := http://\(ServiceDefaults.host):$(PORT)\n",
+            "TOKEN_FILE   := $(HOME)/\(ServiceDefaults.tokenPath)\n",
             "launchctl kickstart -k gui/$$(id -u)/$(LAUNCHD_LABEL)",
             "--args --register-helper",
             "tail -f \"$(LOG)\"\n",

@@ -7,6 +7,11 @@ import NIOCore
 import XCTest
 @testable import iMessageMax
 
+/// The token every test transport requires. Tests that check rejection
+/// build their own headers.
+let testAccessToken = AccessToken.generate()
+var testAuthorization: String { "Bearer \(testAccessToken.encoded)" }
+
 func initializeBody(id: Int = 1, protocolVersion: String = "2025-03-26") -> String {
     #"{"jsonrpc":"2.0","id":\#(id),"method":"initialize","params":{"protocolVersion":"\#(protocolVersion)","capabilities":{},"clientInfo":{"name":"tests","version":"1.0"}}}"#
 }
@@ -48,6 +53,7 @@ func makeTestTransport(
     HTTPTransport(
         host: "127.0.0.1",
         port: port,
+        accessToken: testAccessToken,
         catalog: catalog,
         setupPermissions: makeTestSetupPermissions(),
         configuration: configuration
@@ -62,6 +68,7 @@ func jsonHeaders(sessionId: String? = nil, protocolVersion: String? = nil) -> HT
     var headers: HTTPFields = [
         .contentType: "application/json",
         .accept: "application/json, text/event-stream",
+        .authorization: testAuthorization,
     ]
     headers[.mcpSessionId] = sessionId
     headers[.mcpProtocolVersion] = protocolVersion

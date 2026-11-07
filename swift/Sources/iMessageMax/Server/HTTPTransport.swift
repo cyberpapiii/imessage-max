@@ -24,6 +24,7 @@ actor HTTPTransport {
     let host: String
     let port: Int
 
+    private let accessToken: AccessToken
     private let configuration: Configuration
     private let sessionManager: SessionManager
     private let sseManager: SSEConnectionManager
@@ -45,12 +46,14 @@ actor HTTPTransport {
     init(
         host: String = ServiceDefaults.host,
         port: Int = ServiceDefaults.port,
+        accessToken: AccessToken,
         catalog: ToolCatalog,
         setupPermissions: SetupPermissionService,
         configuration: Configuration = .init()
     ) {
         self.host = host
         self.port = port
+        self.accessToken = accessToken
         self.configuration = configuration
         self.catalog = catalog
         self.setupPermissions = setupPermissions
@@ -100,6 +103,7 @@ actor HTTPTransport {
 
         let router = Router(context: BasicRequestContext.self)
         router.add(middleware: OriginValidationMiddleware(boundHost: host))
+        router.add(middleware: BearerAuthMiddleware(token: accessToken))
         router.post("/") { request, _ in
             try await self.handlePost(request: request)
         }

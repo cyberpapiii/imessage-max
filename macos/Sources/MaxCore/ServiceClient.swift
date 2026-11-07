@@ -2,10 +2,33 @@ import Foundation
 import IMessageMaxContract
 
 public struct ServiceClient: Sendable {
-  public init() {}
+  /// The helper writes this file on first start. It is read on every call, so
+  /// a token created after the app launched is picked up.
+  let tokenFile: URL
 
-  public static func permissionRequest(endpoint: URL, permission: SetupPermission) throws
-    -> URLRequest
+  public init(
+    tokenFile: URL = FileManager.default.homeDirectoryForCurrentUser
+      .appendingPathComponent(ServiceDefaults.tokenPath)
+  ) {
+    self.tokenFile = tokenFile
+  }
+
+  static let unauthorized = CoreError.commandFailed(
+    "iMessage Max refused this app's access token. Restart the service so it reads the token again.")
+
+  static func readToken(_ file: URL) -> String? {
+    guard let contents = try? String(contentsOf: file, encoding: .utf8) else { return nil }
+    let token = contents.trimmingCharacters(in: .whitespacesAndNewlines)
+    return token.isEmpty ? nil : token
+  }
+
+  static func authorize(_ request: inout URLRequest, token: String?) {
+    guard let token else { return }
+    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+  }
+
+  public static func permissionRequest(endpoint: URL, permission: SetupPermission, token: String?)
+    throws -> URLRequest
   {
     let url = SetupPermissionRoute.pathComponents.reduce(endpoint) {
       $0.appendingPathComponent($1)
@@ -16,6 +39,7 @@ public struct ServiceClient: Sendable {
     request.setValue(
       SetupPermissionRoute.headerValue, forHTTPHeaderField: SetupPermissionRoute.header)
     request.httpBody = try JSONEncoder().encode([SetupPermissionRoute.bodyKey: permission.rawValue])
+    authorize(&request, token: token)
     return request
   }
 
@@ -23,8 +47,10 @@ public struct ServiceClient: Sendable {
     async throws -> SetupPermissionReply
   {
     let (data, response) = try await URLSession.shared.data(
-      for: Self.permissionRequest(endpoint: endpoint, permission: permission))
+      for: Self.permissionRequest(
+        endpoint: endpoint, permission: permission, token: Self.readToken(tokenFile)))
     guard let response = response as? HTTPURLResponse else { throw CoreError.invalidResponse }
+    if response.statusCode == 401 { throw Self.unauthorized }
     if response.statusCode == SetupPermissionRoute.notOfferedStatus {
       throw CoreError.commandFailed("Update iMessage Max to finish permission setup.")
     }
@@ -49,7 +75,7 @@ public struct ServiceClient: Sendable {
     return reply
   }
 
-  public static func request(endpoint: URL) throws -> URLRequest {
+  public static func request(endpoint: URL, token: String?) throws -> URLRequest {
     var request = URLRequest(url: endpoint, timeoutInterval: 5)
     request.httpMethod = "POST"
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -68,11 +94,14 @@ public struct ServiceClient: Sendable {
         ],
       ],
     ])
+    authorize(&request, token: token)
     return request
   }
 
   public func diagnose(endpoint: URL) async throws -> DiagnoseResult {
-    let (data, response) = try await URLSession.shared.data(for: Self.request(endpoint: endpoint))
+    let (data, response) = try await URLSession.shared.data(
+      for: Self.request(endpoint: endpoint, token: Self.readToken(tokenFile)))
+    if (response as? HTTPURLResponse)?.statusCode == 401 { throw Self.unauthorized }
     guard let response = response as? HTTPURLResponse, response.statusCode == 200,
       data.count <= DiagnoseResult.maxReplyBytes
     else { throw CoreError.invalidResponse }

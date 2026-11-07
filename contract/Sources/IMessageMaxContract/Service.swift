@@ -6,7 +6,7 @@ import Foundation
 /// in step.
 public enum ServiceDefaults {
   public static let host = "127.0.0.1"
-  public static let port = 8080
+  public static let port = 47821
   public static let executableName = "imessage-max"
   /// The label of the agent the app registers with SMAppService. A test build
   /// may bundle a plist with another label; the companion reads the label from
@@ -19,6 +19,9 @@ public enum ServiceDefaults {
   /// The helper's log, relative to the home directory. The plist passes it to
   /// `--log-file` with a leading `~/`, because launchd does not expand `~`.
   public static let logPath = "Library/Logs/iMessage Max/imessage-max.log"
+  /// The bearer token every HTTP request must send. The helper creates it,
+  /// mode 0600, on first start.
+  public static let tokenPath = "Library/Application Support/iMessage Max/token"
   /// The companion app's bundle identifier, also its log subsystem.
   public static let companionBundleID = "com.cyberpapiii.imessage-max.menubar"
   /// Hosts that keep the listener local. Binding anywhere else needs

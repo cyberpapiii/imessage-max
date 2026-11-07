@@ -1,4 +1,5 @@
 import Foundation
+import IMessageMaxContract
 import Testing
 import MaxTestSupport
 
@@ -48,8 +49,11 @@ import MaxTestSupport
 }
 
 @Test func requestContainsRequiredModernMetadata() throws {
-  let request = try ServiceClient.request(endpoint: URL(string: "http://127.0.0.1:8080")!)
+  let request = try ServiceClient.request(endpoint: URL(string: "http://127.0.0.1:47821")!, token: "secret")
   #expect(request.value(forHTTPHeaderField: "Mcp-Name") == "diagnose")
+  #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer secret")
+  #expect(try ServiceClient.request(endpoint: URL(string: "http://127.0.0.1:47821")!, token: nil)
+    .value(forHTTPHeaderField: "Authorization") == nil)
   #expect(request.value(forHTTPHeaderField: "MCP-Protocol-Version") == "2026-07-28")
   #expect(request.timeoutInterval == 5)
 }
@@ -66,4 +70,13 @@ import MaxTestSupport
   let result = try await ProcessRunner.run("/usr/bin/seq", arguments: ["1", "50000"], timeout: 3)
   #expect(result.exitCode == 0)
   #expect(result.output.utf8.count <= 65536)
+}
+
+@Test func tokenIsReadFreshFromTheFileTheHelperWrites() throws {
+  let file = FileManager.default.temporaryDirectory.appendingPathComponent("token-\(UUID().uuidString)")
+  defer { try? FileManager.default.removeItem(at: file) }
+  #expect(ServiceClient.readToken(file) == nil)
+  try "abc\n".write(to: file, atomically: true, encoding: .utf8)
+  #expect(ServiceClient.readToken(file) == "abc")
+  #expect(ServiceClient().tokenFile.path.hasSuffix("/Library/Application Support/iMessage Max/token"))
 }
