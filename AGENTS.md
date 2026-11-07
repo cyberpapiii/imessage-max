@@ -78,20 +78,22 @@ The wire contract shared with the companion app has its own tests: `cd contract 
 
 ### Test via MCP protocol
 
+The HTTP examples pass the token to curl on stdin (`-K -`), because other users can read a process's arguments with `ps`.
+
 ```bash
 # stdio mode
 echo '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' | ./.build/release/imessage-max
 
 # HTTP mode, legacy era (session-based)
-curl -X POST http://localhost:47821 \
-  -H "Authorization: Bearer $(cat ~/Library/Application\ Support/iMessage\ Max/token)" \
+printf 'header = "Authorization: Bearer %s"\n' "$(cat ~/Library/Application\ Support/iMessage\ Max/token)" |
+curl -K - -X POST http://localhost:47821 \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}'
 
 # HTTP mode, modern era (MCP 2026-07-28, stateless)
-curl -X POST http://localhost:47821 \
-  -H "Authorization: Bearer $(cat ~/Library/Application\ Support/iMessage\ Max/token)" \
+printf 'header = "Authorization: Bearer %s"\n' "$(cat ~/Library/Application\ Support/iMessage\ Max/token)" |
+curl -K - -X POST http://localhost:47821 \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -H "MCP-Protocol-Version: 2026-07-28" \

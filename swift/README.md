@@ -105,15 +105,15 @@ endpoint. In HTTP mode:
 Test with curl:
 ```bash
 # Initialize session
-curl -X POST http://localhost:47821 \
-  -H "Authorization: Bearer $(cat ~/Library/Application\ Support/iMessage\ Max/token)" \
+printf 'header = "Authorization: Bearer %s"\n' "$(cat ~/Library/Application\ Support/iMessage\ Max/token)" |
+curl -K - -X POST http://localhost:47821 \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}'
 
 # Use session (include Mcp-Session-Id from response)
-curl -X POST http://localhost:47821 \
-  -H "Authorization: Bearer $(cat ~/Library/Application\ Support/iMessage\ Max/token)" \
+printf 'header = "Authorization: Bearer %s"\n' "$(cat ~/Library/Application\ Support/iMessage\ Max/token)" |
+curl -K - -X POST http://localhost:47821 \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -H "Mcp-Session-Id: <session-id>" \

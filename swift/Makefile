@@ -29,7 +29,9 @@ URL          := http://127.0.0.1:$(PORT)
 # The probes send the service's bearer token. Override for a server started
 # with --token-file, as in `make verify-db PORT=18484 TOKEN_FILE=/tmp/token`.
 TOKEN_FILE   := $(HOME)/Library/Application Support/iMessage Max/token
-AUTH_HEADER   = -H "Authorization: Bearer $$(cat "$(TOKEN_FILE)" 2>/dev/null)"
+# curl reads the header from stdin (-K -), because other users can read a
+# process's arguments with ps. printf is a shell builtin, so it adds none.
+AUTH_CURL     = printf 'header = "Authorization: Bearer %s"\n' "$$(cat "$(TOKEN_FILE)" 2>/dev/null)" | curl -K -
 VERIFY_ATTEMPTS := 45
 # Per-probe cap, so a server that accepts but never answers fails the probe
 # instead of hanging make.
@@ -40,13 +42,13 @@ MCP_LEGACY_VERSION := 2025-11-25
 
 # $(call mcp_initialize,<clientInfo name>,<extra curl short flags>): POST a
 # legacy initialize to the service and print the reply.
-mcp_initialize = curl -s$(2) --max-time $(CURL_MAX_TIME) "$(URL)" -X POST $(AUTH_HEADER) \
+mcp_initialize = $(AUTH_CURL) -s$(2) --max-time $(CURL_MAX_TIME) "$(URL)" -X POST \
 	-H "Content-Type: application/json" \
 	-H "Accept: application/json, text/event-stream" \
 	-d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"$(MCP_LEGACY_VERSION)","capabilities":{},"clientInfo":{"name":"$(1)","version":"1.0"}}}' 2>/dev/null
 # token_refused succeeds when the service answers 401, so a probe can name
 # the token instead of reporting the service as down.
-token_refused = [ "$$(curl -s -o /dev/null -w '%{http_code}' --max-time $(CURL_MAX_TIME) "$(URL)" -X POST $(AUTH_HEADER))" = 401 ]
+token_refused = [ "$$($(AUTH_CURL) -s -o /dev/null -w '%{http_code}' --max-time $(CURL_MAX_TIME) "$(URL)" -X POST)" = 401 ]
 token_refused_message = ✗ The service refused the token in $(TOKEN_FILE)
 # $(call server_info,<field>): read result.serverInfo.<field> from an
 # initialize reply on stdin.
@@ -127,7 +129,7 @@ verify: ## Verify server is healthy
 				else \
 					echo "✓ Legacy lane: v$$SERVER_VERSION healthy on port $(PORT)"; \
 				fi; \
-				MODERN=$$(curl -sf --max-time $(CURL_MAX_TIME) "$(URL)" -X POST $(AUTH_HEADER) \
+				MODERN=$$($(AUTH_CURL) -sf --max-time $(CURL_MAX_TIME) "$(URL)" -X POST \
 					-H "Content-Type: application/json" \
 					-H "Accept: application/json, text/event-stream" \
 					-H "MCP-Protocol-Version: 2026-07-28" \
@@ -160,14 +162,14 @@ verify-db: ## Call diagnose over HTTP and fail if the service cannot read chat.d
 		if $(token_refused); then echo "$(token_refused_message)"; else echo "✗ initialize returned no Mcp-Session-Id header"; fi; \
 		exit 1; \
 	fi; \
-	BODY=$$(curl -sf --max-time 15 "$(URL)" -X POST $(AUTH_HEADER) \
+	BODY=$$($(AUTH_CURL) -sf --max-time 15 "$(URL)" -X POST \
 		-H "Content-Type: application/json" \
 		-H "Accept: application/json, text/event-stream" \
 		-H "Mcp-Session-Id: $$SESSION" \
 		-H "MCP-Protocol-Version: $(MCP_LEGACY_VERSION)" \
 		-d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"diagnose","arguments":{}}}' 2>/dev/null) \
 		|| { echo "✗ tools/call diagnose failed"; exit 1; }; \
-	curl -s --max-time 2 -o /dev/null "$(URL)" -X DELETE $(AUTH_HEADER) -H "Mcp-Session-Id: $$SESSION" -H "MCP-Protocol-Version: $(MCP_LEGACY_VERSION)" || true; \
+	$(AUTH_CURL) -s --max-time 2 -o /dev/null "$(URL)" -X DELETE -H "Mcp-Session-Id: $$SESSION" -H "MCP-Protocol-Version: $(MCP_LEGACY_VERSION)" || true; \
 	printf '%s' "$$BODY" | python3 -c '\
 import sys, json; \
 r = json.load(sys.stdin)["result"]; \
