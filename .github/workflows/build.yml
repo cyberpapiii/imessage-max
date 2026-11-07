@@ -121,7 +121,10 @@ jobs:
         run: swift build --build-tests
 
       - name: Run tests
-        run: swift test --skip-build
+        run: |
+          for t in probeEnvironmentWithoutWorkingFolder probeEnvironmentWithWorkingFolder probeDefaultRunClosure claudeDesktopOpensAnExtensionPackedFromTheHelper; do swift test --skip-build --filter "$t" 2>&1 | grep -E "Test run with|signal|issue" || true; done
+          for f in ~/Library/Logs/DiagnosticReports/*.ips; do echo "== $f"; head -c 12000 "$f"; done
+          exit 1
 
       # The wire contract both packages above build against.
       - name: Contract tests

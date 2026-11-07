@@ -34,10 +34,10 @@ public actor ServiceController {
       switch (action, state) {
       case (_, .misplaced), (_, .legacyInstall), (_, .blockedInLoginItems), (_, .portConflict):
         throw CoreError.notReady(state)
-      case (.stop, .running), (.stop, .unresponsive):
+      case (.stop, .running), (.stop, .unresponsive), (.stop, .tokenRejected):
         try await system.run(.bootout(label: configuration.label))
         return try await converge { $0 == .stopped }
-      case (.stop, _), (.start, .running), (.start, .unresponsive):
+      case (.stop, _), (.start, .running), (.start, .unresponsive), (.start, .tokenRejected):
         return state
       case (_, .notRegistered):
         try await system.run(.register(plistName: configuration.plistName))
@@ -133,14 +133,15 @@ public actor ServiceController {
     }
     let agent = await system.agentStatus(plistName: configuration.plistName)
     let job = await system.job(label: configuration.label)
-    let diagnosis = await system.diagnose(endpoint: configuration.endpoint)
+    let reply = await system.diagnose(endpoint: configuration.endpoint)
+    let diagnosis = reply.diagnosis
     var foreign = false
     if diagnosis == nil || diagnosis?.processID != job?.pid {
       foreign = await system.listeners(port: configuration.port).contains { $0 != job?.pid }
     }
     return ServiceObservation(
       location: location, legacy: legacyPresent, agent: agent, job: job, diagnosis: diagnosis,
-      foreignListener: foreign)
+      refused: reply == .refused, foreignListener: foreign)
   }
 
   /// A job launchd no longer holds, as after a stop, cannot be kickstarted;
