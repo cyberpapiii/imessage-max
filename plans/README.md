@@ -9,9 +9,13 @@ Verification baseline for all plans: `cd swift && swift build && swift test`.
 Deploying to the local launchd service (`make install`) is an operator
 action, not an executor step.
 
-## Current (2026-10-12): v1.8.0
+## Current (2026-11-07): v2.0.0
 
-No plan is open. The round after 086 ran as `improve/*` branches without
+No plan is open. Plan 087 shipped as v2.0.0 on 2026-11-07; see its round below.
+
+## Previous (2026-10-12): v1.8.0
+
+The round after 086 ran as `improve/*` branches without
 numbered plan files, merged to main between 2026-09-28 and 2026-09-29:
 `search-filtered-count`, `async-timeout-leak`, `scoped-interrupt`,
 `call-log`, `graceful-shutdown`, `makefile-verify`, `watcher-recovery`,
@@ -31,7 +35,7 @@ Still open outside this directory: PRs 5 and 6 (`advisor/018-imcore-helper-bridg
 
 | Plan | Title | Priority | Effort | Depends on | Status |
 |------|-------|----------|--------|------------|--------|
-| 087 | Install and onboard iMessage Max like a normal Mac app: Developer ID signing, notarized DMG, helper inside the app under `SMAppService`, token auth, stdio bridge, one-click client hookup, onboarding rewrite, 2.0 cask | P1 | L | none | PLANNED 2026-11-06, waiting for Rob's go and the release secrets |
+| 087 | Install and onboard iMessage Max like a normal Mac app: Developer ID signing, notarized DMG, helper inside the app under `SMAppService`, token auth, stdio bridge, one-click client hookup, onboarding rewrite, 2.0 cask | P1 | L | none | DONE 2026-11-07, released as v2.0.0 (DMG and `.mcpb` notarized; cask `cyberpapiii/tap/imessage-max`, formula disabled). P1 #24, P2 #25, P3 #26, P4 #28, SIGTERM fix #29, P5 #30, P7 server #31, P6 #32, P8 #33 (`ccd8f37`), P7 app #34. CI speed-up #35 (`d647f3b`) followed. |
 
 ## Round 2026-09-03: search hang
 
