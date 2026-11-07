@@ -45,13 +45,18 @@ cd swift
 make build   # a bare `swift build` omits the embedded Info.plist, so Contacts can never be granted
 BIN=.build/arm64-apple-macosx/release/imessage-max
 
-# stdio mode (for Codex Desktop)
+# stdio bridge (what Codex and Claude Desktop launch): copies stdio to the
+# running helper's socket and reads no Messages data itself
 $BIN
 
-# HTTP mode (for plug, Inspector, etc.), with a scratch token so it
-# does not share the installed service's port or token
+# stdio served in this process, for development; needs its own Full Disk Access
+$BIN --direct
+
+# HTTP mode (for plug, Inspector, etc.), with a scratch token and socket so it
+# does not share the installed service's port, token or socket
 mkdir -m 700 -p /tmp/imax-dev
-$BIN --http --port 18484 --token-file /tmp/imax-dev/token
+$BIN --http --port 18484 --token-file /tmp/imax-dev/token --socket-path /tmp/imax-dev/mcp.sock
+$BIN --socket-path /tmp/imax-dev/mcp.sock   # a bridge to that helper
 
 # one-shot Contacts prompt; re-launches itself disclaimed so the grant is
 # recorded for this executable, not the terminal
@@ -82,8 +87,8 @@ The wire contract shared with the companion app has its own tests: `cd contract 
 The HTTP examples pass the token to curl on stdin (`-K -`), because other users can read a process's arguments with `ps`.
 
 ```bash
-# stdio mode
-echo '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' | ./.build/release/imessage-max
+# stdio mode, in process
+echo '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' | ./.build/release/imessage-max --direct
 
 # HTTP mode, legacy era (session-based)
 printf 'header = "Authorization: Bearer %s"\n' "$(cat ~/Library/Application\ Support/iMessage\ Max/token)" |

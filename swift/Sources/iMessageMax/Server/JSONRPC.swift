@@ -3,6 +3,7 @@ import IMessageMaxContract
 import MCP
 
 enum JSONRPCErrorCode: Int {
+    case parseError = -32700
     case invalidRequest = -32600
     case methodNotFound = -32601
     case invalidParams = -32602

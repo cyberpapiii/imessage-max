@@ -3,7 +3,7 @@
     "imessage-max": {
       "command": "imessage-max",
       "args": [],
-      "note": "Local macOS MCP server for iMessage. Requires Full Disk Access for Messages, Contacts permission for contact resolution, and Automation permission for sending."
+      "note": "Local macOS MCP server for iMessage. Launched with no arguments, imessage-max bridges stdio to the running iMessage Max app, which holds Full Disk Access, Contacts and Automation, so this client needs none of them."
     }
   }
 }

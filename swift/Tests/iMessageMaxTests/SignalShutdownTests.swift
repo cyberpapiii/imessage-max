@@ -63,20 +63,50 @@ final class SignalShutdownTests: XCTestCase {
     }
 }
 
+/// The helper's socket is best effort: it must never stop HTTP, and a clean
+/// stop removes it.
+final class HelperSocketTests: XCTestCase {
+    func testRegularFileAtTheSocketPathLeavesHTTPServingWithAWarning() throws {
+        let server = try SpawnedServer { socketPath in
+            try "keep me".write(toFile: socketPath, atomically: false, encoding: .utf8)
+        }
+        _ = try initializeSession(port: server.port, authorization: server.authorization)
+        XCTAssertTrue(
+            server.waitForStderr(containing: "Serving HTTP only; stdio bridges cannot connect."),
+            server.stderr)
+
+        try server.terminate(within: 5)
+        XCTAssertEqual(try String(contentsOfFile: server.socketPath, encoding: .utf8), "keep me")
+    }
+
+    func testSIGTERMRemovesTheSocket() throws {
+        let server = try SpawnedServer()
+        XCTAssertTrue(server.waitForStderr(containing: "Socket listening path="), server.stderr)
+        var info = stat()
+        XCTAssertEqual(lstat(server.socketPath, &info), 0)
+        XCTAssertEqual(info.st_mode & 0o777, 0o600)
+
+        try server.terminate(within: 5)
+        XCTAssertEqual(lstat(server.socketPath, &info), -1, "the socket outlived a clean stop")
+    }
+}
+
 private final class SpawnedServer {
     let port: Int
     let authorization: String
+    /// In a fresh mkdtemp folder, so a test never binds the user's real socket.
+    let socketPath: String
     private let process = Process()
     private let exited = DispatchSemaphore(value: 0)
     private let folder: URL
     private let stderrURL: URL
 
-    init() throws {
-        folder = FileManager.default.temporaryDirectory
-            .appendingPathComponent("imessage-max-sigterm-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(
-            at: folder, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700]
-        )
+    /// `prepare` runs before launch with the socket path.
+    init(prepare: (String) throws -> Void = { _ in }) throws {
+        // Short, so the socket path fits sun_path.
+        folder = URL(fileURLWithPath: try makeShortTempFolder())
+        socketPath = folder.appendingPathComponent("s.sock").path
+        try prepare(socketPath)
         let tokenURL = folder.appendingPathComponent("token")
         stderrURL = folder.appendingPathComponent("stderr.log")
         FileManager.default.createFile(atPath: stderrURL.path, contents: nil)
@@ -86,6 +116,7 @@ private final class SpawnedServer {
         process.arguments = [
             "--http", "--port", String(port),
             "--token-file", tokenURL.path,
+            "--socket-path", socketPath,
             "--contacts-policy", "skip",
         ]
         process.standardInput = FileHandle.nullDevice
@@ -126,6 +157,17 @@ private final class SpawnedServer {
         XCTAssertEqual(process.terminationReason, .exit, "server died by signal \(process.terminationStatus) after \(elapsed) s: \(Self.tail(stderrURL))", file: file, line: line)
         XCTAssertEqual(process.terminationStatus, 0, "server exited \(process.terminationStatus) after \(elapsed) s: \(Self.tail(stderrURL))", file: file, line: line)
         return elapsed
+    }
+
+    var stderr: String { (try? String(contentsOf: stderrURL, encoding: .utf8)) ?? "" }
+
+    func waitForStderr(containing text: String, within seconds: TimeInterval = 5) -> Bool {
+        let deadline = Date().addingTimeInterval(seconds)
+        while !stderr.contains(text) {
+            guard Date() < deadline else { return false }
+            _ = exited.wait(timeout: .now() + .milliseconds(20))
+        }
+        return true
     }
 
     private static func binary() throws -> URL {

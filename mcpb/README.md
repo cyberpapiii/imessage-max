@@ -1,19 +1,25 @@
-# Claude Desktop MCPB metadata
+# Claude Desktop extension (MCPB)
 
-This directory contains the Claude Desktop / MCPB manifest and PNG icon assets
-for iMessage Max.
+This directory holds the manifest and PNG icons for the iMessage Max Claude
+Desktop extension, `iMessage-Max-<version>.mcpb`.
 
-The manifest holds only metadata. At runtime, `mcp_config.command` is
-`${user_config.binary_path}`, so the client runs the binary at
-`user_config.binary_path`. The repository does not include a built macOS
-executable.
+The extension ships its own copy of the signed `imessage-max` binary at
+`server/imessage-max`, and the manifest runs it as
+`${__dirname}/server/imessage-max` with no arguments. With no transport flag
+the binary is a stdio bridge. It copies MCP traffic to the iMessage Max helper
+over the socket `~/Library/Application Support/iMessage Max/mcp.sock` and never
+reads Messages itself. The helper holds Full Disk Access, Contacts and
+Automation, so Claude needs none of them, and installing the extension asks for
+no path. When the helper is not running, the extension's first request fails
+with "Open iMessage Max to start it."
 
-`server.entry_point`, set to `server/imessage-max`, is where the binary goes
-when you package a self-contained `.mcpb` bundle. That file is left out of git
-on purpose. To package:
+The binary is left out of git. The release workflow builds the bundle with
+`scripts/sign-notarize-app.sh`, which notarizes the binary and then calls:
 
 ```bash
-mkdir -p mcpb/server
-cp /path/to/signed/imessage-max mcpb/server/imessage-max
-# then point mcp_config.command at ${__dirname}/server/imessage-max
+scripts/build-mcpb.sh <signed imessage-max> <output dir>
 ```
+
+`build-mcpb.sh` stages the manifest, the icons and the binary, validates and
+packs them with `@anthropic-ai/mcpb`, then checks the layout, the executable
+bit, the signature and the reported version of the binary inside.
