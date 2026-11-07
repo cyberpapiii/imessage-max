@@ -14,12 +14,18 @@ public protocol ServiceSystem: Sendable {
   func run(_ command: SystemCommand) async throws
   /// Whether `pid` started before the file at `executable` was last replaced.
   func isOutdated(pid: Int32, executable: URL) async -> Bool
+  /// When `pid` started, or nil when it cannot be read.
+  func startTime(pid: Int32) async -> Date?
   /// Asks for Contacts in this process. macOS charges the helper inside the
   /// app to the app, and a helper that asks for itself is denied with no prompt.
   func requestContactsAccess() async -> PermissionStatus
   func requestHelperPermission(_ permission: SetupPermission, endpoint: URL, processID: Int32)
     async throws -> SetupPermissionReply
   func pause() async
+}
+
+extension ServiceSystem {
+  public func startTime(pid: Int32) async -> Date? { nil }
 }
 
 public enum SystemCommand: Sendable, Equatable {
@@ -81,18 +87,26 @@ public struct LiveServiceSystem: ServiceSystem {
   }
 
   public func isOutdated(pid: Int32, executable: URL) async -> Bool {
-    var info = kinfo_proc()
-    var size = MemoryLayout<kinfo_proc>.stride
-    var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
     var file = stat()
-    guard sysctl(&mib, 4, &info, &size, nil, 0) == 0, size > 0,
-      stat(executable.path, &file) == 0
-    else { return false }
-    let started = info.kp_proc.p_un.__p_starttime
+    guard let started = Self.started(pid), stat(executable.path, &file) == 0 else { return false }
     // ctime, not mtime: ditto and cp -p keep the build's mtime, but a new
     // file always gets a new ctime.
     let replaced = file.st_ctimespec
     return (started.tv_sec, Int(started.tv_usec) * 1000) < (replaced.tv_sec, replaced.tv_nsec)
+  }
+
+  public func startTime(pid: Int32) async -> Date? {
+    Self.started(pid).map {
+      Date(timeIntervalSince1970: Double($0.tv_sec) + Double($0.tv_usec) / 1_000_000)
+    }
+  }
+
+  private static func started(_ pid: Int32) -> timeval? {
+    var info = kinfo_proc()
+    var size = MemoryLayout<kinfo_proc>.stride
+    var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
+    guard sysctl(&mib, 4, &info, &size, nil, 0) == 0, size > 0 else { return nil }
+    return info.kp_proc.p_un.__p_starttime
   }
 
   public func requestContactsAccess() async -> PermissionStatus {
@@ -121,8 +135,10 @@ public struct LiveServiceSystem: ServiceSystem {
 
   private static func target(_ label: String) -> String { "gui/\(getuid())/\(label)" }
 
+  /// `kickstart -k` within 10 seconds of the helper's last launch blocks until
+  /// the plist's ThrottleInterval has passed, so the wait must outlast it.
   private func launchctl(_ arguments: [String]) async throws {
-    let result = try await ProcessRunner.run("/bin/launchctl", arguments: arguments)
+    let result = try await ProcessRunner.run("/bin/launchctl", arguments: arguments, timeout: 15)
     guard result.exitCode == 0 else {
       throw CoreError.commandFailed(
         "macOS could not change the service. \(result.output.trimmingCharacters(in: .whitespacesAndNewlines))"

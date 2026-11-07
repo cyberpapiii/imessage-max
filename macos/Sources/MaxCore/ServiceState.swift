@@ -133,17 +133,21 @@ public enum AppLocation: Sendable, Equatable {
 }
 
 extension DiagnoseResult {
-  public var readiness: Readiness {
-    if !database.accessible { return .messages }
-    if !namesReady { return .contacts }
-    if self[.permAutomation]?.isSupported != true || self[.sendTextDM]?.isSupported != true {
-      return .sending
-    }
-    return .ready
+  /// The first of the permission steps this helper still lacks, nil once it
+  /// can read, show names and send. These are the steps diagnose alone judges.
+  public var missingGrant: SetupStep? {
+    if !database.accessible { return .readMessages }
+    if !namesReady { return .showNames }
+    if !sendingReady { return .sendMessages }
+    return nil
   }
 
   public var namesReady: Bool {
     contacts.authorized && PermissionStatus.namesAvailable.contains(contacts.status)
+  }
+
+  public var sendingReady: Bool {
+    self[.permAutomation]?.isSupported == true && self[.sendTextDM]?.isSupported == true
   }
 
   public func grants(_ permission: SetupPermission) -> Bool {
@@ -154,13 +158,21 @@ extension DiagnoseResult {
   }
 
   public var needsMessagesForSendingCheck: Bool {
-    readiness == .sending
+    missingGrant == .sendMessages
       && self[.permAutomation]?.detail == PermissionStatus.messagesNotRunning.rawValue
   }
-}
 
-public enum Readiness: String, Sendable {
-  case messages, contacts, sending, ready
+  /// The missing grant may already be on in System Settings. macOS gives Full
+  /// Disk Access, and the helper reads Contacts access, only at launch, so
+  /// checking it means starting a new helper.
+  public var grantNeedsRestartToCheck: Bool {
+    switch missingGrant {
+    case .readMessages: database.status == .permissionDenied
+    case .showNames:
+      contacts.authorized || [.denied, .restricted].contains(contacts.status)
+    default: false
+    }
+  }
 }
 
 public enum CoreError: Error, LocalizedError, Sendable, Equatable {

@@ -88,6 +88,7 @@ extension AppModel {
         bundleIdentifier: ServiceDefaults.companionBundleID,
         bundleURL: URL(fileURLWithPath: "\(app)/iMessage Max.app"), home: home)
     }
+    if name == "try-it" { milestones.mark(.skippedConnect) }
     return AppModel(
       controller: configuration.map {
         ServiceController(configuration: $0, system: FixtureSystem(name), home: home)
@@ -173,7 +174,7 @@ actor FixtureSystem: ServiceSystem {
   private static func diagnosis(_ name: String) -> DiagnoseResult? {
     func diagnosis(
       messages: Bool, contacts: PermissionStatus, sending: CapabilityState,
-      detail: PermissionStatus? = nil
+      detail: PermissionStatus? = nil, calls: Int = 0
     ) -> DiagnoseResult {
       DiagnoseResult(
         version: "1.8.0", processID: processID,
@@ -187,7 +188,7 @@ actor FixtureSystem: ServiceSystem {
           CapabilityKey.permAutomation.rawValue: Capability(state: sending, detail: detail?.rawValue),
           CapabilityKey.sendTextDM.rawValue: Capability(state: .supported),
           CapabilityKey.liveInbox.rawValue: Capability(state: .supported),
-        ])
+        ], assistantCalls: calls)
     }
     return switch name {
     case "fresh", "stopped", "legacy", "blocked", "problem": nil
@@ -195,10 +196,15 @@ actor FixtureSystem: ServiceSystem {
       diagnosis(messages: false, contacts: .notDetermined, sending: .unverified)
     case "setup-contacts":
       diagnosis(messages: true, contacts: .notDetermined, sending: .unverified)
+    case "contacts-denied":
+      diagnosis(messages: true, contacts: .denied, sending: .unverified)
     case "setup-sending":
       diagnosis(
         messages: true, contacts: .authorized, sending: .unverified, detail: .messagesNotRunning)
-    default: diagnosis(messages: true, contacts: .authorized, sending: .supported)
+    case "connect", "try-it": diagnosis(messages: true, contacts: .authorized, sending: .supported)
+    case "revoked":
+      diagnosis(messages: false, contacts: .authorized, sending: .supported, calls: 1)
+    default: diagnosis(messages: true, contacts: .authorized, sending: .supported, calls: 1)
     }
   }
 }

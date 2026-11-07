@@ -438,31 +438,6 @@ struct Card<Content: View>: View {
   }
 }
 
-struct StatusLine: View {
-  let glyph: Glyph
-  let title: String
-  let detail: String
-  let good: Bool
-  let attention: Bool
-  @PanelMotion private var motion
-
-  private var ink: Color { good ? Design.ready : (attention ? Design.attention : Design.muted) }
-  var body: some View {
-    HStack(spacing: Space.snug) {
-      AppGlyph(glyph: glyph).foregroundStyle(Design.muted)
-      Text(title).font(.maxLine)
-      Spacer(minLength: Space.snug)
-      Text(detail).font(.maxSmall).foregroundStyle(ink).contentTransition(.interpolate)
-      ActionGlyph(mark: good ? .check : (attention ? .more : .pause), size: 12)
-        .foregroundStyle(ink)
-    }
-    .frame(minHeight: 24)
-    .animation(motion[.swap], value: detail)
-    .accessibilityElement(children: .ignore)
-    .accessibilityLabel("\(title): \(detail)")
-  }
-}
-
 struct NavRow: View {
   let title: String
   let glyph: Glyph
@@ -514,6 +489,7 @@ struct IconButton: View {
 
 struct CopyButton: View {
   let title: String
+  var primary = false
   let action: () -> Void
   @State private var copied = false
   @PanelMotion private var motion
@@ -528,7 +504,7 @@ struct CopyButton: View {
         Text(title)
       }
     }
-    .buttonStyle(MaxButtonStyle())
+    .buttonStyle(MaxButtonStyle(primary: primary))
     .animation(motion[.swap], value: copied)
     .accessibilityLabel(copied ? "\(title), copied" : title)
   }
