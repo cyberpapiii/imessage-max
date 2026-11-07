@@ -86,27 +86,26 @@ enum DiagnoseTool {
         }
     }
 
+    static func openStep(_ step: SetupStep) -> String {
+        "Open iMessage Max and choose \(step.title)."
+    }
+
     static func fullDiskAccessFix(holder: GrantHolder = .current) -> String {
         switch holder {
         case .app(let app):
-            return "Full Disk Access is missing for iMessage Max (\(app)). "
-                + "1) System Settings -> Privacy & Security -> Full Disk Access -> turn on iMessage Max. "
-                + "If it is not listed, add the app with the + button. "
-                + "2) If it is already on, turn it off and on again: a grant made for an older copy "
-                + "of the app looks present but does not work. "
-                + "3) The grant applies only after the helper starts again: "
-                + "Restart iMessage Max from its menu bar app."
+            return openStep(.readMessages)
+                + " Then turn on iMessage Max (\(app)) in System Settings -> Privacy & Security -> "
+                + "Full Disk Access. If it is already on there, turn it off and on again: "
+                + "a grant made for an older copy of the app looks present but does not work. "
+                + "Then choose Restart iMessage Max in the app."
         case .executable(let executable):
             return "Full Disk Access is missing for the process reading chat.db (\(executable)). "
-                + "1) System Settings -> Privacy & Security -> Full Disk Access -> add that app or executable "
-                + "(or the app that launches it, such as Terminal). "
+                + "1) System Settings -> Privacy & Security -> Full Disk Access -> add and turn on "
+                + "this executable, or the app that launches it. "
                 + "2) If it is already listed, toggle it off and on: a grant bound to an older "
                 + "code signature looks present but does not work. "
                 + "3) The grant applies only to newly launched processes; relaunch this server, "
-                + "or reconnect the MCP client for stdio. "
-                + "4) To bisect, run sqlite3 -readonly ~/Library/Messages/chat.db 'pragma quick_check;' "
-                + "from a terminal: 'ok' means the terminal has access and this process does not; "
-                + "'unable to open database file' means the user lacks it everywhere."
+                + "or reconnect the MCP client for stdio."
         }
     }
 
@@ -116,47 +115,48 @@ enum DiagnoseTool {
             "This copy of iMessage Max has no Contacts usage description, so macOS cannot ask for "
                 + "or record a Contacts grant. Download iMessage Max again and replace this copy."
         case .executable:
-            "This executable was built without its embedded Info.plist, so macOS "
-                + "cannot prompt for or record a Contacts grant for it. Rebuild with `make build` "
-                + "(or `make sign`), not a bare `swift build`, then run "
-                + "`imessage-max --request-contacts-access` once."
+            "This executable was built without its embedded Info.plist, so macOS cannot ask for "
+                + "or record a Contacts grant for it. Use the helper inside iMessage Max instead. "
+                + openStep(.showNames)
         }
     }
 
     static func contactsNotRequestedFix(holder: GrantHolder) -> String {
         switch holder {
         case .app:
-            "Open iMessage Max and allow Contacts. The helper asks through the app, "
-                + "because macOS does not let it ask on its own."
-        case .executable:
-            "This process has no terminal, so it did not ask for Contacts access. "
-                + "Run `imessage-max --request-contacts-access` once (from a terminal or any "
-                + "shell) and approve the \"iMessage Max\" prompt; the grant is recorded for this "
-                + "executable, not for the terminal. Then restart the MCP client or service. "
-                + "A Contacts switch for Terminal or Claude does not apply to this process."
+            openStep(.showNames) + " The app asks macOS for Contacts on the helper's behalf, "
+                + "because macOS does not let the helper ask on its own."
+        case .executable(let executable):
+            "This process (\(executable)) runs headless, so it did not ask for Contacts "
+                + "access, and System Settings cannot add it to Contacts by hand. Use the helper "
+                + "inside iMessage Max instead. " + openStep(.showNames)
         }
     }
 
     static func contactsDeniedFix(holder: GrantHolder) -> String {
         switch holder {
         case .app:
+            openStep(.showNames)
+                + " Then turn on iMessage Max in System Settings -> Privacy & Security -> Contacts, "
+                + "and choose Restart iMessage Max in the app."
+        case .executable(let executable):
             "Grant Contacts access: System Settings -> Privacy & Security -> Contacts -> "
-                + "turn on iMessage Max. Then restart iMessage Max from its menu bar app."
-        case .executable:
-            "Grant Contacts access: System Settings -> Privacy & Security -> "
-                + "Contacts -> turn on imessage-max. If it is not listed, run "
-                + "`imessage-max --request-contacts-access` once from a terminal."
+                + "turn on imessage-max (\(executable)). If it is not listed, macOS never "
+                + "recorded a request from it. Use the helper inside iMessage Max instead. "
+                + openStep(.showNames)
         }
     }
 
     static func automationFix(holder: GrantHolder) -> String {
         switch holder {
         case .app:
+            openStep(.sendMessages)
+                + " Then turn on Messages under iMessage Max in System Settings -> "
+                + "Privacy & Security -> Automation."
+        case .executable(let executable):
             "Grant Automation access: System Settings -> Privacy & Security -> Automation -> "
-                + "iMessage Max -> turn on Messages."
-        case .executable:
-            "Grant Automation access: System Settings -> Privacy & Security -> "
-                + "Automation -> Enable Messages for your terminal app or the imessage-max executable"
+                + "turn on Messages under the app that launches this server, or under "
+                + "imessage-max (\(executable)) when it runs on its own."
         }
     }
 
@@ -177,8 +177,8 @@ enum DiagnoseTool {
             if dbStatus == .permissionDenied {
                 databaseFix = fullDiskAccessFix(holder: holder)
             } else if dbStatus == .databaseNotFound {
-                databaseFix = "iMessage database not found. Set up iMessage and make sure it " +
-                    "has sent or received at least one message."
+                databaseFix = "iMessage database not found. Sign in to iMessage in Messages, then " +
+                    "send or receive at least one message."
             }
         }
 
@@ -231,9 +231,7 @@ enum DiagnoseTool {
 
         let verifiedSend: Capability
         if !dbOk {
-            verifiedSend = Capability(
-                state: .permissionGated,
-                fix: "Grant Full Disk Access so the server can re-read the database to verify each send.")
+            verifiedSend = Capability(state: .permissionGated, fix: databaseFix)
         } else if automationOk {
             verifiedSend = Capability(state: .supported, detail: "db_reread")
         } else {
@@ -242,7 +240,7 @@ enum DiagnoseTool {
 
         let attachmentsRead = dbOk
             ? Capability(state: .supported)
-            : Capability(state: .permissionGated, fix: "Grant Full Disk Access to read attachment content")
+            : Capability(state: .permissionGated, fix: databaseFix)
         let attachmentsOffloaded = dbOk
             ? Capability(
                 state: .supported,

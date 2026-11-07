@@ -61,11 +61,9 @@ $BIN --direct
 mkdir -m 700 -p /tmp/imax-dev
 $BIN --http --port 18484 --token-file /tmp/imax-dev/token --socket-path /tmp/imax-dev/mcp.sock
 $BIN --socket-path /tmp/imax-dev/mcp.sock   # a bridge to that helper
-
-# one-shot Contacts prompt; re-launches itself disclaimed so the grant is
-# recorded for this executable, not the terminal
-$BIN --request-contacts-access
 ```
+
+A bare executable cannot hold a Contacts grant of its own. It never prompts when it runs headless, and System Settings cannot add an executable to Contacts by hand. Started from a terminal, it asks, and macOS records the grant for the terminal app, so the grant covers only processes that terminal starts. Work that needs contact names under launchd or an MCP client runs through the helper inside the app (`make install`).
 
 ## Running the test suite
 
@@ -246,9 +244,11 @@ return [
 
 ## Required macOS permissions
 
-- Full Disk Access, for ~/Library/Messages/chat.db
-- Contacts, for AddressBook resolution. For the helper inside the app, the companion asks in its own process and then restarts the helper, which reads Contacts access only at launch. A helper inside an app that asks for itself is denied with no prompt. For a bare executable, grant it with `--request-contacts-access`, because headless starts never prompt. MCP clients such as Claude desktop launch the server disclaimed, so only a grant held by the imessage-max executable itself counts. A Contacts switch for Terminal or the client app does not count. A bare `swift build` omits the embedded Info.plist, macOS then cannot grant Contacts at all, and diagnose reports `missing_usage_description`
-- Automation, for Messages.app (sending only)
+macOS charges the helper's grants to `iMessage Max.app`, so the app is where a user grants them. Every `diagnose` fix for the helper inside the app names a first-run step in the app, such as "Open iMessage Max and choose Read messages", and never a terminal command. The step titles live in `contract/Sources/IMessageMaxContract/SetupStep.swift`, which both the server and the companion read. A bare executable (`--direct`, or a build run outside the app) gets fixes that name the System Settings switch, and no fix names `make`, `swift build` or Terminal.
+
+- Full Disk Access, for ~/Library/Messages/chat.db (step Read messages)
+- Contacts, for AddressBook resolution (step Show names). The companion asks in its own process and then restarts the helper, which reads Contacts access only at launch. A helper inside an app that asks for itself is denied with no prompt. A bare executable cannot hold a Contacts grant of its own (see the build section above). A bare `swift build` also omits the embedded Info.plist, and diagnose then reports `missing_usage_description`
+- Automation, for Messages.app, sending only (step Send messages). The helper's own request shows a prompt that names the app
 
 ## Maintainer notes
 

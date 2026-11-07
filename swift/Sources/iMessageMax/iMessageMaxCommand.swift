@@ -38,12 +38,6 @@ struct iMessageMax: AsyncParsableCommand {
     @Option(name: .customLong(ServerOption.logFile.rawValue), help: "Append diagnostics to this file instead of stderr. A leading ~/ means the home directory, because launchd does not expand it.")
     var logFile: String?
 
-    @Flag(name: .long, help: "Ask macOS for Contacts access once, print the resulting status, and exit. Run this from a terminal; the server never prompts when it has no terminal.")
-    var requestContactsAccess = false
-
-    @Flag(name: .long, help: "Ask macOS for Automation access to Messages once, without sending a message, print the resulting status, and exit.")
-    var requestMessagesAccess = false
-
     func validate() throws {
         if http, let message = HostBindingPolicy.validationError(host: host, allowExternalBind: allowExternalBind) {
             throw ValidationError(message)
@@ -58,37 +52,6 @@ struct iMessageMax: AsyncParsableCommand {
 
     mutating func run() async throws {
         if let logFile { Log.redirectStandardError(to: logFile) }
-
-        if requestMessagesAccess {
-            let (_, status) = await AutomationPermission.requestAccess()
-            print("Messages automation: \(status)")
-            return
-        }
-
-        if requestContactsAccess {
-            guard ContactResolver.usageDescriptionEmbedded else {
-                throw ValidationError("This executable has no embedded Info.plist, so macOS cannot grant it Contacts access. Rebuild with `make build` (not a bare `swift build`).")
-            }
-            let disclaimedKey = "IMESSAGE_MAX_CONTACTS_REQUEST_DISCLAIMED"
-            if ProcessInfo.processInfo.environment[disclaimedKey] == nil {
-                guard let executable = Bundle.main.executablePath else {
-                    throw ValidationError("Cannot locate this executable to re-launch it.")
-                }
-                let child = try ResponsibilityDisclaim.spawn(
-                    path: executable,
-                    arguments: Array(CommandLine.arguments.dropFirst()),
-                    disclaim: true,
-                    extraEnvironment: [disclaimedKey: "1"]
-                )
-                let status = ResponsibilityDisclaim.wait(child)
-                if status != 0 { throw ExitCode(status) }
-                return
-            }
-            let resolver = ContactResolver()
-            await resolver.requestAccessIfAllowed(policy: .requestIfNeeded)
-            print("Contacts authorization: \(await resolver.authorization().status)")
-            return
-        }
 
         guard http else {
             if direct {

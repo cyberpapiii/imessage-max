@@ -130,7 +130,7 @@ curl -K - -X POST http://localhost:47821 \
 ### CLI options
 
 ```
-USAGE: imessage-max [--http] [--host <host>] [--port <port>] [--allow-external-bind] [--token-file <token-file>] [--contacts-policy <contacts-policy>] [--log-file <log-file>] [--request-contacts-access] [--request-messages-access]
+USAGE: imessage-max [--http] [--host <host>] [--port <port>] [--allow-external-bind] [--token-file <token-file>] [--socket-path <socket-path>] [--direct] [--contacts-policy <contacts-policy>] [--log-file <log-file>]
 
 OPTIONS:
   --http                  Run with HTTP transport instead of stdio
@@ -146,6 +146,15 @@ OPTIONS:
                           that holds anything but a token is left alone and the
                           server exits. Defaults to ~/Library/Application
                           Support/iMessage Max/token.
+  --socket-path <socket-path>
+                          Unix socket the helper listens on (with --http) or
+                          the stdio bridge connects to (without). Its folder
+                          must already exist and belong to you. Defaults to
+                          ~/Library/Application Support/iMessage Max/mcp.sock.
+  --direct                Serve stdio in this process instead of bridging to
+                          the running iMessage Max helper. For development and
+                          tests: this process then needs Full Disk Access
+                          itself.
   --contacts-policy <contacts-policy>
                           What to do when Contacts authorization is not yet
                           determined: auto (prompt only if stdin is a
@@ -155,16 +164,9 @@ OPTIONS:
   --log-file <log-file>   Append diagnostics to this file instead of stderr. A
                           leading ~/ means the home directory, because launchd
                           does not expand it.
-  --request-contacts-access
-                          Ask macOS for Contacts access once, print the
-                          resulting status, and exit. Run this from a terminal;
-                          the server never prompts when it has no terminal.
-  --request-messages-access
-                          Ask macOS for Automation access to Messages once,
-                          without sending a message, print the resulting
-                          status, and exit.
   --version               Show the version.
   -h, --help              Show help information.
+
 ```
 
 ## Testing
