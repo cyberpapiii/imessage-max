@@ -43,6 +43,20 @@ import Testing
   #expect(result[.permAutomation]?.isSupported == true)
   #expect(result[.permAutomation]?.detail == PermissionStatus.authorized.rawValue)
   #expect(result.capabilities["future_key"]?.state == "new")
+  #expect(result.assistantCalls == nil)
+}
+
+@Test func assistantCallsTravelAsASnakeCaseKey() throws {
+  let json = """
+    {"version":"2.0.0","process_id":7,"status":"ready",
+     "database":{"accessible":true,"status":"accessible","path":"~/Library/Messages/chat.db"},
+     "contacts":{"authorized":true,"status":"authorized"},
+     "capabilities":{},"assistant_calls":2}
+    """
+  let result = try JSONDecoder().decode(DiagnoseResult.self, from: Data(json.utf8))
+  #expect(result.assistantCalls == 2)
+  let encoded = try JSONEncoder().encode(result)
+  #expect(String(decoding: encoded, as: UTF8.self).contains(#""assistant_calls":2"#))
 }
 
 @Test func serverOptionsParseFlags() {

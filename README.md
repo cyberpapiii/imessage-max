@@ -449,6 +449,8 @@ diagnose()  # Returns: database status, contacts count, permissions, capabilitie
 
 Every `fix` names a step in the app for the helper inside `iMessage Max.app`, such as "Open iMessage Max and choose Read messages". The steps are Allow in the background, Read messages, Show names, Send messages, Connect an assistant, and Try it. For a bare executable, a fix names the System Settings switch to turn on. No fix names a terminal command.
 
+`assistant_calls` counts the `tools/call` requests this helper process has received from clients other than the companion app. The app's Try it step turns green when it is above zero.
+
 ## Release checks
 
 Before a release, work through:
@@ -524,8 +526,9 @@ messages". For a bare executable, it names the executable and steps 1 to 3:
    binary a stable identity so rebuilds keep the grant. An ad-hoc build
    does not. The first build after moving from the old self-signed
    "iMessage Max Dev" identity to Developer ID needs this toggle once.
-3. The grant applies only to newly launched processes. Restart iMessage Max
-   from its menu bar app, or run `cd swift && make restart`, which runs
+3. The grant applies only to newly launched processes. For the helper inside
+   the app, open iMessage Max again: its Read messages step restarts the
+   helper and checks. For a bare service, run `cd swift && make restart`, which runs
    `launchctl kickstart -k`. A restart within 10 seconds of the last launch
    waits out launchd's throttle.
 4. To narrow it down yourself, run `sqlite3 -readonly ~/Library/Messages/chat.db 'pragma quick_check;'` from a terminal.

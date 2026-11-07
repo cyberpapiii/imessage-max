@@ -55,6 +55,11 @@ struct JSONRPCMessage: @unchecked Sendable {
 
     var modernProtocolVersion: String? { meta?[ModernMetaKey.protocolVersion] as? String }
 
+    /// The modern-era clientInfo, which every stateless request carries.
+    var clientInfo: [String: Any]? { meta?[ModernMetaKey.clientInfo] as? [String: Any] }
+
+    var clientName: String? { clientInfo?["name"] as? String }
+
     /// Selects the era the same way on both transports. Only the body
     /// decides. Real legacy clients (plug) also send `Mcp-Method` and
     /// `MCP-Protocol-Version` on session traffic, so headers must never
@@ -177,9 +182,7 @@ enum EraLog {
 
     static func modern(_ message: JSONRPCMessage, transport: String, version: String) {
         var client = "unknown"
-        if let info = message.meta?[ModernMetaKey.clientInfo] as? [String: Any],
-            let name = info["name"] as? String
-        {
+        if let info = message.clientInfo, let name = info["name"] as? String {
             let clientVersion = info["version"] as? String ?? "?"
             client = "\(Log.sanitizedField(name))/\(Log.sanitizedField(clientVersion))"
         }

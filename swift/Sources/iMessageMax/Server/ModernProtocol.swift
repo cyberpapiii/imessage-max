@@ -93,7 +93,10 @@ enum ModernDispatcher {
             return error(id, .invalidParams, "Invalid parameter: arguments must be an object")
         }
 
-        switch await ToolCallDispatch.execute(name: name, arguments: message.toolArguments, lane: .modern(transport: transport), catalog: catalog) {
+        switch await ToolCallDispatch.execute(
+            name: name, arguments: message.toolArguments, lane: .modern(transport: transport), catalog: catalog,
+            fromCompanion: message.clientName == ServiceDefaults.companionClientName
+        ) {
         case .unknownTool:
             return error(id, .invalidParams, "Unknown tool: \(name)")
         case .completed(let content, let isError):
