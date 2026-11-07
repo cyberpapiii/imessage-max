@@ -68,6 +68,7 @@ extension ClientContext {
           throw CoreError.commandFailed("macOS could not open \(target.scheme ?? "the file").")
         }
       },
+      run: ClientContext.runProcess,
       extensionFiles: Bundle.main.resourceURL?.appendingPathComponent("mcpb"),
       helper: Bundle.main.bundleURL.appendingPathComponent(ServiceDefaults.helperBundlePath),
       scratch: FileManager.default.temporaryDirectory.appendingPathComponent("iMessage Max"))

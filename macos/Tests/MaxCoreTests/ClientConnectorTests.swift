@@ -334,7 +334,8 @@ private let codexBlock = """
   let recorder = Recorder()
   var context = ClientContext(
     home: home, application: { $0 == Client.claudeDesktopID ? app : nil },
-    open: { recorder.open(($0, $1)) }, extensionFiles: files, helper: helper,
+    open: { recorder.open(($0, $1)) }, run: ClientContext.runProcess,
+    extensionFiles: files, helper: helper,
     scratch: home.appendingPathComponent("scratch"))
   context.commandFolders = []
   #expect(Client.claudeDesktop.detect(context))

@@ -18,7 +18,8 @@ import Testing
 @Test func probeDefaultRunClosure() async throws {
   let context = ClientContext(
     home: URL(fileURLWithPath: NSTemporaryDirectory()), application: { _ in nil },
-    open: { _, _ in }, scratch: URL(fileURLWithPath: NSTemporaryDirectory()))
+    open: { _, _ in }, run: ClientContext.runProcess,
+    scratch: URL(fileURLWithPath: NSTemporaryDirectory()))
   let result = try await context.run("/usr/bin/true", [], [:])
   #expect(result.exitCode == 0)
 }

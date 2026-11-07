@@ -35,8 +35,7 @@ public struct ClientContext: Sendable {
   public init(
     home: URL, commandFolders: [URL]? = nil, application: @escaping @Sendable (String) -> URL?,
     open: @escaping @Sendable (URL, URL?) async throws -> Void,
-    run: @escaping @Sendable (String, [String], [String: String]) async throws -> ProcessResult =
-      { try await ProcessRunner.run($0, arguments: $1, environment: $2, timeout: 30) },
+    run: @escaping @Sendable (String, [String], [String: String]) async throws -> ProcessResult,
     extensionFiles: URL? = nil, helper: URL? = nil, scratch: URL
   ) {
     self.home = home
@@ -51,6 +50,15 @@ public struct ClientContext: Sendable {
     self.extensionFiles = extensionFiles
     self.helper = helper
     self.scratch = scratch
+  }
+
+  /// The real `run`. Passed explicitly: Swift 6.3 aborts when an async
+  /// closure literal is a default argument here.
+  @Sendable public static func runProcess(
+    _ executable: String, _ arguments: [String], _ environment: [String: String]
+  ) async throws -> ProcessResult {
+    try await ProcessRunner.run(
+      executable, arguments: arguments, environment: environment, timeout: 30)
   }
 
   func file(_ path: String) -> URL { home.appendingPathComponent(path) }
