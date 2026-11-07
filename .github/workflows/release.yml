@@ -31,8 +31,11 @@ jobs:
     needs: guard
     uses: ./.github/workflows/build.yml
 
+  # Runs beside checks, so a release waits for the slower of the two instead
+  # of both in turn. The release job needs both, so a failed check still
+  # blocks publishing.
   dmg:
-    needs: checks
+    needs: guard
     runs-on: macos-26
     # Two notarizations, each allowed up to 30 minutes.
     timeout-minutes: 90
@@ -45,8 +48,14 @@ jobs:
 
       - name: Show toolchain
         run: |
+          sysctl -n machdep.cpu.brand_string hw.ncpu
           xcodebuild -version
           swift --version
+
+      # The signed build uses exactly the pinned versions, and fails if
+      # Package.resolved is out of date.
+      - name: Resolve pinned dependencies
+        run: swift package --package-path swift resolve --force-resolved-versions
 
       - name: Build, sign, notarize, and staple the DMG and the Claude Desktop extension
         env:
@@ -107,7 +116,7 @@ jobs:
 
   # The cask reaches the tap only after the release holds the DMG it names.
   release:
-    needs: dmg
+    needs: [checks, dmg]
     if: startsWith(github.ref, 'refs/tags/v') && !inputs.dry_run
     runs-on: ubuntu-latest
     timeout-minutes: 10

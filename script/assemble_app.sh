@@ -37,9 +37,12 @@ HELPER_TOKEN_FILE="${HELPER_TOKEN_FILE:-}"
 SIGN_IDENTITY="$("$ROOT_DIR/script/signing_identity.sh")"
 export SIGN_IDENTITY
 
-swift build --package-path "$ROOT_DIR/macos" -c "$CONFIGURATION" --build-system native
-MENU_BIN_DIR="$(swift build --package-path "$ROOT_DIR/macos" -c "$CONFIGURATION" --build-system native --show-bin-path)"
+# The companion and the helper are separate packages, so they build at once.
+swift build --package-path "$ROOT_DIR/macos" -c "$CONFIGURATION" --build-system native &
+MENU_BUILD_PID=$!
 make -C "$ROOT_DIR/swift" sign
+wait "$MENU_BUILD_PID" || { echo "The companion build failed." >&2; exit 1; }
+MENU_BIN_DIR="$(swift build --package-path "$ROOT_DIR/macos" -c "$CONFIGURATION" --build-system native --show-bin-path)"
 VERSION="$("$ROOT_DIR/scripts/check-version.sh" --print)"
 
 # A fresh bundle every time. Copying over a binary that is running makes macOS
