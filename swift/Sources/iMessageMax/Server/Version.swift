@@ -3,7 +3,7 @@ import IMessageMaxContract
 import MCP
 
 enum Version {
-    static let current = "1.8.0"
+    static let current = "2.0.0"
     static let name = "iMessage Max"
     static let title = name
     static let display = "\(name) \(current)"

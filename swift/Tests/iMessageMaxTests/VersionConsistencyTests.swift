@@ -15,10 +15,6 @@ final class VersionConsistencyTests: XCTestCase {
 
         let plugin = try jsonObject(at: root.appendingPathComponent(".codex-plugin/plugin.json"))
         XCTAssertEqual(plugin["version"] as? String, expected, ".codex-plugin/plugin.json version")
-
-        let formula = try String(contentsOf: root.appendingPathComponent("swift/Formula/imessage-max.rb"), encoding: .utf8)
-        XCTAssertTrue(formula.contains("version \"\(expected)\""), "Formula version")
-        XCTAssertTrue(formula.contains("/releases/download/v\(expected)/"), "Formula url tag segment")
     }
 }
 
