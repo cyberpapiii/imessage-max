@@ -6,41 +6,60 @@ import IMessageMaxContract
 final class ServiceFilesContractTests: XCTestCase {
     private var root: URL { get throws { try findRepoRoot() } }
 
-    func testLaunchdTemplateMatchesContract() throws {
-        let url = try root.appendingPathComponent("swift/launchd/\(ServiceDefaults.launchdLabel).plist")
+    private static let agentPlistSource =
+        "macos/Resources/LaunchAgents/\(ServiceDefaults.launchdLabel).plist"
+
+    func testAgentPlistMatchesContract() throws {
+        let url = try root.appendingPathComponent(Self.agentPlistSource)
         let plist = try XCTUnwrap(
             PropertyListSerialization.propertyList(from: Data(contentsOf: url), format: nil) as? [String: Any])
         XCTAssertEqual(plist["Label"] as? String, ServiceDefaults.launchdLabel)
+        XCTAssertEqual(plist["BundleProgram"] as? String, ServiceDefaults.helperBundlePath)
+        XCTAssertNil(plist["Program"], "SMAppService resolves BundleProgram inside the app")
+        XCTAssertEqual(plist["AssociatedBundleIdentifiers"] as? [String], [ServiceDefaults.companionBundleID])
         XCTAssertEqual(
             plist["ProgramArguments"] as? [String],
-            ["__BIN__", ServerOption.http.flag, ServerOption.port.flag, String(ServiceDefaults.port)])
-        XCTAssertEqual(plist["StandardOutPath"] as? String, "~/\(ServiceDefaults.stdoutLogPath)")
-        XCTAssertEqual(plist["StandardErrorPath"] as? String, "~/\(ServiceDefaults.stderrLogPath)")
+            [
+                ServiceDefaults.executableName, ServerOption.http.flag,
+                ServerOption.port.flag, String(ServiceDefaults.port),
+                ServerOption.logFile.flag, "~/\(ServiceDefaults.logPath)",
+            ])
+        XCTAssertEqual(plist["RunAtLoad"] as? Bool, true)
+        let keepAlive = try XCTUnwrap(plist["KeepAlive"] as? [String: Bool])
+        XCTAssertEqual(keepAlive, ["Crashed": true, "SuccessfulExit": false],
+                       "a clean SIGTERM must leave the helper stopped")
+        XCTAssertNil(plist["StandardErrorPath"], "launchd does not expand ~; the helper opens its own log")
     }
 
     func testMakefileMatchesContract() throws {
         let makefile = try String(contentsOf: root.appendingPathComponent("swift/Makefile"), encoding: .utf8)
         for expected in [
             "LAUNCHD_LABEL := \(ServiceDefaults.launchdLabel)\n",
-            "PLIST        := $(HOME)/\(ServiceDefaults.launchAgentPath.replacingOccurrences(of: ServiceDefaults.launchdLabel, with: "$(LAUNCHD_LABEL)"))\n",
+            "AGENT_PLIST  := ../\(Self.agentPlistSource.replacingOccurrences(of: ServiceDefaults.launchdLabel, with: "$(LAUNCHD_LABEL)"))\n",
+            "LOG          := $(HOME)/\(ServiceDefaults.logPath)\n",
             "),\(ServiceDefaults.port))\n",
             "URL          := http://\(ServiceDefaults.host):$(PORT)\n",
-            "launchd/\(ServiceDefaults.launchdLabel).plist",
-            "tail -f ~/\(ServiceDefaults.stderrLogPath)\n",
-            "> ~/\(ServiceDefaults.stderrLogPath)",
-            "> ~/\(ServiceDefaults.stdoutLogPath)",
+            "launchctl kickstart -k gui/$$(id -u)/$(LAUNCHD_LABEL)",
+            "--args --register-helper",
+            "tail -f \"$(LOG)\"\n",
         ] {
             XCTAssertTrue(makefile.contains(expected), "swift/Makefile lacks \(expected.debugDescription)")
         }
+        XCTAssertFalse(makefile.contains("install-agent"), "the app registers the helper; no hand-rendered plist")
     }
 
     func testCompanionAssemblyScriptMatchesContract() throws {
         let script = try String(contentsOf: root.appendingPathComponent("script/assemble_app.sh"), encoding: .utf8)
-        let plist = "\(ServiceDefaults.launchdLabel).plist"
-        XCTAssertTrue(script.contains("swift/launchd/\(plist)"), "script/assemble_app.sh template source")
-        XCTAssertTrue(script.contains("Contents/Resources/\(plist)"), "script/assemble_app.sh bundled template")
-        XCTAssertTrue(script.contains("Contents/Resources/\(ServiceDefaults.executableName)"), "bundled helper name")
-        XCTAssertTrue(script.contains("BUNDLE_ID=\"\(ServiceDefaults.companionBundleID)\"\n"), "companion bundle id")
+        for (expected, what) in [
+            (Self.agentPlistSource, "agent plist source"),
+            ("$APP_BUNDLE/\(ServiceDefaults.agentPlistDirectory)/$HELPER_LABEL.plist", "bundled agent plist"),
+            ("\"$APP_BUNDLE/\(ServiceDefaults.helperBundlePath)\"", "helper inside the bundle"),
+            ("BUNDLE_ID=\"${APP_BUNDLE_ID:-\(ServiceDefaults.companionBundleID)}\"\n", "companion bundle id"),
+            ("sign.sh\" \"$APP_BUNDLE\" --entitlements \"$ENTITLEMENTS\"", "app signed with entitlements"),
+            ("rm -rf \"$APP_BUNDLE\"\n", "fresh bundle, never cp over a running binary"),
+        ] {
+            XCTAssertTrue(script.contains(expected), "script/assemble_app.sh: \(what)")
+        }
     }
 
     func testHelperEntitlementsGrantContactsAndAutomation() throws {
@@ -60,8 +79,10 @@ final class ServiceFilesContractTests: XCTestCase {
             "\(ServerOption.port.flag)=9191",
             ServerOption.contactsPolicy.flag, ContactsPolicyOption.skip.rawValue,
             ServerOption.allowExternalBind.flag,
+            ServerOption.logFile.flag, "~/x.log",
         ])
         XCTAssertTrue(command.http)
+        XCTAssertEqual(command.logFile, "~/x.log")
         XCTAssertEqual(command.host, "::1")
         XCTAssertEqual(command.port, 9191)
         XCTAssertEqual(command.contactsPolicy, .skip)

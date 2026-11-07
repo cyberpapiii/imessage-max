@@ -47,7 +47,7 @@ import Testing
 
 @Test func serverOptionsParseFlags() {
   #expect(ServerOption.allCases.map(\.flag)
-    == ["--http", "--host", "--port", "--contacts-policy", "--allow-external-bind"])
+    == ["--http", "--host", "--port", "--contacts-policy", "--allow-external-bind", "--log-file"])
   #expect(ServerOption(flag: "--contacts-policy") == .contactsPolicy)
   #expect(ServerOption(flag: "contacts-policy") == nil)
   #expect(SetupPermissionRoute.path == "/setup/permissions")

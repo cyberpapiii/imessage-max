@@ -84,13 +84,24 @@ final class DiagnoseToolTests: XCTestCase {
         XCTAssertTrue(fix.contains("Full Disk Access"), fix)
         XCTAssertTrue(fix.contains("toggle it off and on"), fix)
         XCTAssertTrue(fix.contains("make restart"), fix)
-        XCTAssertFalse(fix.contains("kickstart"), "kickstart hits the launchd crash throttle")
+        XCTAssertTrue(fix.contains("kickstart -k gui/<uid>/\(ServiceDefaults.launchdLabel)"), fix)
         XCTAssertTrue(fix.contains("pragma quick_check"), fix)
         XCTAssertTrue(fix.contains("newly launched"), fix)
         XCTAssertEqual(result.capabilities["perm_full_disk"]?.fix, fix,
                        "perm_full_disk.fix must carry the same remediation")
 
         XCTAssertFalse(json.contains(NSHomeDirectory()), "fix must not leak the home directory: \(json)")
+    }
+
+    func testGrantTargetIsTheAppForAnInBundleHelper() {
+        XCTAssertEqual(
+            DiagnoseTool.grantTarget(executable: "/Applications/iMessage Max.app/Contents/MacOS/imessage-max"),
+            "/Applications/iMessage Max.app")
+        XCTAssertEqual(
+            DiagnoseTool.grantTarget(executable: "/opt/bin/imessage-max"), "/opt/bin/imessage-max")
+        XCTAssertEqual(
+            DiagnoseTool.grantTarget(executable: "/tmp/Contents/MacOS/imessage-max"),
+            "/tmp/Contents/MacOS/imessage-max")
     }
 
     func testFeaturesReportedWhenDatabaseAccessible() async throws {

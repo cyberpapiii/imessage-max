@@ -26,6 +26,9 @@ struct iMessageMax: AsyncParsableCommand {
     @Option(name: .customLong(ServerOption.contactsPolicy.rawValue), help: "What to do when Contacts authorization is not yet determined: auto (prompt only if stdin is a terminal), request, or skip. With auto, the server honours IMESSAGE_MAX_CONTACTS_POLICY=request|skip.")
     var contactsPolicy: ContactsAccessPolicy.Override = .auto
 
+    @Option(name: .customLong(ServerOption.logFile.rawValue), help: "Append diagnostics to this file instead of stderr. A leading ~/ means the home directory, because launchd does not expand it.")
+    var logFile: String?
+
     @Flag(name: .long, help: "Ask macOS for Contacts access once, print the resulting status, and exit. Run this from a terminal; the server never prompts when it has no terminal.")
     var requestContactsAccess = false
 
@@ -39,6 +42,8 @@ struct iMessageMax: AsyncParsableCommand {
     }
 
     mutating func run() async throws {
+        if let logFile { try Log.redirectStandardError(to: logFile) }
+
         if requestMessagesAccess {
             let (_, status) = await AutomationPermission.requestAccess()
             print("Messages automation: \(status)")

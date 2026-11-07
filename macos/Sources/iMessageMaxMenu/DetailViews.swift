@@ -14,12 +14,12 @@ struct SetupStep: View {
           if diagnosis.database.status == .permissionDenied {
             heading("Let Messages in")
             line(
-              "In Full Disk Access, click + and add the iMessage Max helper shown in Finder. Then come back and restart it."
+              "In Full Disk Access, turn on iMessage Max. If it isn’t listed, click + and add the iMessage Max app shown in Finder. Then come back and restart it."
             )
             buttons {
               Button("Open Settings") { model.openSettings("Privacy_AllFiles") }
                 .buttonStyle(MaxButtonStyle(primary: true))
-              Button("Show helper") { model.revealHelper() }
+              Button("Show app") { model.revealApp() }
               Button("Restart after allowing") { model.perform(.restart) }
                 .disabled(model.busy != nil)
             }
@@ -52,11 +52,14 @@ struct SetupStep: View {
               if [.denied, .restricted].contains(diagnosis.contacts.status) {
                 Button("Open Contacts Settings") { model.openSettings("Privacy_Contacts") }
                   .buttonStyle(MaxButtonStyle(primary: true))
+                // The helper reads Contacts access once at launch.
+                Button("Restart after allowing") { model.perform(.restart) }
+                  .disabled(model.busy != nil)
               } else {
                 Button("Allow Contacts") { model.request(.contacts) }
                   .buttonStyle(MaxButtonStyle(primary: true)).disabled(model.busy != nil)
+                recheck
               }
-              recheck
             }
           }
         case .sending:
@@ -176,7 +179,7 @@ struct ConnectionView: View {
         .menuStyle(.button).fixedSize()
       }
       .buttonStyle(MaxButtonStyle())
-      .disabled(model.inspection == nil)
+      .disabled(model.service == nil)
       Text("This address works only on this Mac. Each assistant controls its own tool approvals.")
         .font(.maxSmall).foregroundStyle(Design.muted).fixedSize(horizontal: false, vertical: true)
     }

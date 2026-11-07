@@ -60,18 +60,27 @@ enum DiagnoseTool {
     }
 
     static var executableForGrant: String {
-        let raw = Bundle.main.executablePath ?? CommandLine.arguments.first ?? ServiceDefaults.executableName
-        return (raw as NSString).abbreviatingWithTildeInPath
+        grantTarget(executable: Bundle.main.executablePath ?? CommandLine.arguments.first ?? ServiceDefaults.executableName)
+    }
+
+    /// The app that holds the grant when this helper runs inside one, since
+    /// macOS charges an in-bundle helper's privacy access to its app.
+    static func grantTarget(executable: String) -> String {
+        let suffix = "/" + ServiceDefaults.helperBundlePath
+        let app = executable.dropLast(suffix.count)
+        let target = executable.hasSuffix(suffix) && app.hasSuffix(".app") ? String(app) : executable
+        return (target as NSString).abbreviatingWithTildeInPath
     }
 
     static func fullDiskAccessFix(executable: String = executableForGrant) -> String {
         "Full Disk Access is missing for the process reading chat.db (\(executable)). "
-            + "1) System Settings -> Privacy & Security -> Full Disk Access -> add that executable "
+            + "1) System Settings -> Privacy & Security -> Full Disk Access -> add that app or executable "
             + "(or the app that launches it, such as Terminal). "
             + "2) If it is already listed, toggle it off and on: a grant bound to an older "
             + "code signature looks present but does not work. "
             + "3) The grant applies only to newly launched processes; relaunch this server: "
-            + "`make restart` in swift/ (launchctl bootout, then bootstrap, of ~/\(ServiceDefaults.launchAgentPath)), "
+            + "Restart iMessage Max from its menu bar app, or run `make restart` in swift/ "
+            + "(launchctl kickstart -k gui/<uid>/\(ServiceDefaults.launchdLabel)), "
             + "or reconnect the MCP client for stdio. "
             + "4) To bisect, run sqlite3 -readonly ~/Library/Messages/chat.db 'pragma quick_check;' "
             + "from a terminal: 'ok' means the terminal has access and this process does not; "

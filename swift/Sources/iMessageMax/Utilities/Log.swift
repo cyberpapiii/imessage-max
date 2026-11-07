@@ -31,6 +31,20 @@ enum Log {
         FileHandle.standardError.write(Data(format(level, message()).utf8))
     }
 
+    /// Points stderr at `path`, appending, so launchd needs no StandardErrorPath.
+    /// A leading `~` expands here because launchd passes arguments verbatim.
+    static func redirectStandardError(to path: String) throws {
+        let url = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let file = open(url.path, O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0o644)
+        guard file >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        defer { close(file) }
+        guard dup2(file, STDERR_FILENO) >= 0 else {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+    }
+
     static func info(_ message: @autoclosure () -> String) { write(.info, message()) }
     static func warning(_ message: @autoclosure () -> String) { write(.warning, message()) }
     static func error(_ message: @autoclosure () -> String) { write(.error, message()) }
