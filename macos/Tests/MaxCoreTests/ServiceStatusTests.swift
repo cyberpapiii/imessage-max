@@ -92,6 +92,7 @@ import Testing
     bundleIdentifier: ServiceDefaults.companionBundleID,
     bundleURL: URL(fileURLWithPath: "/Applications/iMessage Max.app"), home: home)
   #expect(ipv6.endpoint.absoluteString == "http://[::1]:9191/")
+  try parse(agentPlist(arguments: ["imessage-max", "--http", "--socket-path", "/tmp/test/mcp.sock"]))
   #expect(throws: CoreError.self) { try parse(agentPlist(), name: "other.plist") }
   #expect(throws: CoreError.self) { try parse(agentPlist(bundleID: "com.example.other")) }
   #expect(throws: CoreError.self) { try parse(agentPlist(program: "Contents/MacOS/other")) }

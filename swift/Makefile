@@ -89,6 +89,8 @@ version: ## Print the version and check all copies agree
 	@../scripts/check-version.sh
 
 release-check: build test version ## Everything that must pass before tagging
+	@# The SIGTERM abort (#27) only happened in optimized builds.
+	@IMESSAGE_MAX_BINARY=$(BINARY) swift test --skip-build --filter SignalShutdownTests
 	@../scripts/check-version.sh --tag || echo "Not on a matching tag yet (expected before tagging)."
 	@ruby -c Formula/imessage-max.rb
 	@echo "Release checks passed. Next: git tag v$$(../scripts/check-version.sh --print) && git push --tags"

@@ -121,7 +121,7 @@ jobs:
           xcodebuild -version
           swift --version
 
-      - name: Build, sign, notarize, and staple the DMG
+      - name: Build, sign, notarize, and staple the DMG and the Claude Desktop extension
         env:
           MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
           MACOS_CERTIFICATE_PASS: ${{ secrets.MACOS_CERTIFICATE_PASS }}
@@ -136,6 +136,13 @@ jobs:
         with:
           name: iMessage-Max-dmg
           path: dist/*.dmg
+          if-no-files-found: error
+
+      - name: Upload Claude Desktop extension as workflow artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: iMessage-Max-mcpb
+          path: dist/*.mcpb
           if-no-files-found: error
 
   # One job creates the release, so the tarball and DMG jobs never race to
@@ -161,6 +168,7 @@ jobs:
           files: |
             assets/imessage-max-macos.tar.gz
             assets/iMessage-Max-*.dmg
+            assets/iMessage-Max-*.mcpb
           fail_on_unmatched_files: true
           generate_release_notes: true
           append_body: true

@@ -80,7 +80,7 @@ public struct ServiceConfiguration: Sendable, Equatable {
             value.hasPrefix("~/")
             ? home.appendingPathComponent(String(value.dropFirst(2)))
             : URL(fileURLWithPath: value)
-        case .http, .allowExternalBind: break
+        case .http, .allowExternalBind, .socketPath: break
         }
       }
       index += 1

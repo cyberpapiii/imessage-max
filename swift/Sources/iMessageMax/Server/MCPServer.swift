@@ -40,27 +40,39 @@ enum ServerStartup {
     static func serveStdio(base: any Transport, catalog: ToolCatalog) async throws {
         let server = await Version.makeServer(catalog: catalog)
         let stdio = DualEraStdio(base: base, catalog: catalog)
-        try await stdio.start()
-        try await server.start(transport: stdio.legacy)
+        do {
+            try await stdio.start()
+            try await server.start(transport: stdio.legacy)
+        } catch {
+            // Releases the base transport, which on the socket lane holds
+            // the connection's fd.
+            await stdio.stop()
+            throw error
+        }
         await server.waitUntilCompleted()
         await stdio.drain()
     }
 
     static func runHTTP(
-        host: String, port: Int, accessToken: AccessToken, contactsPolicy: ContactsAccessPolicy.Override
+        host: String, port: Int, accessToken: AccessToken, contactsPolicy: ContactsAccessPolicy.Override,
+        socketOverride: String?
     ) async throws {
         let resolver = ContactResolver()
         let (newRows, newRowsSink) = AsyncStream<Int64>.makeStream()
         let watcher = MessageWatcher(databasePath: Database.defaultPath) { newRowsSink.yield($0) }
+        let catalog = ToolCatalog(database: Database(), resolver: resolver, liveInbox: { watcher.isLive })
         let transport = HTTPTransport(
             host: host,
             port: port,
             accessToken: accessToken,
-            catalog: ToolCatalog(database: Database(), resolver: resolver, liveInbox: { watcher.isLive }),
+            catalog: catalog,
             setupPermissions: SetupPermissionService(resolver: resolver)
         )
 
         try await transport.connect()
+        // After the HTTP bind, so a second helper on the same port fails
+        // there before it touches the socket.
+        let listener = await startSocketListener(override: socketOverride, catalog: catalog)
         announce(transport: "http addr=\(host):\(port)", resolver: resolver, contactsPolicy: contactsPolicy)
 
         Task {
@@ -70,6 +82,37 @@ enum ServerStartup {
         }
         watcher.start()
         defer { watcher.stop() }
-        try await transport.waitForTermination()
+        do {
+            try await transport.waitForTermination()
+        } catch {
+            await listener?.stop()
+            throw error
+        }
+        await listener?.stop()
+    }
+
+    /// Starts the socket every stdio bridge connects to. Each connection is
+    /// its own dual-era session over the shared catalog.
+    ///
+    /// Best effort: returns nil with one warning on any socket problem, and
+    /// HTTP keeps serving. The helper runs under launchd KeepAlive, so a
+    /// helper that exited over its socket would restart into the same
+    /// problem in a loop and take HTTP down with it.
+    static func startSocketListener(override: String?, catalog: ToolCatalog) async -> SocketListener? {
+        do throws(SocketSetupError) {
+            let socket = try SocketPath.resolve(override: override)
+            return try await SocketListener.start(at: socket) { transport in
+                do {
+                    try await serveStdio(base: transport, catalog: catalog)
+                } catch {
+                    Log.warning("socket session ended: \(error)")
+                }
+            }
+        } catch .inUse(let path) {
+            Log.warning("Another iMessage Max answers on \(path); stdio bridges use it. Serving HTTP only.")
+        } catch {
+            Log.warning("Serving HTTP only; stdio bridges cannot connect. \(error)")
+        }
+        return nil
     }
 }

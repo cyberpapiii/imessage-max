@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Builds iMessage Max.app, notarizes and staples it, wraps it in a signed,
-# notarized and stapled DMG, and checks the result before anything uploads.
+# notarized and stapled DMG, packs the Claude Desktop extension around the
+# same signed helper, and checks the results before anything uploads.
 #
 # Usage: sign-notarize-app.sh [--local] <output dir>
 #
@@ -176,6 +177,22 @@ xcrun stapler staple "$DMG"
 xcrun stapler validate "$DMG"
 spctl -a -t open --context context:primary-signature -vv "$DMG"
 
+echo "==> Building the Claude Desktop extension"
+MCPB="$("$ROOT_DIR/scripts/build-mcpb.sh" "$HELPER" "$WORK_DIR/mcpb" | tail -n 1)"
+MCPB_NAME="$(basename "$MCPB")"
+[[ "$MCPB_NAME" == "iMessage-Max-$VERSION.mcpb" ]] || fail "unexpected extension name $MCPB_NAME"
+
+# A bare binary cannot be stapled. Gatekeeper finds its ticket online when
+# Claude Desktop first runs the unpacked copy.
+echo "==> Notarizing the binary inside $MCPB_NAME"
+mkdir -p "$WORK_DIR/mcpb-binary"
+unzip -q "$MCPB" server/imessage-max -d "$WORK_DIR/mcpb-binary"
+ditto -c -k "$WORK_DIR/mcpb-binary/server/imessage-max" "$WORK_DIR/mcpb-binary.zip"
+notarize "$WORK_DIR/mcpb-binary.zip"
+
 mkdir -p "$OUT_DIR"
 mv "$DMG" "$OUT_DIR/$DMG_NAME"
-echo "$OUT_DIR/$DMG_NAME $(du -h "$OUT_DIR/$DMG_NAME" | cut -f1) sha256 $(shasum -a 256 "$OUT_DIR/$DMG_NAME" | cut -d' ' -f1)"
+mv "$MCPB" "$OUT_DIR/$MCPB_NAME"
+for artifact in "$OUT_DIR/$DMG_NAME" "$OUT_DIR/$MCPB_NAME"; do
+  echo "$artifact $(du -h "$artifact" | cut -f1) sha256 $(shasum -a 256 "$artifact" | cut -d' ' -f1)"
+done

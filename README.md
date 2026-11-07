@@ -139,6 +139,17 @@ headers over HTTP. Legacy clients keep working without changes. No client
 has to migrate, and legacy support stays as long as real clients depend
 on it.
 
+Stdio clients do not run the server themselves. `imessage-max` launched
+with no transport flag is a bridge: it copies stdin and stdout to the running
+helper (`imessage-max --http`) over the Unix socket
+`~/Library/Application Support/iMessage Max/mcp.sock` (mode 0600), so only the
+helper needs Full Disk Access, Contacts and Automation. Each bridge connection
+is its own stdio session, serving both eras. When the helper is not running,
+the bridge answers the first request with "Open iMessage Max to start it." and
+exits. `imessage-max --direct` serves stdio in process, as before, for
+development. If the home folder path is too long for a socket address, both
+sides use `imessage-max.sock` in the per-user temporary folder instead.
+
 The server implements only tools. By design, it has no prompts, resources,
 completion, subscriptions, tasks, or MRTR flows. The official
 conformance suite runs against both eras with the documented baseline in
@@ -187,7 +198,7 @@ To grant access by hand instead, add `imessage-max` in System Settings → Priva
 
 ### 3. Configure your MCP client
 
-Add `imessage-max` to your MCP client's server configuration.
+Add `imessage-max` to your MCP client's server configuration. Bare `imessage-max` is a bridge to the iMessage Max helper, so iMessage Max must be running for the client to reach your messages.
 
 Many MCP clients use a JSON structure like this:
 
@@ -499,8 +510,10 @@ If `diagnose` reports `contacts.status: "not_requested_headless"`, run `imessage
 
 Full Disk Access is missing for the **process that opens chat.db**. For
 the helper inside `iMessage Max.app`, macOS charges the access to the app,
-so turn on iMessage Max. For a bare `imessage-max` binary, that process is
-the binary itself. For stdio clients, it is the app that spawns the binary. Run `diagnose`. Its
+so turn on iMessage Max. For a bare `imessage-max` launchd service, that
+process is the binary itself. Stdio clients reach the helper through the
+bridge, so they need no grant of their own. Only `--direct` makes the app
+that spawns the binary need it. Run `diagnose`. Its
 `database.fix` field names the executable and the steps:
 
 1. System Settings → Privacy & Security → Full Disk Access → add that

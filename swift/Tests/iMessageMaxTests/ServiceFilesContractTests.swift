@@ -96,9 +96,11 @@ final class ServiceFilesContractTests: XCTestCase {
             ServerOption.contactsPolicy.flag, ContactsPolicyOption.skip.rawValue,
             ServerOption.allowExternalBind.flag,
             ServerOption.logFile.flag, "~/x.log",
+            ServerOption.socketPath.flag, "/tmp/x.sock",
         ])
         XCTAssertTrue(command.http)
         XCTAssertEqual(command.logFile, "~/x.log")
+        XCTAssertEqual(command.socketPath, "/tmp/x.sock")
         XCTAssertEqual(command.host, "::1")
         XCTAssertEqual(command.port, 9191)
         XCTAssertEqual(command.contactsPolicy, .skip)

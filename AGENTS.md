@@ -21,7 +21,7 @@ make install    # builds the app, installs it to ~/Applications, registers the h
 
 It builds `dist/iMessage Max.app` with `script/assemble_app.sh`, removes `~/Applications/iMessage Max.app` and copies the new bundle there (never copy over a running signed binary: macOS kills the process), then opens the app with `--register-helper`. That flag registers the helper with `SMAppService`, restarts a running one on the new binary, and replaces an install of the pre-2.0 `local.imessage-max` agent. The helper runs from `Contents/MacOS/imessage-max` inside the app, under the agent plist `macos/Resources/LaunchAgents/com.cyberpapiii.imessage-max.helper.plist`, which the app bundles in `Contents/Library/LaunchAgents/`. macOS charges an in-bundle helper's Full Disk Access, Contacts and Automation to the app, so each Privacy list shows one "iMessage Max". Do not hand-write a plist into `~/Library/LaunchAgents`.
 
-A live check that must not disturb the installed helper builds a test variant: `APP_NAME`, `APP_BUNDLE_ID`, `HELPER_LABEL` and `HELPER_PORT` override the app name, bundle id, label and port in `script/assemble_app.sh`. A test variant never touches a pre-2.0 install. Remove it with `open "<app>" --args --unregister-helper`, then delete the app.
+A live check that must not disturb the installed helper builds a test variant: `APP_NAME`, `APP_BUNDLE_ID`, `HELPER_LABEL`, `HELPER_PORT` and `HELPER_SOCKET` override the app name, bundle id, label, port and socket path in `script/assemble_app.sh`. The socket's folder must already exist with mode 0700. A test variant never touches a pre-2.0 install. Remove it with `open "<app>" --args --unregister-helper`, then delete the app.
 
 The binaries are signed with hardened runtime and the entitlements in `swift/iMessageMax.entitlements`, the app and the helper alike. The identity comes from `script/signing_identity.sh`: `SIGN_IDENTITY` (a certificate SHA-1) when set, otherwise the valid "Developer ID Application" identity in the keychain that expires last. A stable Developer ID signature keeps macOS from revoking Full Disk Access on every rebuild. A contributor without a Developer ID gets an ad-hoc signature and a printed warning, and must grant Full Disk Access again after each build. `make sign` builds and signs without touching the service.
 
@@ -30,7 +30,7 @@ Other Makefile targets:
 - `make status` checks process, version, signature, health
 - `make app` builds and signs `dist/iMessage Max.app` without installing it
 - `make logs` tails the helper log, `~/Library/Logs/iMessage Max/imessage-max.log`. launchd cannot expand `~`, so the plist passes `--log-file` and the server opens the file itself
-- `make restart` runs `launchctl kickstart -k` on the helper. A kickstart within the plist's 10 second `ThrottleInterval` of the last launch waits out the rest of it. Do not stop the helper with `launchctl kill`: the server aborts while shutting down ([#27](https://github.com/cyberpapiii/imessage-max/issues/27)), so `KeepAlive` treats a SIGTERM as a crash and relaunches it. The companion stops it with `launchctl bootout` and starts it again by registering
+- `make restart` runs `launchctl kickstart -k` on the helper. A kickstart within the plist's 10 second `ThrottleInterval` of the last launch waits out the rest of it. The server exits 0 on SIGTERM, and the plist's `KeepAlive` has `SuccessfulExit` false, so launchd does not relaunch after a clean `launchctl kill`. The companion still stops the helper with `launchctl bootout`, which unloads the job so no exit status can relaunch it, and starts it again by registering.
 - `make clean` removes debug artifacts and clears the helper log
 - `make version` checks that the five version sites agree, and `make release-check` runs everything that must pass before tagging (see `docs/RELEASING.md`)
 
@@ -49,13 +49,18 @@ cd swift
 make build   # a bare `swift build` omits the embedded Info.plist, so Contacts can never be granted
 BIN=.build/arm64-apple-macosx/release/imessage-max
 
-# stdio mode (for Codex Desktop)
+# stdio bridge (what Codex and Claude Desktop launch): copies stdio to the
+# running helper's socket and reads no Messages data itself
 $BIN
 
-# HTTP mode (for plug, Inspector, etc.), with a scratch token so it
-# does not share the installed service's port or token
+# stdio served in this process, for development; needs its own Full Disk Access
+$BIN --direct
+
+# HTTP mode (for plug, Inspector, etc.), with a scratch token and socket so it
+# does not share the installed service's port, token or socket
 mkdir -m 700 -p /tmp/imax-dev
-$BIN --http --port 18484 --token-file /tmp/imax-dev/token
+$BIN --http --port 18484 --token-file /tmp/imax-dev/token --socket-path /tmp/imax-dev/mcp.sock
+$BIN --socket-path /tmp/imax-dev/mcp.sock   # a bridge to that helper
 
 # one-shot Contacts prompt; re-launches itself disclaimed so the grant is
 # recorded for this executable, not the terminal
@@ -86,8 +91,8 @@ The wire contract shared with the companion app has its own tests: `cd contract 
 The HTTP examples pass the token to curl on stdin (`-K -`), because other users can read a process's arguments with `ps`.
 
 ```bash
-# stdio mode
-echo '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' | ./.build/release/imessage-max
+# stdio mode, in process
+echo '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' | ./.build/release/imessage-max --direct
 
 # HTTP mode, legacy era (session-based)
 printf 'header = "Authorization: Bearer %s"\n' "$(cat ~/Library/Application\ Support/iMessage\ Max/token)" |
@@ -191,7 +196,11 @@ the cancellable `DispatchSourceTimer` pattern in
 can be cancelled. A cancelled asyncAfter work item stays enqueued until
 its deadline, and under load it retains each request's timeout timer. `Task.sleep` crashed production on
 2026-06-11 in the send-confirmation timeout path. Do not reintroduce it.
-`LaunchdSafetyTests` enforces this rule.
+The rule covers library code you configure into a sleep too. ServiceGroup's
+`maximumGracefulShutdownDuration` made every release-build SIGTERM abort
+(#27), so `HTTPTransport` bounds the drain with its own Dispatch timer.
+`LaunchdSafetyTests` enforces this rule, and `SignalShutdownTests` checks
+that a spawned server exits 0 on SIGTERM.
 
 ### Send contract (no confirmation gate)
 
