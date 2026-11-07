@@ -30,8 +30,8 @@ final class StdioBridgeTests: XCTestCase {
         try? FileManager.default.removeItem(atPath: folder)
     }
 
-    private func startHelper(catalog: ToolCatalog = makeTestCatalog(), log: Log.Capture? = nil) throws {
-        listener = try SocketListener.start(at: socket) { transport in
+    private func startHelper(catalog: ToolCatalog = makeTestCatalog(), log: Log.Capture? = nil) async throws {
+        listener = try await SocketListener.start(at: socket) { transport in
             await Log.$capture.withValue(log) {
                 try? await ServerStartup.serveStdio(base: transport, catalog: catalog)
             }
@@ -53,7 +53,7 @@ final class StdioBridgeTests: XCTestCase {
     }
 
     func testLegacySessionRunsThroughTheBridge() async throws {
-        try startHelper()
+        try await startHelper()
         let bridge = try startBridge()
         try initialize(bridge)
 
@@ -78,7 +78,7 @@ final class StdioBridgeTests: XCTestCase {
     }
 
     func testModernRequestsRunThroughTheBridge() async throws {
-        try startHelper()
+        try await startHelper()
         let bridge = try startBridge()
 
         bridge.send(modernBody(id: 1, method: "server/discover"))
@@ -137,7 +137,7 @@ final class StdioBridgeTests: XCTestCase {
     }
 
     func testStdinReadErrorIsAnIOFailure() async throws {
-        try startHelper()
+        try await startHelper()
         // read(2) on a folder fails with EISDIR.
         let unreadable = open(folder, O_RDONLY)
         defer { close(unreadable) }
@@ -162,7 +162,7 @@ final class StdioBridgeTests: XCTestCase {
     // The legacy lane cannot show this: the SDK server drops a reply still
     // in flight when its input ends, the same as with --direct.
     func testClosingStdinStillDeliversThePendingReplyThenFinishes() async throws {
-        try startHelper()
+        try await startHelper()
         let bridge = try startBridge()
 
         bridge.send(modernBody(id: 4, method: "tools/call", params: #""name":"diagnose","arguments":{}"#))
@@ -177,7 +177,7 @@ final class StdioBridgeTests: XCTestCase {
     }
 
     func testHelperStopMidSessionIsHelperDisconnected() async throws {
-        try startHelper()
+        try await startHelper()
         let bridge = try startBridge()
         try initialize(bridge)
 
@@ -192,7 +192,7 @@ final class StdioBridgeTests: XCTestCase {
         let bridge = try startBridge(grace: .seconds(2))
         bridge.send(initializeBody(id: 1, protocolVersion: "2025-11-25"))
         usleep(150_000)
-        try startHelper()
+        try await startHelper()
 
         let reply = try bridge.output.nextJSON()
         XCTAssertEqual(reply["id"] as? Int, 1)
@@ -214,7 +214,7 @@ final class StdioBridgeTests: XCTestCase {
             throw CancellationError()
         }
         let log = Log.Capture()
-        try startHelper(catalog: ToolCatalog([parked]), log: log)
+        try await startHelper(catalog: ToolCatalog([parked]), log: log)
         let bridge = try startBridge()
         try initialize(bridge)
 

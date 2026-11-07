@@ -23,6 +23,12 @@ final class SocketListener: Sendable {
     /// Bounds one turn of the accept handler, so a connect storm cannot hold
     /// the queue that stop() needs.
     private static let acceptsPerTurn = 32
+    /// Live connections past this are accepted and closed at once, so a
+    /// client that opens bridges in a loop cannot exhaust descriptors.
+    static let maxConnections = 64
+    /// How long accepting pauses after accept fails for a reason other than
+    /// the queue being empty.
+    private static let acceptBackoff: DispatchTimeInterval = .milliseconds(250)
     /// How long a live helper may take to accept the reclaim probe.
     private static let probeTimeout: Duration = .milliseconds(500)
     /// How long start waits for another helper to finish its own setup.
@@ -35,6 +41,8 @@ final class SocketListener: Sendable {
         var acceptSource: (any DispatchSourceRead)?
         var backoff: (any DispatchSourceTimer)?
         var rejections = LogThrottle(interval: .seconds(10))
+        var overflows = LogThrottle(interval: .seconds(10))
+        var acceptFailures = LogThrottle(interval: .seconds(10))
     }
 
     private let state = Mutex(State())
@@ -56,9 +64,27 @@ final class SocketListener: Sendable {
     /// Prepares the folder, reclaims a stale socket, binds 0600, listens,
     /// and starts accepting. Leaves no socket file behind when a step after
     /// bind fails.
+    ///
+    /// Setup can block for up to `setupLockTimeout` plus `probeTimeout`, so
+    /// it runs on its own thread and no cooperative thread waits on it.
     static func start(
         at socket: SocketPath,
         peerPolicy: @escaping PeerPolicy = SocketListener.sameUser,
+        serve: @escaping Serve
+    ) async throws(SocketSetupError) -> SocketListener {
+        let result = await withCheckedContinuation { (done: CheckedContinuation<Result<SocketListener, SocketSetupError>, Never>) in
+            Thread.detachNewThread {
+                done.resume(returning: Result { () throws(SocketSetupError) in
+                    try startBlocking(at: socket, peerPolicy: peerPolicy, serve: serve)
+                })
+            }
+        }
+        return try result.get()
+    }
+
+    private static func startBlocking(
+        at socket: SocketPath,
+        peerPolicy: @escaping PeerPolicy,
         serve: @escaping Serve
     ) throws(SocketSetupError) -> SocketListener {
         do {
@@ -71,7 +97,8 @@ final class SocketListener: Sendable {
         }
         // Two helpers starting at once would otherwise both judge the old
         // socket stale, and the second would unlink the first one's new
-        // socket. Held until this function returns.
+        // socket. Held until the new socket listens (the consume below) or
+        // setup throws, so a second helper's probe finds a live socket.
         let lock = try SetupLock(beside: socket, timeout: setupLockTimeout)
         try reclaimStale(socket)
 
@@ -90,7 +117,13 @@ final class SocketListener: Sendable {
         guard bindResult == 0 else {
             throw bindError == EADDRINUSE ? .inUse(path: socket.path) : .posix(socket.path, "bind", bindError)
         }
-        guard let bound = FileIdentity(at: socket.path) else { throw .posix(socket.path, "stat", errno) }
+        guard let bound = FileIdentity(at: socket.path) else {
+            let code = errno
+            // The path cannot be checked, so it is unlinked as bound. The
+            // setup lock keeps a cooperating helper from binding it meanwhile.
+            Darwin.unlink(socket.path)
+            throw .posix(socket.path, "stat", code)
+        }
         do throws(SocketSetupError) {
             guard chmod(socket.path, 0o600) == 0 else { throw .posix(socket.path, "chmod", errno) }
             guard listen(owned.fd, 64) == 0 else { throw .posix(socket.path, "listen on", errno) }
@@ -146,13 +179,13 @@ final class SocketListener: Sendable {
         for _ in 0..<Self.acceptsPerTurn {
             let fd = accept(listenFD, nil, nil)
             if fd < 0 {
-                switch errno {
+                let code = errno
+                switch code {
                 case EAGAIN: return
                 case EINTR, ECONNABORTED: continue
-                case EMFILE, ENFILE: pauseAccepting(); return
-                default:
-                    Log.error("socket accept failed: \(String(cString: strerror(errno)))")
-                    return
+                // EMFILE, ENFILE, ENOBUFS, ENOMEM and the rest leave the
+                // connection queued, so the source stays readable.
+                default: pauseAccepting(after: code); return
                 }
             }
             let owned: OwnedSocket
@@ -165,8 +198,19 @@ final class SocketListener: Sendable {
             let uid = owned.peerUID()
             guard let uid, peerPolicy(uid) else {
                 if let held = state.withLock({ $0.rejections.admit() }) {
-                    let more = held > 0 ? " (\(held) more since the last warning)" : ""
-                    Log.warning("socket peer uid=\(uid.map(String.init) ?? "unknown") rejected\(more)")
+                    Log.warning("socket peer uid=\(uid.map(String.init) ?? "unknown") rejected\(Self.heldNote(held))")
+                }
+                continue
+            }
+            // Only this queue adds connections, so the count cannot grow
+            // between this check and the insert below.
+            let overflow: (full: Bool, held: Int?) = state.withLock { state in
+                guard state.connections.count >= Self.maxConnections else { return (false, nil) }
+                return (true, state.overflows.admit())
+            }
+            if overflow.full {
+                if let held = overflow.held {
+                    Log.warning("socket has \(Self.maxConnections) live connections; closed a new one\(Self.heldNote(held))")
                 }
                 continue
             }
@@ -190,29 +234,38 @@ final class SocketListener: Sendable {
         }
     }
 
-    /// The read source is level-triggered, so out of descriptors it would
-    /// spin. A cancellable timer resumes it after 250 ms.
-    private func pauseAccepting() {
-        Log.error("socket accept: out of file descriptors; pausing 250 ms")
-        let timer = DispatchSource.makeTimerSource(queue: queue)
-        let source: (any DispatchSourceRead)? = state.withLock { state in
-            guard !state.stopped, state.backoff == nil else { return nil }
-            state.backoff = timer
-            return state.acceptSource
-        }
-        guard let source else { return }
-        source.suspend()
-        timer.setEventHandler { [self] in
-            let resumes = state.withLock { state in
-                guard let backoff = state.backoff else { return false }
-                backoff.cancel()
-                state.backoff = nil
-                return true
+    private static func heldNote(_ held: Int) -> String {
+        held > 0 ? " (\(held) more since the last warning)" : ""
+    }
+
+    /// The read source is level-triggered, so after a failed accept it would
+    /// spin. A cancellable timer resumes it after `acceptBackoff`.
+    ///
+    /// The timer is made, and resumed, only once the pause is certain:
+    /// libdispatch traps when a source that was never resumed is released.
+    func pauseAccepting(after code: Int32) {
+        // nil: not paused, or paused with the log line held back.
+        let held = state.withLock { current -> Int? in
+            guard !current.stopped, current.backoff == nil, let source = current.acceptSource else { return nil }
+            let timer = DispatchSource.makeTimerSource(queue: queue)
+            timer.setEventHandler { [self] in
+                let resumes = state.withLock { state in
+                    guard let backoff = state.backoff else { return false }
+                    backoff.cancel()
+                    state.backoff = nil
+                    return true
+                }
+                if resumes { source.resume() }
             }
-            if resumes { source.resume() }
+            timer.schedule(deadline: .now() + Self.acceptBackoff)
+            source.suspend()
+            timer.resume()
+            current.backoff = timer
+            return current.acceptFailures.admit()
         }
-        timer.schedule(deadline: .now() + .milliseconds(250))
-        timer.resume()
+        if let held {
+            Log.error("socket accept failed: \(String(cString: strerror(code))); pausing 250 ms\(Self.heldNote(held))")
+        }
     }
 
     /// Runs under the setup lock. A socket that refuses the probe is stale
@@ -260,6 +313,10 @@ private struct FileIdentity: Equatable, Sendable {
 
     /// Unlinks `path` only while it still names this file. Returns false
     /// when another file has taken the path; true when this file is gone.
+    ///
+    /// The lstat and the unlink are two steps, not one atomic check. Only
+    /// helpers that take the setup lock are kept from swapping the path in
+    /// between; any other process that can write the folder is not.
     @discardableResult
     func unlink(at path: String) -> Bool {
         var info = stat()
@@ -325,14 +382,18 @@ struct LogThrottle: Sendable {
 /// One accepted connection as an MCP Transport. Messages are
 /// newline-delimited JSON, as on stdio.
 ///
-/// Built on DispatchIO, so it never sleeps and never blocks a cooperative
-/// thread. Every bound a misbehaving peer could push against lives here:
-/// - Reads go in chunks, and the next chunk waits while more than
-///   `maxQueuedMessages` messages sit unread. A stalled session stops
-///   reading, and the peer's writes back up in the kernel instead.
+/// Built on DispatchIO and Dispatch timers, so no method sleeps or blocks a
+/// cooperative thread. Every bound a misbehaving peer could push against
+/// lives here:
+/// - Reads go in chunks of `readChunkBytes`. Before each read, reading
+///   pauses while `maxQueuedMessages` or more messages sit unread, so the
+///   inbox can pass the cap by at most one chunk's messages. A stalled
+///   session stops reading, and the peer's writes back up in the kernel.
 /// - `send` queues the bytes on the channel and returns. A peer that
 ///   leaves more than `maxUnsentBytes` unread is disconnected.
 /// - A line over LineFramer.maxMessageBytes disconnects the peer.
+/// - `disconnect` gives queued writes at most `flushTimeout`, so a peer
+///   that stops reading cannot hold the fd open.
 ///
 /// The DispatchIO handlers run off the actor, so everything they touch sits
 /// in one Mutex, and no method that builds a handler is actor-isolated: a
@@ -342,6 +403,7 @@ struct LogThrottle: Sendable {
 actor SocketTransport: Transport {
     static let maxQueuedMessages = 64
     static let maxUnsentBytes = 16 * 1024 * 1024
+    static let flushTimeout: DispatchTimeInterval = .seconds(2)
     private static let readChunkBytes = 64 * 1024
 
     nonisolated let logger = Logger(label: "imessage-max.socket", factory: { _ in SwiftLogNoOpLogHandler() })
@@ -358,6 +420,15 @@ actor SocketTransport: Transport {
         }
     }
 
+    private enum Phase {
+        case open
+        /// disconnect() ran with writes queued. Nothing more is read or
+        /// sent. The channel closes when the writes finish or the timer
+        /// fires, whichever comes first.
+        case draining(any DispatchSourceTimer)
+        case closed
+    }
+
     private struct State {
         var framer = LineFramer()
         /// Unread messages from `head` on. Popped slots are released and
@@ -371,7 +442,7 @@ actor SocketTransport: Transport {
         var started = false
         var reading = false
         var chunkBytes = 0
-        var writable = true
+        var phase = Phase.open
         var unsentBytes = 0
 
         var queued: Int { inbox.count - head }
@@ -410,28 +481,31 @@ actor SocketTransport: Transport {
         if first { readNextChunk() }
     }
 
-    /// Ends the session from the server side. Writes already queued still
-    /// reach the peer, then the fd closes. DualEraStdio queues its last
-    /// send before it disconnects. A second call does nothing.
+    /// Ends the session from the server side. Reading stops at once.
+    /// Writes already queued get up to `flushTimeout` to reach the peer,
+    /// then the fd closes whether or not they did. DualEraStdio queues its
+    /// last send before it disconnects. A second call does nothing.
     func disconnect() async {
-        close(discardingWrites: false)
+        end(flushing: true)
     }
 
     /// Ends the connection now and drops queued writes and unread messages,
     /// so the session ends and the bridge reads EOF. For listener shutdown
-    /// and peers that break a bound.
+    /// and peers that break a bound. Also cuts short a disconnect's flush.
     nonisolated func abort() {
-        close(discardingWrites: true)
+        end(flushing: false)
     }
 
-    /// Appends "\n" and queues the bytes. Throws ENOTCONN once the
-    /// connection is closed; never raises SIGPIPE.
+    /// Appends "\n" and queues the bytes; never raises SIGPIPE. Throws
+    /// ENOTCONN once disconnect or abort has run, and ENOBUFS when this
+    /// send would leave more than `maxUnsentBytes` unwritten, after
+    /// aborting the connection.
     nonisolated func send(_ data: Data) async throws {
         var bytes = data
         bytes.append(0x0A)
         let size = bytes.count
         let admitted: Bool? = state.withLock { state in
-            guard state.writable else { return nil }
+            guard case .open = state.phase else { return nil }
             state.unsentBytes += size
             return state.unsentBytes <= Self.maxUnsentBytes
         }
@@ -444,9 +518,16 @@ actor SocketTransport: Transport {
         let payload = bytes.withUnsafeBytes { DispatchData(bytes: $0) }
         channel.write(offset: 0, data: payload, queue: queue) { [self] done, _, error in
             guard done else { return }
-            state.withLock { $0.unsentBytes -= size }
-            // EPIPE: the peer has gone. ECANCELED: already aborted.
-            if error != 0 { abort() }
+            let flushed = state.withLock { state in
+                state.unsentBytes -= size
+                return state.unsentBytes == 0
+            }
+            // EPIPE: the peer has gone. ECANCELED: already closed.
+            if error != 0 {
+                abort()
+            } else if flushed {
+                closeIfDraining()
+            }
         }
     }
 
@@ -533,19 +614,54 @@ actor SocketTransport: Transport {
         waiter?.resume(with: ending.result)
     }
 
-    private nonisolated func close(discardingWrites: Bool) {
-        let stop = state.withLock { state in
-            state.writable = false
-            if discardingWrites {
+    /// Sets the ending in the same lock section that decides how to close,
+    /// so readNextChunk cannot start a read after it. Closes with .stop,
+    /// which cancels an outstanding read instead of waiting on the peer.
+    private nonisolated func end(flushing: Bool) {
+        let (waiter, closesNow) = state.withLock { state in
+            if state.ending == nil { state.ending = .finished }
+            defer { state.waiter = nil }
+            if !flushing {
                 state.inbox = []
                 state.head = 0
             }
-            // A graceful close waits for outstanding operations, and a read
-            // waits for the peer, so an outstanding read forces .stop.
-            return discardingWrites || state.reading
+            switch state.phase {
+            case .closed:
+                return (state.waiter, false)
+            case .draining(let timer):
+                guard !flushing else { return (state.waiter, false) }
+                timer.cancel()
+                state.phase = .closed
+                return (state.waiter, true)
+            case .open:
+                guard flushing, state.unsentBytes > 0 else {
+                    state.phase = .closed
+                    return (state.waiter, true)
+                }
+                // Resumed under the lock, so no path can release it unresumed.
+                let timer = DispatchSource.makeTimerSource(queue: queue)
+                timer.setEventHandler { [self] in closeIfDraining() }
+                timer.schedule(deadline: .now() + Self.flushTimeout)
+                timer.resume()
+                state.phase = .draining(timer)
+                return (state.waiter, false)
+            }
         }
-        finishReading(.finished)
-        channel.close(flags: stop ? .stop : [])
+        // A waiter means the inbox was empty and no ending was set before.
+        waiter?.resume(returning: nil)
+        if closesNow { channel.close(flags: .stop) }
+    }
+
+    /// Ends a disconnect's flush: its writes finished, or its time ran out.
+    private nonisolated func closeIfDraining() {
+        let timer: (any DispatchSourceTimer)? = state.withLock { state in
+            guard case .draining(let timer) = state.phase else { return nil }
+            state.phase = .closed
+            return timer
+        }
+        guard let timer else { return }
+        timer.cancel()
+        channel.close(flags: .stop)
     }
 }
 

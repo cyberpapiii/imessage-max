@@ -33,10 +33,21 @@ final class SocketListenerTests: XCTestCase {
         try? FileManager.default.removeItem(atPath: folder)
     }
 
-    private func start(peerPolicy: @escaping SocketListener.PeerPolicy = SocketListener.sameUser, serve: SocketListener.Serve? = nil) throws -> SocketListener {
-        let listener = try SocketListener.start(at: socket, peerPolicy: peerPolicy, serve: serve ?? echo)
+    private func start(
+        peerPolicy: @escaping SocketListener.PeerPolicy = SocketListener.sameUser, serve: SocketListener.Serve? = nil
+    ) async throws(SocketSetupError) -> SocketListener {
+        let listener = try await SocketListener.start(at: socket, peerPolicy: peerPolicy, serve: serve ?? echo)
         listeners.append(listener)
         return listener
+    }
+
+    private func startFailure() async -> SocketSetupError? {
+        do {
+            _ = try await start()
+            return nil
+        } catch {
+            return error
+        }
     }
 
     private func client() throws -> LineReader {
@@ -50,45 +61,43 @@ final class SocketListenerTests: XCTestCase {
         XCTAssertEqual(try reader.nextLine(), line, file: file, line: number)
     }
 
-    func testSocketFileIsAPrivateSocket() throws {
-        _ = try start()
+    func testSocketFileIsAPrivateSocket() async throws {
+        _ = try await start()
         var info = stat()
         XCTAssertEqual(lstat(socket.path, &info), 0)
         XCTAssertEqual(info.st_mode & S_IFMT, S_IFSOCK)
         XCTAssertEqual(info.st_mode & 0o777, 0o600)
     }
 
-    func testStaleSocketLeftByACrashIsReclaimed() throws {
+    func testStaleSocketLeftByACrashIsReclaimed() async throws {
         let stale = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
         XCTAssertEqual(socket.withAddress { Darwin.bind(stale, $0, $1) }, 0)
         close(stale)
         var info = stat()
         XCTAssertEqual(lstat(socket.path, &info), 0, "the stale socket file is still there")
 
-        _ = try start()
+        _ = try await start()
         try assertEchoes(try client(), #"{"after":"reclaim"}"#)
     }
 
-    func testRegularFileAtThePathIsLeftAlone() throws {
+    func testRegularFileAtThePathIsLeftAlone() async throws {
         try "keep me".write(toFile: socket.path, atomically: false, encoding: .utf8)
 
-        XCTAssertThrowsError(try start()) { error in
-            XCTAssertEqual(error as? SocketSetupError, .notASocket(path: socket.path))
-        }
+        let failure = await startFailure()
+        XCTAssertEqual(failure, .notASocket(path: socket.path))
         XCTAssertEqual(try String(contentsOfFile: socket.path, encoding: .utf8), "keep me")
     }
 
-    func testLiveListenerAtThePathGivesInUse() throws {
-        _ = try start()
+    func testLiveListenerAtThePathGivesInUse() async throws {
+        _ = try await start()
 
-        XCTAssertThrowsError(try start()) { error in
-            XCTAssertEqual(error as? SocketSetupError, .inUse(path: socket.path))
-        }
+        let failure = await startFailure()
+        XCTAssertEqual(failure, .inUse(path: socket.path))
         try assertEchoes(try client(), #"{"first":"still serves"}"#)
     }
 
-    func testTwoClientsAreServedIndependently() throws {
-        _ = try start()
+    func testTwoClientsAreServedIndependently() async throws {
+        _ = try await start()
         let first = try client()
         let second = try client()
 
@@ -106,7 +115,7 @@ final class SocketListenerTests: XCTestCase {
     func testPeerOfAnotherUserIsClosedBeforeServe() async throws {
         let served = expectation(description: "serve was called")
         served.isInverted = true
-        _ = try start(peerPolicy: { _ in false }) { _ in served.fulfill() }
+        _ = try await start(peerPolicy: { _ in false }) { _ in served.fulfill() }
 
         let reader = try client()
         writeLine(reader.fd, "hello")
@@ -115,7 +124,7 @@ final class SocketListenerTests: XCTestCase {
     }
 
     func testStopUnlinksTheSocketEndsSessionsAndIsIdempotent() async throws {
-        let listener = try start()
+        let listener = try await start()
         let reader = try client()
         try assertEchoes(reader, "ping")
 
@@ -128,12 +137,11 @@ final class SocketListenerTests: XCTestCase {
         await listener.stop()
     }
 
-    func testFolderOthersCanWriteIsRefusedForTheSocketButNotTheToken() throws {
+    func testFolderOthersCanWriteIsRefusedForTheSocketButNotTheToken() async throws {
         for mode: mode_t in [0o770, 0o707] {
             XCTAssertEqual(chmod(folder, mode), 0)
-            XCTAssertThrowsError(try start()) { error in
-                XCTAssertEqual(error as? SocketSetupError, .unsafeFolder(path: folder), "mode \(String(mode, radix: 8))")
-            }
+            let failure = await startFailure()
+            XCTAssertEqual(failure, .unsafeFolder(path: folder), "mode \(String(mode, radix: 8))")
             switch StdioBridge.connect(socket, grace: .zero) {
             case .failure(let reason): XCTAssertEqual(reason, .unsafeFolder(path: folder), "the bridge refuses it too")
             case .success: XCTFail("the bridge connected through mode \(String(mode, radix: 8))")
@@ -141,7 +149,7 @@ final class SocketListenerTests: XCTestCase {
             XCTAssertNoThrow(try PrivateFolder.requireOwned(folder), "the token folder rule is unchanged")
         }
         XCTAssertEqual(chmod(folder, 0o700), 0)
-        _ = try start()
+        _ = try await start()
         try assertEchoes(try client(), "private again")
     }
 
@@ -154,12 +162,16 @@ final class SocketListenerTests: XCTestCase {
                 XCTAssertEqual(socket.withAddress { Darwin.bind(stale, $0, $1) }, 0)
                 close(stale)
             }
-            let results = Mutex<[Result<SocketListener, SocketSetupError>]>([])
-            DispatchQueue.concurrentPerform(iterations: 2) { _ in
-                let result = Result { () throws(SocketSetupError) in try SocketListener.start(at: socket, serve: echo) }
-                results.withLock { $0.append(result) }
+            func attempt() async -> Result<SocketListener, SocketSetupError> {
+                do {
+                    return .success(try await SocketListener.start(at: socket, serve: echo))
+                } catch {
+                    return .failure(error)
+                }
             }
-            let all = results.withLock { $0 }
+            async let first = attempt()
+            async let second = attempt()
+            let all = await [first, second]
             let winners = all.compactMap { try? $0.get() }
             XCTAssertEqual(winners.count, 1, "round \(round): \(all)")
             for case .failure(let error) in all {
@@ -178,7 +190,7 @@ final class SocketListenerTests: XCTestCase {
     func testOversizedLineDisconnectsThePeerAndEndsTheSession() async throws {
         let ended = expectation(description: "session ended")
         let log = Log.Capture()
-        _ = try start(serve: { transport in
+        _ = try await start(serve: { transport in
             await Log.$capture.withValue(log) {
                 try? await ServerStartup.serveStdio(base: transport, catalog: makeTestCatalog())
             }
@@ -197,7 +209,7 @@ final class SocketListenerTests: XCTestCase {
     func testPeerThatNeverReadsIsDisconnectedAndOthersStillServed() async throws {
         let ended = expectation(description: "a session ended")
         ended.assertForOverFulfill = false
-        _ = try start(serve: { [echo] transport in
+        _ = try await start(serve: { [echo] transport in
             await echo(transport)
             ended.fulfill()
         })
@@ -219,10 +231,10 @@ final class SocketListenerTests: XCTestCase {
         try assertEchoes(try client(), "still serving")
     }
 
-    func testStalledSessionStopsReadingSoThePeersWritesBackUp() throws {
+    func testStalledSessionStopsReadingSoThePeersWritesBackUp() async throws {
         let (park, parked) = AsyncStream<Void>.makeStream()
         defer { parked.finish() }
-        _ = try start(serve: { transport in
+        _ = try await start(serve: { transport in
             try? await transport.connect()
             for await _ in park {}
         })
@@ -246,7 +258,7 @@ final class SocketListenerTests: XCTestCase {
     }
 
     func testStopLeavesASocketSomeoneElseBoundAtThePath() async throws {
-        let listener = try start()
+        let listener = try await start()
         XCTAssertEqual(unlink(socket.path), 0)
         let other = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
         defer { close(other) }
@@ -256,6 +268,113 @@ final class SocketListenerTests: XCTestCase {
 
         var info = stat()
         XCTAssertEqual(lstat(socket.path, &info), 0, "stop must not unlink a socket it did not bind")
+    }
+
+    func testSetupWaitingOnTheLockLeavesTheCooperativePoolFree() async throws {
+        let lockFD = open(socket.path + ".lock", O_RDWR | O_CREAT | O_CLOEXEC, 0o600)
+        defer { close(lockFD) }
+        XCTAssertEqual(flock(lockFD, LOCK_EX), 0)
+        let socket = self.socket!
+        let attempts = ProcessInfo.processInfo.activeProcessorCount * 2
+        let starts = Task {
+            await withTaskGroup(of: SocketSetupError?.self) { group in
+                for _ in 0..<attempts {
+                    group.addTask {
+                        do throws(SocketSetupError) {
+                            await (try await SocketListener.start(at: socket) { _ in }).stop()
+                            return nil
+                        } catch {
+                            return error
+                        }
+                    }
+                }
+                return await group.reduce(into: []) { $0.append($1) }
+            }
+        }
+        usleep(200_000)
+
+        let began = ContinuousClock.now
+        await Task.detached {}.value
+        XCTAssertLessThan(began.duration(to: .now), .milliseconds(500), "a cooperative thread was free while setups waited")
+        let failures: [SocketSetupError?] = await starts.value
+        XCTAssertEqual(failures, Array(repeating: SocketSetupError.inUse(path: socket.path), count: attempts))
+    }
+
+    func testAcceptFailureAfterStopDoesNotTrap() async throws {
+        let listener = try await start()
+        await listener.stop()
+
+        listener.pauseAccepting(after: EMFILE)
+    }
+
+    func testAcceptPausedByAnyFailureResumesAndStopEndsThePause() async throws {
+        let listener = try await start()
+        listener.pauseAccepting(after: ENOBUFS)
+        listener.pauseAccepting(after: EMFILE)
+
+        try assertEchoes(try client(), "after the pause")
+        listener.pauseAccepting(after: ENOMEM)
+        await listener.stop()
+    }
+
+    func testConnectionsPastTheCapAreClosedAndASlotFreesOnDisconnect() async throws {
+        _ = try await start()
+        var live: [LineReader] = []
+        for index in 0..<SocketListener.maxConnections {
+            let reader = try client()
+            try assertEchoes(reader, "client \(index)")
+            live.append(reader)
+        }
+
+        let overflow = try client()
+        writeLine(overflow.fd, "one too many")
+        XCTAssertNil(try overflow.nextLine(), "the connection past the cap reads EOF")
+        try assertEchoes(live[1], "the others are still served")
+
+        shutdown(live[0].fd, SHUT_RDWR)
+        let deadline = Date().addingTimeInterval(10)
+        while true {
+            let reader = try client()
+            writeLine(reader.fd, "a freed slot")
+            if try reader.nextLine() == "a freed slot" { break }
+            guard Date() < deadline else { return XCTFail("the closed connection never freed its slot") }
+            usleep(50_000)
+        }
+    }
+
+    func testDisconnectFlushesQueuedWritesToAReadingPeer() async throws {
+        let payload = String(repeating: "a", count: 512 * 1024)
+        _ = try await start(serve: { transport in
+            try? await transport.connect()
+            try? await transport.send(Data(payload.utf8))
+            await transport.disconnect()
+        })
+        let reader = try client()
+
+        XCTAssertEqual(try reader.nextLine()?.count, payload.count, "every queued byte arrives")
+        XCTAssertNil(try reader.nextLine(), "then EOF")
+    }
+
+    func testDisconnectClosesWithinTheFlushDeadlineWhenThePeerNeverReads() async throws {
+        let disconnected = Mutex<ContinuousClock.Instant?>(nil)
+        _ = try await start(serve: { transport in
+            try? await transport.connect()
+            try? await transport.send(Data(repeating: 0x61, count: 512 * 1024))
+            await transport.disconnect()
+            disconnected.withLock { $0 = .now }
+        })
+        let fd = try connectClient(socket)
+        clients.append(fd)
+
+        let deadline = ContinuousClock.now + .seconds(10)
+        var probe: UInt8 = 0x0A
+        while write(fd, &probe, 1) == 1 {
+            guard ContinuousClock.now < deadline else { return XCTFail("the helper kept the fd of a peer that never reads") }
+            usleep(50_000)
+        }
+        XCTAssertEqual(errno, EPIPE)
+        let closedAfter = try XCTUnwrap(disconnected.withLock { $0 }).duration(to: .now)
+        XCTAssertLessThan(closedAfter, .seconds(3.5), "closed within the 2 s flush deadline")
     }
 }
 

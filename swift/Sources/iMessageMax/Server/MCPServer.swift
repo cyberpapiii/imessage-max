@@ -72,7 +72,7 @@ enum ServerStartup {
         try await transport.connect()
         // After the HTTP bind, so a second helper on the same port fails
         // there before it touches the socket.
-        let listener = startSocketListener(override: socketOverride, catalog: catalog)
+        let listener = await startSocketListener(override: socketOverride, catalog: catalog)
         announce(transport: "http addr=\(host):\(port)", resolver: resolver, contactsPolicy: contactsPolicy)
 
         Task {
@@ -98,10 +98,10 @@ enum ServerStartup {
     /// HTTP keeps serving. The helper runs under launchd KeepAlive, so a
     /// helper that exited over its socket would restart into the same
     /// problem in a loop and take HTTP down with it.
-    static func startSocketListener(override: String?, catalog: ToolCatalog) -> SocketListener? {
+    static func startSocketListener(override: String?, catalog: ToolCatalog) async -> SocketListener? {
         do throws(SocketSetupError) {
             let socket = try SocketPath.resolve(override: override)
-            return try SocketListener.start(at: socket) { transport in
+            return try await SocketListener.start(at: socket) { transport in
                 do {
                     try await serveStdio(base: transport, catalog: catalog)
                 } catch {
