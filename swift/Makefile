@@ -9,13 +9,13 @@
 #   make status        Show service health and version
 #   make logs          Tail stderr log
 #   make clean         Remove debug build artifacts
-#   make setup-signing Create persistent code signing identity (one-time)
 #   make version       Print the version and check all copies agree
 #   make release-check Everything that must pass before tagging a release
 #
-# The signing identity lets Full Disk Access persist across rebuilds.
-# Without it, you'd need to re-grant FDA in System Settings every build.
-# Run `make setup-signing` once, then `make install` for every update.
+# `sign` uses SIGN_IDENTITY (a certificate SHA-1) or else the Developer ID
+# Application identity in the keychain that expires last, so Full Disk Access
+# persists across rebuilds. With neither it signs ad hoc, and FDA must be
+# granted again after every build.
 
 BINARY       := .build/release/imessage-max
 LAUNCHD_LABEL := local.imessage-max
@@ -26,7 +26,6 @@ PLIST        := $(HOME)/Library/LaunchAgents/$(LAUNCHD_LABEL).plist
 PORT         := $(or $(shell [ -f "$(PLIST)" ] && plutil -extract ProgramArguments json -o - "$(PLIST)" 2>/dev/null | \
 	tr -d '[]"' | tr ',' '\n' | awk 'take { print; exit } $$0 == "--port" { take = 1 } sub(/^--port=/, "") { print; exit }'),8080)
 URL          := http://127.0.0.1:$(PORT)
-CERT_CN      := iMessage Max Dev
 VERIFY_ATTEMPTS := 45
 # Per-probe cap, so a server that accepts but never answers fails the probe
 # instead of hanging make.
@@ -45,23 +44,7 @@ mcp_initialize = curl -s$(2) --max-time $(CURL_MAX_TIME) "$(URL)" -X POST \
 # initialize reply on stdin.
 server_info = python3 -c "import sys,json; print(json.load(sys.stdin)['result']['serverInfo']['$(1)'])"
 
-# Resolve CERT_CN to a certificate SHA-1. `codesign --sign <name>` fails with
-# "ambiguous" when the login keychain holds more than one cert with that common
-# name. A hash is unique by construction, and find-identity lists only certs
-# that have a usable private key, so this both disambiguates and filters out
-# orphaned certs.
-# Evaluated lazily (`=`, not `:=`) so that a target running later in the same
-# make invocation (e.g. `make setup-signing install`) sees an identity created
-# by an earlier target instead of the parse-time snapshot.
-#
-# NOTE: lazy still means "expanded when the recipe is expanded", which is just
-# BEFORE that recipe's shell runs, not during it. A recipe that creates the
-# identity itself cannot observe it through this variable; it must re-query at
-# shell runtime. See the tail of setup-signing.
-SIGN_HASH = $(shell security find-identity -v -p codesigning 2>/dev/null | \
-	grep -F '"$(CERT_CN)"' | head -1 | awk '{print $$2}')
-
-.PHONY: build test sign install restart status logs clean setup-signing verify verify-db help version release-check install-agent
+.PHONY: build test sign install restart status logs clean verify verify-db help version release-check install-agent
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
@@ -87,20 +70,9 @@ release-check: build test version ## Everything that must pass before tagging
 	@ruby -c Formula/imessage-max.rb
 	@echo "Release checks passed. Next: git tag v$$(../scripts/check-version.sh --print) && git push --tags"
 
-sign: build ## Build and sign with persistent identity
-	@HASH="$(SIGN_HASH)"; \
-	if [ -n "$$HASH" ]; then \
-		if codesign --force --sign "$$HASH" $(BINARY); then \
-			echo "✓ Signed with '$(CERT_CN)' ($$HASH). FDA persists across rebuilds"; \
-		else \
-			echo "✗ Found identity '$(CERT_CN)' ($$HASH) but signing failed. See the error above"; \
-			exit 1; \
-		fi; \
-	else \
-		echo "⚠ No signing identity '$(CERT_CN)'. Using ad-hoc, so FDA needs re-granting each build"; \
-		echo "  Run 'make setup-signing' once to fix this permanently"; \
-		codesign --force --sign - $(BINARY); \
-	fi
+sign: build ## Build and sign with the Developer ID, else ad hoc
+	@SIGN_IDENTITY="$(SIGN_IDENTITY)" ../script/sign.sh $(BINARY) --entitlements iMessageMax.entitlements \
+		--identifier "$$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$(INFO_PLIST)")"
 
 restart: ## Restart the launchd service
 	@echo "Restarting service..."
@@ -231,70 +203,3 @@ clean: ## Remove debug artifacts and old logs
 	@cat /dev/null > ~/Library/Logs/imessage-max.stdout.log 2>/dev/null || true
 	@echo "  Cleared log files"
 	@echo "✓ Clean"
-
-# setup-signing runs as a SINGLE shell program (one `\`-continued line) so that
-# the private key lives in a `mktemp -d` directory removed by an EXIT trap on
-# every path: success, failure, or interrupt. Splitting it back into separate
-# `@` lines would give each line its own shell, so the early "already works"
-# exit would fall through into regenerating the cert.
-#
-# Step notes, in recipe order:
-#   - openssl req: generate cert with the code signing EKU
-#   - openssl pkcs12: package as PKCS12 (legacy format for Keychain compatibility)
-#   - security import: import to the login keychain
-#   - security set-key-partition-list: let codesign use the key without prompting
-#   - security add-trusted-cert: makes `find-identity -v` report it valid and
-#     removes the manual Keychain Access trust step. Pops a login-password
-#     dialog (expected). Signing already works without this; trust only affects
-#     how the cert is reported, not signability.
-#     This step is load-bearing for idempotency: SIGN_HASH reads
-#     `find-identity -v`, and an untrusted self-signed cert is reported
-#     CSSMERR_TP_NOT_TRUSTED and excluded from `-v`. If the trust dialog is
-#     cancelled, SIGN_HASH stays empty, the guard above will not fire, and a
-#     re-run imports another cert. Fix trust rather than dropping `-v`:
-#     without `-v` the hash could point at a cert that has no usable private key.
-setup-signing: ## Create persistent code signing identity (one-time)
-	@if [ -n "$(SIGN_HASH)" ]; then \
-		echo "✓ Signing identity '$(CERT_CN)' already exists ($(SIGN_HASH))"; \
-		exit 0; \
-	fi; \
-	SIGNTMP=$$(mktemp -d); \
-	trap 'rm -rf "$$SIGNTMP"' EXIT; \
-	echo "Creating self-signed code signing certificate '$(CERT_CN)'..."; \
-	echo "This lets Full Disk Access persist across rebuilds."; \
-	echo ""; \
-	openssl req -x509 -newkey rsa:2048 \
-		-keyout "$$SIGNTMP/key.pem" -out "$$SIGNTMP/cert.pem" \
-		-days 3650 -nodes \
-		-subj "/CN=$(CERT_CN)" \
-		-addext "keyUsage=critical,digitalSignature" \
-		-addext "extendedKeyUsage=critical,codeSigning" \
-		2>/dev/null; \
-	openssl pkcs12 -export \
-		-out "$$SIGNTMP/bundle.p12" \
-		-inkey "$$SIGNTMP/key.pem" \
-		-in "$$SIGNTMP/cert.pem" \
-		-passout pass:_imtmp \
-		-certpbe PBE-SHA1-3DES -keypbe PBE-SHA1-3DES -macalg sha1 \
-		2>/dev/null; \
-	security import "$$SIGNTMP/bundle.p12" \
-		-k ~/Library/Keychains/login.keychain-db \
-		-P "_imtmp" \
-		-T /usr/bin/codesign; \
-	security set-key-partition-list -S apple-tool:,apple:,codesign: \
-		-s -k "" ~/Library/Keychains/login.keychain-db >/dev/null 2>&1 || true; \
-	echo "Trusting the cert for code signing (a login-password dialog is expected)..."; \
-	security add-trusted-cert -r trustRoot -p codeSign "$$SIGNTMP/cert.pem" 2>/dev/null || true; \
-	echo ""; \
-	NEW_HASH=$$(security find-identity -v -p codesigning 2>/dev/null | \
-		grep -F '"$(CERT_CN)"' | head -1 | awk '{print $$2}'); \
-	if [ -n "$$NEW_HASH" ]; then \
-		echo "✓ Signing identity '$(CERT_CN)' created and working ($$NEW_HASH)"; \
-		echo "  Grant FDA one more time in System Settings. It will persist across rebuilds."; \
-	else \
-		echo "⚠ Certificate imported but no usable signing identity was found."; \
-		echo "  This usually means the private key did not import. Check with:"; \
-		echo "    security find-identity -v -p codesigning"; \
-		echo "  If '$(CERT_CN)' is absent there, the import failed. Re-run this target."; \
-		echo "  If it IS listed, signing should now work; report this as a bug."; \
-	fi

@@ -1,7 +1,7 @@
 import Foundation
 
 /// How the service is installed and reached. The launchd plist template
-/// (swift/launchd), swift/Makefile and script/build_and_run.sh repeat some of
+/// (swift/launchd), swift/Makefile and script/assemble_app.sh repeat some of
 /// these; ServiceFilesContractTests in swift/Tests keeps them in step.
 public enum ServiceDefaults {
   public static let host = "127.0.0.1"

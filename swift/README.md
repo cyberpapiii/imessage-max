@@ -21,14 +21,16 @@ the launchd service and its Full Disk Access grant do not use.
 Use the `Makefile` for normal development updates:
 
 ```bash
-make setup-signing   # one-time: create persistent signing identity
 make install         # build, sign, restart launchd service, verify health
 ```
 
 The workflow exists so that:
 - the release binary path stays stable
-- the binary is signed with a persistent local identity, so Full Disk Access
-  survives rebuilds
+- the binary is signed with the Developer ID in your keychain, with hardened
+  runtime and `iMessageMax.entitlements`, so Full Disk Access survives
+  rebuilds. Set `SIGN_IDENTITY` to a certificate SHA-1 to pick one. With no
+  Developer ID the build signs ad hoc, prints a warning, and Full Disk Access
+  must be granted again after each build
 - the launchd-managed HTTP service restarts automatically
 
 Other targets:

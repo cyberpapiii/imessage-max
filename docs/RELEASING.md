@@ -55,8 +55,7 @@ codesign -dv /tmp/imessage-max-release/imessage-max 2>&1 | grep Signature   # Si
 
 The digest must match the one in the GitHub release body. The signature
 must be `Signature=adhoc`. The Formula ships this binary as-is, and no
-other machine trusts a binary signed with the local "iMessage Max Dev"
-identity.
+other machine trusts a binary signed with a local identity.
 
 Do not run `brew install --build-from-source swift/Formula/imessage-max.rb`.
 Homebrew 6 refuses a path argument when a formula of that name already

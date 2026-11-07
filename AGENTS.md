@@ -19,7 +19,7 @@ make install    # builds, signs, restarts the launchd service, verifies health
 
 `make install` replaces the live service that every MCP client uses through plug. Run it when a change needs to reach that service, for example to check behaviour on real data. Code-only work verified by tests does not need it. Before installing, copy the current release binary to a scratch folder so `make restart` can bring it back.
 
-It signs the binary. The stable signature keeps macOS from revoking Full Disk Access on every rebuild.
+It signs the binary with hardened runtime and the entitlements in `swift/iMessageMax.entitlements`. The identity comes from `script/signing_identity.sh`: `SIGN_IDENTITY` (a certificate SHA-1) when set, otherwise the valid "Developer ID Application" identity in the keychain that expires last. A stable Developer ID signature keeps macOS from revoking Full Disk Access on every rebuild. A contributor without a Developer ID gets an ad-hoc signature and a printed warning, and must grant Full Disk Access again after each build. `make sign` builds and signs without touching the service.
 
 Other Makefile targets:
 - `make test` runs the full test suite (`FILTER=ClassOrMethod` for a subset)
@@ -27,7 +27,6 @@ Other Makefile targets:
 - `make logs` tails the stderr log
 - `make restart` restarts the service. Use it, not `launchctl kill`. The plist's `KeepAlive` has `SuccessfulExit` false, so launchd does not relaunch after a clean SIGTERM
 - `make clean` removes debug artifacts and clears logs
-- `make setup-signing` creates a persistent code signing identity, once per machine
 - `make version` checks that the five version sites agree, and `make release-check` runs everything that must pass before tagging (see `docs/RELEASING.md`)
 - `make install-agent` renders `swift/launchd/local.imessage-max.plist` (binary path and `~/` log paths filled in) into `~/Library/LaunchAgents/` and loads it (do not hand-write the plist)
 
