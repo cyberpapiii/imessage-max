@@ -94,6 +94,13 @@ jobs:
         # `--parallel` with the guard in place is green; see plan 066.
         run: swift test --skip-build
 
+      # The SIGTERM abort (#27) only happened in optimized builds, so the
+      # shutdown tests run again against the binary launchd runs.
+      - name: Shutdown tests against the release binary
+        run: |
+          make build
+          IMESSAGE_MAX_BINARY=.build/release/imessage-max swift test --skip-build --filter SignalShutdownTests
+
   companion:
     runs-on: macos-26
     timeout-minutes: 15

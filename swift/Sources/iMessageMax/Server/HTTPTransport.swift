@@ -36,6 +36,7 @@ actor HTTPTransport {
     private var routingConfigured = false
     private var serverTask: Task<Void, Error>?
     private var serviceGroup: ServiceGroup?
+    private var shutdownDeadline: DispatchSourceTimer?
 
     private static let silentLogger = Logger(label: "imessage-max.http", factory: { _ in SwiftLogNoOpLogHandler() })
 
@@ -69,15 +70,18 @@ actor HTTPTransport {
 
         // ServiceGroup shuts services down last-first, so the stream closer
         // runs before the server starts waiting for open requests to finish.
-        var groupConfiguration = ServiceGroupConfiguration(
-            services: [app, SSEShutdownService(transport: self)],
+        // The group gets no maximumGracefulShutdownDuration: ServiceGroup
+        // enforces it with a Task.sleep child, and cancelling that sleep when
+        // shutdown ends aborts release builds in swift_task_dealloc (#27).
+        // GracefulShutdownService arms a Dispatch timer for the bound instead.
+        let group = ServiceGroup(configuration: ServiceGroupConfiguration(
+            services: [app, GracefulShutdownService(transport: self)],
             gracefulShutdownSignals: gracefulShutdownSignals,
             logger: Self.silentLogger
-        )
-        groupConfiguration.maximumGracefulShutdownDuration = Self.maximumGracefulShutdownDuration
-        let group = ServiceGroup(configuration: groupConfiguration)
+        ))
         serviceGroup = group
         serverTask = Task {
+            defer { disarmShutdownDeadline() }
             try await group.run()
         }
     }
@@ -135,8 +139,25 @@ actor HTTPTransport {
         )
     }
 
-    fileprivate func closeAllSSEStreams() async {
+    fileprivate func beginGracefulShutdown() async {
+        armShutdownDeadline()
         await sseManager.closeAll()
+    }
+
+    /// Cancels the service group if the drain outlasts
+    /// `maximumGracefulShutdownDuration`, as ServiceGroup's own bound would.
+    private func armShutdownDeadline() {
+        guard shutdownDeadline == nil, let serverTask else { return }
+        let timer = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
+        timer.setEventHandler { serverTask.cancel() }
+        timer.schedule(deadline: .now() + AsyncTimeout.dispatchInterval(for: Self.maximumGracefulShutdownDuration))
+        timer.resume()
+        shutdownDeadline = timer
+    }
+
+    private func disarmShutdownDeadline() {
+        shutdownDeadline?.cancel()
+        shutdownDeadline = nil
     }
 
     private func handlePost(request: Request) async throws -> Response {
@@ -551,11 +572,11 @@ actor HTTPTransport {
 
 private struct DuplicateRequestId: Error {}
 
-private struct SSEShutdownService: Service {
+private struct GracefulShutdownService: Service {
     let transport: HTTPTransport
 
     func run() async throws {
         try await gracefulShutdown()
-        await transport.closeAllSSEStreams()
+        await transport.beginGracefulShutdown()
     }
 }
