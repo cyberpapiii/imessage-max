@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       dry_run:
-        description: Build, notarize, and upload artifacts only. Never create a release.
+        description: Build, notarize, and upload artifacts only. Never create a release or push the cask.
         type: boolean
         default: true
 
@@ -31,86 +31,13 @@ jobs:
     needs: guard
     uses: ./.github/workflows/build.yml
 
-  build-and-release:
-    needs: checks
-    runs-on: macos-26
-    timeout-minutes: 30
-    outputs:
-      sha256: ${{ steps.tarball.outputs.sha256 }}
-    defaults:
-      run:
-        working-directory: swift
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-tags: true
-
-      - name: Show toolchain
-        run: |
-          xcodebuild -version
-          swift --version
-
-      - name: Check version consistency (and tag on tag pushes)
-        working-directory: .
-        run: |
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            scripts/check-version.sh --tag
-          else
-            scripts/check-version.sh
-          fi
-
-      # `make build` is the one release build: native build system (so the
-      # binary lands in .build/arm64-apple-macosx/release) with the embedded
-      # Info.plist. The runner is Apple silicon; the next steps assert arm64.
-      - name: Build release binary with embedded Info.plist
-        run: make build
-
-      - name: Re-sign binary with bundle identifier
-        run: |
-          BINARY=".build/arm64-apple-macosx/release/imessage-max"
-          BUNDLE_ID="com.cyberpapiii.imessage-max"
-          codesign --force --sign - --identifier "$BUNDLE_ID" "$BINARY"
-          echo "Verifying code signature..."
-          codesign -dvvv "$BINARY" 2>&1 | grep -E "(Identifier|Info.plist)"
-          # A non-weak link fails to load on macOS 15, which lacks this dylib.
-          if otool -L "$BINARY" | awk '/libswiftCompatibilitySpan\.dylib/ && !/, weak\)/ { found = 1 } END { exit !found }'; then
-            echo "error: $BINARY links libswiftCompatibilitySpan.dylib non-weak" >&2
-            exit 1
-          fi
-
-      - name: Assert architecture, identifier, and version
-        run: |
-          BINARY=".build/arm64-apple-macosx/release/imessage-max"
-          lipo -info "$BINARY" | grep -q "arm64" || { echo "not arm64"; exit 1; }
-          codesign -dvv "$BINARY" 2>&1 | grep -q "Identifier=com.cyberpapiii.imessage-max" || { echo "wrong identifier"; exit 1; }
-          EXPECTED=$(../scripts/check-version.sh --print)
-          REPORTED=$("$BINARY" --version)
-          echo "Binary reports version: $REPORTED"
-          [[ "$REPORTED" == *"$EXPECTED"* ]] || { echo "version mismatch: binary '$REPORTED' vs Version.swift '$EXPECTED'"; exit 1; }
-
-      - name: Create tarball
-        id: tarball
-        run: |
-          cd .build/arm64-apple-macosx/release
-          tar -czvf imessage-max-macos.tar.gz imessage-max
-          DIGEST=$(shasum -a 256 imessage-max-macos.tar.gz | cut -d' ' -f1)
-          echo "sha256=$DIGEST" >> "$GITHUB_OUTPUT"
-          echo "imessage-max-macos.tar.gz sha256 $DIGEST"
-          mv imessage-max-macos.tar.gz "$GITHUB_WORKSPACE/"
-
-      - name: Upload tarball as workflow artifact
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: imessage-max-macos
-          path: imessage-max-macos.tar.gz
-
   dmg:
     needs: checks
     runs-on: macos-26
     # Two notarizations, each allowed up to 30 minutes.
     timeout-minutes: 90
+    outputs:
+      sha256: ${{ steps.cask.outputs.sha256 }}
 
     steps:
       - name: Checkout code
@@ -131,6 +58,32 @@ jobs:
           MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
         run: scripts/sign-notarize-app.sh dist
 
+      # Every run prints and uploads the cask. Only the release job pushes it.
+      - name: Generate the Homebrew cask
+        id: cask
+        run: |
+          VERSION=$(scripts/check-version.sh --print)
+          DIGEST=$(shasum -a 256 "dist/iMessage-Max-$VERSION.dmg" | cut -d' ' -f1)
+          echo "sha256=$DIGEST" >> "$GITHUB_OUTPUT"
+          mkdir -p dist/cask
+          scripts/generate-cask.sh "$VERSION" "$DIGEST" > dist/cask/imessage-max.rb
+          cat dist/cask/imessage-max.rb
+
+      # brew audit loads a cask only by name, from a tap it trusts, so the
+      # checks run in a throwaway local tap.
+      - name: Check the cask with brew style and brew audit
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: 1
+          HOMEBREW_NO_ANALYTICS: 1
+        run: |
+          brew tap-new --no-git imessage-max/release-check
+          TAP=$(brew --repository imessage-max/release-check)
+          mkdir -p "$TAP/Casks"
+          cp dist/cask/imessage-max.rb "$TAP/Casks/imessage-max.rb"
+          brew trust --tap imessage-max/release-check
+          brew style --cask imessage-max/release-check/imessage-max
+          brew audit --cask --strict imessage-max/release-check/imessage-max
+
       - name: Upload DMG as workflow artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -145,10 +98,16 @@ jobs:
           path: dist/*.mcpb
           if-no-files-found: error
 
-  # One job creates the release, so the tarball and DMG jobs never race to
-  # create it.
+      - name: Upload the cask as workflow artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: imessage-max-cask
+          path: dist/cask/imessage-max.rb
+          if-no-files-found: error
+
+  # The cask reaches the tap only after the release holds the DMG it names.
   release:
-    needs: [build-and-release, dmg]
+    needs: dmg
     if: startsWith(github.ref, 'refs/tags/v') && !inputs.dry_run
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -166,11 +125,34 @@ jobs:
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           files: |
-            assets/imessage-max-macos.tar.gz
             assets/iMessage-Max-*.dmg
             assets/iMessage-Max-*.mcpb
           fail_on_unmatched_files: true
           generate_release_notes: true
           append_body: true
           body: |
-            `imessage-max-macos.tar.gz` sha256: `${{ needs.build-and-release.outputs.sha256 }}`
+            Install with `brew install --cask cyberpapiii/tap/imessage-max`, or open the DMG and drag iMessage Max to Applications.
+
+            DMG sha256: `${{ needs.dmg.outputs.sha256 }}`
+
+      - name: Check out the tap
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: cyberpapiii/homebrew-tap
+          ssh-key: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+          path: homebrew-tap
+
+      - name: Push the cask to the tap
+        run: |
+          mkdir -p homebrew-tap/Casks
+          cp assets/imessage-max.rb homebrew-tap/Casks/imessage-max.rb
+          cd homebrew-tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Casks/imessage-max.rb
+          if git diff --cached --quiet; then
+            echo "Casks/imessage-max.rb is already current"
+            exit 0
+          fi
+          git commit -m "imessage-max ${GITHUB_REF_NAME#v}"
+          git push

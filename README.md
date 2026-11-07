@@ -8,14 +8,15 @@ For a Mac control panel, use the [native menu bar companion](macos/README.md). I
 
 iMessage Max is an MCP (Model Context Protocol) server for iMessage. AI agents use it to read, search, and send your messages. It resolves phone numbers to contact names.
 
-It is written in Swift and ships as one binary with no runtime dependencies.
+It is written in Swift and ships as one Mac app with no runtime dependencies.
 
 ## Distribution
 
 There is one Swift implementation, in `swift/`. It ships as:
-- GitHub releases (arm64, ad-hoc signed)
-- Homebrew (`cyberpapiii/tap`)
-- source builds
+- `iMessage Max.app` in a notarized DMG on GitHub releases (Apple silicon, macOS 15 or later)
+- a Homebrew cask (`cyberpapiii/tap/imessage-max`) that installs the same app
+- a Claude Desktop extension (`iMessage-Max-<version>.mcpb`) on GitHub releases
+- source builds ([swift/README.md](swift/README.md))
 - Codex plugin metadata (`.codex-plugin/`)
 - Claude Desktop MCPB metadata (`mcpb/`)
 
@@ -101,27 +102,12 @@ For sensitive sends, prefer to resolve the exact chat first and then send with i
 
 ## Installation
 
-### Homebrew (recommended)
+Open the DMG from the [latest release](https://github.com/cyberpapiii/imessage-max/releases/latest) and drag iMessage Max to Applications.
+Or run `brew install --cask cyberpapiii/tap/imessage-max`.
 
-```bash
-brew tap cyberpapiii/tap
-brew install imessage-max
-```
+### Upgrading from 1.x
 
-### From source
-
-```bash
-git clone https://github.com/cyberpapiii/imessage-max.git
-cd imessage-max/swift
-make build
-
-# Binary is at .build/arm64-apple-macosx/release/imessage-max
-# (a bare `swift build` omits the embedded Info.plist, so Contacts can't be granted)
-```
-
-For local development, advanced setup, and the signed install workflow, see:
-
-- [swift/README.md](swift/README.md)
+Version 1.x installed a Homebrew formula and a launch agent you set up by hand. The formula is retired. Run `brew uninstall imessage-max` first, because the cask links the same `imessage-max` command. Then install the app and open it. It offers **Replace the older helper**, which stops the old agent and removes its files. The new helper listens on port 47821 and needs a token, so reconnect each assistant from the app's Connection page.
 
 ## Protocol support
 
@@ -172,63 +158,37 @@ The source PNGs are committed under `assets/icons/` in these sizes: `16x16`,
 
 ## Setup
 
-### 1. Grant Full Disk Access
+### 1. Open iMessage Max and grant its permissions
 
-The server needs Full Disk Access to read `~/Library/Messages/chat.db`:
+Open iMessage Max from Applications. It adds a speech bubble to the menu bar and walks you through three permissions, each listed in System Settings as "iMessage Max":
 
-1. Open System Settings → Privacy & Security → Full Disk Access
-2. Click + to add the binary
+- Full Disk Access, to read `~/Library/Messages/chat.db`
+- Contacts, to turn phone numbers into names
+- Automation for Messages, to send
 
-For Homebrew installs, the binary is at `/opt/homebrew/Cellar/imessage-max/VERSION/bin/imessage-max` (not the symlink at `/opt/homebrew/bin/`). Find it with:
-```bash
-# Open the folder containing the actual binary
-open $(dirname $(readlink -f $(which imessage-max)))
-```
+The app starts a background helper that serves your assistants. The helper keeps running after you quit the app, and starts again at login.
 
-For source builds, add `.build/release/imessage-max` from your clone directory.
-After you change the grant, relaunch the server. macOS applies Full Disk Access only to processes started after the change.
+### 2. Connect your assistant
 
-> In the file picker, press ⌘+Shift+G and paste the path to go straight there.
+The app's Connection page copies the settings for your assistant. Each assistant reaches the helper in one of three ways:
 
-### 2. Grant Contacts access
+- HTTP, for Plug, Codex and Claude Code: `http://127.0.0.1:47821`, with the header `Authorization: Bearer <token>`. The token is in `~/Library/Application Support/iMessage Max/token`.
+- stdio, for any client that runs a command: `imessage-max`. The cask links that command. With the DMG, use `/Applications/iMessage Max.app/Contents/MacOS/imessage-max`. It is a bridge to the helper, so it needs no permissions of its own.
+- Claude Desktop: open `iMessage-Max-<version>.mcpb` from the release.
 
-The server needs Contacts access to resolve phone numbers to names. It asks for access only when you start it from a terminal. launchd and MCP clients start it headless, and a headless process never prompts. Grant access once by running `imessage-max --request-contacts-access` from a terminal, then restart the service. `--contacts-policy request|skip`, or `IMESSAGE_MAX_CONTACTS_POLICY`, overrides the terminal detection.
-
-To grant access by hand instead, add `imessage-max` in System Settings → Privacy & Security → Contacts.
-
-### 3. Configure your MCP client
-
-Add `imessage-max` to your MCP client's server configuration. Bare `imessage-max` is a bridge to the iMessage Max helper, so iMessage Max must be running for the client to reach your messages.
-
-Many MCP clients use a JSON structure like this:
-
-For Homebrew:
 ```json
 {
   "mcpServers": {
     "imessage": {
-      "command": "/opt/homebrew/Cellar/imessage-max/VERSION/bin/imessage-max"
+      "command": "imessage-max"
     }
   }
 }
 ```
 
-For source builds:
-```json
-{
-  "mcpServers": {
-    "imessage": {
-      "command": "/path/to/imessage-max/swift/.build/release/imessage-max"
-    }
-  }
-}
-```
+### 3. Reconnect your assistant
 
-If your client uses a different config format, point it at the same binary path.
-
-### 4. Reconnect your MCP client
-
-After you save the config, reconnect or restart your MCP client. The server's tools should then appear in the client. Run `diagnose` to check the connection.
+After you save the config, reconnect or restart your assistant. The tools then appear in it. Run `diagnose` to check the connection.
 
 ## Tools
 
@@ -570,7 +530,7 @@ Some attachments are stored in iCloud, not on disk. `list_attachments` includes 
 
 ## Requirements
 
-- macOS 15+ (Sequoia or later)
+- macOS 15+ (Sequoia or later) on Apple silicon
 - Full Disk Access permission
 - Contacts permission (for name resolution)
 - Automation permission for Messages.app (send only)

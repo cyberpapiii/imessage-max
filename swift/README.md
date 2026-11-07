@@ -2,8 +2,10 @@
 
 An MCP server for iMessage, written in Swift. It runs natively on macOS.
 
-This directory is the source of truth for the current project and its
-install and update workflow.
+This directory is the source of truth for the server and its developer
+workflow. People install the released app from the DMG or with
+`brew install --cask cyberpapiii/tap/imessage-max`. `docs/RELEASING.md`
+covers how a release reaches them.
 
 ## Building
 
@@ -21,11 +23,16 @@ system writes the binary to `.build/out/Products/Release` instead, a path
 Use the `Makefile` for normal development updates:
 
 ```bash
-make install         # build the app, install it to ~/Applications, register the helper, verify health
+make install         # build the app, install it, register the helper, verify health
 ```
 
+`make install` replaces the released app in `/Applications` when one is
+there, so the Mac never holds two copies that claim the same helper.
+Otherwise it installs to `~/Applications`. `brew upgrade` later replaces a
+build installed over the cask's copy.
+
 The workflow exists so that:
-- the helper runs from inside `~/Applications/iMessage Max.app` under
+- the helper runs from inside `iMessage Max.app` under
   `SMAppService`, so macOS charges Full Disk Access, Contacts and Automation
   to the app, and each Privacy list shows one "iMessage Max"
 - the app and the helper are signed with the Developer ID in your keychain,
@@ -46,12 +53,12 @@ make clean
 
 The helper's launchd label is `com.cyberpapiii.imessage-max.helper`, its
 log is `~/Library/Logs/iMessage Max/imessage-max.log`, and the default HTTP
-port is `47821`. Opening the app with `--register-helper` replaces an install
-of the pre-2.0 `local.imessage-max` agent.
+port is `47821`. Opening the app with `--register-helper` replaces a pre-2.0
+install.
 
 ## Requirements
 
-- macOS 15+ (Sequoia or later)
+- macOS 15+ (Sequoia or later) on Apple silicon
 - Xcode Command Line Tools or full Xcode
 
 ## Architecture
@@ -207,7 +214,7 @@ Use `chat_id` values such as `chat123` as internal handles for follow-up tool ca
 
 - The server is one compiled binary, so there is no interpreter to start
 - Image resizing runs on the GPU through Core Image
-- The binary is self-contained for both local installs and Homebrew
+- The helper is self-contained inside the app bundle
 
 ## License
 

@@ -14,12 +14,12 @@ The project is written in Swift and lives in `/swift/`.
 
 ```bash
 cd swift
-make install    # builds the app, installs it to ~/Applications, registers the helper, verifies health
+make install    # builds the app, installs it, registers the helper, verifies health
 ```
 
-`make install` replaces the live service that every MCP client uses through plug. Run it when a change needs to reach that service, for example to check behaviour on real data. Code-only work verified by tests does not need it. Before installing, copy the current `~/Applications/iMessage Max.app` to a scratch folder so you can put it back.
+`make install` replaces the live service that every MCP client uses through plug. Run it when a change needs to reach that service, for example to check behaviour on real data. Code-only work verified by tests does not need it. Before installing, copy the current `iMessage Max.app` to a scratch folder so you can put it back.
 
-It builds `dist/iMessage Max.app` with `script/assemble_app.sh`, removes `~/Applications/iMessage Max.app` and copies the new bundle there (never copy over a running signed binary: macOS kills the process), then opens the app with `--register-helper`. That flag registers the helper with `SMAppService`, restarts a running one on the new binary, and replaces an install of the pre-2.0 `local.imessage-max` agent. The helper runs from `Contents/MacOS/imessage-max` inside the app, under the agent plist `macos/Resources/LaunchAgents/com.cyberpapiii.imessage-max.helper.plist`, which the app bundles in `Contents/Library/LaunchAgents/`. macOS charges an in-bundle helper's Full Disk Access, Contacts and Automation to the app, so each Privacy list shows one "iMessage Max". Do not hand-write a plist into `~/Library/LaunchAgents`.
+It builds `dist/iMessage Max.app` with `script/assemble_app.sh`, removes the installed `iMessage Max.app` and copies the new bundle to the same place (never copy over a running signed binary: macOS kills the process). That place is `/Applications` when the DMG or the cask put a copy there, so one bundle owns the helper label, and `~/Applications` otherwise. Then it opens the app with `--register-helper`. That flag registers the helper with `SMAppService`, restarts a running one on the new binary, and replaces a pre-2.0 install. The helper runs from `Contents/MacOS/imessage-max` inside the app, under the agent plist `macos/Resources/LaunchAgents/com.cyberpapiii.imessage-max.helper.plist`, which the app bundles in `Contents/Library/LaunchAgents/`. macOS charges an in-bundle helper's Full Disk Access, Contacts and Automation to the app, so each Privacy list shows one "iMessage Max". Do not hand-write a plist into `~/Library/LaunchAgents`.
 
 A live check that must not disturb the installed helper builds a test variant: `APP_NAME`, `APP_BUNDLE_ID`, `HELPER_LABEL`, `HELPER_PORT` and `HELPER_SOCKET` override the app name, bundle id, label, port and socket path in `script/assemble_app.sh`. The socket's folder must already exist with mode 0700. A test variant never touches a pre-2.0 install. Remove it with `open "<app>" --args --unregister-helper`, then delete the app.
 
@@ -32,7 +32,7 @@ Other Makefile targets:
 - `make logs` tails the helper log, `~/Library/Logs/iMessage Max/imessage-max.log`. launchd cannot expand `~`, so the plist passes `--log-file` and the server opens the file itself
 - `make restart` runs `launchctl kickstart -k` on the helper. A kickstart within the plist's 10 second `ThrottleInterval` of the last launch waits out the rest of it. The server exits 0 on SIGTERM, and the plist's `KeepAlive` has `SuccessfulExit` false, so launchd does not relaunch after a clean `launchctl kill`. The companion still stops the helper with `launchctl bootout`, which unloads the job so no exit status can relaunch it, and starts it again by registering.
 - `make clean` removes debug artifacts and clears the helper log
-- `make version` checks that the five version sites agree, and `make release-check` runs everything that must pass before tagging (see `docs/RELEASING.md`)
+- `make version` checks that the version sites agree, and `make release-check` runs everything that must pass before tagging (see `docs/RELEASING.md`)
 
 The server runs as the launchd agent `com.cyberpapiii.imessage-max.helper`. The default port is 47821, and the bundled agent plist can pin another with `--port`. It starts at login and restarts after a crash. System Settings → General → Login Items & Extensions lists it once, as iMessage Max, under "App Background Activity".
 
