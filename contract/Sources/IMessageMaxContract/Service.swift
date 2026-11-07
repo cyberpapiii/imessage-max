@@ -14,6 +14,9 @@ public enum ServiceDefaults {
   public static let stderrLogPath = "Library/Logs/imessage-max.stderr.log"
   /// Where the companion installs its bundled helper on a fresh Mac.
   public static let helperInstallPath = "Library/Application Support/iMessage Max/bin/\(executableName)"
+  /// The bearer token every HTTP request must send. The helper creates it,
+  /// mode 0600, on first start.
+  public static let tokenPath = "Library/Application Support/iMessage Max/token"
   /// The companion app's bundle identifier, also its log subsystem.
   public static let companionBundleID = "com.cyberpapiii.imessage-max.menubar"
   /// Hosts that keep the listener local. Binding anywhere else needs
