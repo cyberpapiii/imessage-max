@@ -6,11 +6,12 @@ import Testing
 
 @Test func permissionRequestsTargetTheLiveServiceNotASpawnedHelper() throws {
   let request = try ServiceClient.permissionRequest(
-    endpoint: URL(string: "http://127.0.0.1:9191/")!, permission: .automation)
+    endpoint: URL(string: "http://127.0.0.1:9191/")!, permission: .automation, token: "secret")
   #expect(request.url?.absoluteString == "http://127.0.0.1:9191/setup/permissions")
   #expect(request.value(forHTTPHeaderField: "X-iMessage-Max-Setup") == "permission-request-v1")
   #expect(request.value(forHTTPHeaderField: "Origin") == nil)
   #expect(request.httpMethod == "POST")
+  #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer secret")
 }
 
 @Test func permissionReceiptMustMatchTheActualDaemonAndRequestedPermission() throws {

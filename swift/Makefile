@@ -26,6 +26,10 @@ PLIST        := $(HOME)/Library/LaunchAgents/$(LAUNCHD_LABEL).plist
 PORT         := $(or $(shell [ -f "$(PLIST)" ] && plutil -extract ProgramArguments json -o - "$(PLIST)" 2>/dev/null | \
 	tr -d '[]"' | tr ',' '\n' | awk 'take { print; exit } $$0 == "--port" { take = 1 } sub(/^--port=/, "") { print; exit }'),8080)
 URL          := http://127.0.0.1:$(PORT)
+# The probes send the service's bearer token. Override for a server started
+# with --token-file, as in `make verify-db PORT=18484 TOKEN_FILE=/tmp/token`.
+TOKEN_FILE   := $(HOME)/Library/Application Support/iMessage Max/token
+AUTH_HEADER   = -H "Authorization: Bearer $$(cat "$(TOKEN_FILE)" 2>/dev/null)"
 VERIFY_ATTEMPTS := 45
 # Per-probe cap, so a server that accepts but never answers fails the probe
 # instead of hanging make.
@@ -36,10 +40,14 @@ MCP_LEGACY_VERSION := 2025-11-25
 
 # $(call mcp_initialize,<clientInfo name>,<extra curl short flags>): POST a
 # legacy initialize to the service and print the reply.
-mcp_initialize = curl -s$(2) --max-time $(CURL_MAX_TIME) "$(URL)" -X POST \
+mcp_initialize = curl -s$(2) --max-time $(CURL_MAX_TIME) "$(URL)" -X POST $(AUTH_HEADER) \
 	-H "Content-Type: application/json" \
 	-H "Accept: application/json, text/event-stream" \
 	-d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"$(MCP_LEGACY_VERSION)","capabilities":{},"clientInfo":{"name":"$(1)","version":"1.0"}}}' 2>/dev/null
+# token_refused succeeds when the service answers 401, so a probe can name
+# the token instead of reporting the service as down.
+token_refused = [ "$$(curl -s -o /dev/null -w '%{http_code}' --max-time $(CURL_MAX_TIME) "$(URL)" -X POST $(AUTH_HEADER))" = 401 ]
+token_refused_message = ✗ The service refused the token in $(TOKEN_FILE)
 # $(call server_info,<field>): read result.serverInfo.<field> from an
 # initialize reply on stdin.
 server_info = python3 -c "import sys,json; print(json.load(sys.stdin)['result']['serverInfo']['$(1)'])"
@@ -103,6 +111,7 @@ verify: ## Verify server is healthy
 		[ $$i -gt 1 ] && sleep 1; \
 		CURL_STATUS=0; \
 		RESULT=$$($(call mcp_initialize,verify,f)) || CURL_STATUS=$$?; \
+		if [ $$CURL_STATUS -ne 0 ] && $(token_refused); then echo "$(token_refused_message)"; exit 1; fi; \
 		if [ $$CURL_STATUS -eq 0 ]; then \
 			CURL_OK=1; \
 			LAST_BODY=$$RESULT; \
@@ -118,7 +127,7 @@ verify: ## Verify server is healthy
 				else \
 					echo "✓ Legacy lane: v$$SERVER_VERSION healthy on port $(PORT)"; \
 				fi; \
-				MODERN=$$(curl -sf --max-time $(CURL_MAX_TIME) "$(URL)" -X POST \
+				MODERN=$$(curl -sf --max-time $(CURL_MAX_TIME) "$(URL)" -X POST $(AUTH_HEADER) \
 					-H "Content-Type: application/json" \
 					-H "Accept: application/json, text/event-stream" \
 					-H "MCP-Protocol-Version: 2026-07-28" \
@@ -147,15 +156,18 @@ verify-db: ## Call diagnose over HTTP and fail if the service cannot read chat.d
 	@INIT=$$($(call mcp_initialize,verify-db,i)) \
 		|| { echo "✗ Server not responding on $(URL)"; exit 1; }; \
 	SESSION=$$(printf '%s' "$$INIT" | tr -d '\r' | awk 'tolower($$1)=="mcp-session-id:" {print $$2}'); \
-	if [ -z "$$SESSION" ]; then echo "✗ initialize returned no Mcp-Session-Id header"; exit 1; fi; \
-	BODY=$$(curl -sf --max-time 15 "$(URL)" -X POST \
+	if [ -z "$$SESSION" ]; then \
+		if $(token_refused); then echo "$(token_refused_message)"; else echo "✗ initialize returned no Mcp-Session-Id header"; fi; \
+		exit 1; \
+	fi; \
+	BODY=$$(curl -sf --max-time 15 "$(URL)" -X POST $(AUTH_HEADER) \
 		-H "Content-Type: application/json" \
 		-H "Accept: application/json, text/event-stream" \
 		-H "Mcp-Session-Id: $$SESSION" \
 		-H "MCP-Protocol-Version: $(MCP_LEGACY_VERSION)" \
 		-d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"diagnose","arguments":{}}}' 2>/dev/null) \
 		|| { echo "✗ tools/call diagnose failed"; exit 1; }; \
-	curl -s --max-time 2 -o /dev/null "$(URL)" -X DELETE -H "Mcp-Session-Id: $$SESSION" -H "MCP-Protocol-Version: $(MCP_LEGACY_VERSION)" || true; \
+	curl -s --max-time 2 -o /dev/null "$(URL)" -X DELETE $(AUTH_HEADER) -H "Mcp-Session-Id: $$SESSION" -H "MCP-Protocol-Version: $(MCP_LEGACY_VERSION)" || true; \
 	printf '%s' "$$BODY" | python3 -c '\
 import sys, json; \
 r = json.load(sys.stdin)["result"]; \
@@ -181,7 +193,8 @@ status: ## Show service status and version
 	@codesign -dvv $(BINARY) 2>&1 | grep -E "Signature|Authority|CDHash" || echo "Not signed"
 	@echo ""
 	@echo "=== Health ==="
-	@BODY=$$($(call mcp_initialize,status,f)) || { echo "✗ Not responding"; exit 0; }; \
+	@BODY=$$($(call mcp_initialize,status,f)) || { \
+		if $(token_refused); then echo "$(token_refused_message)"; else echo "✗ Not responding"; fi; exit 0; }; \
 	if command -v python3 >/dev/null 2>&1; then \
 		VERSION=$$(echo "$$BODY" | $(call server_info,version) 2>/dev/null) && echo "✓ Responding, v$$VERSION" \
 			|| { printf '%s' "$$BODY" | head -c 200; echo; echo "✗ Unexpected response (not JSON)"; }; \

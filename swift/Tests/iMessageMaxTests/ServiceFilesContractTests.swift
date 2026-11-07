@@ -25,6 +25,7 @@ final class ServiceFilesContractTests: XCTestCase {
             "PLIST        := $(HOME)/\(ServiceDefaults.launchAgentPath.replacingOccurrences(of: ServiceDefaults.launchdLabel, with: "$(LAUNCHD_LABEL)"))\n",
             "),\(ServiceDefaults.port))\n",
             "URL          := http://\(ServiceDefaults.host):$(PORT)\n",
+            "TOKEN_FILE   := $(HOME)/\(ServiceDefaults.tokenPath)\n",
             "launchd/\(ServiceDefaults.launchdLabel).plist",
             "tail -f ~/\(ServiceDefaults.stderrLogPath)\n",
             "> ~/\(ServiceDefaults.stderrLogPath)",

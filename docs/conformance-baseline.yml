@@ -1,9 +1,11 @@
 # MCP conformance@0.2.0-alpha.11 expected-failures baseline for iMessage Max.
 #
-# Usage (official suite: github.com/modelcontextprotocol/conformance):
-#   npx @modelcontextprotocol/conformance@0.2.0-alpha.11 server --url http://127.0.0.1:8080 \
+# Usage (official suite: github.com/modelcontextprotocol/conformance). The
+# server requires a bearer token, which scripts/conformance-auth.mjs adds:
+#   export NODE_OPTIONS="--import $PWD/scripts/conformance-auth.mjs" IMESSAGE_MAX_TOKEN_FILE=<token file>
+#   npx @modelcontextprotocol/conformance@0.2.0-alpha.11 server --url http://127.0.0.1:<port> \
 #     --suite draft  --expected-failures docs/conformance-baseline.yml
-#   npx @modelcontextprotocol/conformance@0.2.0-alpha.11 server --url http://127.0.0.1:8080 \
+#   npx @modelcontextprotocol/conformance@0.2.0-alpha.11 server --url http://127.0.0.1:<port> \
 #     --suite active --expected-failures docs/conformance-baseline.yml
 #
 # Every entry below is a feature the server intentionally does not implement,
