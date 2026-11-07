@@ -17,6 +17,12 @@ public enum ServiceDefaults {
   /// The bearer token every HTTP request must send. The helper creates it,
   /// mode 0600, on first start.
   public static let tokenPath = "Library/Application Support/iMessage Max/token"
+  /// The Unix socket stdio bridges connect to. The helper creates it, mode
+  /// 0600, in its 0700 app-support folder.
+  public static let socketPath = "Library/Application Support/iMessage Max/mcp.sock"
+  /// Used in the per-user temp folder (confstr _CS_DARWIN_USER_TEMP_DIR)
+  /// when the home path is too long for socketPath to fit in sockaddr_un.
+  public static let fallbackSocketName = "imessage-max.sock"
   /// The companion app's bundle identifier, also its log subsystem.
   public static let companionBundleID = "com.cyberpapiii.imessage-max.menubar"
   /// Hosts that keep the listener local. Binding anywhere else needs
