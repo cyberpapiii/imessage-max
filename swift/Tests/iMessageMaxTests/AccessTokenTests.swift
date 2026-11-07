@@ -64,13 +64,23 @@ final class AccessTokenTests: XCTestCase {
 
     func testMalformedFileIsReplaced() throws {
         try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
-        for contents in ["", "short", String(repeating: "a", count: 42), String(repeating: "+", count: 43)] {
+        let oversized = String(repeating: "a", count: 2048)
+        for contents in ["", "short", String(repeating: "a", count: 42), String(repeating: "+", count: 43), oversized] {
             try contents.write(to: file, atomically: false, encoding: .utf8)
             XCTAssertEqual(chmod(file.path, 0o600), 0)
 
             let token = try AccessToken.loadOrCreate(at: file)
             XCTAssertEqual(try String(contentsOf: file, encoding: .utf8), token.encoded + "\n")
             XCTAssertEqual(try permissions(file.path), 0o600)
+        }
+    }
+
+    func testFifoIsRejectedWithoutBlocking() throws {
+        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        XCTAssertEqual(mkfifo(file.path, 0o600), 0)
+
+        XCTAssertThrowsError(try AccessToken.loadOrCreate(at: file)) { error in
+            XCTAssertEqual(error as? AccessToken.LoadError, .notRegularFile(path: file.path))
         }
     }
 

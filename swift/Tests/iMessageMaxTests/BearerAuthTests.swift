@@ -2,6 +2,7 @@ import XCTest
 import HTTPTypes
 import Hummingbird
 import HummingbirdTesting
+import IMessageMaxContract
 import NIOCore
 @testable import iMessageMax
 
@@ -20,6 +21,8 @@ final class BearerAuthTests: XCTestCase {
         Probe(method: .post, uri: "/setup/permissions", body: #"{"permission":"automation"}"#),
         Probe(method: .get, uri: "/.well-known/oauth-protected-resource", body: nil),
         Probe(method: .put, uri: "/", body: nil),
+        Probe(method: .head, uri: "/", body: nil),
+        Probe(method: .options, uri: "/", body: nil),
     ]
 
     private static var wrongTokens: [(String, String?)] {
@@ -110,7 +113,13 @@ final class BearerAuthTests: XCTestCase {
     }
 
     func testSetupRouteReachesHandlerOnlyWithToken() async throws {
-        let app = await makeTestTransport().application()
+        let prompts = PromptCounter()
+        let transport = HTTPTransport(
+            host: "127.0.0.1", accessToken: testAccessToken, catalog: makeTestCatalog(),
+            setupPermissions: SetupPermissionService(
+                contactsRequest: { await prompts.record() }, automationRequest: { await prompts.record() }),
+            configuration: .test)
+        let app = await transport.application()
         try await app.test(TestingSetup.router) { client in
             var headers: HTTPFields = [
                 .contentType: "application/json",
@@ -120,12 +129,31 @@ final class BearerAuthTests: XCTestCase {
             let refused = try await client.executeRequest(
                 uri: "/setup/permissions", method: .post, headers: headers, body: body)
             XCTAssertEqual(refused.head.status, .unauthorized)
+            let promptsWithoutToken = await prompts.count
+            XCTAssertEqual(promptsWithoutToken, 0, "no permission prompt without the token")
 
             headers[.authorization] = testAuthorization
             let accepted = try await client.executeRequest(
                 uri: "/setup/permissions", method: .post, headers: headers, body: body)
             XCTAssertEqual(accepted.head.status, .ok, String(buffer: accepted.body))
+            let promptsWithToken = await prompts.count
+            XCTAssertEqual(promptsWithToken, 1)
         }
+    }
+
+    func testBrowserProbeIsRefusedByOriginWithoutAnAuthLine() async throws {
+        let capture = Log.Capture()
+        let app = await makeTestTransport().application()
+        try await Log.$capture.withValue(capture) {
+            try await app.test(TestingSetup.router) { client in
+                var headers = jsonHeaders()
+                headers[.authorization] = nil
+                headers[HTTPField.Name("Origin")!] = "http://evil.example"
+                let response = try await client.post(modernBody(method: "server/discover"), headers: headers)
+                XCTAssertEqual(response.head.status, .forbidden)
+            }
+        }
+        XCTAssertFalse(capture.lines.contains { $0.hasPrefix("auth=rejected") }, "\(capture.lines)")
     }
 
     func testSchemeIsCaseInsensitive() {
@@ -173,5 +201,14 @@ final class BearerAuthTests: XCTestCase {
     private static func assertUnauthorizedBody(_ response: TestResponse, context: String) throws {
         let error = try XCTUnwrap(try decodeJSON(from: response.body)["error"] as? [String: Any], context)
         XCTAssertTrue((error["message"] as? String)?.contains(BearerAuthMiddleware<BasicRequestContext>.fix) == true, context)
+    }
+}
+
+private actor PromptCounter {
+    private(set) var count = 0
+
+    func record() -> (ok: Bool, status: PermissionStatus) {
+        count += 1
+        return (true, .authorized)
     }
 }

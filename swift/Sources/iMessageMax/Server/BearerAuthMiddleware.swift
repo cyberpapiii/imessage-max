@@ -4,7 +4,9 @@ import HTTPTypes
 
 /// Refuses every request that lacks `Authorization: Bearer <token>`, before
 /// any route reads the body. Hummingbird applies router middleware only to
-/// routes registered after it, so it must be the first thing added.
+/// routes registered after it, so it must be added before every route.
+/// Origin validation runs first, so a web page that probes the port gets a
+/// 403 and adds no `auth=rejected` line to the log.
 struct BearerAuthMiddleware<Context: RequestContext>: RouterMiddleware {
     static var fix: String { "Open iMessage Max and choose Connect, or copy the token from the app." }
 

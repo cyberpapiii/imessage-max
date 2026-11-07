@@ -102,8 +102,8 @@ actor HTTPTransport {
         isConnected = true
 
         let router = Router(context: BasicRequestContext.self)
-        router.add(middleware: BearerAuthMiddleware(token: accessToken))
         router.add(middleware: OriginValidationMiddleware(boundHost: host))
+        router.add(middleware: BearerAuthMiddleware(token: accessToken))
         router.post("/") { request, _ in
             try await self.handlePost(request: request)
         }
