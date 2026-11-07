@@ -62,6 +62,20 @@ final class ServiceFilesContractTests: XCTestCase {
         }
     }
 
+    func testReleaseScriptChecksTheBundledLayout() throws {
+        let script = try String(
+            contentsOf: root.appendingPathComponent("scripts/sign-notarize-app.sh"), encoding: .utf8)
+        for expected in [
+            "AGENT_LABEL=\"\(ServiceDefaults.launchdLabel)\"\n",
+            "APP_ID=\"\(ServiceDefaults.companionBundleID)\"\n",
+            "HELPER=\"$APP/\(ServiceDefaults.helperBundlePath)\"\n",
+            "AGENT_PLIST=\"$APP/\(ServiceDefaults.agentPlistDirectory)/$AGENT_LABEL.plist\"\n",
+            "== \"\(ServiceDefaults.helperBundlePath)\" ]]",
+        ] {
+            XCTAssertTrue(script.contains(expected), "scripts/sign-notarize-app.sh lacks \(expected.debugDescription)")
+        }
+    }
+
     func testHelperEntitlementsGrantContactsAndAutomation() throws {
         let url = try root.appendingPathComponent("swift/iMessageMax.entitlements")
         let entitlements = try XCTUnwrap(

@@ -19,7 +19,10 @@ set -euo pipefail
 TEAM_ID="HJF7LN64XX"
 HELPER_ID="com.cyberpapiii.imessage-max"
 APP_ID="com.cyberpapiii.imessage-max.menubar"
-HELPER_ENTITLEMENTS=(
+AGENT_LABEL="com.cyberpapiii.imessage-max.helper"
+# The helper and the app both carry these: macOS charges the in-bundle
+# helper's Contacts and Apple Events access to the app.
+ENTITLEMENTS=(
   com.apple.security.automation.apple-events
   com.apple.security.personal-information.addressbook
 )
@@ -112,8 +115,9 @@ notarize() {
 
 STAGE="$WORK_DIR/dmg"
 APP="$STAGE/iMessage Max.app"
-HELPER="$APP/Contents/Resources/imessage-max"
+HELPER="$APP/Contents/MacOS/imessage-max"
 MENU="$APP/Contents/MacOS/iMessageMaxMenu"
+AGENT_PLIST="$APP/Contents/Library/LaunchAgents/$AGENT_LABEL.plist"
 DMG_NAME="iMessage-Max-$VERSION.dmg"
 DMG="$WORK_DIR/$DMG_NAME"
 
@@ -136,10 +140,19 @@ for bin in "$HELPER" "$MENU"; do
 done
 grep -qx "Identifier=$HELPER_ID" <<<"$(codesign -dvv "$HELPER" 2>&1)" || fail "helper identifier is not $HELPER_ID"
 grep -qx "Identifier=$APP_ID" <<<"$(codesign -dvv "$APP" 2>&1)" || fail "app identifier is not $APP_ID"
-entitlements="$(codesign -d --entitlements - --xml "$HELPER" 2>/dev/null)"
-for key in "${HELPER_ENTITLEMENTS[@]}"; do
-  grep -A1 "<key>$key</key>" <<<"$entitlements" | grep -q "<true/>" || fail "helper lacks entitlement $key"
+for signed in "$HELPER" "$APP"; do
+  entitlements="$(codesign -d --entitlements - --xml "$signed" 2>/dev/null)"
+  for key in "${ENTITLEMENTS[@]}"; do
+    grep -A1 "<key>$key</key>" <<<"$entitlements" | grep -q "<true/>" || fail "$signed lacks entitlement $key"
+  done
 done
+[[ -f "$AGENT_PLIST" ]] || fail "the agent plist $AGENT_PLIST is missing"
+[[ "$(plutil -extract Label raw -o - "$AGENT_PLIST")" == "$AGENT_LABEL" ]] \
+  || fail "the agent plist's Label is not $AGENT_LABEL"
+[[ "$(plutil -extract BundleProgram raw -o - "$AGENT_PLIST")" == "Contents/MacOS/imessage-max" ]] \
+  || fail "the agent plist's BundleProgram is not Contents/MacOS/imessage-max"
+plutil -extract AssociatedBundleIdentifiers json -o - "$AGENT_PLIST" | grep -qF "\"$APP_ID\"" \
+  || fail "the agent plist does not associate $APP_ID"
 APP_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")"
 [[ "$APP_VERSION" == "$VERSION" ]] || fail "app version $APP_VERSION is not $VERSION"
 HELPER_VERSION="$("$HELPER" --version)"
