@@ -28,8 +28,9 @@ public enum SystemCommand: Sendable, Equatable {
   case unregister(plistName: String)
   /// `launchctl kickstart`, with `-k` when `restart` kills a running process first.
   case kickstart(label: String, restart: Bool)
-  /// SIGTERM. The plist's KeepAlive does not relaunch a clean exit.
-  case terminate(label: String)
+  /// Unloads the job until the next login or registration. Stopping uses
+  /// this, not SIGTERM: the server aborts while shutting down, and the
+  /// plist's KeepAlive relaunches a crash.
   case bootout(label: String)
 }
 
@@ -73,8 +74,6 @@ public struct LiveServiceSystem: ServiceSystem {
       try await SMAppService.agent(plistName: plistName).unregister()
     case .kickstart(let label, let restart):
       try await launchctl(["kickstart"] + (restart ? ["-k"] : []) + [Self.target(label)])
-    case .terminate(let label):
-      try await launchctl(["kill", "SIGTERM", Self.target(label)])
     case .bootout(let label):
       try await launchctl(["bootout", Self.target(label)])
     }

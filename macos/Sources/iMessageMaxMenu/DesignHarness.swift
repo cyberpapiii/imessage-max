@@ -113,8 +113,7 @@ actor FixtureSystem: ServiceSystem {
   func job(label: String) async -> Job? {
     if label == LegacyInstall.label { return name == "legacy" ? Job(pid: 77) : nil }
     return switch name {
-    case "fresh", "legacy", "blocked": nil
-    case "stopped": Job(pid: nil)
+    case "fresh", "legacy", "blocked", "stopped": nil
     default: Job(pid: Self.processID)
     }
   }
@@ -130,9 +129,8 @@ actor FixtureSystem: ServiceSystem {
     while name == "working" { await withCheckedContinuation { waiting.append($0) } }
     await Self.pause(1.2)
     switch command {
-    case .terminate: land(on: "stopped")
     case .unregister: land(on: "fresh")
-    case .bootout: land(on: "fresh")
+    case .bootout(let label): land(on: label == LegacyInstall.label ? "fresh" : "stopped")
     case .register, .kickstart: land(on: "ready")
     }
   }

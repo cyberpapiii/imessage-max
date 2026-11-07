@@ -64,10 +64,13 @@ actor FakeServiceSystem: ServiceSystem {
     case .kickstart(_, let restart):
       guard loaded else { throw CoreError.commandFailed("no such job") }
       if restart || pid == nil { launch() }
-    case .terminate:
-      pid = nil
-    case .bootout:
-      legacyLoaded = false
+    case .bootout(let label):
+      if label == LegacyInstall.label {
+        legacyLoaded = false
+      } else {
+        loaded = false
+        pid = nil
+      }
     }
   }
 

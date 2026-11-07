@@ -100,7 +100,7 @@ struct PanelState: Equatable {
     case .misplaced:
       "iMessage Max runs from your Applications folder, so its helper keeps working after this window closes."
     case .olderInstall:
-      "An older iMessage Max helper is still installed. We’ll replace it with the one in this app. Your settings stay."
+      "An older iMessage Max helper is still installed. We’ll replace it with the one in this app. Then you’ll allow access once more, for the app."
     case .blocked:
       "macOS lets the helper run only when it’s on in Login Items. Turn on iMessage Max there."
     case .notSetUp: "A small helper connects your assistants to Messages."

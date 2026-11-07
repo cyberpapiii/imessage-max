@@ -140,23 +140,12 @@ import Testing
   let label = ServiceDefaults.launchdLabel
   #expect(
     await system.commands == [
-      .register(plistName: plist), .terminate(label: label),
-      .kickstart(label: label, restart: false), .kickstart(label: label, restart: true),
-    ])
-}
-
-@Test func aJobLaunchdDroppedIsRegisteredAgain() async throws {
-  let system = FakeServiceSystem()
-  await system.set {
-    $0.agent = .enabled
-    $0.loaded = false
-  }
-  let controller = ServiceController(
-    configuration: try configuration(home: try temporaryHome()), system: system,
-    home: try temporaryHome())
-  #expect(await controller.inspect() == .stopped)
-  #expect(try await controller.perform(.start).diagnosis != nil)
-  #expect(await system.commands.suffix(2).first == .unregister(plistName: "\(ServiceDefaults.launchdLabel).plist"))
+      .register(plistName: plist),
+      .bootout(label: label),
+      .unregister(plistName: plist), .register(plistName: plist),
+      .kickstart(label: label, restart: true),
+    ],
+    "a stop unloads the job, so the next start registers it again")
 }
 
 @Test func blockedStatesChangeNothing() async throws {

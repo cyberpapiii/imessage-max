@@ -12,8 +12,9 @@ public actor ServiceController {
   /// nil for a test build, which must never touch the old install.
   private let legacy: LegacyInstall?
   private var operating = false
-  /// About 12 seconds at the live system's 0.35 second pause.
-  private static let attempts = 35
+  /// About 18 seconds at the live system's 0.35 second pause. A kickstart
+  /// waits out the plist's 10 second ThrottleInterval.
+  private static let attempts = 50
 
   public init(
     configuration: ServiceConfiguration, system: any ServiceSystem = LiveServiceSystem(),
@@ -34,7 +35,7 @@ public actor ServiceController {
       case (_, .misplaced), (_, .legacyInstall), (_, .blockedInLoginItems), (_, .portConflict):
         throw CoreError.notReady(state)
       case (.stop, .running), (.stop, .unresponsive):
-        try await system.run(.terminate(label: configuration.label))
+        try await system.run(.bootout(label: configuration.label))
         return try await converge { $0 == .stopped }
       case (.stop, _), (.start, .running), (.start, .unresponsive):
         return state
@@ -139,13 +140,12 @@ public actor ServiceController {
       foreignListener: foreign)
   }
 
-  /// A job launchd no longer holds, for example after a manual bootout,
-  /// cannot be kickstarted; registering again loads it.
+  /// A job launchd no longer holds, as after a stop, cannot be kickstarted;
+  /// registering again loads it.
   private func kickstart(restart: Bool) async throws {
-    do {
+    if await system.job(label: configuration.label) != nil {
       try await system.run(.kickstart(label: configuration.label, restart: restart))
-    } catch {
-      guard await system.job(label: configuration.label) == nil else { throw error }
+    } else {
       try await system.run(.unregister(plistName: configuration.plistName))
       try await system.run(.register(plistName: configuration.plistName))
     }

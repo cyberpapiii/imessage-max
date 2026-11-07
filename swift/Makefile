@@ -85,7 +85,7 @@ app: ## Build and sign the app with the helper inside it, into ../dist
 restart: ## Restart the helper
 	@echo "Restarting service..."
 	@launchctl kickstart -k gui/$$(id -u)/$(LAUNCHD_LABEL) \
-		|| { echo "The helper is not registered. Run: make install"; exit 1; }
+		|| { echo "The helper is not loaded. Start it from the iMessage Max menu, or run: make install"; exit 1; }
 	@echo "✓ Service restarted"
 
 verify: ## Verify server is healthy
