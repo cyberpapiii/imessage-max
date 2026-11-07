@@ -3,7 +3,7 @@ import MaxBrand
 import MaxCore
 
 enum Busy: Equatable {
-  case starting, stopping, askingPermission, checkingSending, moving
+  case starting, stopping, askingPermission, checkingSending, checkingAccess, moving
 
   var title: String {
     switch self {
@@ -11,6 +11,7 @@ enum Busy: Equatable {
     case .stopping: "Taking a break…"
     case .askingPermission: "Waiting for permission…"
     case .checkingSending: "Checking sending…"
+    case .checkingAccess: "Checking access…"
     case .moving: "Moving to Applications…"
     }
   }
@@ -29,6 +30,7 @@ struct Notice: Equatable {
   static let setupUnfinished = Notice(
     text: "Setup isn’t finished yet. Check the step below.", tone: .neutral)
   static let noLog = Notice(text: "No service log yet. Start iMessage Max first.")
+  static let tried = Notice(text: "Your assistant just used iMessage Max. You’re all set.")
 
   static func granted(_ permission: SetupPermission) -> Notice {
     Notice(text: permission == .automation ? "Sending is ready." : "Contact names are ready.")
@@ -52,34 +54,120 @@ enum ClientActivity: Equatable {
   case failed(String)
 }
 
+/// What the first-run steps are judged on besides diagnose.
+struct SetupFacts: Equatable {
+  /// Detected clients whose config reaches the helper, in table order.
+  var connected: [String] = []
+  var skippedConnect = false
+  /// A client other than this app has called a tool. The app keeps it once
+  /// seen, because the helper's count starts over at every launch.
+  var tried = false
+}
+
+enum StepProgress: Equatable {
+  /// The word the row shows, such as Ready.
+  case done(String)
+  case current
+  case skipped
+  case upcoming
+}
+
+struct StepRow: Identifiable, Equatable {
+  let step: SetupStep
+  let progress: StepProgress
+  var id: SetupStep { step }
+}
+
+extension SetupStep {
+  /// The step's done check against a running helper: nil while it is not
+  /// done, else the word its row shows. Answering diagnose is itself the
+  /// check for Allow in the background.
+  func done(_ diagnosis: DiagnoseResult, _ facts: SetupFacts) -> String? {
+    switch self {
+    case .allowInBackground: "On"
+    case .readMessages: diagnosis.database.accessible ? "Ready" : nil
+    case .showNames:
+      diagnosis.namesReady ? (diagnosis.contacts.status == .limited ? "Some names" : "Ready") : nil
+    case .sendMessages: diagnosis.sendingReady ? "Ready" : nil
+    case .connectAssistant:
+      if let first = facts.connected.first {
+        facts.connected.count == 1 ? first : "\(first) and \(facts.connected.count - 1) more"
+      } else {
+        facts.tried ? "Connected" : nil
+      }
+    case .tryIt: facts.tried ? "Worked" : nil
+    }
+  }
+}
+
+/// First run as one ordered list. Each row is judged on its own, so a revoked
+/// grant turns its row back while later rows keep their state, and the first
+/// row that is neither done nor skipped is the current step.
+struct FirstRun: Equatable {
+  let rows: [StepRow]
+
+  /// nil for a helper no step can fix, such as one that is stopped or misplaced.
+  init?(service: ServiceState?, facts: SetupFacts) {
+    switch service {
+    case .notRegistered?, .blockedInLoginItems?:
+      rows = SetupStep.allCases.map {
+        StepRow(step: $0, progress: $0 == .allowInBackground ? .current : .upcoming)
+      }
+    case .running(let diagnosis)?:
+      var found = false
+      rows = SetupStep.allCases.map { step in
+        if let word = step.done(diagnosis, facts) { return StepRow(step: step, progress: .done(word)) }
+        if step == .connectAssistant && facts.skippedConnect {
+          return StepRow(step: step, progress: .skipped)
+        }
+        defer { found = true }
+        return StepRow(step: step, progress: found ? .upcoming : .current)
+      }
+    default:
+      return nil
+    }
+  }
+
+  var current: SetupStep? { rows.first { $0.progress == .current }?.step }
+}
+
 struct PanelState: Equatable {
   enum Phase: Equatable {
     case checking
-    case connected(Readiness, opensMessages: Bool)
+    /// Step one, before the helper was ever registered.
+    case notSetUp
+    /// Step one, after the user turned the helper off in Login Items.
+    case blocked
+    /// A running helper's first unfinished step.
+    case setup(SetupStep)
+    case ready
     case misplaced
     case olderInstall
-    case blocked
-    case notSetUp
     case stopped
     /// The helper answered 401: it holds another token than this app reads.
     case keyMismatch
     case disconnected
   }
 
-  enum Primary { case connect, start, restart, migrate, move, openLoginItems, recheck }
+  enum Primary { case start, restart, migrate, move, recheck }
 
   let phase: Phase
+  let firstRun: FirstRun?
   let busy: Busy?
   let troubled: Bool
 
-  init(service: ServiceState?, busy: Busy?, problem: String?, checked: Bool) {
+  init(
+    service: ServiceState?, facts: SetupFacts = SetupFacts(), busy: Busy?, problem: String?,
+    checked: Bool
+  ) {
     self.busy = busy
     troubled = problem != nil
+    let firstRun = FirstRun(service: service, facts: facts)
+    self.firstRun = firstRun
     phase =
       switch service {
       case nil: !checked && problem == nil ? .checking : .disconnected
-      case .running(let diagnosis):
-        .connected(diagnosis.readiness, opensMessages: diagnosis.needsMessagesForSendingCheck)
+      case .running: firstRun?.current.map(Phase.setup) ?? .ready
       case .misplaced: .misplaced
       case .legacyInstall: .olderInstall
       case .blockedInLoginItems: .blocked
@@ -90,18 +178,33 @@ struct PanelState: Equatable {
       }
   }
 
+  /// The step the panel walks the user through now.
+  var step: SetupStep? {
+    switch phase {
+    case .notSetUp, .blocked: .allowInBackground
+    case .setup(let step): step
+    default: nil
+    }
+  }
+
+  /// Steps one to four. Until they are done no assistant can use Messages.
+  var needsGrant: Bool {
+    guard let step else { return false }
+    return step != .connectAssistant && step != .tryIt
+  }
+
   var title: String {
     if let busy { return busy.title }
     return switch phase {
     case .checking: "Checking in…"
-    case .connected(.messages, _): "A little setup first"
-    case .connected(.contacts, _): "Let’s add names"
-    case .connected(.sending, _): "Ready to read"
-    case .connected(.ready, _): "Ready to help"
+    case .notSetUp: "Hello, iMessage Max"
+    case .blocked: "Turned off in Login Items"
+    case .setup(.allowInBackground), .setup(.readMessages): "A little setup first"
+    case .setup(.showNames): "Let’s add names"
+    case .setup(.sendMessages): "Ready to read"
+    case .setup(.connectAssistant), .setup(.tryIt), .ready: "Ready to help"
     case .misplaced: "Move me to Applications"
     case .olderInstall: "Finish the update"
-    case .blocked: "Turned off in Login Items"
-    case .notSetUp: "Hello, iMessage Max"
     case .stopped: "Taking a break"
     case .keyMismatch: "Access key doesn’t match"
     case .disconnected: "Let’s get connected"
@@ -111,20 +214,20 @@ struct PanelState: Equatable {
   var subtitle: String {
     if busy != nil { return "We’ll check that everything worked." }
     return switch phase {
-    case .connected(.messages, _): "Give iMessage Max access to Messages on this Mac."
-    case .connected(.contacts, _): "Messages are available. Allow Contacts to show names."
-    case .connected(.sending, let opensMessages):
-      opensMessages
-        ? "Open Messages so we can check sending. Your assistants can already read messages."
-        : "Your assistants can read messages. Let’s check sending access."
-    case .connected(.ready, _): "Your assistants can now use Messages on this Mac."
+    case .notSetUp: "A small helper connects your assistants to Messages. A few steps set it up."
+    case .blocked:
+      "macOS lets the helper run only when it’s on in Login Items. Turn on iMessage Max there."
+    case .setup(.allowInBackground), .setup(.readMessages):
+      "Give iMessage Max access to Messages on this Mac."
+    case .setup(.showNames): "Messages are available. Allow Contacts to show names."
+    case .setup(.sendMessages): "Your assistants can read messages. Let’s check sending access."
+    case .setup(.connectAssistant): "Connect the assistant you use. It takes one click."
+    case .setup(.tryIt): "Ask your assistant something, and this step turns green."
+    case .ready: "Your assistants can now use Messages on this Mac."
     case .misplaced:
       "Move iMessage Max to Applications so it can register its helper and start at login."
     case .olderInstall:
       "An older iMessage Max helper is still installed. We’ll replace it with the one in this app. Then you’ll allow access once more, for the app."
-    case .blocked:
-      "macOS lets the helper run only when it’s on in Login Items. Turn on iMessage Max there."
-    case .notSetUp: "A small helper connects your assistants to Messages."
     case .stopped: "Start whenever you need your assistants again."
     case .keyMismatch:
       "iMessage Max is running but turned this app away, because its access key changed. Restart it so both use the same key."
@@ -133,37 +236,33 @@ struct PanelState: Equatable {
     }
   }
 
+  /// The big button, for states outside the steps. A step carries its own.
   var primary: Primary? {
     switch phase {
-    case .connected(.ready, _): .connect
-    case .connected: nil
     case .misplaced: .move
     case .olderInstall: .migrate
-    case .blocked: .openLoginItems
-    case .notSetUp, .stopped: .start
+    case .stopped: .start
     case .keyMismatch: .restart
     case .checking, .disconnected: .recheck
+    case .notSetUp, .blocked, .setup, .ready: nil
     }
   }
 
   var primaryTitle: String {
     if busy != nil { return "Working…" }
     return switch phase {
-    case .connected: "Connect an assistant"
     case .misplaced: "Move to Applications"
     case .olderInstall: "Replace the older helper"
-    case .blocked: "Open Login Items"
-    case .notSetUp: "Set up iMessage Max"
     case .stopped: "Start iMessage Max"
     case .keyMismatch: "Restart iMessage Max"
-    case .checking, .disconnected: "Check again"
+    default: "Check again"
     }
   }
 
   var primaryMark: ActionMark {
     if busy != nil { return .more }
     return switch phase {
-    case .notSetUp, .stopped, .olderInstall, .keyMismatch: .play
+    case .stopped, .olderInstall, .keyMismatch: .play
     default: .arrow
     }
   }
@@ -175,8 +274,8 @@ struct PanelState: Equatable {
     if troubled { return .trouble }
     return switch phase {
     case .stopped, .notSetUp: .resting
-    case .connected(.ready, _): .ready
-    case .connected, .misplaced, .olderInstall, .blocked: .needsYou
+    case .ready, .setup(.connectAssistant), .setup(.tryIt): .ready
+    case .setup, .blocked, .misplaced, .olderInstall: .needsYou
     case .checking, .disconnected, .keyMismatch: .trouble
     }
   }

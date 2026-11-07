@@ -5,9 +5,10 @@ import MaxCore
 @MainActor
 final class Milestones {
   enum Key: String {
-    case introducedMenuBar = "hasIntroducedMenuBar"
     case welcomedConnection = "hasWelcomedConnection"
     case welcomedSetup = "hasWelcomedSetup"
+    case skippedConnect = "hasSkippedConnect"
+    case triedAssistant = "hasTriedAssistant"
   }
 
   private let defaults: UserDefaults?
@@ -21,11 +22,15 @@ final class Milestones {
     defaults?.bool(forKey: key.rawValue) ?? reachedInMemory.contains(key)
   }
 
-  func mark(_ key: Key) {
+  func mark(_ key: Key) { set(key, true) }
+
+  func set(_ key: Key, _ value: Bool) {
     if let defaults {
-      defaults.set(true, forKey: key.rawValue)
-    } else {
+      defaults.set(value, forKey: key.rawValue)
+    } else if value {
       reachedInMemory.insert(key)
+    } else {
+      reachedInMemory.remove(key)
     }
   }
 }

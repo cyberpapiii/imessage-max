@@ -90,7 +90,7 @@ public struct ServiceClient: Sendable {
         "_meta": [
           ModernMetaKey.protocolVersion: ModernMCP.protocolVersion,
           ModernMetaKey.clientCapabilities: [:],
-          ModernMetaKey.clientInfo: ["name": "iMessage Max Menu", "version": "1.0"],
+          ModernMetaKey.clientInfo: ["name": ServiceDefaults.companionClientName, "version": "1.0"],
         ],
       ],
     ])

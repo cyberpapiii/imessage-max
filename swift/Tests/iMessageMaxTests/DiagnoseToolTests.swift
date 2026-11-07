@@ -167,7 +167,23 @@ final class DiagnoseToolTests: XCTestCase {
             ] {
                 XCTAssertFalse(fix.contains(developerWord), "in-app fix names \(developerWord): \(fix)")
             }
+            // The app's steps restart the helper themselves.
+            XCTAssertFalse(fix.contains("Restart"), "in-app fix asks for a restart: \(fix)")
         }
+        XCTAssertTrue(fullDisk.hasSuffix(DiagnoseTool.appRechecks), fullDisk)
+        XCTAssertTrue(contactsDenied.hasSuffix(DiagnoseTool.appRechecks), contactsDenied)
+    }
+
+    /// The companion's Try it step turns green on this count.
+    func testAssistantCallsReachDiagnose() async throws {
+        let result = try await DiagnoseTool.execute(
+            resolver: ContactResolver(seedCache: [:]),
+            dbProbe: DiagnoseToolTests.dbAccessible,
+            automationProbe: DiagnoseToolTests.automationGranted,
+            assistantCalls: { 3 }
+        )
+        XCTAssertEqual(result.assistantCalls, 3)
+        XCTAssertTrue(try FormatUtils.encodeJSON(result).contains(#""assistant_calls":3"#))
     }
 
     /// Someone who never opens Terminal must be able to follow every fix, for

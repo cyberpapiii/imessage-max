@@ -1,6 +1,8 @@
 import Foundation
 import XCTest
+import IMessageMaxContract
 import MCP
+import Synchronization
 @testable import iMessageMax
 
 final class ModernDispatcherTests: XCTestCase {
@@ -173,6 +175,19 @@ final class ModernDispatcherTests: XCTestCase {
         XCTAssertEqual(error["code"] as? Int, -32602)
     }
 
+    /// The companion checks status with diagnose, and those checks must not
+    /// turn its Try it step green.
+    func testOnlyCallsFromOtherClientsCountAsAssistantCalls() async throws {
+        registerFakeTool(named: "modern_echo")
+        let call = ["name": "modern_echo", "arguments": [:]] as [String: Any]
+        let before = ToolCallDispatch.assistantCalls.withLock { $0 }
+        _ = await dispatch(modernRequest(
+            method: "tools/call", client: ServiceDefaults.companionClientName, extraParams: call))
+        XCTAssertEqual(ToolCallDispatch.assistantCalls.withLock { $0 }, before)
+        _ = await dispatch(modernRequest(method: "tools/call", extraParams: call))
+        XCTAssertEqual(ToolCallDispatch.assistantCalls.withLock { $0 }, before + 1)
+    }
+
     func testBase64SentinelDecoding() {
         XCTAssertEqual(HTTPRequestParsing.decodeBase64Sentinel("plain"), "plain")
         let encoded = "=?base64?" + Data("héllo".utf8).base64EncodedString() + "?="
@@ -204,21 +219,22 @@ final class ModernDispatcherTests: XCTestCase {
         definitions.append(fakeTool(named: name, handler: handler))
     }
 
-    private func modernMeta(protocolVersion: String = "2026-07-28") -> [String: Any] {
+    private func modernMeta(protocolVersion: String = "2026-07-28", client: String = "test-client") -> [String: Any] {
         [
             "io.modelcontextprotocol/protocolVersion": protocolVersion,
             "io.modelcontextprotocol/clientCapabilities": [:],
-            "io.modelcontextprotocol/clientInfo": ["name": "test-client", "version": "1.0"],
+            "io.modelcontextprotocol/clientInfo": ["name": client, "version": "1.0"],
         ]
     }
 
     private func modernRequest(
         method: String,
         protocolVersion: String = "2026-07-28",
+        client: String = "test-client",
         extraParams: [String: Any] = [:]
     ) -> Data {
         var params = extraParams
-        params["_meta"] = modernMeta(protocolVersion: protocolVersion)
+        params["_meta"] = modernMeta(protocolVersion: protocolVersion, client: client)
         return (try? payloadData([
             "jsonrpc": "2.0",
             "id": 1,

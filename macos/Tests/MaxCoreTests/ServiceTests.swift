@@ -6,15 +6,15 @@ import MaxTestSupport
 @testable import MaxCore
 
 @Test func readingDoesNotPromiseUnverifiedSending() throws {
-  #expect(try diagnosis(automation: "unverified").readiness == .sending)
+  #expect(try diagnosis(automation: "unverified").missingGrant == .sendMessages)
 }
 
 @Test func missingMessagesTakesPriority() throws {
-  #expect(try diagnosis(database: false, contacts: false).readiness == .messages)
+  #expect(try diagnosis(database: false, contacts: false).missingGrant == .readMessages)
 }
 
 @Test func missingNamesIsNotFullyReady() throws {
-  #expect(try diagnosis(contacts: false).readiness == .contacts)
+  #expect(try diagnosis(contacts: false).missingGrant == .showNames)
 }
 
 @Test func grantedContactsWithFailedLoadingAreNotReady() throws {
@@ -25,5 +25,5 @@ import MaxTestSupport
     """.utf8)
   let value = try JSONDecoder().decode(DiagnoseResult.self, from: data)
   #expect(!value.namesReady)
-  #expect(value.readiness == .contacts)
+  #expect(value.missingGrant == .showNames)
 }

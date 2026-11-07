@@ -83,6 +83,14 @@ public actor ServiceController {
     return try await perform(.restart)
   }
 
+  /// The helper started under the plist's 10 second ThrottleInterval ago. A
+  /// restart now would wait out the rest, and the helper predates no grant a
+  /// person could have turned on since.
+  public func helperIsFresh(_ processID: Int32) async -> Bool {
+    guard let started = await system.startTime(pid: processID) else { return false }
+    return Date.now.timeIntervalSince(started) < 10
+  }
+
   public func unregister() async throws -> ServiceState {
     try await exclusively {
       if await system.agentStatus(plistName: configuration.plistName) != .notRegistered {

@@ -90,6 +90,10 @@ enum DiagnoseTool {
         "Open iMessage Max and choose \(step.title)."
     }
 
+    /// The grant reaches only a new helper process, and the app's step
+    /// restarts the helper itself when it opens again.
+    static let appRechecks = "Then open iMessage Max again: it restarts its helper and checks by itself."
+
     static func fullDiskAccessFix(holder: GrantHolder = .current) -> String {
         switch holder {
         case .app(let app):
@@ -97,7 +101,7 @@ enum DiagnoseTool {
                 + " Then turn on iMessage Max (\(app)) in System Settings -> Privacy & Security -> "
                 + "Full Disk Access. If it is already on there, turn it off and on again: "
                 + "a grant made for an older copy of the app looks present but does not work. "
-                + "Then choose Restart iMessage Max in the app."
+                + appRechecks
         case .executable(let executable):
             return "Full Disk Access is missing for the process reading chat.db (\(executable)). "
                 + "1) System Settings -> Privacy & Security -> Full Disk Access -> add and turn on "
@@ -137,8 +141,8 @@ enum DiagnoseTool {
         switch holder {
         case .app:
             openStep(.showNames)
-                + " Then turn on iMessage Max in System Settings -> Privacy & Security -> Contacts, "
-                + "and choose Restart iMessage Max in the app."
+                + " Then turn on iMessage Max in System Settings -> Privacy & Security -> Contacts. "
+                + appRechecks
         case .executable(let executable):
             "Grant Contacts access: System Settings -> Privacy & Security -> Contacts -> "
                 + "turn on imessage-max (\(executable)). If it is not listed, macOS never "
@@ -167,7 +171,8 @@ enum DiagnoseTool {
         schemaProbe: SchemaProbe = { nil },
         liveInboxProbe: LiveInboxProbe = { false },
         usageDescriptionProbe: UsageDescriptionProbe = { ContactResolver.usageDescriptionEmbedded },
-        holder: GrantHolder = .current
+        holder: GrantHolder = .current,
+        assistantCalls: @Sendable () -> Int = { ToolCallDispatch.assistantCalls.withLock { $0 } }
     ) async throws -> DiagnoseResult {
         let (dbOk, dbStatus) = dbProbe()
         let features = dbOk ? schemaProbe()?.features : nil
@@ -302,7 +307,8 @@ enum DiagnoseTool {
                 loaded: contactsLoaded,
                 fix: contactsFix
             ),
-            capabilities: Dictionary(uniqueKeysWithValues: capabilities.map { ($0.key.rawValue, $0.value) })
+            capabilities: Dictionary(uniqueKeysWithValues: capabilities.map { ($0.key.rawValue, $0.value) }),
+            assistantCalls: assistantCalls()
         )
     }
 }

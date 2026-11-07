@@ -3,108 +3,6 @@ import MaxCore
 import ServiceManagement
 import SwiftUI
 
-struct SetupStep: View {
-  let model: AppModel
-
-  var body: some View {
-    Card {
-      if let diagnosis = model.diagnosis {
-        switch diagnosis.readiness {
-        case .messages:
-          if diagnosis.database.status == .permissionDenied {
-            heading("Let Messages in")
-            line(
-              "In Full Disk Access, turn on iMessage Max. If it isn’t listed, click + and add the iMessage Max app shown in Finder. Then come back and restart it."
-            )
-            buttons {
-              Button("Open Settings") { model.openSettings("Privacy_AllFiles") }
-                .buttonStyle(MaxButtonStyle(primary: true))
-              Button("Show app") { model.revealApp() }
-              Button("Restart after allowing") { model.perform(.restart) }
-                .disabled(model.busy != nil)
-            }
-          } else {
-            heading("Find your Messages")
-            line(
-              "Open Messages and make sure iMessage is set up on this Mac. Then restart iMessage Max to check again."
-            )
-            buttons {
-              Button("Open Messages") { model.openMessages() }
-                .buttonStyle(MaxButtonStyle(primary: true))
-              Button("Restart and check") { model.perform(.restart) }.disabled(model.busy != nil)
-            }
-          }
-        case .contacts:
-          if diagnosis.contacts.authorized {
-            heading("Names did not load")
-            line("Contacts access is allowed. Restart iMessage Max and check again.")
-            buttons {
-              Button("Restart and check") { model.perform(.restart) }
-                .buttonStyle(MaxButtonStyle(primary: true)).disabled(model.busy != nil)
-              recheck
-            }
-          } else {
-            heading("Put names to numbers")
-            line(
-              "Allow Contacts so your assistants can recognize people. This does not change your contacts."
-            )
-            buttons {
-              if [.denied, .restricted].contains(diagnosis.contacts.status) {
-                Button("Open Contacts Settings") { model.openSettings("Privacy_Contacts") }
-                  .buttonStyle(MaxButtonStyle(primary: true))
-                // The helper reads Contacts access once at launch.
-                Button("Restart after allowing") { model.perform(.restart) }
-                  .disabled(model.busy != nil)
-              } else {
-                Button("Allow Contacts") { model.request(.contacts) }
-                  .buttonStyle(MaxButtonStyle(primary: true)).disabled(model.busy != nil)
-                recheck
-              }
-            }
-          }
-        case .sending:
-          heading(model.messagesNeedOpening ? "Check sending" : "Enable sending")
-          line(
-            model.messagesNeedOpening
-              ? "Messages needs to be open to check access. We’ll open it for you. macOS may ask for permission. No message is sent."
-              : "Allow iMessage Max to work with Messages. Your assistant sends only when you ask. Setup sends no message."
-          )
-          buttons {
-            if diagnosis[.permAutomation]?.isPermissionGated == true {
-              Button("Open Automation Settings") { model.openSettings("Privacy_Automation") }
-                .buttonStyle(MaxButtonStyle(primary: true))
-            } else {
-              Button(
-                model.messagesNeedOpening ? "Open Messages and check" : "Allow Messages access"
-              ) { model.request(.automation) }
-              .buttonStyle(MaxButtonStyle(primary: true)).disabled(model.busy != nil)
-            }
-            recheck
-          }
-        case .ready:
-          EmptyView()
-        }
-      }
-    }
-  }
-
-  private func heading(_ text: String) -> some View { Text(text).font(.maxStrong) }
-
-  private func line(_ text: String) -> some View {
-    Text(text).font(.maxLine).foregroundStyle(Design.muted)
-      .fixedSize(horizontal: false, vertical: true)
-  }
-
-  private func buttons<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
-    FlowRow(spacing: Space.tight) { content() }.buttonStyle(MaxButtonStyle())
-  }
-
-  private var recheck: some View {
-    Button("Check again after allowing") { Task { await model.refresh() } }
-      .disabled(model.busy != nil || model.checking)
-  }
-}
-
 struct FlowRow: Layout {
   var spacing: CGFloat
 
@@ -213,6 +111,8 @@ struct ConnectionView: View {
 struct ClientRowView: View {
   let row: ClientRow
   let canConnect: Bool
+  /// The first-run step makes its first Connect the panel's one blue button.
+  var prominent = false
   let connect: () -> Void
   @PanelMotion private var motion
 
@@ -282,7 +182,7 @@ struct ClientRowView: View {
       .accessibilityLabel("\(row.name) connected")
     } else {
       Button(isFailure ? "Try again" : "Connect", action: connect)
-        .buttonStyle(MaxButtonStyle())
+        .buttonStyle(MaxButtonStyle(primary: prominent))
         .disabled(!canConnect)
         .accessibilityLabel(isFailure ? "Try connecting \(row.name) again" : "Connect \(row.name)")
     }

@@ -23,10 +23,13 @@ final class AppModel {
   /// The clients found on this Mac, in table order. Empty until the first scan.
   private(set) var clients: [ClientRow] = []
   private(set) var clientsScanned = false
+  private(set) var skippedConnect: Bool
+  private(set) var tried: Bool
   private var pendingOn: Bool?
   @ObservationIgnored private var timer: DispatchSourceTimer?
   @ObservationIgnored private var observers: [NSObjectProtocol] = []
   @ObservationIgnored private var actionTask: Task<Void, Never>?
+  @ObservationIgnored private var checkTask: Task<Void, Never>?
   @ObservationIgnored private var sleeping = false
   @ObservationIgnored private var generation = 0
   @ObservationIgnored private var noticeTimer: DispatchWorkItem?
@@ -59,6 +62,8 @@ final class AppModel {
     self.clientContext = clientContext
     self.changeDeadline = changeDeadline
     self.permissionDeadline = permissionDeadline
+    skippedConnect = milestones.reached(.skippedConnect)
+    tried = milestones.reached(.triedAssistant)
   }
 
   static func live(milestones: Milestones, clientRoot: URL? = nil) -> AppModel {
@@ -76,8 +81,15 @@ final class AppModel {
       clientContext: sandbox.map(ClientContext.sandbox(root:)) ?? .live(home: home))
   }
 
+  var facts: SetupFacts {
+    SetupFacts(
+      connected: clients.filter { $0.link == .connected }.map(\.name),
+      skippedConnect: skippedConnect, tried: tried)
+  }
+
   var state: PanelState {
-    PanelState(service: service, busy: busy, problem: problem, checked: lastCheck != nil)
+    PanelState(
+      service: service, facts: facts, busy: busy, problem: problem, checked: lastCheck != nil)
   }
   var diagnosis: DiagnoseResult? { service?.diagnosis }
   var stopped: Bool { service == .stopped }
@@ -86,7 +98,6 @@ final class AppModel {
       ?? "http://\(ServiceDefaults.host):\(ServiceDefaults.port)/"
   }
   var canControl: Bool { service?.isRegistered == true && busy == nil }
-  var ready: Bool { diagnosis?.readiness == .ready }
   var switchOn: Bool { pendingOn ?? (service?.isRunning == true) }
   var showsSwitch: Bool { service?.isRegistered == true }
   var messagesNeedOpening: Bool {
@@ -118,7 +129,13 @@ final class AppModel {
       })
     Task {
       await refresh()
-      change(.starting) { try await $0.restartIfOutdated() }
+      // A step waiting on a launch-time grant restarts the helper anyway,
+      // which also replaces an outdated one.
+      if diagnosis?.grantNeedsRestartToCheck == true {
+        await recheckIfStale()
+      } else {
+        change(.starting) { try await $0.restartIfOutdated() }
+      }
     }
   }
 
@@ -143,8 +160,18 @@ final class AppModel {
     }
   }
 
+  /// A caller that arrives during a check waits for that check, so it acts
+  /// on the state the check found.
   func refresh() async {
-    guard !checking, busy == nil, !sleeping else { return }
+    if let inFlight = checkTask { return await inFlight.value }
+    let task = Task { await check() }
+    checkTask = task
+    await task.value
+    checkTask = nil
+  }
+
+  private func check() async {
+    guard busy == nil, !sleeping else { return }
     guard let controller else {
       problem = CoreError.invalidConfiguration.localizedDescription
       lastCheck = .now
@@ -239,15 +266,49 @@ final class AppModel {
 
   func runPrimary() {
     switch state.primary {
-    case .connect: section = .connection
     case .start: perform(.start)
     case .restart: perform(.restart)
     case .migrate: migrate()
     case .move: moveToApplications()
-    case .openLoginItems: SMAppService.openSystemSettingsLoginItems()
     case .recheck: Task { await refresh() }
     case nil: break
     }
+  }
+
+  /// Every opening of the panel checks. A grant that macOS gives only to a
+  /// new helper gets one, so turning a switch in System Settings and coming
+  /// back is all a step asks.
+  func panelOpened() async {
+    await refresh()
+    await recheckIfStale()
+  }
+
+  /// Restarts a helper that lacks a launch-time grant, unless it started
+  /// moments ago. Check again restarts it either way.
+  private func recheckIfStale() async {
+    guard let controller, let diagnosis, diagnosis.grantNeedsRestartToCheck,
+      await !controller.helperIsFresh(diagnosis.processID)
+    else { return }
+    recheck(announce: false)
+  }
+
+  /// A step's Check again. `announce` shows a notice when the step is still
+  /// unfinished afterwards.
+  func recheck(announce: Bool = true) {
+    guard diagnosis?.grantNeedsRestartToCheck == true else {
+      Task { await refresh() }
+      return
+    }
+    let step = state.step
+    change(.checkingAccess) { try await $0.perform(.restart) } then: { _ in
+      if announce && self.state.step == step { self.notice = .setupUnfinished }
+    }
+  }
+
+  /// Skipping keeps the step in the list, one click from coming back.
+  func skipConnect(_ skip: Bool) {
+    skippedConnect = skip
+    milestones.set(.skippedConnect, skip)
   }
 
   func perform(_ action: ServiceAction) {
@@ -298,7 +359,7 @@ final class AppModel {
       if confirmed { problem = nil } else if let permissionProblem { problem = permissionProblem }
       notice = confirmed ? .granted(permission) : .setupUnfinished
       busy = nil
-      if ready && !milestones.reached(.welcomedSetup) {
+      if diagnosis?.missingGrant == nil && !milestones.reached(.welcomedSetup) {
         celebration += 1
         milestones.mark(.welcomedSetup)
       }
@@ -462,6 +523,14 @@ final class AppModel {
   private func show(_ latest: ServiceState) {
     service = latest
     lastCheck = .now
+    if !tried, let calls = latest.diagnosis?.assistantCalls, calls > 0 {
+      tried = true
+      milestones.set(.triedAssistant, true)
+      if state.phase == .ready {
+        celebration += 1
+        notice = .tried
+      }
+    }
     problem =
       switch latest {
       case .portConflict: CoreError.conflict.localizedDescription
