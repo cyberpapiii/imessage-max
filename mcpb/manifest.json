@@ -4,7 +4,7 @@
   "display_name": "iMessage Max",
   "version": "1.8.0",
   "description": "Local MCP server for reading, searching, and sending iMessages on macOS.",
-  "long_description": "iMessage Max gives AI agents MCP tools that match what users ask for: search local iMessages, inspect a conversation, fetch attachments, triage unread messages, and send through Messages.app. It runs locally and needs access to the macOS Messages data.",
+  "long_description": "iMessage Max gives AI agents MCP tools that match what users ask for: search local iMessages, inspect a conversation, fetch attachments, triage unread messages, and send through Messages.app. The extension connects Claude to the iMessage Max app running on this Mac, which holds the permissions to read Messages, so Claude needs none of its own. Install and open the iMessage Max app first.",
   "author": {
     "name": "Rob Dezendorf",
     "url": "https://github.com/cyberpapiii"
@@ -47,7 +47,7 @@
     "type": "binary",
     "entry_point": "server/imessage-max",
     "mcp_config": {
-      "command": "${user_config.binary_path}",
+      "command": "${__dirname}/server/imessage-max",
       "args": []
     }
   },
@@ -65,14 +65,5 @@
     "platforms": [
       "darwin"
     ]
-  },
-  "user_config": {
-    "binary_path": {
-      "type": "file",
-      "title": "iMessage Max binary",
-      "description": "Path to the installed imessage-max binary.",
-      "required": true,
-      "default": "/opt/homebrew/bin/imessage-max"
-    }
   }
 }
