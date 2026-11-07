@@ -8,13 +8,14 @@ struct SocketPath: Sendable, Equatable, CustomStringConvertible {
     enum FolderRule: Sendable, Equatable {
         /// The default app-support folder: the helper creates it 0700.
         case ensurePrivate
-        /// --socket-path or the temp fallback: must exist and be owned.
-        case requireOwned
+        /// --socket-path or the temp fallback: must exist, be owned, and
+        /// give no one else write access.
+        case requirePrivate
     }
 
     let path: String
     /// What the helper may do to the parent folder. The bridge never
-    /// creates folders and always applies requireOwned.
+    /// creates folders and always applies requirePrivate.
     let folderRule: FolderRule
 
     /// 103 on Darwin: sizeof(sun_path) minus the NUL.
@@ -47,7 +48,7 @@ struct SocketPath: Sendable, Equatable, CustomStringConvertible {
             let expanded = (override as NSString).expandingTildeInPath
             guard expanded.hasPrefix("/") else { throw .relativePath(override) }
             guard fits(expanded) else { throw .pathTooLong(path: expanded, bytes: expanded.utf8.count) }
-            return SocketPath(path: expanded, folderRule: .requireOwned)
+            return SocketPath(path: expanded, folderRule: .requirePrivate)
         }
         let standard = (home as NSString).appendingPathComponent(ServiceDefaults.socketPath)
         if fits(standard) {
@@ -56,7 +57,7 @@ struct SocketPath: Sendable, Equatable, CustomStringConvertible {
         if let userTempDir, userTempDir.hasPrefix("/") {
             let fallback = (userTempDir as NSString).appendingPathComponent(ServiceDefaults.fallbackSocketName)
             if fits(fallback) {
-                return SocketPath(path: fallback, folderRule: .requireOwned)
+                return SocketPath(path: fallback, folderRule: .requirePrivate)
             }
         }
         throw .pathTooLong(path: standard, bytes: standard.utf8.count)
@@ -118,7 +119,7 @@ enum SocketSetupError: Error, Equatable, CustomStringConvertible {
 
     init(_ failure: PrivateFolder.Failure) {
         switch failure {
-        case .notAFolder(let path), .wrongOwner(let path), .notOwnedFolder(let path):
+        case .notAFolder(let path), .wrongOwner(let path), .notOwnedFolder(let path), .writableByOthers(let path):
             self = .unsafeFolder(path: path)
         case .missing(let path):
             self = .posix(path, "find folder", ENOENT)
@@ -134,7 +135,7 @@ enum SocketSetupError: Error, Equatable, CustomStringConvertible {
         case .pathTooLong(let path, let bytes):
             "Socket path \(path) is \(bytes) bytes; macOS allows \(SocketPath.maxBytes). Pass --socket-path with a shorter path."
         case .unsafeFolder(let path):
-            "Folder \(path) belongs to another user, or is not a folder. Pass --socket-path with a path in a folder you own."
+            "Folder \(path) belongs to another user, is not a folder, or others can write to it. Pass --socket-path with a path in a private folder you own."
         case .notASocket(let path):
             "\(path) exists and is not a socket, so the server left it alone. Remove it, or pass --socket-path with another path."
         case .wrongOwner(let path):
@@ -182,9 +183,27 @@ struct OwnedSocket: ~Copyable {
         return getpeereid(fd, &uid, &gid) == 0 ? uid : nil
     }
 
-    /// Connects to `socket`. Returns 0 or the errno.
-    func connect(to socket: SocketPath) -> Int32 {
-        socket.withAddress { Darwin.connect(fd, $0, $1) } == 0 ? 0 : errno
+    /// Connects to `socket` without waiting past `deadline`, then leaves the
+    /// fd blocking again. Returns 0 or the errno, ETIMEDOUT when the
+    /// deadline passes first.
+    func connect(to socket: SocketPath, deadline: ContinuousClock.Instant) -> Int32 {
+        let flags = fcntl(fd, F_GETFL)
+        guard flags >= 0, fcntl(fd, F_SETFL, flags | O_NONBLOCK) == 0 else { return errno }
+        defer { _ = fcntl(fd, F_SETFL, flags) }
+        if socket.withAddress({ Darwin.connect(fd, $0, $1) }) == 0 { return 0 }
+        guard errno == EINPROGRESS || errno == EINTR else { return errno }
+        var descriptor = pollfd(fd: fd, events: Int16(POLLOUT), revents: 0)
+        while true {
+            let remaining = ContinuousClock.now.duration(to: deadline) / .milliseconds(1)
+            let milliseconds = Int32(clamping: Int64(max(0, remaining.rounded(.up))))
+            let ready = poll(&descriptor, 1, milliseconds)
+            if ready < 0, errno == EINTR { continue }
+            if ready < 0 { return errno }
+            if ready == 0 { return ETIMEDOUT }
+            var error: Int32 = 0
+            var length = socklen_t(MemoryLayout<Int32>.size)
+            return getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &length) == 0 ? error : errno
+        }
     }
 
     consuming func release() -> Int32 {

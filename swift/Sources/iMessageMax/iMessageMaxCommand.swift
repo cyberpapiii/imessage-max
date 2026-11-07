@@ -109,7 +109,7 @@ struct iMessageMax: AsyncParsableCommand {
         let accessToken = try AccessToken.loadOrCreate(location)
         try await ServerStartup.runHTTP(
             host: host, port: port, accessToken: accessToken, contactsPolicy: contactsPolicy,
-            socket: try resolvedSocketPath()
+            socketOverride: socketPath
         )
     }
 

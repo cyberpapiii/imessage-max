@@ -14,6 +14,8 @@ enum PrivateFolder {
         case notOwnedFolder(path: String)
         /// requireOwned: nothing exists at the path.
         case missing(path: String)
+        /// requirePrivate: group or others can write to the folder.
+        case writableByOthers(path: String)
         case io(path: String, operation: String, reason: String)
 
         static func posix(_ path: String, _ operation: String, _ code: Int32) -> Failure {
@@ -42,6 +44,17 @@ enum PrivateFolder {
     /// Requires an existing folder owned by the effective uid. Leaves its
     /// mode alone.
     static func requireOwned(_ path: String) throws(Failure) {
+        _ = try ownedFolder(path)
+    }
+
+    /// requireOwned, and refuses a folder that group or others can write to.
+    /// For the socket: in such a folder another user could swap the socket
+    /// file between the helper's check and a bridge's connect.
+    static func requirePrivate(_ path: String) throws(Failure) {
+        guard try ownedFolder(path).st_mode & 0o022 == 0 else { throw .writableByOthers(path: path) }
+    }
+
+    private static func ownedFolder(_ path: String) throws(Failure) -> stat {
         var info = stat()
         guard stat(path, &info) == 0 else {
             if errno == ENOENT { throw .missing(path: path) }
@@ -50,5 +63,6 @@ enum PrivateFolder {
         guard info.st_mode & S_IFMT == S_IFDIR, info.st_uid == geteuid() else {
             throw .notOwnedFolder(path: path)
         }
+        return info
     }
 }

@@ -32,7 +32,7 @@ enum BridgeOutcome: Equatable, Sendable {
             case .foreignPeer(let uid):
                 "The iMessage Max socket is served by another user (uid \(uid)). Open iMessage Max in your own account to start it."
             case .unsafeFolder(let path):
-                "Folder \(path) belongs to another user, or is not a folder. Pass --socket-path with a path in a folder you own."
+                "Folder \(path) belongs to another user, is not a folder, or others can write to it. Pass --socket-path with a path in a private folder you own."
             case .connectFailed(let reason):
                 "Cannot connect to iMessage Max: \(reason). Quit and reopen iMessage Max."
             }
@@ -93,9 +93,12 @@ enum StdioBridge {
         Thread.detachNewThread {
             pumpUp(from: input, to: shared)
         }
-        let outcome = pumpDown(from: shared, to: output)
+        let drained = pumpDown(from: shared, to: output)
         // Unblocks the up pump if it is mid-write to a helper that stopped reading.
         shutdown(shared.fd, SHUT_RDWR)
+        // A stdin failure ends the down pump too, which then looks like the
+        // helper leaving. The failure is the real cause.
+        let outcome = shared.inputFailure.withLock { $0 }.map(BridgeOutcome.ioFailure) ?? drained
         shared.release()
 
         switch outcome {
@@ -112,10 +115,13 @@ enum StdioBridge {
             let count = read(input, &buffer, buffer.count)
             if count > 0 {
                 if writeAll(socket.fd, buffer, count: count) != 0 { break }
-            } else if count < 0, errno == EINTR {
-                continue
-            } else {
+            } else if count == 0 {
                 socket.inputEnded.store(true, ordering: .sequentiallyConsistent)
+                break
+            } else if errno != EINTR {
+                let reason = "read stdin: \(String(cString: strerror(errno)))"
+                socket.inputFailure.withLock { $0 = reason }
+                shutdown(socket.fd, SHUT_RDWR)
                 break
             }
         }
@@ -157,15 +163,16 @@ enum StdioBridge {
         return 0
     }
 
-    /// Blocking. Retries a missing socket or folder, and a refused connect,
-    /// every 100 ms until `grace` passes. Checks the folder with
-    /// PrivateFolder.requireOwned and never creates it. Checks the
+    /// Blocking, but never past `grace`. Retries a missing socket or folder,
+    /// and a refused connect, every 100 ms until `grace` passes. A connect
+    /// the helper does not accept by then fails. Checks the folder with
+    /// PrivateFolder.requirePrivate and never creates it. Checks the
     /// server's uid after connecting.
     static func connect(_ socket: SocketPath, grace: Duration) -> Result<OwnedSocket, BridgeOutcome.Unavailable> {
         let clock = ContinuousClock()
         let deadline = clock.now + grace
         while true {
-            switch attempt(socket) {
+            switch attempt(socket, deadline: deadline) {
             case .connected(let owned):
                 return .success(owned)
             case .failed(let reason):
@@ -184,12 +191,12 @@ enum StdioBridge {
         case failed(BridgeOutcome.Unavailable)
     }
 
-    private static func attempt(_ socket: SocketPath) -> Attempt {
+    private static func attempt(_ socket: SocketPath, deadline: ContinuousClock.Instant) -> Attempt {
         do {
-            try PrivateFolder.requireOwned(socket.folder)
+            try PrivateFolder.requirePrivate(socket.folder)
         } catch .missing {
             return .notListening
-        } catch .notOwnedFolder(let path) {
+        } catch .notOwnedFolder(let path), .writableByOthers(let path) {
             return .failed(.unsafeFolder(path: path))
         } catch {
             return .failed(.connectFailed(reason: SocketSetupError(error).description))
@@ -200,15 +207,17 @@ enum StdioBridge {
         } catch {
             return .failed(.connectFailed(reason: error.description))
         }
-        switch owned.connect(to: socket) {
+        switch owned.connect(to: socket, deadline: deadline) {
         case 0:
             guard let uid = owned.peerUID() else {
                 return .failed(.connectFailed(reason: "cannot read the server's user id"))
             }
             guard uid == geteuid() else { return .failed(.foreignPeer(uid: uid)) }
             return .connected(owned)
-        case ENOENT, ECONNREFUSED:
+        case ENOENT, ECONNREFUSED, EAGAIN:
             return .notListening
+        case ETIMEDOUT:
+            return .failed(.connectFailed(reason: "it did not accept the connection in time"))
         case let code:
             return .failed(.connectFailed(reason: String(cString: strerror(code))))
         }
@@ -226,8 +235,8 @@ enum StdioBridge {
     /// Blocking. Reads newline-delimited messages from `input` until the
     /// first request, writes one JSON-RPC error with that id and code
     /// -32000, and returns. Notifications and responses are skipped. A
-    /// batch or an unparseable line gets the error with id null. On EOF
-    /// first, writes nothing.
+    /// batch gets that error with id null; an unparseable or oversized line
+    /// gets a -32700 parse error with id null. On EOF first, writes nothing.
     static func answerFirstRequest(input: Int32, output: Int32, with reason: BridgeOutcome.Unavailable) {
         var framer = LineFramer()
         var buffer = [UInt8](repeating: 0, count: chunkBytes)
@@ -239,7 +248,7 @@ enum StdioBridge {
             do {
                 lines = try framer.append(buffer[..<count])
             } catch {
-                return reply(id: nil, reason, to: output)
+                return reply(id: nil, code: .parseError, reason, to: output)
             }
             for line in lines {
                 switch JSONRPCMessage.parse(line) {
@@ -247,15 +256,20 @@ enum StdioBridge {
                     return reply(id: message.id, reason, to: output)
                 case .message:
                     continue
-                case .batch, .invalid:
+                case .batch:
                     return reply(id: nil, reason, to: output)
+                case .invalid:
+                    return reply(id: nil, code: .parseError, reason, to: output)
                 }
             }
         }
     }
 
-    private static func reply(id: Any?, _ reason: BridgeOutcome.Unavailable, to output: Int32) {
-        var bytes = [UInt8](JSONRPC.error(id: id, code: .serverError, message: reason.message))
+    private static func reply(
+        id: Any?, code: JSONRPCErrorCode = .serverError, _ reason: BridgeOutcome.Unavailable, to output: Int32
+    ) {
+        let message = code == .parseError ? "Parse error. \(reason.message)" : reason.message
+        var bytes = [UInt8](JSONRPC.error(id: id, code: code, message: message))
         bytes.append(0x0A)
         _ = writeAll(output, bytes, count: bytes.count)
     }
@@ -266,6 +280,8 @@ enum StdioBridge {
 private final class SharedSocket: Sendable {
     let fd: Int32
     let inputEnded = Atomic<Bool>(false)
+    /// Set by the up pump when reading stdin fails.
+    let inputFailure = Mutex<String?>(nil)
     private let holders = Atomic<Int>(2)
 
     init(_ socket: consuming OwnedSocket) {

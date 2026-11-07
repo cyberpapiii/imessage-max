@@ -198,7 +198,7 @@ To grant access by hand instead, add `imessage-max` in System Settings → Priva
 
 ### 3. Configure your MCP client
 
-Add `imessage-max` to your MCP client's server configuration.
+Add `imessage-max` to your MCP client's server configuration. Bare `imessage-max` is a bridge to the iMessage Max helper, so iMessage Max must be running for the client to reach your messages.
 
 Many MCP clients use a JSON structure like this:
 

@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import Logging
 import MCP
 import Synchronization
 import XCTest
@@ -37,8 +38,8 @@ final class StdioBridgeTests: XCTestCase {
         }
     }
 
-    private func startBridge(grace: Duration = .zero) throws -> BridgeHarness {
-        let bridge = try BridgeHarness(socket: socket, grace: grace)
+    private func startBridge(grace: Duration = .zero, input: Int32? = nil) throws -> BridgeHarness {
+        let bridge = try BridgeHarness(socket: socket, grace: grace, input: input)
         bridges.append(bridge)
         return bridge
     }
@@ -121,6 +122,41 @@ final class StdioBridgeTests: XCTestCase {
         XCTAssertEqual(outcome, .helperUnavailable(.notRunning))
         bridge.closeOutputWriter()
         XCTAssertNil(try bridge.output.nextLine(), "nothing written before EOF")
+    }
+
+    func testHelperDownAnswersAnUnparseableFirstLineWithAParseError() async throws {
+        let bridge = try startBridge(grace: .zero)
+
+        bridge.send("this is not json")
+        let reply = try bridge.output.nextJSON()
+        XCTAssertTrue(reply["id"] is NSNull, "\(reply)")
+        let error = try XCTUnwrap(reply["error"] as? [String: Any], "\(reply)")
+        XCTAssertEqual(error["code"] as? Int, -32700)
+        let outcome = await bridge.outcome(timeout: 10)
+        XCTAssertEqual(outcome, .helperUnavailable(.notRunning))
+    }
+
+    func testStdinReadErrorIsAnIOFailure() async throws {
+        try startHelper()
+        // read(2) on a folder fails with EISDIR.
+        let unreadable = open(folder, O_RDONLY)
+        defer { close(unreadable) }
+        let bridge = try startBridge(input: unreadable)
+
+        let outcome = await bridge.outcome(timeout: 10)
+        guard case .ioFailure(let reason) = outcome else { return XCTFail("\(String(describing: outcome))") }
+        XCTAssertTrue(reason.hasPrefix("read stdin"), reason)
+        XCTAssertEqual(outcome?.exitCode, 74)
+    }
+
+    func testSessionThatFailsToStartReleasesItsTransport() async throws {
+        let transport = RefusingTransport()
+        do {
+            try await ServerStartup.serveStdio(base: transport, catalog: makeTestCatalog())
+            XCTFail("a transport that cannot connect must fail the session")
+        } catch {}
+        let released = await transport.disconnected
+        XCTAssertTrue(released)
     }
 
     // The legacy lane cannot show this: the SDK server drops a reply still
@@ -210,13 +246,14 @@ private final class BridgeHarness: @unchecked Sendable {
     private let finished: AsyncStream<Void>
     private let finishedSink: AsyncStream<Void>.Continuation
 
-    init(socket: SocketPath, grace: Duration) throws {
+    /// `input` replaces the stdin pipe as what the bridge reads.
+    init(socket: SocketPath, grace: Duration, input bridgeStdin: Int32? = nil) throws {
         var input: [Int32] = [0, 0]
         var output: [Int32] = [0, 0]
         guard pipe(&input) == 0, pipe(&output) == 0 else { throw POSIXError(.EMFILE) }
         // The bridge's read end of stdin stays open: its up pump may still be
         // blocked reading it after run returns, as in the real process.
-        let bridgeInput = input[0]
+        let bridgeInput = bridgeStdin ?? input[0]
         toBridge = input[1]
         bridgeOutput = output[1]
         self.output = LineReader(output[0])
@@ -258,4 +295,14 @@ private final class BridgeHarness: @unchecked Sendable {
         }
         return state.withLock { $0.outcome }
     }
+}
+
+private actor RefusingTransport: Transport {
+    nonisolated let logger = Logger(label: "test.refusing-transport", factory: { _ in SwiftLogNoOpLogHandler() })
+    private(set) var disconnected = false
+
+    func connect() async throws { throw POSIXError(.ECONNREFUSED) }
+    func disconnect() async { disconnected = true }
+    func send(_ data: Data) async throws {}
+    func receive() -> AsyncThrowingStream<Data, any Error> { AsyncThrowingStream { $0.finish() } }
 }

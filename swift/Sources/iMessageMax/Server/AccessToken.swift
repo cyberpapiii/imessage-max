@@ -183,7 +183,7 @@ extension AccessToken.LoadError {
         switch failure {
         case .notAFolder(let path): self = .notRegularFile(path: path)
         case .wrongOwner(let path): self = .wrongOwner(path: path)
-        case .notOwnedFolder(let path): self = .unsafeFolder(path: path)
+        case .notOwnedFolder(let path), .writableByOthers(let path): self = .unsafeFolder(path: path)
         case .missing(let path): self = .posix(path, "find folder", ENOENT)
         case .io(let path, let operation, let reason): self = .io(path: path, operation: operation, reason: reason)
         }

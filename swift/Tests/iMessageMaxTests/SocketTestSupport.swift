@@ -88,3 +88,19 @@ final class LineReader {
             file: file, line: line)
     }
 }
+
+/// Writes all of `bytes`, blocking as needed. Returns 0, or the errno once
+/// the peer has gone.
+@discardableResult
+func writeUntilError(_ fd: Int32, _ bytes: [UInt8]) -> Int32 {
+    var offset = 0
+    while offset < bytes.count {
+        let written = bytes.withUnsafeBytes { write(fd, $0.baseAddress! + offset, bytes.count - offset) }
+        if written < 0 {
+            if errno == EINTR { continue }
+            return errno
+        }
+        offset += written
+    }
+    return 0
+}

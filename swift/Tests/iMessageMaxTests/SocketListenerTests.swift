@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import Synchronization
 import XCTest
 @testable import iMessageMax
 
@@ -127,6 +128,123 @@ final class SocketListenerTests: XCTestCase {
         await listener.stop()
     }
 
+    func testFolderOthersCanWriteIsRefusedForTheSocketButNotTheToken() throws {
+        for mode: mode_t in [0o770, 0o707] {
+            XCTAssertEqual(chmod(folder, mode), 0)
+            XCTAssertThrowsError(try start()) { error in
+                XCTAssertEqual(error as? SocketSetupError, .unsafeFolder(path: folder), "mode \(String(mode, radix: 8))")
+            }
+            switch StdioBridge.connect(socket, grace: .zero) {
+            case .failure(let reason): XCTAssertEqual(reason, .unsafeFolder(path: folder), "the bridge refuses it too")
+            case .success: XCTFail("the bridge connected through mode \(String(mode, radix: 8))")
+            }
+            XCTAssertNoThrow(try PrivateFolder.requireOwned(folder), "the token folder rule is unchanged")
+        }
+        XCTAssertEqual(chmod(folder, 0o700), 0)
+        _ = try start()
+        try assertEchoes(try client(), "private again")
+    }
+
+    func testTwoListenersStartingAtOnceLeaveExactlyOneServing() async throws {
+        let socket = self.socket!
+        let echo = self.echo
+        for round in 0..<20 {
+            if round.isMultiple(of: 2) {
+                let stale = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
+                XCTAssertEqual(socket.withAddress { Darwin.bind(stale, $0, $1) }, 0)
+                close(stale)
+            }
+            let results = Mutex<[Result<SocketListener, SocketSetupError>]>([])
+            DispatchQueue.concurrentPerform(iterations: 2) { _ in
+                let result = Result { () throws(SocketSetupError) in try SocketListener.start(at: socket, serve: echo) }
+                results.withLock { $0.append(result) }
+            }
+            let all = results.withLock { $0 }
+            let winners = all.compactMap { try? $0.get() }
+            XCTAssertEqual(winners.count, 1, "round \(round): \(all)")
+            for case .failure(let error) in all {
+                XCTAssertEqual(error, .inUse(path: socket.path), "round \(round)")
+            }
+            listeners += winners
+            var info = stat()
+            XCTAssertEqual(lstat(socket.path, &info), 0, "round \(round): the socket vanished")
+            try assertEchoes(try client(), "round \(round)")
+            for winner in winners {
+                await winner.stop()
+            }
+        }
+    }
+
+    func testOversizedLineDisconnectsThePeerAndEndsTheSession() async throws {
+        let ended = expectation(description: "session ended")
+        let log = Log.Capture()
+        _ = try start(serve: { transport in
+            await Log.$capture.withValue(log) {
+                try? await ServerStartup.serveStdio(base: transport, catalog: makeTestCatalog())
+            }
+            ended.fulfill()
+        })
+        let reader = try client()
+        let fd = reader.fd
+        Thread.detachNewThread {
+            _ = writeUntilError(fd, Array(repeating: 0x61, count: LineFramer.maxMessageBytes + 1))
+        }
+
+        XCTAssertNil(try reader.nextLine(), "the peer reads EOF")
+        await fulfillment(of: [ended], timeout: 10)
+    }
+
+    func testPeerThatNeverReadsIsDisconnectedAndOthersStillServed() async throws {
+        let ended = expectation(description: "a session ended")
+        ended.assertForOverFulfill = false
+        _ = try start(serve: { [echo] transport in
+            await echo(transport)
+            ended.fulfill()
+        })
+        let flooder = try client()
+        let flooded = expectation(description: "flooder's write failed")
+        let line = Array(repeating: UInt8(0x61), count: 64 * 1024 - 1) + [0x0A]
+        let limit = 4 * SocketTransport.maxUnsentBytes
+        let written = Mutex(0)
+        let fd = flooder.fd
+        Thread.detachNewThread {
+            while written.withLock({ $0 }) < limit {
+                guard writeUntilError(fd, line) == 0 else { return flooded.fulfill() }
+                written.withLock { $0 += line.count }
+            }
+        }
+
+        await fulfillment(of: [flooded, ended], timeout: 20)
+        XCTAssertLessThan(written.withLock { $0 }, limit, "the helper kept buffering for a peer that never reads")
+        try assertEchoes(try client(), "still serving")
+    }
+
+    func testStalledSessionStopsReadingSoThePeersWritesBackUp() throws {
+        let (park, parked) = AsyncStream<Void>.makeStream()
+        defer { parked.finish() }
+        _ = try start(serve: { transport in
+            try? await transport.connect()
+            for await _ in park {}
+        })
+        let fd = try connectClient(socket)
+        clients.append(fd)
+        XCTAssertEqual(fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK), 0)
+        let line = Array(repeating: UInt8(0x61), count: 1023) + [0x0A]
+        let limit = 4 * 1024 * 1024
+        var accepted = 0
+        while accepted < limit {
+            let count = line.withUnsafeBytes { write(fd, $0.baseAddress!, line.count) }
+            if count > 0 {
+                accepted += count
+                continue
+            }
+            XCTAssertEqual(errno, EAGAIN)
+            var descriptor = pollfd(fd: fd, events: Int16(POLLOUT), revents: 0)
+            if poll(&descriptor, 1, 300) == 0 { break }
+        }
+        XCTAssertLessThan(accepted, 1024 * 1024, "a session reading nothing must not let the helper buffer without bound")
+    }
+
     func testStopLeavesASocketSomeoneElseBoundAtThePath() async throws {
         let listener = try start()
         XCTAssertEqual(unlink(socket.path), 0)
@@ -141,6 +259,19 @@ final class SocketListenerTests: XCTestCase {
     }
 }
 
+final class LogThrottleTests: XCTestCase {
+    func testOneLinePerIntervalCountingTheLinesHeldBack() {
+        var throttle = LogThrottle(interval: .seconds(10))
+        let start = ContinuousClock.now
+        XCTAssertEqual(throttle.admit(at: start), 0)
+        XCTAssertNil(throttle.admit(at: start + .seconds(1)))
+        XCTAssertNil(throttle.admit(at: start + .seconds(9)))
+        XCTAssertEqual(throttle.admit(at: start + .seconds(10)), 2)
+        XCTAssertNil(throttle.admit(at: start + .seconds(19)))
+        XCTAssertEqual(throttle.admit(at: start + .seconds(30)), 1)
+    }
+}
+
 final class SocketPathTests: XCTestCase {
     func testStandardPathFitsUnderTheHome() throws {
         let resolved = try SocketPath.resolve(override: nil, home: "/Users/rob", userTempDir: "/var/folders/ab/cd/T/")
@@ -152,7 +283,7 @@ final class SocketPathTests: XCTestCase {
         let home = "/Volumes/External/Users/" + String(repeating: "h", count: 40)
         let resolved = try SocketPath.resolve(override: nil, home: home, userTempDir: "/var/folders/ab/cd/T/")
         XCTAssertEqual(resolved.path, "/var/folders/ab/cd/T/imessage-max.sock")
-        XCTAssertEqual(resolved.folderRule, .requireOwned)
+        XCTAssertEqual(resolved.folderRule, .requirePrivate)
     }
 
     func testNeitherLocationFittingIsPathTooLong() {
@@ -178,7 +309,7 @@ final class SocketPathTests: XCTestCase {
     func testOverrideRequiresAnOwnedFolder() throws {
         let resolved = try SocketPath.resolve(override: "/tmp/imax/mcp.sock")
         XCTAssertEqual(resolved.path, "/tmp/imax/mcp.sock")
-        XCTAssertEqual(resolved.folderRule, .requireOwned)
+        XCTAssertEqual(resolved.folderRule, .requirePrivate)
     }
 }
 
