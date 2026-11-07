@@ -107,9 +107,13 @@ struct AccessToken: Sendable {
     static func loadOrCreate(_ location: Location) throws -> AccessToken {
         let path = location.file.path
         let folder = location.file.deletingLastPathComponent().path
-        switch location {
-        case .appSupport: try ensurePrivateDirectory(folder)
-        case .custom: try requireOwnedDirectory(folder)
+        do {
+            switch location {
+            case .appSupport: try PrivateFolder.ensure(folder)
+            case .custom: try PrivateFolder.requireOwned(folder)
+            }
+        } catch {
+            throw LoadError(error)
         }
         if let existing = try read(path) {
             return existing
@@ -144,30 +148,6 @@ struct AccessToken: Sendable {
         return token
     }
 
-    private static func requireOwnedDirectory(_ path: String) throws {
-        var info = stat()
-        guard stat(path, &info) == 0 else { throw LoadError.posix(path, "find folder", errno) }
-        guard info.st_mode & S_IFMT == S_IFDIR, info.st_uid == geteuid() else {
-            throw LoadError.unsafeFolder(path: path)
-        }
-    }
-
-    private static func ensurePrivateDirectory(_ path: String) throws {
-        do {
-            try FileManager.default.createDirectory(
-                atPath: path, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-        } catch {
-            throw LoadError.io(path: path, operation: "create", reason: error.localizedDescription)
-        }
-        var info = stat()
-        guard stat(path, &info) == 0 else { throw LoadError.posix(path, "stat", errno) }
-        guard info.st_mode & S_IFMT == S_IFDIR else { throw LoadError.notRegularFile(path: path) }
-        guard info.st_uid == geteuid() else { throw LoadError.wrongOwner(path: path) }
-        if info.st_mode & 0o077 != 0, chmod(path, 0o700) != 0 {
-            throw LoadError.posix(path, "chmod", errno)
-        }
-    }
-
     /// Writes a temporary file, then links it into place. `link` never
     /// replaces a file: when another process created the token first, that
     /// token wins, and the caller's read decides whether it is valid.
@@ -194,6 +174,18 @@ struct AccessToken: Sendable {
             true
         default:
             false
+        }
+    }
+}
+
+extension AccessToken.LoadError {
+    init(_ failure: PrivateFolder.Failure) {
+        switch failure {
+        case .notAFolder(let path): self = .notRegularFile(path: path)
+        case .wrongOwner(let path): self = .wrongOwner(path: path)
+        case .notOwnedFolder(let path): self = .unsafeFolder(path: path)
+        case .missing(let path): self = .posix(path, "find folder", ENOENT)
+        case .io(let path, let operation, let reason): self = .io(path: path, operation: operation, reason: reason)
         }
     }
 }
