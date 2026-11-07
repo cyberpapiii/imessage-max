@@ -96,7 +96,7 @@ unset MACOS_CERTIFICATE_P12 MACOS_CERTIFICATE_PASS MACOS_NOTARY_KEY_P8
 NOTARY_AUTH=(--key "$NOTARY_KEY" --key-id "$MACOS_NOTARY_KEY_ID" --issuer "$MACOS_NOTARY_ISSUER_ID")
 
 notarize() {
-  local artifact="$1" result="$WORK_DIR/notary-result.json" status id
+  local artifact="$1" result="$1.notary.json" status id
   xcrun notarytool submit "$artifact" "${NOTARY_AUTH[@]}" --wait --timeout 30m \
     --output-format json > "$result" || true
   cat "$result"
@@ -159,12 +159,29 @@ APP_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$
 HELPER_VERSION="$("$HELPER" --version)"
 [[ "$HELPER_VERSION" == *"$VERSION"* ]] || fail "helper reports '$HELPER_VERSION', not $VERSION"
 
+echo "==> Building the Claude Desktop extension"
+MCPB="$("$ROOT_DIR/scripts/build-mcpb.sh" "$HELPER" "$WORK_DIR/mcpb" | tail -n 1)"
+MCPB_NAME="$(basename "$MCPB")"
+[[ "$MCPB_NAME" == "iMessage-Max-$VERSION.mcpb" ]] || fail "unexpected extension name $MCPB_NAME"
+
+# A bare binary cannot be stapled. Gatekeeper finds its ticket online when
+# Claude Desktop first runs the unpacked copy. Its submission runs while the
+# app and the DMG notarize, and its log prints once it is waited for.
+echo "==> Notarizing the binary inside $MCPB_NAME, in the background"
+mkdir -p "$WORK_DIR/mcpb-binary"
+MCPB_BINARY="$WORK_DIR/mcpb-binary/server/imessage-max"
+unzip -q "$MCPB" server/imessage-max -d "$WORK_DIR/mcpb-binary"
+ditto -c -k "$MCPB_BINARY" "$WORK_DIR/mcpb-binary.zip"
+notarize "$WORK_DIR/mcpb-binary.zip" > "$WORK_DIR/mcpb-notary.log" 2>&1 &
+MCPB_NOTARY_PID=$!
+
 echo "==> Notarizing the app"
 ditto -c -k --keepParent "$APP" "$WORK_DIR/app.zip"
 notarize "$WORK_DIR/app.zip"
 xcrun stapler staple "$APP"
 xcrun stapler validate "$APP"
 spctl -a -t exec -vv "$APP"
+cmp -s "$HELPER" "$MCPB_BINARY" || fail "stapling changed the helper the extension carries"
 
 echo "==> Building $DMG_NAME"
 ln -s /Applications "$STAGE/Applications"
@@ -177,18 +194,11 @@ xcrun stapler staple "$DMG"
 xcrun stapler validate "$DMG"
 spctl -a -t open --context context:primary-signature -vv "$DMG"
 
-echo "==> Building the Claude Desktop extension"
-MCPB="$("$ROOT_DIR/scripts/build-mcpb.sh" "$HELPER" "$WORK_DIR/mcpb" | tail -n 1)"
-MCPB_NAME="$(basename "$MCPB")"
-[[ "$MCPB_NAME" == "iMessage-Max-$VERSION.mcpb" ]] || fail "unexpected extension name $MCPB_NAME"
-
-# A bare binary cannot be stapled. Gatekeeper finds its ticket online when
-# Claude Desktop first runs the unpacked copy.
-echo "==> Notarizing the binary inside $MCPB_NAME"
-mkdir -p "$WORK_DIR/mcpb-binary"
-unzip -q "$MCPB" server/imessage-max -d "$WORK_DIR/mcpb-binary"
-ditto -c -k "$WORK_DIR/mcpb-binary/server/imessage-max" "$WORK_DIR/mcpb-binary.zip"
-notarize "$WORK_DIR/mcpb-binary.zip"
+echo "==> Notarization of the binary inside $MCPB_NAME"
+MCPB_NOTARY_STATUS=0
+wait "$MCPB_NOTARY_PID" || MCPB_NOTARY_STATUS=$?
+cat "$WORK_DIR/mcpb-notary.log"
+[[ "$MCPB_NOTARY_STATUS" -eq 0 ]] || fail "notarization of the binary inside $MCPB_NAME failed"
 
 mkdir -p "$OUT_DIR"
 mv "$DMG" "$OUT_DIR/$DMG_NAME"
