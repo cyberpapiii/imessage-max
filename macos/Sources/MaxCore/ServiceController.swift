@@ -11,6 +11,7 @@ public actor ServiceController {
   private let home: URL
   /// nil for a test build, which must never touch the old install.
   private let legacy: LegacyInstall?
+  private let registered: RegisteredAgent
   private var operating = false
   /// About 18 seconds at the live system's 0.35 second pause. A kickstart
   /// waits out the plist's 10 second ThrottleInterval.
@@ -24,7 +25,12 @@ public actor ServiceController {
     self.system = system
     self.home = home
     legacy = configuration.isProduction ? LegacyInstall(home: home) : nil
+    registered = RegisteredAgent(configuration: configuration)
   }
+
+  /// Whether launchd holds the plist this app bundles. False after an update
+  /// that changed the plist, until a restart registers it again.
+  public nonisolated var definitionIsCurrent: Bool { registered.isCurrent }
 
   public func inspect() async -> ServiceState { ServiceState(await observe()) }
 
@@ -40,7 +46,7 @@ public actor ServiceController {
       case (.stop, _), (.start, .running), (.start, .unresponsive), (.start, .tokenRejected):
         return state
       case (_, .notRegistered):
-        try await system.run(.register(plistName: configuration.plistName))
+        try await register()
         return try await converge { $0.diagnosis != nil }
       case (.start, _), (.restart, _):
         let previous = state.diagnosis?.processID
@@ -68,18 +74,21 @@ public actor ServiceController {
       }
       try legacy.removeFiles()
       if await system.agentStatus(plistName: configuration.plistName) == .notRegistered {
-        try await system.run(.register(plistName: configuration.plistName))
+        try await register()
       }
       return try await converge { $0.diagnosis != nil }
     }
   }
 
-  /// After an update the running helper is the old binary until it restarts.
+  /// After an update the running helper is the old binary, and launchd may
+  /// hold the old plist, until it restarts. The restart registers again
+  /// only when the plist changed.
   public func restartIfOutdated() async throws -> ServiceState {
     let state = await inspect()
-    guard let pid = state.diagnosis?.processID,
-      await system.isOutdated(pid: pid, executable: configuration.helper)
-    else { return state }
+    guard let pid = state.diagnosis?.processID else { return state }
+    if definitionIsCurrent, await !system.isOutdated(pid: pid, executable: configuration.helper) {
+      return state
+    }
     return try await perform(.restart)
   }
 
@@ -96,6 +105,7 @@ public actor ServiceController {
       if await system.agentStatus(plistName: configuration.plistName) != .notRegistered {
         try await system.run(.unregister(plistName: configuration.plistName))
       }
+      registered.remove()
       return await inspect()
     }
   }
@@ -152,15 +162,26 @@ public actor ServiceController {
       refused: reply == .refused, foreignListener: foreign)
   }
 
-  /// A job launchd no longer holds, as after a stop, cannot be kickstarted;
-  /// registering again loads it.
+  /// A job launchd no longer holds, as after a stop, cannot be kickstarted,
+  /// and a kickstart keeps the plist launchd loaded at registration. Either
+  /// way unregistering and registering again loads the bundled plist. It is
+  /// kept for a changed plist only, as a new registration can show the
+  /// person a notice that a background item was added.
   private func kickstart(restart: Bool) async throws {
-    if await system.job(label: configuration.label) != nil {
+    if definitionIsCurrent, await system.job(label: configuration.label) != nil {
       try await system.run(.kickstart(label: configuration.label, restart: restart))
     } else {
       try await system.run(.unregister(plistName: configuration.plistName))
-      try await system.run(.register(plistName: configuration.plistName))
+      try await register()
     }
+  }
+
+  /// Registering loads the bundled plist only when the agent is not
+  /// registered already. A record that fails to save leaves the next restart
+  /// to register again, which costs a notice, not a wrong definition.
+  private func register() async throws {
+    try await system.run(.register(plistName: configuration.plistName))
+    try? registered.save()
   }
 
   /// Waits until `done`. Turned off in Login Items is an end state: launchd

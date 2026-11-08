@@ -36,8 +36,11 @@ private func legacyInstall(in home: URL, extra: Bool = false) throws -> LegacyIn
   let fm = FileManager.default
   #expect(!fm.fileExists(atPath: legacy.plist.path))
   #expect(!fm.fileExists(atPath: legacy.helper.path))
+  // The old helper's folder is gone; the record of the registration is new.
   #expect(
-    !fm.fileExists(atPath: home.appendingPathComponent("Library/Application Support/iMessage Max").path))
+    try fm.contentsOfDirectory(
+      atPath: home.appendingPathComponent("Library/Application Support/iMessage Max").path)
+      == [ServiceDefaults.registeredAgentFileName])
   #expect(fm.fileExists(atPath: home.appendingPathComponent("Library/LaunchAgents").path))
   let afterFirst = await system.commands
   #expect(

@@ -27,6 +27,11 @@ public enum ServiceDefaults {
   /// file's folder. The helper reads it as it stops: without it a SIGTERM
   /// exits non-zero and launchd starts the helper again.
   public static let stayStoppedFileName = "stay-stopped"
+  /// The SHA-256, in hex, of the agent plist the companion last registered,
+  /// beside the token file like `stayStoppedFileName`. SMAppService keeps a
+  /// registered job on the plist it first loaded, so the companion compares
+  /// this with the bundled plist to know when an update must register again.
+  public static let registeredAgentFileName = "registered-agent.sha256"
   /// The Unix socket stdio bridges connect to. The helper creates it, mode
   /// 0600, in its 0700 app-support folder.
   public static let socketPath = "Library/Application Support/iMessage Max/mcp.sock"

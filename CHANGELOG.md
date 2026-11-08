@@ -5,6 +5,7 @@
 ### Service
 
 - New **Keep running** setting in Settings → General, on by default. While it is on, the helper starts again after a plain quit from Activity Monitor or `kill`, not only after a crash. Turn it off and a quit leaves the helper stopped. The change applies at once, with no restart. Stop iMessage Max… keeps the helper stopped either way, until you start it again or log in again. The setting is the `stay-stopped` file in `~/Library/Application Support/iMessage Max/`.
+- An update that changes the helper's launchd plist now takes effect. macOS keeps a registered helper on the plist it first loaded, so the app records the plist it registered (`registered-agent.sha256` in `~/Library/Application Support/iMessage Max/`) and, when the bundled plist differs, registers the helper again on launch or on `--register-helper`. A Mac updating from 2.0.0 has no record yet and registers again once, which loads the new Keep running behaviour. macOS may show its "background item added" notice that one time. Permissions are unaffected.
 
 ### Companion app
 

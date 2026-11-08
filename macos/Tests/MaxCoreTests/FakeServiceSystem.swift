@@ -21,6 +21,10 @@ actor FakeServiceSystem: ServiceSystem {
   /// Registering leaves the helper off in Login Items, as after the user
   /// turned it off there.
   var registerNeedsApproval = false
+  /// The plist the app bundles now. launchd loads it only when an agent that
+  /// is not registered registers: registering again keeps `loadedPlist`.
+  var bundledPlist = "A"
+  private(set) var loadedPlist: String?
   private(set) var commands: [SystemCommand] = []
   private(set) var contactRequests = 0
   private(set) var pauses = 0
@@ -31,6 +35,7 @@ actor FakeServiceSystem: ServiceSystem {
   /// A registered, running helper.
   func startRunning() {
     agent = .enabled
+    loadedPlist = bundledPlist
     loaded = true
     launch()
   }
@@ -64,6 +69,7 @@ actor FakeServiceSystem: ServiceSystem {
         failNextRegister = false
         throw CoreError.commandFailed("register failed")
       }
+      if agent == .notRegistered { loadedPlist = bundledPlist }
       if registerNeedsApproval {
         agent = .requiresApproval
         return
@@ -73,6 +79,7 @@ actor FakeServiceSystem: ServiceSystem {
       launch()
     case .unregister:
       agent = .notRegistered
+      loadedPlist = nil
       loaded = false
       pid = nil
     case .kickstart(_, let restart):
