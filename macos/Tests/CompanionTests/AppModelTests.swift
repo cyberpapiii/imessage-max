@@ -61,6 +61,8 @@ private func model(
     bundleIdentifier: ServiceDefaults.companionBundleID,
     bundleURL: URL(fileURLWithPath: "/Applications/iMessage Max.app"),
     home: home)
+  // These helpers run under the plist this app registered.
+  try RegisteredAgent(configuration: configuration).save()
   return AppModel(
     controller: ServiceController(configuration: configuration, system: system, home: home),
     milestones: milestones, prepareMessages: {},

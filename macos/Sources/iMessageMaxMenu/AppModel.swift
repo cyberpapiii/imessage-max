@@ -140,8 +140,9 @@ final class AppModel {
     Task {
       await refresh()
       // A step waiting on a launch-time grant restarts the helper anyway,
-      // which also replaces an outdated one.
-      if diagnosis?.grantNeedsRestartToCheck == true {
+      // which also replaces an outdated one. That restart is skipped for a
+      // helper that just started, which may still run under an old plist.
+      if diagnosis?.grantNeedsRestartToCheck == true, controller?.definitionIsCurrent != false {
         await recheckIfStale()
       } else {
         change(.starting) { try await $0.restartIfOutdated() }
@@ -150,7 +151,8 @@ final class AppModel {
   }
 
   /// `--register-helper` from `make install`: the command is the consent to
-  /// replace an older install, and a running helper restarts on the new binary.
+  /// replace an older install, and a running helper restarts on the new
+  /// binary. The restart registers again when the bundled plist changed.
   func registerHelper() {
     change(.starting) { controller in
       switch await controller.inspect() {

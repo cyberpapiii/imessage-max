@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import IMessageMaxContract
 
@@ -11,6 +12,9 @@ public struct ServiceConfiguration: Sendable, Equatable {
   public let log: URL
   /// The bearer token file the helper reads at launch, from `--token-file`.
   public let tokenFile: URL
+  /// SHA-256 of the bundled plist's bytes, in hex. `RegisteredAgent`
+  /// compares it with the plist this app last registered.
+  public let plistDigest: String
   /// Only the released identity may touch an install of the old agent.
   public let isProduction: Bool
 
@@ -99,6 +103,7 @@ public struct ServiceConfiguration: Sendable, Equatable {
     self.endpoint = endpoint
     self.log = log
     self.tokenFile = tokenFile
+    plistDigest = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     isProduction =
       label == ServiceDefaults.launchdLabel && bundleIdentifier == ServiceDefaults.companionBundleID
   }

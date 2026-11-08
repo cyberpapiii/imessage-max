@@ -187,6 +187,7 @@ import Testing
   let home = try temporaryHome()
   let controller = ServiceController(
     configuration: try configuration(home: home), system: system, home: home)
+  try RegisteredAgent(configuration: controller.configuration).save()
 
   let reply = try await controller.requestPermission(.contacts)
   #expect(reply.authorized && reply.processID == 201)
@@ -228,6 +229,7 @@ import Testing
   let home = try temporaryHome()
   let controller = ServiceController(
     configuration: try configuration(home: home), system: system, home: home)
+  try RegisteredAgent(configuration: controller.configuration).save()
   #expect(try await controller.restartIfOutdated().diagnosis?.processID == 200)
   await system.set { $0.outdated = true }
   #expect(try await controller.restartIfOutdated().diagnosis?.processID == 201)
