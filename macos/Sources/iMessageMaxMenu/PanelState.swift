@@ -19,18 +19,15 @@ enum Busy: Equatable {
   var isPermissionRequest: Bool { self == .askingPermission || self == .checkingSending }
 }
 
+/// A short line that answers an action. The window shows it where the
+/// action was, and VoiceOver reads it out.
 struct Notice: Equatable {
-  enum Tone { case good, neutral }
-
   let text: String
-  var tone = Tone.good
 
-  static let resting = Notice(text: "Resting until you start it again.")
-  static let connected = Notice(text: "Connected. iMessage Max is running.")
-  static let setupUnfinished = Notice(
-    text: "That permission isn’t on yet. See Permissions below.", tone: .neutral)
-  static let noLog = Notice(text: "No service log yet. Start iMessage Max first.")
-  static let tried = Notice(text: "Your assistant just used iMessage Max. You’re all set.")
+  static let resting = Notice(text: "Stopped. iMessage Max rests until you start it again.")
+  static let connected = Notice(text: "iMessage Max is running.")
+  static let setupUnfinished = Notice(text: "That permission isn’t on yet.")
+  static let noLog = Notice(text: "No log yet. Start iMessage Max first.")
 
   static func linked(_ name: String) -> Notice { Notice(text: "\(name) is connected.") }
 
@@ -56,13 +53,13 @@ enum ClientActivity: Equatable {
   case failed(String)
 }
 
-/// What the home panel judges besides diagnose.
+/// What the companion judges besides diagnose.
 struct SetupFacts: Equatable {
   /// Detected clients whose config reaches the helper, in table order. nil
   /// until the first scan.
   var connected: [String]?
   /// The user chose Not now, or an assistant has connected or called a
-  /// tool. Kept across launches, so the connect card does not come back.
+  /// tool. Kept across launches, so the connect prompt does not come back.
   var connectSettled = false
 }
 
@@ -92,7 +89,7 @@ struct PermissionRow: Identifiable, Equatable {
 extension SetupStep {
   var purpose: String {
     switch self {
-    case .backgroundActivity: "Keeps running when this panel is closed."
+    case .backgroundActivity: "Keeps iMessage Max running, even after you quit this app."
     case .fullDiskAccess: "Lets your assistants read your messages."
     case .contacts: "Shows people’s names instead of phone numbers."
     case .automation: "Lets your assistants send messages when you ask."
@@ -121,7 +118,7 @@ extension SetupStep {
 }
 
 /// The four permissions, the same during first run and after. The first
-/// missing one is the one the panel walks the user through.
+/// missing one opens with what to do.
 struct Permissions: Equatable {
   let rows: [PermissionRow]
 
@@ -145,6 +142,70 @@ struct Permissions: Equatable {
       if case .missing = $0.grant { true } else { false }
     }?.step
   }
+}
+
+/// The pages of the Settings window, in sidebar order. General sits under
+/// the identity row at the top of the sidebar.
+enum SettingsPage: String, CaseIterable, Identifiable {
+  case general, permissions, connections, about
+
+  var id: Self { self }
+
+  var title: String {
+    switch self {
+    case .general: "General"
+    case .permissions: "Permissions"
+    case .connections: "Connections"
+    case .about: "About & Help"
+    }
+  }
+}
+
+/// The pages the Settings window has shown, for its back and forward buttons.
+struct PageHistory: Equatable {
+  private(set) var pages: [SettingsPage]
+  private(set) var index = 0
+
+  init(_ start: SettingsPage = .general) { pages = [start] }
+
+  var current: SettingsPage { pages[index] }
+  var canGoBack: Bool { index > 0 }
+  var canGoForward: Bool { index < pages.count - 1 }
+
+  mutating func go(_ page: SettingsPage) {
+    guard page != current else { return }
+    pages = Array(pages[...index]) + [page]
+    index += 1
+  }
+
+  mutating func back() { if canGoBack { index -= 1 } }
+  mutating func forward() { if canGoForward { index += 1 } }
+}
+
+/// What the status menu and the sidebar say beside the face.
+enum Status: Equatable {
+  case running, attention, stopped, settingUp
+  /// A check or a change is under way, with what it is doing.
+  case working(String)
+
+  var word: String {
+    switch self {
+    case .running: "Running"
+    case .attention: "Needs attention"
+    case .stopped: "Stopped"
+    case .settingUp: "Setting up"
+    case .working(let title): title
+    }
+  }
+}
+
+/// The one thing to do next, as a line in the status menu. Choosing it opens
+/// Settings on `page`.
+struct Attention: Equatable {
+  let text: String
+  let page: SettingsPage
+  /// false for a suggestion, such as connecting the first assistant.
+  var urgent = true
 }
 
 struct PanelState: Equatable {
@@ -171,11 +232,13 @@ struct PanelState: Equatable {
   let permissions: Permissions?
   /// Every permission is on, and no assistant has connected yet.
   let offersConnect: Bool
-  /// The Connections row's value: who is connected, or None. nil until the
-  /// first scan.
+  /// Who is connected, or None. nil until the first scan.
   let connections: String?
   let busy: Busy?
   let troubled: Bool
+  /// Setup was finished once: an assistant connected or called a tool, or
+  /// the user chose Not now. A permission missing after that needs attention.
+  let settled: Bool
 
   init(
     service: ServiceState?, facts: SetupFacts = SetupFacts(), busy: Busy?, problem: String?,
@@ -183,6 +246,7 @@ struct PanelState: Equatable {
   ) {
     self.busy = busy
     troubled = problem != nil
+    settled = facts.connectSettled
     let permissions = Permissions(service: service)
     self.permissions = permissions
     phase =
@@ -207,7 +271,7 @@ struct PanelState: Equatable {
     }
   }
 
-  /// The permission the panel walks the user through now.
+  /// The permission to turn on now.
   var step: SetupStep? {
     switch phase {
     case .notSetUp, .blocked: .backgroundActivity
@@ -216,27 +280,44 @@ struct PanelState: Equatable {
     }
   }
 
-  var title: String {
-    if let busy { return busy.title }
+  var status: Status {
+    if let busy { return .working(busy.title) }
     return switch phase {
-    case .checking: "Checking in…"
-    case .notSetUp: "Hello, iMessage Max"
-    case .blocked: "Turned off in Login Items"
-    case .setup(.contacts), .setup(.automation): "Almost ready"
-    case .setup: "A little setup first"
-    case .ready: "Ready to help"
-    case .misplaced: "Move me to Applications"
-    case .olderInstall: "Finish the update"
-    case .stopped: "Taking a break"
-    case .keyMismatch: "Access key doesn’t match"
-    case .disconnected: "Let’s get connected"
+    case .checking: .working("Checking…")
+    case .ready, .stopped: troubled ? .attention : phase == .ready ? .running : .stopped
+    case .notSetUp: .settingUp
+    case .setup: settled ? .attention : .settingUp
+    case .blocked, .misplaced, .olderInstall, .keyMismatch, .disconnected: .attention
+    }
+  }
+
+  var attention: Attention? {
+    if busy != nil { return nil }
+    if troubled && (phase == .ready || phase == .stopped) {
+      return Attention(text: "Something went wrong", page: .general)
+    }
+    return switch phase {
+    case .notSetUp: Attention(text: "Finish setting up", page: .permissions)
+    case .blocked: Attention(text: "Turn on iMessage Max in Login Items", page: .permissions)
+    case .setup(.backgroundActivity): Attention(text: "Turn on Background activity", page: .permissions)
+    case .setup(.fullDiskAccess): Attention(text: "Turn on Full Disk Access", page: .permissions)
+    case .setup(.contacts): Attention(text: "Allow Contacts to show names", page: .permissions)
+    case .setup(.automation): Attention(text: "Allow Automation to send messages", page: .permissions)
+    case .misplaced: Attention(text: "Move iMessage Max to Applications", page: .general)
+    case .olderInstall: Attention(text: "Finish the update", page: .general)
+    case .keyMismatch: Attention(text: "Restart iMessage Max", page: .general)
+    case .disconnected: Attention(text: "iMessage Max isn’t answering", page: .general)
+    case .ready where offersConnect:
+      Attention(text: "Connect your assistant", page: .connections, urgent: false)
+    case .checking, .ready, .stopped: nil
     }
   }
 
   var subtitle: String {
     if busy != nil { return "We’ll check that everything worked." }
     return switch phase {
-    case .notSetUp: "A small helper connects your assistants to Messages. Allow what it needs below."
+    case .notSetUp:
+      "A small helper connects your assistants to Messages. Allow what it needs in Permissions."
     case .blocked: "Background activity is off, so your assistants can’t reach Messages."
     case .setup(.contacts): "Your assistants can read messages. Allow Contacts to show names."
     case .setup(.automation): "Your assistants can read messages. Allow Automation so they can send."
@@ -249,13 +330,13 @@ struct PanelState: Equatable {
     case .stopped: "Start whenever you need your assistants again."
     case .keyMismatch:
       "iMessage Max is running but turned this app away, because its access key changed. Restart it so both use the same key."
-    case .checking, .disconnected:
-      "Your messages stay on this Mac. Let’s check the connection."
+    case .checking: "Checking the connection…"
+    case .disconnected: "Your messages stay on this Mac. Let’s check the connection."
     }
   }
 
-  /// The big button, for states outside the permissions. A missing
-  /// permission carries its own.
+  /// The service row's button, for states outside the permissions. A missing
+  /// permission carries its own on the Permissions page.
   var primary: Primary? {
     switch phase {
     case .misplaced: .move
@@ -268,21 +349,12 @@ struct PanelState: Equatable {
   }
 
   var primaryTitle: String {
-    if busy != nil { return "Working…" }
-    return switch phase {
+    switch phase {
     case .misplaced: "Move to Applications"
-    case .olderInstall: "Replace the older helper"
+    case .olderInstall: "Replace Older Helper"
     case .stopped: "Start iMessage Max"
     case .keyMismatch: "Restart iMessage Max"
-    default: "Check again"
-    }
-  }
-
-  var primaryMark: ActionMark {
-    if busy != nil { return .more }
-    return switch phase {
-    case .stopped, .olderInstall, .keyMismatch: .play
-    default: .arrow
+    default: "Check Again"
     }
   }
 

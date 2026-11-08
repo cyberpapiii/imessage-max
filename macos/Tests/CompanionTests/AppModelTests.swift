@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import IMessageMaxContract
 import MaxCore
@@ -64,171 +65,220 @@ private func model(_ system: any ServiceSystem, milestones: Milestones = Milesto
     changeDeadline: 0.3, permissionDeadline: 0.3)
 }
 
-@MainActor @Test func aServiceChangeThatNeverAnswersFreesTheButtons() async throws {
-  let system = StuckSystem(running: false)
-  let model = try model(system)
-  model.perform(.start)
-  #expect(model.busy == .starting)
-  await model.prepareToQuit()
-  #expect(model.busy == nil)
-  #expect(model.problem == CoreError.timeout.localizedDescription)
-  #expect(model.service == .notRegistered)
-  await system.release()
-}
-
-@MainActor @Test func aPermissionPromptThatNeverAnswersFreesTheButtons() async throws {
-  let system = StuckSystem(running: true)
-  let model = try model(system)
-  await model.refresh()
-  #expect(model.service?.diagnosis != nil)
-  model.request(.automation)
-  #expect(model.busy == .askingPermission)
-  await model.prepareToQuit()
-  #expect(model.busy == nil)
-  #expect(model.problem == CoreError.timeout.localizedDescription)
-  await system.release()
-}
-
-/// A running helper that, like the real one, sees Full Disk Access only as it
-/// was at its launch, and counts tool calls from zero after every launch.
-private actor LaunchGrantSystem: ServiceSystem {
-  var fullDiskOn: Bool
-  var assistantCalls = 0
-  private(set) var restarts = 0
-  private var pid: Int32 = 400
-  private var launchedWithFullDisk: Bool
-  private var launchedAt = Date.distantPast
-
-  init(fullDiskOn: Bool) {
-    self.fullDiskOn = fullDiskOn
-    launchedWithFullDisk = fullDiskOn
+@Suite struct AppModelTests {
+  @MainActor @Test func aServiceChangeThatNeverAnswersFreesTheButtons() async throws {
+    let system = StuckSystem(running: false)
+    let model = try model(system)
+    model.perform(.start)
+    #expect(model.busy == .starting)
+    await model.prepareToQuit()
+    #expect(model.busy == nil)
+    #expect(model.problem == CoreError.timeout.localizedDescription)
+    #expect(model.service == .notRegistered)
+    await system.release()
   }
 
-  func turnOnFullDisk() { fullDiskOn = true }
-  func call() { assistantCalls += 1 }
-
-  func agentStatus(plistName: String) async -> AgentStatus { .enabled }
-  func job(label: String) async -> Job? { label == LegacyInstall.label ? nil : Job(pid: pid) }
-  func diagnose(endpoint: URL) async -> DiagnoseReply {
-    guard
-      let result = try? diagnosis(
-        database: launchedWithFullDisk, processID: pid, assistantCalls: assistantCalls)
-    else { return .silent }
-    return .answered(result)
+  @MainActor @Test func aPermissionPromptThatNeverAnswersFreesTheButtons() async throws {
+    let system = StuckSystem(running: true)
+    let model = try model(system)
+    await model.refresh()
+    #expect(model.service?.diagnosis != nil)
+    model.request(.automation)
+    #expect(model.busy == .askingPermission)
+    await model.prepareToQuit()
+    #expect(model.busy == nil)
+    #expect(model.problem == CoreError.timeout.localizedDescription)
+    await system.release()
   }
-  func listeners(port: Int) async -> Set<Int32> { [pid] }
-  func run(_ command: SystemCommand) async throws {
-    guard case .kickstart = command else { return }
-    restarts += 1
-    pid += 1
-    launchedWithFullDisk = fullDiskOn
-    assistantCalls = 0
-    launchedAt = .now
+
+  /// A running helper that, like the real one, sees Full Disk Access only as it
+  /// was at its launch, and counts tool calls from zero after every launch.
+  private actor LaunchGrantSystem: ServiceSystem {
+    var fullDiskOn: Bool
+    var assistantCalls = 0
+    private(set) var restarts = 0
+    private var pid: Int32 = 400
+    private var launchedWithFullDisk: Bool
+    private var launchedAt = Date.distantPast
+
+    init(fullDiskOn: Bool) {
+      self.fullDiskOn = fullDiskOn
+      launchedWithFullDisk = fullDiskOn
+    }
+
+    func turnOnFullDisk() { fullDiskOn = true }
+    func call() { assistantCalls += 1 }
+
+    func agentStatus(plistName: String) async -> AgentStatus { .enabled }
+    func job(label: String) async -> Job? { label == LegacyInstall.label ? nil : Job(pid: pid) }
+    func diagnose(endpoint: URL) async -> DiagnoseReply {
+      guard
+        let result = try? diagnosis(
+          database: launchedWithFullDisk, processID: pid, assistantCalls: assistantCalls)
+      else { return .silent }
+      return .answered(result)
+    }
+    func listeners(port: Int) async -> Set<Int32> { [pid] }
+    func run(_ command: SystemCommand) async throws {
+      guard case .kickstart = command else { return }
+      restarts += 1
+      pid += 1
+      launchedWithFullDisk = fullDiskOn
+      assistantCalls = 0
+      launchedAt = .now
+    }
+    func startTime(pid: Int32) async -> Date? { launchedAt }
+    func isOutdated(pid: Int32, executable: URL) async -> Bool { false }
+    func requestContactsAccess() async -> PermissionStatus { .authorized }
+    func requestHelperPermission(_ permission: SetupPermission, endpoint: URL, processID: Int32)
+      async throws -> SetupPermissionReply
+    {
+      throw CoreError.invalidResponse
+    }
+    func pause() async {}
   }
-  func startTime(pid: Int32) async -> Date? { launchedAt }
-  func isOutdated(pid: Int32, executable: URL) async -> Bool { false }
-  func requestContactsAccess() async -> PermissionStatus { .authorized }
-  func requestHelperPermission(_ permission: SetupPermission, endpoint: URL, processID: Int32)
-    async throws -> SetupPermissionReply
-  {
-    throw CoreError.invalidResponse
+
+  @MainActor @Test func comingBackRestartsTheHelperToSeeAFullDiskGrant() async throws {
+    let system = LaunchGrantSystem(fullDiskOn: false)
+    let model = try model(system)
+    await model.refresh()
+    #expect(model.state.phase == .setup(.fullDiskAccess))
+    await system.turnOnFullDisk()
+    await model.opened()
+    await model.prepareToQuit()
+    #expect(await system.restarts == 1)
+    #expect(model.state.phase == .ready)
+    #expect(model.notice == nil)
   }
-  func pause() async {}
-}
 
-@MainActor @Test func openingThePanelRestartsTheHelperToSeeAFullDiskGrant() async throws {
-  let system = LaunchGrantSystem(fullDiskOn: false)
-  let model = try model(system)
-  await model.refresh()
-  #expect(model.state.phase == .setup(.fullDiskAccess))
-  await system.turnOnFullDisk()
-  await model.panelOpened()
-  await model.prepareToQuit()
-  #expect(await system.restarts == 1)
-  #expect(model.state.phase == .ready)
-  #expect(model.notice == nil)
-}
+  @MainActor @Test func checkAgainWithoutTheGrantSaysTheStepIsUnfinished() async throws {
+    let system = LaunchGrantSystem(fullDiskOn: false)
+    let model = try model(system)
+    await model.refresh()
+    model.recheck()
+    #expect(model.busy == .checkingAccess)
+    await model.prepareToQuit()
+    #expect(await system.restarts == 1)
+    #expect(model.state.phase == .setup(.fullDiskAccess))
+    #expect(model.notice == .setupUnfinished)
+    // Coming back right after holds off: launchd would throttle the restart.
+    await model.opened()
+    await model.prepareToQuit()
+    #expect(await system.restarts == 1)
+  }
 
-@MainActor @Test func checkAgainWithoutTheGrantSaysTheStepIsUnfinished() async throws {
-  let system = LaunchGrantSystem(fullDiskOn: false)
-  let model = try model(system)
-  await model.refresh()
-  model.recheck()
-  #expect(model.busy == .checkingAccess)
-  await model.prepareToQuit()
-  #expect(await system.restarts == 1)
-  #expect(model.state.phase == .setup(.fullDiskAccess))
-  #expect(model.notice == .setupUnfinished)
-  // A panel opened right after holds off: launchd would throttle the restart.
-  await model.panelOpened()
-  await model.prepareToQuit()
-  #expect(await system.restarts == 1)
-}
+  @MainActor @Test func aStepThatNeedsNoRestartOnlyChecks() async throws {
+    let system = LaunchGrantSystem(fullDiskOn: true)
+    let model = try model(system)
+    await model.opened()
+    await model.prepareToQuit()
+    #expect(await system.restarts == 0)
+    #expect(model.state.phase == .ready)
+  }
 
-@MainActor @Test func aStepThatNeedsNoRestartOnlyChecks() async throws {
-  let system = LaunchGrantSystem(fullDiskOn: true)
-  let model = try model(system)
-  await model.panelOpened()
-  await model.prepareToQuit()
-  #expect(await system.restarts == 0)
-  #expect(model.state.phase == .ready)
-}
+  @MainActor @Test func theFirstAssistantCallCelebratesOnceAndOutlivesTheHelper() async throws {
+    let system = LaunchGrantSystem(fullDiskOn: true)
+    let milestones = Milestones(defaults: nil)
+    let app = try model(system, milestones: milestones)
+    await app.refresh()
+    #expect(!app.triedNews)
+    await system.call()
+    await app.refresh()
+    #expect(app.triedNews)
+    #expect(app.celebration == 1)
+    app.newsSeen()
+    #expect(!app.triedNews)
 
-@MainActor @Test func theFirstAssistantCallCelebratesOnceAndOutlivesTheHelper() async throws {
-  let system = LaunchGrantSystem(fullDiskOn: true)
-  let milestones = Milestones(defaults: nil)
-  let app = try model(system, milestones: milestones)
-  await app.refresh()
-  #expect(app.notice == nil)
-  await system.call()
-  await app.refresh()
-  #expect(app.notice == .tried)
-  #expect(app.celebration == 1)
+    try await system.run(.kickstart(label: ServiceDefaults.launchdLabel, restart: true))
+    await app.refresh()
+    #expect(app.celebration == 1)
+    let reopened = try model(system, milestones: milestones)
+    await reopened.refresh()
+    #expect(reopened.tried)
+    #expect(reopened.celebration == 0)
+  }
 
-  try await system.run(.kickstart(label: ServiceDefaults.launchdLabel, restart: true))
-  await app.refresh()
-  #expect(app.celebration == 1)
-  let reopened = try model(system, milestones: milestones)
-  await reopened.refresh()
-  #expect(reopened.tried)
-  #expect(reopened.celebration == 0)
-}
+  @MainActor @Test func anAssistantCallBeforeTheGrantsAreDoneIsKeptQuietly() async throws {
+    let system = LaunchGrantSystem(fullDiskOn: false)
+    let app = try model(system)
+    await system.call()
+    await app.refresh()
+    #expect(app.tried)
+    #expect(app.state.phase == .setup(.fullDiskAccess))
+    #expect(!app.triedNews)
+    #expect(app.celebration == 0)
+  }
 
-@MainActor @Test func anAssistantCallBeforeTheGrantsAreDoneIsKeptQuietly() async throws {
-  let system = LaunchGrantSystem(fullDiskOn: false)
-  let app = try model(system)
-  await system.call()
-  await app.refresh()
-  #expect(app.tried)
-  #expect(app.state.phase == .setup(.fullDiskAccess))
-  #expect(app.notice == nil)
-  #expect(app.celebration == 0)
-}
+  @MainActor @Test func notNowRetiresTheConnectPromptAcrossLaunches() async throws {
+    let system = LaunchGrantSystem(fullDiskOn: true)
+    let milestones = Milestones(defaults: nil)
+    let first = try model(system, milestones: milestones)
+    await first.refreshClients()
+    await first.refresh()
+    #expect(first.state.offersConnect)
+    #expect(first.state.connections == "None")
+    first.dismissConnect()
+    #expect(!first.state.offersConnect)
+    let reopened = try model(system, milestones: milestones)
+    await reopened.refreshClients()
+    await reopened.refresh()
+    #expect(reopened.state.phase == .ready)
+    #expect(!reopened.state.offersConnect)
+  }
 
-@MainActor @Test func notNowRetiresTheConnectCardAcrossLaunches() async throws {
-  let system = LaunchGrantSystem(fullDiskOn: true)
-  let milestones = Milestones(defaults: nil)
-  let first = try model(system, milestones: milestones)
-  await first.refreshClients()
-  await first.refresh()
-  #expect(first.state.offersConnect)
-  #expect(first.state.connections == "None")
-  first.dismissConnect()
-  #expect(!first.state.offersConnect)
-  let reopened = try model(system, milestones: milestones)
-  await reopened.refreshClients()
-  await reopened.refresh()
-  #expect(reopened.state.phase == .ready)
-  #expect(!reopened.state.offersConnect)
-}
+  @MainActor @Test func anAssistantCallRetiresTheConnectPrompt() async throws {
+    let system = LaunchGrantSystem(fullDiskOn: true)
+    let app = try model(system)
+    await app.refreshClients()
+    await app.refresh()
+    #expect(app.state.offersConnect)
+    await system.call()
+    await app.refresh()
+    #expect(!app.state.offersConnect)
+  }
 
-@MainActor @Test func anAssistantCallRetiresTheConnectCard() async throws {
-  let system = LaunchGrantSystem(fullDiskOn: true)
-  let app = try model(system)
-  await app.refreshClients()
-  await app.refresh()
-  #expect(app.state.offersConnect)
-  await system.call()
-  await app.refresh()
-  #expect(!app.state.offersConnect)
+  /// Lets queued main-queue work, such as a menu choice, run.
+  @MainActor private func drainMainQueue() async {
+    await withCheckedContinuation { done in DispatchQueue.main.async { done.resume() } }
+  }
+
+  @MainActor @Test func theStatusMenuNamesTheNextStepAndOpensItsPage() async throws {
+    let system = LaunchGrantSystem(fullDiskOn: false)
+    let app = try model(system)
+    await app.refreshClients()
+    await app.refresh()
+    var opened: [SettingsPage?] = []
+    let status = StatusMenuController(model: app) { opened.append($0) }
+    status.menuNeedsUpdate(status.menu)
+    #expect(status.menu.items.map(\.title) == [
+      "iMessage Max", "Turn on Full Disk Access", "", "Connections: None", "", "Settings…", "",
+      "Quit iMessage Max",
+    ])
+    #expect(status.menu.items[5].keyEquivalent == ",")
+    #expect(status.menu.items[7].keyEquivalent == "q")
+    status.menu.performActionForItem(at: 1)
+    status.menu.performActionForItem(at: 3)
+    status.menu.performActionForItem(at: 5)
+    await drainMainQueue()
+    #expect(opened == [.permissions, .connections, nil])
+
+    await system.turnOnFullDisk()
+    await app.opened()
+    await app.prepareToQuit()
+    await drainMainQueue()
+    #expect(status.menu.items.map(\.title).contains("Turn on Full Disk Access") == false)
+  }
+
+  @MainActor @Test func theMenuHeaderNewsLastsUntilTheMenuCloses() async throws {
+    let system = LaunchGrantSystem(fullDiskOn: true)
+    let app = try model(system)
+    await app.refresh()
+    await system.call()
+    await app.refresh()
+    let status = StatusMenuController(model: app) { _ in }
+    status.menuWillOpen(status.menu)
+    #expect(app.menuOpen && app.triedNews)
+    status.menuDidClose(status.menu)
+    #expect(!app.menuOpen && !app.triedNews)
+  }
 }
