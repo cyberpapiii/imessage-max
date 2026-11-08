@@ -50,9 +50,13 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
   private var shown: [MenuEntry] = []
   private lazy var header: NSMenuItem = {
     let item = NSMenuItem(title: "iMessage Max", action: nil, keyEquivalent: "")
-    let view = NSHostingView(
+    let view = MenuItemHostingView(
       rootView: MenuHeaderView(model: model) { [weak self] in self?.choose(.general) })
     view.frame.size = view.fittingSize
+    view.resized = { [weak self, weak item] in
+      guard let self, let item, self.menu.index(of: item) >= 0 else { return }
+      self.menu.itemChanged(item)
+    }
     item.view = view
     return item
   }()
@@ -78,8 +82,9 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
     model.newsSeen()
   }
 
-  /// Rebuilds the items whenever the entries change, also while the menu is
-  /// open, so a check that lands mid-glance shows at once.
+  /// Rebuilds the items whenever the entries change while the menu is
+  /// closed. An open menu grows for an added item but never shrinks back,
+  /// so the list waits for the next open; the header still updates live.
   private func observe() {
     let entries = withObservationTracking {
       _ = model.triedNews
@@ -87,15 +92,10 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
     } onChange: { [weak self] in
       Task { @MainActor in self?.observe() }
     }
-    apply(entries)
+    if !model.menuOpen { apply(entries) }
   }
 
   private func apply(_ entries: [MenuEntry]) {
-    if let view = header.view, view.frame.size != view.fittingSize {
-      view.frame.size = view.fittingSize
-      // An open menu keeps its old height until told the item changed.
-      if menu.index(of: header) >= 0 { menu.itemChanged(header) }
-    }
     guard entries != shown else { return }
     shown = entries
     menu.removeAllItems()
@@ -140,6 +140,30 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
   private func choose(_ page: SettingsPage?) {
     menu.cancelTracking()
     DispatchQueue.main.async { self.openSettings(page) }
+  }
+}
+
+/// Sizes a menu item's SwiftUI view to its content. Measured before it is
+/// in the menu's window, the view comes out taller than it draws, and an
+/// open menu keeps an item's old height until told the item changed.
+final class MenuItemHostingView<Content: View>: NSHostingView<Content> {
+  var resized: (() -> Void)?
+
+  override func viewDidMoveToWindow() {
+    super.viewDidMoveToWindow()
+    fit()
+  }
+
+  override func invalidateIntrinsicContentSize() {
+    super.invalidateIntrinsicContentSize()
+    fit()
+  }
+
+  private func fit() {
+    let size = fittingSize
+    guard size != frame.size, size.height > 0 else { return }
+    setFrameSize(size)
+    resized?()
   }
 }
 
