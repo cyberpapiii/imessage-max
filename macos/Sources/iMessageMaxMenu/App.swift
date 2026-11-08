@@ -21,19 +21,19 @@ struct iMessageMaxMenuApp {
   }
 }
 
-/// AppKit owns only the status item and popover lifecycle. The public
-/// MenuBarExtra API cannot show the panel on app launch or reopen, and a new
-/// user needs both to find the app. The panel and its state use SwiftUI and
-/// Observation.
+/// AppKit owns the status item, its menu and the Settings window. The public
+/// MenuBarExtra and Settings scenes cannot open a window on launch or reopen,
+/// and a new user needs both to find the app. The window's content and its
+/// state use SwiftUI and Observation.
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate {
   private let design: DesignOptions
   private let milestones: Milestones
   private let model: AppModel
-  private var designWindow: NSWindow?
   private var statusItem: NSStatusItem?
-  private let popover = NSPopover()
-  private var keyMonitor: Any?
+  private var statusMenu: StatusMenuController?
+  private var settings: SettingsWindowController?
+  private var designMenu: NSWindow?
 
   init(design: DesignOptions) {
     self.design = design
@@ -47,23 +47,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
   }
 
   func applicationDidFinishLaunching(_ notification: Notification) {
+    NSApp.mainMenu = makeMainMenu(settings: #selector(showSettings))
+    let settings = SettingsWindowController(
+      model: model, motion: design.motion,
+      focus: design.capture ? .none : .app)
+    self.settings = settings
+    let menu = StatusMenuController(model: model) { page in settings.show(page) }
+    statusMenu = menu
     let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+    item.menu = menu.menu
     statusItem = item
-    item.button?.target = self
-    item.button?.action = #selector(togglePanel)
-    popover.behavior = .transient
-    popover.delegate = self
-    popover.appearance = NSApp.appearance
-    popover.animates =
-      !(NSWorkspace.shared.accessibilityDisplayShouldReduceMotion || design.motion.reduce)
-    let hosting = NSHostingController(
-      rootView: PanelView(model: model).environment(\.motionSettings, design.motion))
-    hosting.sizingOptions = [.preferredContentSize]
     updateStatusItem()
     if design.isActive {
       design.prepare(model)
-      if design.window {
-        designWindow = design.showWindow(hosting, model: model)
+      if design.capture {
+        designMenu = design.show(settings: settings, model: model)
         return
       }
     }
@@ -76,27 +74,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
       if arguments.contains("--register-helper") { model.registerHelper() }
       if arguments.contains("--unregister-helper") { model.unregisterHelperAndQuit() }
     }
-    popover.contentViewController = hosting
-    // A person who opens the app sees the panel, on the first unfinished
-    // step. A launch at login stays quiet.
-    if design.isActive || !(scripted || Self.launchedAtLogin) { showPanelOnceItemIsPlaced() }
-  }
-
-  /// A new status item starts off screen and slides into the menu bar, and a
-  /// popover shown before it lands opens in the wrong place or not at all.
-  /// Waits up to 3 seconds for the item to sit at the top of a screen.
-  private func showPanelOnceItemIsPlaced(tries: Int = 30) {
-    let frame = statusItem?.button?.window?.frame ?? .zero
-    let placed =
-      frame.height > 0
-      && NSScreen.screens.contains { $0.frame.contains(frame) && $0.frame.maxY == frame.maxY }
-    guard tries > 0, !placed else {
-      showPanel()
-      return
-    }
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-      self.showPanelOnceItemIsPlaced(tries: tries - 1)
-    }
+    // A person who opens the app sees Settings, on Permissions. A launch at
+    // login stays quiet in the menu bar.
+    if design.isActive || !(scripted || Self.launchedAtLogin) { settings.show(.permissions) }
   }
 
   private static var launchedAtLogin: Bool {
@@ -108,7 +88,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
   func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool
   {
-    showPanel()
+    settings?.show(nil)
     return false
   }
 
@@ -121,52 +101,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     return .terminateLater
   }
 
-  @objc private func togglePanel() {
-    if popover.isShown { popover.performClose(nil) } else { showPanel() }
-  }
-
-  private func showPanel() {
-    guard let button = statusItem?.button else { return }
-    let screenHeight = button.window?.screen?.visibleFrame.height ?? .greatestFiniteMagnitude
-    model.maximumPanelHeight = min(Design.maximumPanelHeight, screenHeight - 12)
-    model.panelOpen = true
-    NSApp.activate(ignoringOtherApps: true)
-    popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-    popover.contentViewController?.view.window?.makeKey()
-    if keyMonitor == nil {
-      // Local monitors run on NSApplication's main event-dispatch thread. This
-      // monitor takes only the Escape key, and only in the shown panel.
-      // Escape goes back to the home page first, then closes the panel.
-      keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-        let handled = MainActor.assumeIsolated {
-          guard let self, self.popover.isShown, event.keyCode == 53,
-            event.window === self.popover.contentViewController?.view.window
-          else { return false }
-          if self.model.section != nil {
-            self.model.section = nil
-          } else {
-            self.popover.performClose(nil)
-          }
-          return true
-        }
-        return handled ? nil : event
-      }
-    }
-    Task { await model.panelOpened() }
-  }
-
-  func popoverDidClose(_ notification: Notification) {
-    if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
-    keyMonitor = nil
-    model.section = nil
-    model.panelOpen = false
-    model.clearNotice()
-  }
+  @objc private func showSettings() { settings?.show(nil) }
 
   private func updateStatusItem() {
     withObservationTracking {
       let state = model.state
-      let title = "iMessage Max, \(state.title)"
+      let title = "iMessage Max, \(state.status.word)"
       statusItem?.button?.image = MenuBarArtwork.image(for: state.mood)
       statusItem?.button?.image?.isTemplate = true
       statusItem?.button?.toolTip = title

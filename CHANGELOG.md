@@ -4,10 +4,14 @@
 
 ### Companion app
 
-- The home page shows one Permissions card in place of the numbered setup steps, and it looks the same during first run and after. It lists Background activity, Full Disk Access, Contacts and Automation by their System Settings names, each with what it is for and its status: On or Off, Allowed or Not allowed, and Some contacts for limited Contacts access. The first missing permission opens in place with its explanation and buttons.
-- Connecting an assistant is a card under Permissions. It shows once every permission is on and no assistant is connected, and leaves for good once one connects, an assistant calls a tool, or you choose Not now.
-- The Connection page is now Connections. Its row on the home page names what is connected, such as "Plug" or "Plug and 1 more", or None.
-- The Try it step and its sample prompt are gone. The app still says so the first time an assistant uses iMessage Max.
+- The menu bar bubble opens a plain macOS menu in place of the popover panel. Its header shows Max's face and one status word: Running, Needs attention, Stopped or Setting up. One more line names the next thing to do, such as Turn on Full Disk Access, and opens Settings on the page that fixes it. Below that are Connections (such as "Connections: Plug", or None), Settings… (⌘,) and Quit iMessage Max (⌘Q). Quitting still leaves the helper running.
+- Setup, permissions, connections and help moved to a Settings window with a sidebar, back and forward buttons, and grouped forms built from stock controls, so macOS 26 draws its own Liquid Glass. Under a row with the face and the status word, the pages are General, Permissions, Connections, and About & Help. Opening the app shows the window on Permissions.
+- The switch that started and stopped the helper is now a Stop iMessage Max… button on General, which asks first, and a Start iMessage Max button when it is stopped.
+- Permissions lists Background activity, Full Disk Access, Contacts and Automation by their System Settings names, each with what it is for and its status: On or Off, Allowed or Not allowed, and Some contacts for limited Contacts access. The first missing permission shows its explanation and buttons in its row. Coming back to the window from System Settings checks again.
+- Connecting an assistant is a section under Permissions once every permission is on and no assistant is connected. It leaves for good once one connects, an assistant calls a tool, or you choose Not Now.
+- The Try it step and its sample prompt are gone. The first time an assistant uses iMessage Max, the menu header and General say so, in place of a notice that covered the panel's content.
+- The custom-painted cards, buttons, switch and glyphs are gone in favour of SF Symbols and system controls. Copy buttons say Copied on the button, and VoiceOver reads out the result of an action.
+- The design harness shows the Settings window with `--design-window --design-open <general|permissions|connections|about>` and draws the status menu with `--design-menu`. Captures of every page and of the menu in each status are in `docs/design/settings/`.
 
 ### Server
 

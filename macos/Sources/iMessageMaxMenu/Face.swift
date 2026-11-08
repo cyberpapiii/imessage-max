@@ -1,54 +1,11 @@
 import MaxBrand
 import SwiftUI
 
+/// The brand colours. Everything else uses the system's semantic colours.
 enum Design {
-  static let width: CGFloat = 340
-  static let inset: CGFloat = 16
-  static let maximumPanelHeight: CGFloat = 720
-
   static let blue = Color(
     red: MessageMark.blue.red, green: MessageMark.blue.green, blue: MessageMark.blue.blue)
-  static let ready = adaptive(light: 0x237446, dark: 0x79CF9E)
-  static let attention = adaptive(light: 0x985410, dark: 0xF0BA76)
-  static let running = adaptive(light: 0x2F9E5B, dark: 0x3DB56E)
   static let badge = Color(red: 0.96, green: 0.60, blue: 0.18)
-  static let canvas = adaptive(light: 0xF8F8F6, dark: 0x232527)
-  static let card = adaptive(light: 0xFFFFFF, dark: 0x2D3033)
-  static let well = adaptive(light: 0xECEDEA, dark: 0x383C40)
-  static let track = adaptive(light: 0xD3D6D2, dark: 0x4A4F54)
-  static let muted = adaptive(light: 0x626763, dark: 0xB8BCB9)
-  static let wash = 0.11
-
-  private static func adaptive(light: UInt32, dark: UInt32) -> Color {
-    Color(
-      nsColor: NSColor(name: nil) { appearance in
-        let value = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light
-        return NSColor(
-          srgbRed: Double((value >> 16) & 255) / 255,
-          green: Double((value >> 8) & 255) / 255, blue: Double(value & 255) / 255, alpha: 1)
-      })
-  }
-}
-
-enum Space {
-  static let hairline: CGFloat = 2
-  static let rowGap: CGFloat = 4
-  static let tight: CGFloat = 6
-  static let snug: CGFloat = 10
-  static let regular: CGFloat = 14
-}
-
-enum Radius {
-  static let card: CGFloat = 10
-  static let control: CGFloat = 7
-}
-
-extension Font {
-  static let maxTitle = Font.system(size: 15, weight: .semibold)
-  static let maxLine = Font.system(size: 13)
-  static let maxStrong = Font.system(size: 13, weight: .medium)
-  static let maxSmall = Font.system(size: 12)
-  static let maxCode = Font.system(size: 12, design: .monospaced)
 }
 
 struct MotionSettings: Equatable {
@@ -61,27 +18,23 @@ extension EnvironmentValues {
 }
 
 struct Motion {
-  enum Kind { case hover, press, toggle, swap, step, glide, morph }
+  enum Kind { case swap, glide }
 
   let reduced: Bool
   let scale: Double
 
+  /// nil under Reduce Motion, so the change lands without animating.
   subscript(kind: Kind) -> Animation? {
     guard !reduced else { return nil }
     return switch kind {
-    case .hover: .easeOut(duration: 0.10 * scale)
-    case .press: .snappy(duration: 0.15 * scale)
-    case .toggle: .snappy(duration: 0.20 * scale)
     case .swap: .snappy(duration: 0.25 * scale)
-    case .step: .snappy(duration: 0.32 * scale)
     case .glide: .smooth(duration: 0.25 * scale)
-    case .morph: .smooth(duration: 0.16 * scale)
     }
   }
 }
 
 @propertyWrapper
-struct PanelMotion: DynamicProperty {
+struct MotionStyle: DynamicProperty {
   @Environment(\.accessibilityReduceMotion) private var system
   @Environment(\.motionSettings) private var settings
   var wrappedValue: Motion { Motion(reduced: system || settings.reduce, scale: settings.scale) }
@@ -262,7 +215,7 @@ struct MaxFaceView: View {
   var size: CGFloat = 48
   var awake = true
   @State private var engine = FaceEngine()
-  @PanelMotion private var motion
+  @MotionStyle private var motion
 
   var body: some View {
     let margin = size * 0.3
@@ -354,196 +307,5 @@ struct MaxFaceView: View {
       if awake { engine.show(mood, animated: !motion.reduced) } else { engine.sleep() }
     }
     .accessibilityHidden(true)
-  }
-}
-
-struct MaxSwitchStyle: ToggleStyle {
-  @Environment(\.isEnabled) private var enabled
-  @PanelMotion private var motion
-
-  func makeBody(configuration: Configuration) -> some View {
-    Button {
-      configuration.isOn.toggle()
-    } label: {
-      Capsule()
-        .fill(configuration.isOn ? Design.running : Design.track)
-        .frame(width: 36, height: 20)
-        .overlay(alignment: configuration.isOn ? .trailing : .leading) {
-          Circle().fill(.white)
-            .shadow(color: .black.opacity(0.18), radius: 1, y: 0.5)
-            .frame(width: 16, height: 16).padding(2)
-        }
-        .contentShape(Capsule())
-    }
-    .buttonStyle(.plain)
-    .opacity(enabled ? 1 : 0.5)
-    .animation(motion[.toggle], value: configuration.isOn)
-    .accessibilityRepresentation {
-      Toggle(isOn: configuration.$isOn) { configuration.label }
-    }
-  }
-}
-
-struct MaxButtonStyle: ButtonStyle {
-  var primary = false
-  @Environment(\.isEnabled) private var enabled
-  @Environment(\.colorSchemeContrast) private var contrast
-  @PanelMotion private var motion
-  @State private var hovering = false
-
-  func makeBody(configuration: Configuration) -> some View {
-    let shape = RoundedRectangle(cornerRadius: Radius.control, style: .continuous)
-    configuration.label
-      .font(.system(size: 13, weight: primary ? .semibold : .medium))
-      .padding(.horizontal, primary ? Space.regular : Space.snug)
-      .padding(.vertical, primary ? 9 : 6)
-      .foregroundStyle(primary ? Color.white : Color.primary)
-      .background {
-        shape.fill(primary ? Design.blue : Design.well)
-          .overlay {
-            shape.fill(
-              primary
-                ? Color.black.opacity(hovering ? 0.07 : 0)
-                : Color.primary.opacity(hovering ? 0.05 : 0))
-          }
-      }
-      .overlay {
-        if contrast == .increased {
-          shape.strokeBorder(primary ? Color.white.opacity(0.4) : Color.primary.opacity(0.35))
-        }
-      }
-      .contentShape(shape)
-      .opacity(enabled ? 1 : 0.45)
-      .scaleEffect(configuration.isPressed && !motion.reduced ? 0.98 : 1)
-      .onHover { hovering = $0 }
-      .animation(motion[.hover], value: hovering)
-      .animation(motion[.press], value: configuration.isPressed)
-  }
-}
-
-struct Card<Content: View>: View {
-  var wash: Color?
-  @ViewBuilder var content: Content
-  @Environment(\.colorSchemeContrast) private var contrast
-
-  var body: some View {
-    let shape = RoundedRectangle(cornerRadius: Radius.card, style: .continuous)
-    VStack(alignment: .leading, spacing: Space.snug) { content }
-      .frame(maxWidth: .infinity, alignment: .leading)
-      .padding(Space.regular)
-      .background(wash.map { $0.opacity(Design.wash) } ?? Design.card, in: shape)
-      .overlay {
-        if contrast == .increased { shape.strokeBorder(Color.primary.opacity(0.35)) }
-      }
-  }
-}
-
-struct NavRow: View {
-  let title: String
-  var value: String?
-  let glyph: Glyph
-  let action: () -> Void
-  @State private var hovering = false
-  @PanelMotion private var motion
-
-  var body: some View {
-    Button(action: action) {
-      HStack(spacing: Space.snug) {
-        AppGlyph(glyph: glyph).foregroundStyle(Design.muted)
-        Text(title).font(.maxLine)
-        Spacer(minLength: Space.snug)
-        if let value {
-          Text(value).font(.maxLine).foregroundStyle(Design.muted).lineLimit(1)
-            .contentTransition(.interpolate)
-        }
-        ActionGlyph(mark: .chevron, size: 12).foregroundStyle(Design.muted)
-      }
-      .padding(.horizontal, Space.snug).frame(minHeight: 32)
-      .contentShape(RoundedRectangle(cornerRadius: Radius.control))
-      .background(
-        hovering ? Design.well : .clear,
-        in: RoundedRectangle(cornerRadius: Radius.control, style: .continuous))
-    }
-    .buttonStyle(.plain)
-    .onHover { hovering = $0 }
-    .animation(motion[.hover], value: hovering)
-    .accessibilityHint("Show \(title.lowercased())")
-  }
-}
-
-struct IconButton: View {
-  let glyph: Glyph
-  let label: String
-  let action: () -> Void
-  @State private var hovering = false
-  @PanelMotion private var motion
-
-  var body: some View {
-    Button(action: action) {
-      AppGlyph(glyph: glyph, size: 14).foregroundStyle(Design.muted)
-        .frame(width: 24, height: 24)
-        .background(hovering ? Design.well : .clear, in: Circle())
-        .contentShape(Circle())
-    }
-    .buttonStyle(.plain)
-    .onHover { hovering = $0 }
-    .animation(motion[.hover], value: hovering)
-    .help(label).accessibilityLabel(label)
-  }
-}
-
-struct CopyButton: View {
-  let title: String
-  var primary = false
-  let action: () -> Void
-  @State private var copied = false
-  @PanelMotion private var motion
-
-  var body: some View {
-    Button {
-      action()
-      copied = true
-    } label: {
-      HStack(spacing: Space.tight) {
-        CopyGlyph(completed: copied).frame(width: 14, height: 14).accessibilityHidden(true)
-        Text(title)
-      }
-    }
-    .buttonStyle(MaxButtonStyle(primary: primary))
-    .animation(motion[.swap], value: copied)
-    .accessibilityLabel(copied ? "\(title), copied" : title)
-  }
-}
-
-struct Toast: View {
-  let text: String
-  let good: Bool
-
-  var body: some View {
-    HStack(spacing: Space.tight) {
-      AppGlyph(glyph: good ? .check : .details, size: 14)
-        .foregroundStyle(good ? Design.ready : Design.muted)
-      Text(text).font(.maxSmall).fixedSize(horizontal: false, vertical: true)
-    }
-    .padding(.horizontal, Space.regular).padding(.vertical, 8)
-    .floatingSurface()
-    .padding(.horizontal, Design.inset)
-    .accessibilityHidden(true)
-  }
-}
-
-extension View {
-  @ViewBuilder fileprivate func floatingSurface() -> some View {
-    #if compiler(>=6.2)
-      if #available(macOS 26.0, *) {
-        glassEffect(.regular, in: Capsule())
-      } else {
-        background(.regularMaterial, in: Capsule())
-          .shadow(color: .black.opacity(0.14), radius: 8, y: 3)
-      }
-    #else
-      background(.regularMaterial, in: Capsule())
-        .shadow(color: .black.opacity(0.14), radius: 8, y: 3)
-    #endif
   }
 }

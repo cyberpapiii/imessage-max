@@ -8,8 +8,11 @@ struct DesignOptions {
   var appearance: NSAppearance.Name?
   var artworkSheet: URL?
   var fixture: String?
+  /// `--design-window`: the Settings window, without taking focus.
   var window = false
-  var page: PanelSection?
+  /// `--design-menu`: the status menu drawn in a window.
+  var menu = false
+  var page: SettingsPage?
   var act: String?
   /// `--client-root <folder>`: client configs are read and written there.
   var clientRoot: URL?
@@ -26,7 +29,8 @@ struct DesignOptions {
     artworkSheet = value("--design-artwork").map { URL(fileURLWithPath: $0) }
     fixture = value("--design-state")
     window = arguments.contains("--design-window")
-    page = value("--design-open").flatMap(PanelSection.init(rawValue:))
+    menu = arguments.contains("--design-menu")
+    page = value("--design-open").flatMap(SettingsPage.init(rawValue:))
     act = value("--design-act")
     clientRoot = value("--client-root").map { URL(fileURLWithPath: $0, isDirectory: true) }
     motion = MotionSettings(
@@ -34,7 +38,9 @@ struct DesignOptions {
       reduce: arguments.contains("--design-reduce-motion"))
   }
 
-  var isActive: Bool { fixture != nil || window }
+  var isActive: Bool { fixture != nil || capture }
+  /// Shows windows for a screenshot, and leaves the user's focus alone.
+  var capture: Bool { window || menu }
 
   @MainActor func prepare(_ model: AppModel) {
     Task {
@@ -43,15 +49,33 @@ struct DesignOptions {
     }
   }
 
-  @MainActor func showWindow(_ hosting: NSViewController, model: AppModel) -> NSWindow {
-    let window = NSWindow(contentViewController: hosting)
-    window.styleMask = [.borderless]
-    window.level = .floating
-    window.appearance = NSApp.appearance
-    window.setFrameTopLeftPoint(NSPoint(x: 80, y: (NSScreen.main?.visibleFrame.maxY ?? 900) - 40))
-    window.orderFrontRegardless()
-    model.panelOpen = true
-    if let page { model.section = page }
+  /// Shows the Settings window, the menu drawing, or both, and prints each
+  /// window number on its own line, the Settings window first. Returns the
+  /// menu drawing's window, which the caller keeps alive.
+  @MainActor func show(settings: SettingsWindowController, model: AppModel) -> NSWindow? {
+    var drawing: NSWindow?
+    if window {
+      settings.show(page ?? .permissions)
+      if let number = settings.window?.windowNumber { print(number) }
+    }
+    if menu {
+      model.menuOpen = true
+      let hosting = NSHostingController(
+        rootView: StatusMenuPreview(model: model).environment(\.motionSettings, motion))
+      hosting.sizingOptions = [.preferredContentSize]
+      let preview = NSWindow(contentViewController: hosting)
+      preview.styleMask = [.borderless]
+      preview.isOpaque = false
+      preview.backgroundColor = .clear
+      preview.hasShadow = false
+      preview.appearance = NSApp.appearance
+      preview.setFrameTopLeftPoint(
+        NSPoint(x: 80, y: (NSScreen.main?.visibleFrame.maxY ?? 900) - 40))
+      preview.orderFrontRegardless()
+      print(preview.windowNumber)
+      drawing = preview
+    }
+    fflush(stdout)
     if let act {
       DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
         switch act {
@@ -63,9 +87,7 @@ struct DesignOptions {
         }
       }
     }
-    print(window.windowNumber)
-    fflush(stdout)
-    return window
+    return drawing
   }
 }
 
@@ -87,6 +109,13 @@ extension AppModel {
         plist: $0, plistName: "\(ServiceDefaults.launchdLabel).plist",
         bundleIdentifier: ServiceDefaults.companionBundleID,
         bundleURL: URL(fileURLWithPath: "\(app)/iMessage Max.app"), home: home)
+    }
+    // A helper that has started has written its access key, so Connect works
+    // against a sandbox from `--client-root`.
+    if let token = configuration?.tokenFile, !["fresh", "legacy", "blocked"].contains(name) {
+      try? FileManager.default.createDirectory(
+        at: token.deletingLastPathComponent(), withIntermediateDirectories: true)
+      try? Data("design-token".utf8).write(to: token)
     }
     return AppModel(
       controller: configuration.map {

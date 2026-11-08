@@ -8,9 +8,10 @@ import ServiceManagement
 
 @MainActor @Observable
 final class AppModel {
-  var section: PanelSection?
-  var maximumPanelHeight = Design.maximumPanelHeight
-  var panelOpen = false
+  /// The Settings window's page, with its back and forward history.
+  var history = PageHistory()
+  var menuOpen = false
+  var windowOpen = false
   private(set) var service: ServiceState?
   private(set) var problem: String?
   private(set) var busy: Busy?
@@ -25,7 +26,9 @@ final class AppModel {
   private(set) var clientsScanned = false
   private(set) var connectSettled: Bool
   private(set) var tried: Bool
-  private var pendingOn: Bool?
+  /// An assistant just used iMessage Max for the first time. The status menu
+  /// and the sidebar say so until the user has seen it.
+  private(set) var triedNews = false
   @ObservationIgnored private var timer: DispatchSourceTimer?
   @ObservationIgnored private var observers: [NSObjectProtocol] = []
   @ObservationIgnored private var actionTask: Task<Void, Never>?
@@ -100,8 +103,9 @@ final class AppModel {
       ?? "http://\(ServiceDefaults.host):\(ServiceDefaults.port)/"
   }
   var canControl: Bool { service?.isRegistered == true && busy == nil }
-  var switchOn: Bool { pendingOn ?? (service?.isRunning == true) }
-  var showsSwitch: Bool { service?.isRegistered == true }
+  /// The status menu or the Settings window is on screen, so checks also
+  /// scan clients and the face may move.
+  var awake: Bool { menuOpen || windowOpen }
   var messagesNeedOpening: Bool {
     diagnosis?.needsMessagesForSendingCheck == true
   }
@@ -189,7 +193,7 @@ final class AppModel {
     let elapsed = start.duration(to: .now).components
     checkMilliseconds = Int(elapsed.seconds * 1000 + elapsed.attoseconds / 1_000_000_000_000_000)
     loginStatus = SMAppService.mainApp.status
-    if panelOpen { await refreshClients() }
+    if awake { await refreshClients() }
   }
 
   /// What a client needs to reach the helper. nil until the helper has
@@ -264,7 +268,7 @@ final class AppModel {
       guard let index = clients.firstIndex(where: { $0.id == id }) else { return }
       clients[index].activity = activity
       if let link { clients[index].link = link }
-      if link == .connected && section == nil { notice = .linked(clients[index].name) }
+      if link == .connected { announce(.linked(clients[index].name)) }
       settleConnectIfConnected()
     }
   }
@@ -287,10 +291,10 @@ final class AppModel {
     }
   }
 
-  /// Every opening of the panel checks. A grant that macOS gives only to a
-  /// new helper gets one, so turning a switch in System Settings and coming
-  /// back is all a step asks.
-  func panelOpened() async {
+  /// Opening the menu, or coming back to the Settings window, checks. A grant
+  /// that macOS gives only to a new helper gets one, so turning a switch in
+  /// System Settings and coming back is all a permission asks.
+  func opened() async {
     await refresh()
     await recheckIfStale()
   }
@@ -304,8 +308,8 @@ final class AppModel {
     recheck(announce: false)
   }
 
-  /// A step's Check again. `announce` shows a notice when the step is still
-  /// unfinished afterwards.
+  /// A permission's Check again. `announce` says so when the permission is
+  /// still missing afterwards.
   func recheck(announce: Bool = true) {
     guard diagnosis?.grantNeedsRestartToCheck == true else {
       Task { await refresh() }
@@ -313,7 +317,7 @@ final class AppModel {
     }
     let step = state.step
     change(.checkingAccess) { try await $0.perform(.restart) } then: { _ in
-      if announce && self.state.step == step { self.notice = .setupUnfinished }
+      if announce && self.state.step == step { self.note(.setupUnfinished) }
     }
   }
 
@@ -325,11 +329,10 @@ final class AppModel {
 
   func perform(_ action: ServiceAction) {
     let recovering = problem != nil
-    if busy == nil, action != .restart { pendingOn = action == .start }
     change(action == .stop ? .stopping : .starting) {
       try await $0.perform(action)
     } then: { latest in
-      self.notice = action == .stop ? .resting : .connected
+      self.announce(action == .stop ? .resting : .connected)
       if action != .stop, latest.diagnosis?.database.accessible == true {
         self.celebrateConnection(recovering: recovering)
       }
@@ -338,7 +341,7 @@ final class AppModel {
 
   /// The consent button for replacing an install from before 2.0.
   func migrate() {
-    change(.starting) { try await $0.migrate() } then: { _ in self.notice = .connected }
+    change(.starting) { try await $0.migrate() } then: { _ in self.announce(.connected) }
   }
 
   func request(_ permission: SetupPermission) {
@@ -369,7 +372,7 @@ final class AppModel {
       show(await controller.inspect())
       let confirmed = diagnosis?.grants(permission) == true
       if confirmed { problem = nil } else if let permissionProblem { problem = permissionProblem }
-      notice = confirmed ? .granted(permission) : .setupUnfinished
+      if confirmed { announce(.granted(permission)) } else { note(.setupUnfinished) }
       busy = nil
       if diagnosis?.missingGrant == nil && !milestones.reached(.welcomedSetup) {
         celebration += 1
@@ -454,21 +457,38 @@ final class AppModel {
     } catch { problem = "Could not change launch at login. \(error.localizedDescription)" }
   }
 
-  func copy(_ text: String, acknowledgement: String = "Copied. Ready to paste.") {
+  func copy(_ text: String, acknowledgement: String = "Copied.") {
     NSPasteboard.general.clearContents()
     NSPasteboard.general.setString(text, forType: .string)
-    notice = Notice(text: acknowledgement)
+    announce(Notice(text: acknowledgement))
   }
 
-  func noticeAppeared() {
+  func show(_ page: SettingsPage) { history.go(page) }
+
+  /// The user saw the news in the menu or the sidebar.
+  func newsSeen() { triedNews = false }
+
+  /// Shows a notice where its action was, for a few seconds, and reads it out.
+  private func note(_ shown: Notice) {
     noticeTimer?.cancel()
-    guard let shown = notice else { return }
+    notice = shown
+    announce(shown)
     let timer = DispatchWorkItem { [weak self] in
       MainActor.assumeIsolated { if self?.notice == shown { self?.notice = nil } }
     }
     noticeTimer = timer
     DispatchQueue.main.asyncAfter(
-      deadline: .now() + 2.4 + 0.04 * Double(shown.text.count), execute: timer)
+      deadline: .now() + 4 + 0.04 * Double(shown.text.count), execute: timer)
+  }
+
+  /// Reads a notice out with VoiceOver. The screen already shows the change.
+  private func announce(_ notice: Notice) {
+    guard let app = NSApp as NSApplication? else { return }
+    NSAccessibility.post(
+      element: app, notification: .announcementRequested,
+      userInfo: [
+        .announcement: notice.text, .priority: NSAccessibilityPriorityLevel.medium.rawValue,
+      ])
   }
 
   func clearNotice() {
@@ -492,7 +512,7 @@ final class AppModel {
     if let file = controller?.configuration.log, FileManager.default.fileExists(atPath: file.path) {
       NSWorkspace.shared.open(file)
     } else {
-      notice = .noLog
+      note(.noLog)
     }
   }
 
@@ -527,7 +547,6 @@ final class AppModel {
         log.error("Service change failed")
       }
       busy = nil
-      pendingOn = nil
       actionTask = nil
     }
   }
@@ -541,7 +560,7 @@ final class AppModel {
       milestones.mark(.triedAssistant)
       if state.phase == .ready {
         celebration += 1
-        notice = .tried
+        triedNews = true
       }
     }
     problem =
