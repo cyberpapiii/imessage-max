@@ -1,10 +1,15 @@
 import Darwin
 import Foundation
+import IMessageMaxContract
 import XCTest
+@testable import iMessageMax
 
 /// launchd, logout and SMAppService stop the HTTP service with SIGTERM. A
-/// clean stop must exit 0: launchd counts any other ending as a crash, and
-/// an abort also leaves a crash report (#27).
+/// clean stop must end in a plain exit, never an abort, which leaves a crash
+/// report (#27). The exit code carries the Keep running setting: 0 while the
+/// stay-stopped file sits beside the token, so launchd leaves the helper
+/// down, and `KeepRunning.relaunchExitCode` otherwise, so launchd starts it
+/// again.
 ///
 /// The abort only showed in optimized builds, so CI and `make release-check`
 /// also run this class with IMESSAGE_MAX_BINARY set to the release binary.
@@ -15,6 +20,23 @@ final class SignalShutdownTests: XCTestCase {
     func testIdleServerExitsZeroOnSIGTERM() throws {
         let server = try SpawnedServer()
         try server.terminate(within: 5)
+    }
+
+    func testWithoutTheStayStoppedFileSIGTERMExitsWithTheRelaunchCode() throws {
+        let server = try SpawnedServer(stayStopped: false)
+        try server.terminate(within: 5, expecting: KeepRunning.relaunchExitCode)
+        XCTAssertTrue(server.stderr.contains("Stopped exit=\(KeepRunning.relaunchExitCode)"), server.stderr)
+    }
+
+    /// The companion's toggle reaches a running helper, with no restart.
+    func testTheSettingIsReadWhenTheServerStops() throws {
+        let turnedOff = try SpawnedServer(stayStopped: false)
+        try turnedOff.setStayStopped(true)
+        try turnedOff.terminate(within: 5)
+
+        let turnedOn = try SpawnedServer()
+        try turnedOn.setStayStopped(false)
+        try turnedOn.terminate(within: 5, expecting: KeepRunning.relaunchExitCode)
     }
 
     func testServerWithAnOpenSSEStreamExitsZeroOnSIGTERM() throws {
@@ -101,12 +123,14 @@ private final class SpawnedServer {
     private let folder: URL
     private let stderrURL: URL
 
-    /// `prepare` runs before launch with the socket path.
-    init(prepare: (String) throws -> Void = { _ in }) throws {
+    /// `prepare` runs before launch with the socket path. `stayStopped`
+    /// writes the Keep running opt-out beside the token, so SIGTERM exits 0.
+    init(stayStopped: Bool = true, prepare: (String) throws -> Void = { _ in }) throws {
         // Short, so the socket path fits sun_path.
         folder = URL(fileURLWithPath: try makeShortTempFolder())
         socketPath = folder.appendingPathComponent("s.sock").path
         try prepare(socketPath)
+        try Self.setStayStopped(stayStopped, in: folder)
         let tokenURL = folder.appendingPathComponent("token")
         stderrURL = folder.appendingPathComponent("stderr.log")
         FileManager.default.createFile(atPath: stderrURL.path, contents: nil)
@@ -146,8 +170,22 @@ private final class SpawnedServer {
         try? FileManager.default.removeItem(at: folder)
     }
 
+    func setStayStopped(_ on: Bool) throws { try Self.setStayStopped(on, in: folder) }
+
+    private static func setStayStopped(_ on: Bool, in folder: URL) throws {
+        let marker = folder.appendingPathComponent(ServiceDefaults.stayStoppedFileName)
+        if on {
+            try Data().write(to: marker)
+        } else if FileManager.default.fileExists(atPath: marker.path) {
+            try FileManager.default.removeItem(at: marker)
+        }
+    }
+
     @discardableResult
-    func terminate(within seconds: TimeInterval, file: StaticString = #filePath, line: UInt = #line) throws -> TimeInterval {
+    func terminate(
+        within seconds: TimeInterval, expecting status: Int32 = 0,
+        file: StaticString = #filePath, line: UInt = #line
+    ) throws -> TimeInterval {
         let start = Date()
         kill(process.processIdentifier, SIGTERM)
         guard exited.wait(timeout: .now() + seconds) == .success else {
@@ -155,7 +193,7 @@ private final class SpawnedServer {
         }
         let elapsed = Date().timeIntervalSince(start)
         XCTAssertEqual(process.terminationReason, .exit, "server died by signal \(process.terminationStatus) after \(elapsed) s: \(Self.tail(stderrURL))", file: file, line: line)
-        XCTAssertEqual(process.terminationStatus, 0, "server exited \(process.terminationStatus) after \(elapsed) s: \(Self.tail(stderrURL))", file: file, line: line)
+        XCTAssertEqual(process.terminationStatus, status, "server exited \(process.terminationStatus) after \(elapsed) s: \(Self.tail(stderrURL))", file: file, line: line)
         return elapsed
     }
 

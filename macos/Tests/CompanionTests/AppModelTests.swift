@@ -46,14 +46,16 @@ private actor StuckSystem: ServiceSystem {
 }
 
 @MainActor
-private func model(_ system: any ServiceSystem, milestones: Milestones = Milestones(defaults: nil)) throws -> AppModel {
+private func model(
+  _ system: any ServiceSystem, milestones: Milestones = Milestones(defaults: nil),
+  home: URL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+) throws -> AppModel {
   let plist = try PropertyListSerialization.data(
     fromPropertyList: [
       "Label": ServiceDefaults.launchdLabel, "BundleProgram": ServiceDefaults.helperBundlePath,
       "AssociatedBundleIdentifiers": [ServiceDefaults.companionBundleID],
       "ProgramArguments": [ServiceDefaults.executableName, "--http", "--port", "8080"],
     ], format: .xml, options: 0)
-  let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
   let configuration = try ServiceConfiguration(
     plist: plist, plistName: "\(ServiceDefaults.launchdLabel).plist",
     bundleIdentifier: ServiceDefaults.companionBundleID,
@@ -66,6 +68,32 @@ private func model(_ system: any ServiceSystem, milestones: Milestones = Milesto
 }
 
 @Suite struct AppModelTests {
+  @MainActor @Test func keepRunningIsOnUntilTheUserTurnsItOff() throws {
+    let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: home) }
+    let marker = home.appendingPathComponent(ServiceDefaults.tokenPath).deletingLastPathComponent()
+      .appendingPathComponent(ServiceDefaults.stayStoppedFileName)
+    let first = try model(StuckSystem(running: false), home: home)
+    #expect(first.keepRunning == true)
+
+    first.setKeepRunning(false)
+    #expect(first.keepRunning == false)
+    #expect(FileManager.default.fileExists(atPath: marker.path))
+    #expect(try model(StuckSystem(running: false), home: home).keepRunning == false)
+
+    first.setKeepRunning(true)
+    #expect(first.keepRunning == true)
+    #expect(!FileManager.default.fileExists(atPath: marker.path))
+    #expect(first.problem == nil)
+  }
+
+  @MainActor @Test func keepRunningIsHiddenWithoutAHelperToKeep() {
+    let model = AppModel(
+      controller: nil, milestones: Milestones(defaults: nil), prepareMessages: {})
+    #expect(model.keepRunning == nil)
+    model.setKeepRunning(false)
+    #expect(model.keepRunning == nil)
+  }
   @MainActor @Test func aServiceChangeThatNeverAnswersFreesTheButtons() async throws {
     let system = StuckSystem(running: false)
     let model = try model(system)

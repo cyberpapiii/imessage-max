@@ -30,11 +30,11 @@ Other Makefile targets:
 - `make status` checks process, version, signature, health
 - `make app` builds and signs `dist/iMessage Max.app` without installing it
 - `make logs` tails the helper log, `~/Library/Logs/iMessage Max/imessage-max.log`. launchd cannot expand `~`, so the plist passes `--log-file` and the server opens the file itself
-- `make restart` runs `launchctl kickstart -k` on the helper. A kickstart within the plist's 10 second `ThrottleInterval` of the last launch waits out the rest of it. The plist's `KeepAlive` is true, so launchd relaunches the helper however it exits, a clean SIGTERM or `launchctl kill` included, after the `ThrottleInterval`. The companion stops the helper with `launchctl bootout`, which unloads the job until the next login or until it starts it again by registering.
+- `make restart` runs `launchctl kickstart -k` on the helper. A kickstart within the plist's 10 second `ThrottleInterval` of the last launch waits out the rest of it. The plist's `KeepAlive` has `SuccessfulExit` false, so launchd relaunches the helper after any exit but a zero one, a crash included, after the `ThrottleInterval`. On SIGTERM (`launchctl kill`, Activity Monitor) the helper drains, then exits 75 (`KeepRunning.relaunchExitCode`) so launchd starts it again, or exits 0 so it stays down when the companion's Keep running setting is off. That setting is the `stay-stopped` file beside the token (`ServiceDefaults.stayStoppedFileName`), so a helper with `--token-file` reads it from that file's folder. The helper reads it as it stops, so a change needs no restart. The companion stops the helper with `launchctl bootout`, which unloads the job whatever the setting says, until the next login or until it starts it again by registering.
 - `make clean` removes debug artifacts and clears the helper log
 - `make version` checks that the version sites agree, and `make release-check` runs everything that must pass before tagging (see `docs/RELEASING.md`)
 
-The server runs as the launchd agent `com.cyberpapiii.imessage-max.helper`. The default port is 47821, and the bundled agent plist can pin another with `--port`. It starts at login and launchd starts it again whenever it exits, until the companion stops it. System Settings → General → Login Items & Extensions lists it once, as iMessage Max, under "App Background Activity".
+The server runs as the launchd agent `com.cyberpapiii.imessage-max.helper`. The default port is 47821, and the bundled agent plist can pin another with `--port`. It starts at login and restarts after a crash. While Keep running is on (the default) it also restarts after a plain quit. Stop in the companion keeps it down until the next login. System Settings → General → Login Items & Extensions lists it once, as iMessage Max, under "App Background Activity".
 
 Every HTTP request needs `Authorization: Bearer <token>`, on every route and both eras. On first start the server writes a random token to `~/Library/Application Support/iMessage Max/token` (mode 0600, folder 0700) and reuses it after that. It refuses to start if the file is readable by other users, owned by someone else, or holds anything but a token, and it never overwrites that file. `--token-file <path>` points a dev or test server at another file, in a folder that already exists and belongs to you; the server leaves that folder's mode alone. A missing or wrong token gets 401 and one `auth=rejected` stderr line, which never holds the token. Stdio needs no token.
 
@@ -198,7 +198,8 @@ The rule covers library code you configure into a sleep too. ServiceGroup's
 `maximumGracefulShutdownDuration` made every release-build SIGTERM abort
 (#27), so `HTTPTransport` bounds the drain with its own Dispatch timer.
 `LaunchdSafetyTests` enforces this rule, and `SignalShutdownTests` checks
-that a spawned server exits 0 on SIGTERM.
+that a spawned server exits plainly on SIGTERM, with 0 or the Keep running
+code as the setting says.
 
 ### Send contract (no confirmation gate)
 
