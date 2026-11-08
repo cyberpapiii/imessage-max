@@ -91,7 +91,11 @@ final class StatusMenuController: NSObject, NSMenuDelegate {
   }
 
   private func apply(_ entries: [MenuEntry]) {
-    if let view = header.view { view.frame.size = view.fittingSize }
+    if let view = header.view, view.frame.size != view.fittingSize {
+      view.frame.size = view.fittingSize
+      // An open menu keeps its old height until told the item changed.
+      if menu.index(of: header) >= 0 { menu.itemChanged(header) }
+    }
     guard entries != shown else { return }
     shown = entries
     menu.removeAllItems()
