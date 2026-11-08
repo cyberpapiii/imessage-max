@@ -42,7 +42,6 @@ final class AppModel {
   /// nil when this copy of the app has no valid agent plist.
   @ObservationIgnored private let controller: ServiceController?
   @ObservationIgnored private let milestones: Milestones
-  @ObservationIgnored private let prepareMessages: @MainActor () async throws -> Void
   /// nil leaves the client list empty, as in the design harness.
   @ObservationIgnored private let clientContext: ClientContext?
   /// Bumped by every connect, so a scan that started before a write cannot
@@ -58,13 +57,11 @@ final class AppModel {
 
   init(
     controller: ServiceController?, milestones: Milestones,
-    prepareMessages: @escaping @MainActor () async throws -> Void,
     clientContext: ClientContext? = nil,
     changeDeadline: Double = 60, permissionDeadline: Double = 180
   ) {
     self.controller = controller
     self.milestones = milestones
-    self.prepareMessages = prepareMessages
     self.clientContext = clientContext
     self.changeDeadline = changeDeadline
     self.permissionDeadline = permissionDeadline
@@ -86,7 +83,6 @@ final class AppModel {
           configuration: $0, system: LiveServiceSystem(tokenFile: $0.tokenFile))
       },
       milestones: milestones,
-      prepareMessages: { try await MessagesApp.ensureRunning() },
       clientContext: sandbox.map(ClientContext.sandbox(root:)) ?? .live(home: home))
   }
 
@@ -110,9 +106,6 @@ final class AppModel {
   /// The status menu or the Settings window is on screen, so checks also
   /// scan clients and the face may move.
   var awake: Bool { menuOpen || windowOpen }
-  var messagesNeedOpening: Bool {
-    diagnosis?.needsMessagesForSendingCheck == true
-  }
 
   func startMonitoring() {
     guard timer == nil else { return }
@@ -354,15 +347,13 @@ final class AppModel {
   func request(_ permission: SetupPermission) {
     guard let controller, busy == nil else { return }
     generation += 1
-    busy = permission == .automation && messagesNeedOpening ? .checkingSending : .askingPermission
+    busy = .askingPermission
     notice = nil
     problem = nil
-    let prepareMessages = prepareMessages
     actionTask = Task {
       var permissionProblem: String?
       do {
         let result = try await withDeadline(seconds: permissionDeadline) { @MainActor in
-          if permission == .automation { try await prepareMessages() }
           // The Contacts prompt belongs to this app, so bring it forward.
           if permission == .contacts { NSApp.activate(ignoringOtherApps: true) }
           return try await controller.requestPermission(permission)
@@ -372,7 +363,7 @@ final class AppModel {
             result.status == .denied
             ? "Access is off. You can enable iMessage Max in Privacy & Security, then check again."
             : (result.status == .messagesNotRunning
-              ? "Messages needs a moment to open. Check again."
+              ? "Messages did not start. Check again."
               : "macOS did not finish the permission request. Open Privacy & Security and check again.")
         }
       } catch { permissionProblem = error.localizedDescription }

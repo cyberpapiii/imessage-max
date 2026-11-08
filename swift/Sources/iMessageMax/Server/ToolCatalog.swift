@@ -49,6 +49,7 @@ final class ToolCatalog: @unchecked Sendable {
     convenience init(
         database: Database,
         resolver: ContactResolver,
+        access: MessagesAccess,
         liveInbox: @escaping @Sendable () -> Bool = { false }
     ) {
         self.init([
@@ -63,8 +64,8 @@ final class ToolCatalog: @unchecked Sendable {
             GetUnread.definition(db: database, resolver: resolver),
             ListAttachments.definition(db: database, resolver: resolver),
             GetAttachment.definition(db: database, resolver: resolver),
-            SendTool.definition(db: database, resolver: resolver),
-            DiagnoseTool.definition(db: database, resolver: resolver, liveInbox: liveInbox),
+            SendTool.definition(db: database, resolver: resolver, access: access),
+            DiagnoseTool.definition(db: database, resolver: resolver, access: access, liveInbox: liveInbox),
         ])
     }
 

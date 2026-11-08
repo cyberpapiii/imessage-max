@@ -17,7 +17,7 @@ actor SetupPermissionService {
         self.automationRequest = automationRequest
     }
 
-    init(resolver: ContactResolver) {
+    init(resolver: ContactResolver, access: MessagesAccess) {
         contactsRequest = {
             await resolver.requestAccessIfAllowed(policy: .requestIfNeeded)
             await resolver.invalidate()
@@ -28,7 +28,7 @@ actor SetupPermissionService {
             }
             return (contacts.authorized, status)
         }
-        automationRequest = { await AutomationPermission.requestAccess() }
+        automationRequest = { await MessagesAccess.offPool { access.requestAutomation() } }
     }
 
     func request(_ permission: SetupPermission) async throws -> SetupPermissionReply {

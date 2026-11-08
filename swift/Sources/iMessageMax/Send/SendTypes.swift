@@ -117,7 +117,7 @@ enum SendError: LocalizedError {
                 + "click OK to let iMessage Max send messages. If you missed the prompt: "
                 + DiagnoseTool.automationFix(holder: .current)
         case .messagesAppUnavailable:
-            return "Messages.app is not responding. Open Messages.app and try again."
+            return "Messages.app is not responding. Try again in a moment."
         case .recipientNotFound(let recipient):
             return "Could not find recipient '\(recipient)' in Messages.app."
         case .chatNotFound(let guid):

@@ -321,21 +321,16 @@ struct PermissionFix: View {
   }
 
   @ViewBuilder private var automation: some View {
-    let opensMessages = model.messagesNeedOpening
     line(
-      opensMessages
-        ? "Messages needs to be open to check access. We’ll open it for you. macOS may ask for permission. No message is sent."
-        : "Allow iMessage Max to work with Messages. Your assistant sends only when you ask. Setup sends no message."
+      "Allow iMessage Max to work with Messages. Your assistant sends only when you ask. Setup sends no message."
     )
     buttons {
       if model.diagnosis?[.permAutomation]?.isPermissionGated == true {
         Button("Open Automation Settings") { model.openSettings("Privacy_Automation") }
           .buttonStyle(.borderedProminent)
       } else {
-        Button(opensMessages ? "Open Messages and Check" : "Allow Messages Access") {
-          model.request(.automation)
-        }
-        .buttonStyle(.borderedProminent).disabled(model.busy != nil)
+        Button("Allow Messages Access") { model.request(.automation) }
+          .buttonStyle(.borderedProminent).disabled(model.busy != nil)
       }
       recheck
     }

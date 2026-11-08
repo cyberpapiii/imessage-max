@@ -3,20 +3,19 @@ import MaxBrand
 import MaxCore
 
 enum Busy: Equatable {
-  case starting, stopping, askingPermission, checkingSending, checkingAccess, moving
+  case starting, stopping, askingPermission, checkingAccess, moving
 
   var title: String {
     switch self {
     case .starting: "Getting ready…"
     case .stopping: "Taking a break…"
     case .askingPermission: "Waiting for permission…"
-    case .checkingSending: "Checking sending…"
     case .checkingAccess: "Checking access…"
     case .moving: "Moving to Applications…"
     }
   }
 
-  var isPermissionRequest: Bool { self == .askingPermission || self == .checkingSending }
+  var isPermissionRequest: Bool { self == .askingPermission }
 }
 
 /// A short line that answers an action. The window shows it where the

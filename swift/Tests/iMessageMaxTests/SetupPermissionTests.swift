@@ -63,7 +63,8 @@ final class SetupPermissionTests: XCTestCase {
 
     func testSetupReplyCarriesTheResolverWord() async throws {
         let service = SetupPermissionService(
-            resolver: ContactResolver(seedCache: [:], authorization: (false, .denied))
+            resolver: ContactResolver(seedCache: [:], authorization: (false, .denied)),
+            access: makeTestMessagesAccess()
         )
         let reply = try await service.request(.contacts)
         XCTAssertEqual(reply.status, .denied)

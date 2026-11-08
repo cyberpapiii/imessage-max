@@ -28,7 +28,7 @@ There is one Swift implementation, in `swift/`. It ships as:
 - A gap of 4 hours or more starts a new message session
 - Attachment listings say whether each file is on disk or offloaded to iCloud
 - Queries use raw SQLite3, and image resizing runs on the GPU through Core Image
-- The server only reads chat.db. Sending needs Automation permission for Messages.app
+- The server only reads chat.db. Sending needs Automation permission for Messages.app. You never have to open Messages: when the server needs it, it starts Messages hidden, with no window and no change of focus
 
 ## Why this exists
 

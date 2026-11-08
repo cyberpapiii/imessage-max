@@ -65,7 +65,7 @@ private func model(
   try RegisteredAgent(configuration: configuration).save()
   return AppModel(
     controller: ServiceController(configuration: configuration, system: system, home: home),
-    milestones: milestones, prepareMessages: {},
+    milestones: milestones,
     changeDeadline: 0.3, permissionDeadline: 0.3)
 }
 
@@ -91,7 +91,7 @@ private func model(
 
   @MainActor @Test func keepRunningIsHiddenWithoutAHelperToKeep() {
     let model = AppModel(
-      controller: nil, milestones: Milestones(defaults: nil), prepareMessages: {})
+      controller: nil, milestones: Milestones(defaults: nil))
     #expect(model.keepRunning == nil)
     model.setKeepRunning(false)
     #expect(model.keepRunning == nil)
