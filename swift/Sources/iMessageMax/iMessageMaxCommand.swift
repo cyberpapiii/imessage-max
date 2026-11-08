@@ -79,6 +79,9 @@ struct iMessageMax: AsyncParsableCommand {
             host: host, port: port, accessToken: accessToken, contactsPolicy: contactsPolicy,
             socketOverride: socketPath
         )
+        let code = KeepRunning.exitCode(folder: location.file.deletingLastPathComponent())
+        Log.info("Stopped exit=\(code)")
+        if code != 0 { throw ExitCode(code) }
     }
 
     private func resolvedSocketPath() throws -> SocketPath {

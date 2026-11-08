@@ -118,6 +118,12 @@ struct GeneralPage: View {
             Button("Open Login Items") { SMAppService.openSystemSettingsLoginItems() }
           }
         }
+        if let keepRunning = model.keepRunning {
+          Toggle(isOn: Binding(get: { keepRunning }, set: { model.setKeepRunning($0) })) {
+            Text("Keep running")
+            Text("If iMessage Max quits, it starts again by itself. Stop iMessage Max… still turns it off.")
+          }
+        }
       } footer: {
         Footnote("Quitting this app leaves iMessage Max running for your assistants.")
       }

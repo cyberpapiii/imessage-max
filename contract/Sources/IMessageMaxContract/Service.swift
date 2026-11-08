@@ -22,6 +22,11 @@ public enum ServiceDefaults {
   /// The bearer token every HTTP request must send. The helper creates it,
   /// mode 0600, on first start.
   public static let tokenPath = "Library/Application Support/iMessage Max/token"
+  /// The Keep running setting, off while this file exists. It sits beside
+  /// the token file, so a helper with `--token-file` reads it from that
+  /// file's folder. The helper reads it as it stops: without it a SIGTERM
+  /// exits non-zero and launchd starts the helper again.
+  public static let stayStoppedFileName = "stay-stopped"
   /// The Unix socket stdio bridges connect to. The helper creates it, mode
   /// 0600, in its 0700 app-support folder.
   public static let socketPath = "Library/Application Support/iMessage Max/mcp.sock"

@@ -21,6 +21,9 @@ final class AppModel {
   private(set) var notice: Notice?
   private(set) var celebration = 0
   private(set) var loginStatus = SMAppService.mainApp.status
+  /// Settings → General → Keep running. nil when this copy of the app has no
+  /// valid agent plist, so there is no helper to keep running.
+  private(set) var keepRunning: Bool?
   /// The clients found on this Mac, in table order. Empty until the first scan.
   private(set) var clients: [ClientRow] = []
   private(set) var clientsScanned = false
@@ -65,6 +68,7 @@ final class AppModel {
     self.clientContext = clientContext
     self.changeDeadline = changeDeadline
     self.permissionDeadline = permissionDeadline
+    keepRunning = controller.map { KeepRunningSetting(configuration: $0.configuration).isOn }
     let tried = milestones.reached(.triedAssistant)
     self.tried = tried
     connectSettled =
@@ -193,6 +197,7 @@ final class AppModel {
     let elapsed = start.duration(to: .now).components
     checkMilliseconds = Int(elapsed.seconds * 1000 + elapsed.attoseconds / 1_000_000_000_000_000)
     loginStatus = SMAppService.mainApp.status
+    keepRunning = KeepRunningSetting(configuration: controller.configuration).isOn
     if awake { await refreshClients() }
   }
 
@@ -455,6 +460,18 @@ final class AppModel {
       }
       loginStatus = SMAppService.mainApp.status
     } catch { problem = "Could not change launch at login. \(error.localizedDescription)" }
+  }
+
+  /// The helper reads the setting as it stops, so this needs no restart.
+  func setKeepRunning(_ on: Bool) {
+    guard let controller else { return }
+    let setting = KeepRunningSetting(configuration: controller.configuration)
+    do {
+      try setting.set(on)
+    } catch {
+      problem = error.localizedDescription
+    }
+    keepRunning = setting.isOn
   }
 
   func copy(_ text: String, acknowledgement: String = "Copied.") {
