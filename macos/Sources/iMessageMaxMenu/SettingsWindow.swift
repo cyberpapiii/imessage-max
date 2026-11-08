@@ -118,7 +118,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate, NSToolbarDeleg
     group.subitems = [back, forward]
     group.label = "Back/Forward"
     group.isNavigational = true
-    followPage()
+    back.isEnabled = model.history.canGoBack
+    forward.isEnabled = model.history.canGoForward
     return group
   }
 
