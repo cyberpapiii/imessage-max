@@ -34,8 +34,8 @@ public enum SystemCommand: Sendable, Equatable {
   /// `launchctl kickstart`, with `-k` when `restart` kills a running process first.
   case kickstart(label: String, restart: Bool)
   /// Unloads the job until the next login or registration. Stopping uses
-  /// this, not SIGTERM: a clean exit stays down only because KeepAlive skips
-  /// a successful exit, while an unloaded job stays down however it ends.
+  /// this, not SIGTERM: KeepAlive relaunches the helper however it exits,
+  /// and only an unloaded job stays down.
   case bootout(label: String)
 }
 
