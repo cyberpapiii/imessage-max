@@ -25,8 +25,7 @@ final class ServiceFilesContractTests: XCTestCase {
                 ServerOption.logFile.flag, "~/\(ServiceDefaults.logPath)",
             ])
         XCTAssertEqual(plist["RunAtLoad"] as? Bool, true)
-        let keepAlive = try XCTUnwrap(plist["KeepAlive"] as? [String: Bool])
-        XCTAssertEqual(keepAlive, ["Crashed": true, "SuccessfulExit": false])
+        XCTAssertEqual(plist["KeepAlive"] as? Bool, true)
         XCTAssertEqual(plist["ThrottleInterval"] as? Int, 10,
                        "kickstart -k waits out the throttle, and a restart must finish inside the companion's wait")
         XCTAssertNil(plist["StandardErrorPath"], "launchd does not expand ~; the helper opens its own log")

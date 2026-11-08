@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Service
+
+- The helper now restarts however it exits, a plain quit from Activity Monitor or `kill` included, not only after a crash. Stop iMessage Max… in Settings is the one way to keep it stopped, until you start it again or log in again.
+
 ### Companion app
 
 - The menu bar bubble opens a plain macOS menu in place of the popover panel. Its header shows Max's face and one status word: Running, Needs attention, Stopped or Setting up. One more line names the next thing to do, such as Turn on Full Disk Access, and opens Settings on the page that fixes it. Below that are Connections (such as "Connections: Plug", or None), Settings… (⌘,) and Quit iMessage Max (⌘Q). Quitting still leaves the helper running.
