@@ -22,7 +22,20 @@ import Testing
     (.init(agent: .enabled, job: running), .unresponsive),
     (.init(agent: .enabled, job: running, refused: true), .tokenRejected),
     (.init(agent: .enabled, refused: true, foreignListener: true), .portConflict),
+    (.init(agent: .enabled, job: running, refused: true, portTaken: true), .portConflict),
     (.init(agent: .enabled, job: running, diagnosis: mine), .running(mine)),
+    (.init(agent: .enabled, job: Job(pid: nil, lastExitCode: 0)), .stopped),
+    (.init(agent: .enabled, job: Job(pid: nil, lastExitCode: ServiceDefaults.relaunchExitCode)), .stopped),
+    (
+      .init(agent: .enabled, job: Job(pid: nil, lastExitCode: 1), startupFailure: "Cannot create the token."),
+      .failing("Cannot create the token.")
+    ),
+    (.init(agent: .enabled, job: Job(pid: nil, lastExitCode: 1)), .failing("It exited with code 1.")),
+    (
+      .init(agent: .enabled, job: Job(pid: nil, lastSignal: "Segmentation fault: 11")),
+      .failing("It crashed (Segmentation fault: 11).")
+    ),
+    (.init(agent: .enabled, job: Job(pid: 200, lastExitCode: 1)), .unresponsive),
   ]
   for (observation, expected) in table {
     #expect(ServiceState(observation) == expected, "\(observation)")
@@ -57,6 +70,90 @@ import Testing
 @Test func readsTheRunningPidFromLaunchctl() {
   #expect(Job(launchctlPrint: "gui/501/x = {\n\tstate = running\n\tpid = 4242\n}").pid == 4242)
   #expect(Job(launchctlPrint: "gui/501/x = {\n\tstate = not running\n}").pid == nil)
+}
+
+/// Shaped like `launchctl print` of a job between failed launches, as
+/// macOS 27 prints it, nested blocks included.
+@Test func readsTheLastExitFromLaunchctl() {
+  let failing = """
+    gui/501/com.example.helper = {
+    \tactive count = 0
+    \tstate = spawn scheduled
+    \texit timeout = 20
+    \truns = 4
+    \tlast exit code = 1
+
+    \tsemaphores = {
+    \t\tsuccessful exit => 0
+    \t}
+
+    \tresource coalition = {
+    \t\tID = 2282
+    \t\tstate = active
+    \t}
+    }
+    """
+  #expect(Job(launchctlPrint: failing) == Job(pid: nil, lastExitCode: 1))
+  #expect(Job(launchctlPrint: failing).lastRunFailed)
+
+  let crashed = "gui/501/x = {\n\truns = 1\n\tlast terminating signal = Segmentation fault: 11\n}"
+  #expect(Job(launchctlPrint: crashed) == Job(pid: nil, lastSignal: "Segmentation fault: 11"))
+  #expect(Job(launchctlPrint: crashed).lastRunFailed)
+
+  let relaunching = "gui/501/x = {\n\tstate = spawn scheduled\n\tlast exit code = 75: EX_TEMPFAIL\n}"
+  #expect(Job(launchctlPrint: relaunching) == Job(pid: nil, lastExitCode: ServiceDefaults.relaunchExitCode))
+  #expect(!Job(launchctlPrint: relaunching).lastRunFailed)
+
+  let never = "gui/501/x = {\n\tpid = 7\n\tlast exit code = (never exited)\n}"
+  #expect(Job(launchctlPrint: never) == Job(pid: 7))
+  #expect(!Job(launchctlPrint: never).lastRunFailed)
+  #expect(!Job(pid: nil, lastExitCode: ServiceDefaults.relaunchExitCode).lastRunFailed)
+}
+
+/// 088 #15: a helper that stops at every launch showed as Stopped. It now
+/// shows the reason its log gives, and Stop still unloads it.
+@Test func aHelperThatStopsAtEveryLaunchShowsWhyAndCanBeStopped() async throws {
+  let home = try temporaryHome()
+  let system = FakeServiceSystem()
+  let reason = "Cannot create /Users/x/Library/Application Support/iMessage Max: Permission denied"
+  await system.set {
+    $0.startRunning()
+    $0.launchFailure = (exitCode: 1, logged: reason)
+  }
+  let controller = ServiceController(
+    configuration: try configuration(home: home), system: system, home: home)
+  let state = await controller.inspect()
+  #expect(state == .failing(reason))
+  #expect(state.isRegistered && !state.isRunning)
+
+  #expect(try await controller.perform(.stop) == .stopped)
+  #expect(await system.commands == [.bootout(label: ServiceDefaults.launchdLabel)])
+}
+
+/// 088 #10: another user's helper on the port answers 401, and lsof cannot
+/// see it. That read as a token mismatch, whose restart only looped.
+@Test func anotherUsersHelperOnThePortIsAPortConflictNotATokenMismatch() async throws {
+  let home = try temporaryHome()
+  let system = FakeServiceSystem()
+  await system.set {
+    $0.startRunning()
+    $0.portHeldByAnotherUser = true
+  }
+  let controller = ServiceController(
+    configuration: try configuration(home: home), system: system, home: home)
+  #expect(await controller.inspect() == .portConflict)
+
+  await system.set { $0.portHeldByAnotherUser = false }
+  #expect(await controller.inspect().diagnosis?.processID == 200, "the helper binds once the port frees")
+}
+
+@Test func theLiveSystemReadsTheFailureFromTheLogsTail() async throws {
+  let log = try temporaryHome().appendingPathComponent("imessage-max.log")
+  let filler = String(repeating: "2026-11-08T09:00:00.000Z [imessage-max] INFO noise\n", count: 3000)
+  try (filler + "2026-11-08T10:00:00.000Z [imessage-max] ERROR Startup failed: Port 1 is privileged\n")
+    .write(to: log, atomically: true, encoding: .utf8)
+  #expect(await LiveServiceSystem().startupFailure(log: log) == "Port 1 is privileged")
+  #expect(await LiveServiceSystem().startupFailure(log: log.appendingPathExtension("missing")) == nil)
 }
 
 @Test func configurationComesFromTheBundledPlist() throws {

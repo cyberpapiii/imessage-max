@@ -10,9 +10,12 @@ typealias SchemaProbe = @Sendable () -> SchemaCapabilities?
 
 typealias LiveInboxProbe = @Sendable () -> Bool
 
+typealias HTTPEndpointProbe = @Sendable () -> DiagnoseResult.HTTPEndpoint?
+
 enum DiagnoseTool {
     static func definition(
-        db: Database, resolver: ContactResolver, access: MessagesAccess, liveInbox: @escaping LiveInboxProbe
+        db: Database, resolver: ContactResolver, access: MessagesAccess, liveInbox: @escaping LiveInboxProbe,
+        http: @escaping HTTPEndpointProbe = { nil }
     ) -> ToolDefinition {
         let inputSchema: Value = .object([
             "type": "object",
@@ -57,7 +60,8 @@ enum DiagnoseTool {
                 resolver: resolver,
                 automationProbe: { await MessagesAccess.offPool { access.automationStatus() } },
                 schemaProbe: { try? db.schema() },
-                liveInboxProbe: liveInbox
+                liveInboxProbe: liveInbox,
+                httpProbe: http
             )
             return [.plainText(try FormatUtils.encodeJSON(result))]
         }
@@ -194,6 +198,7 @@ enum DiagnoseTool {
         automationProbe: AutomationProbe,
         schemaProbe: SchemaProbe = { nil },
         liveInboxProbe: LiveInboxProbe = { false },
+        httpProbe: HTTPEndpointProbe = { nil },
         usageDescriptionProbe: UsageDescriptionProbe = { ContactResolver.usageDescriptionEmbedded },
         holder: GrantHolder = .current,
         assistantCalls: @Sendable () -> Int = { ToolCallDispatch.assistantCalls.withLock { $0 } }
@@ -338,7 +343,8 @@ enum DiagnoseTool {
                 fix: contactsFix
             ),
             capabilities: Dictionary(uniqueKeysWithValues: capabilities.map { ($0.key.rawValue, $0.value) }),
-            assistantCalls: assistantCalls()
+            assistantCalls: assistantCalls(),
+            http: httpProbe()
         )
     }
 }

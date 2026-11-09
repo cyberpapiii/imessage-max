@@ -220,6 +220,57 @@ final class HTTPTransportLiveSocketTests: XCTestCase {
         }
     }
 
+    /// connect() returns only once the bind has an outcome, and a taken port
+    /// is an outcome, not an error: the transport binds once it frees.
+    func testConnectReportsATakenPortAndBindsOnceItFrees() async throws {
+        let holder = try HeldPort()
+        var configuration = HTTPTransport.Configuration.test
+        configuration.bindRetry = BindRetry(initial: .milliseconds(20), maximum: .milliseconds(100))
+        let transport = makeTestTransport(port: holder.port, configuration: configuration)
+        let capture = Log.Capture()
+        let outcome = try await Log.$capture.withValue(capture) {
+            try await transport.connect(gracefulShutdownSignals: [])
+        }
+        XCTAssertEqual(outcome, .portInUse)
+        XCTAssertEqual(transport.listenerState.current, .portInUse)
+        XCTAssertEqual(transport.listenerState.diagnosis(port: holder.port).state, .portInUse)
+        XCTAssertEqual(capture.lines.filter { $0.contains("is in use by another process") }.count, 1, "\(capture.lines)")
+
+        holder.release()
+        let deadline = ContinuousClock.now + .seconds(5)
+        while !transport.listenerState.isListening, ContinuousClock.now < deadline {
+            await AsyncTimeout.sleep(.milliseconds(10))
+        }
+        XCTAssertTrue(transport.listenerState.isListening)
+        _ = try initializeSession(port: holder.port)
+        await transport.shutdown()
+    }
+
+    func testConnectReturnsListeningOnceTheServerAcceptsConnections() async throws {
+        let port = try freeLoopbackPort()
+        let transport = makeTestTransport(port: port)
+        let outcome = try await transport.connect(gracefulShutdownSignals: [])
+        XCTAssertEqual(outcome, .listening)
+        close(try connectLoopback(port: port))
+        await transport.shutdown()
+    }
+
+    func testShutdownWhileWaitingForATakenPortEnds() async throws {
+        let holder = try HeldPort()
+        defer { holder.release() }
+        let transport = makeTestTransport(port: holder.port)
+        let outcome = try await transport.connect(gracefulShutdownSignals: [])
+        XCTAssertEqual(outcome, .portInUse)
+        let start = ContinuousClock.now
+        await transport.shutdown()
+        XCTAssertLessThan(ContinuousClock.now - start, .seconds(2), "shutdown waited out the bind retry")
+    }
+
+    func testBindRetryDoublesUpToTheCap() {
+        let retry = BindRetry(initial: .seconds(1), maximum: .seconds(30))
+        XCTAssertEqual((0..<8).map { retry.delay(after: $0) }, [1, 2, 4, 8, 16, 30, 30, 30].map { Duration.seconds($0) })
+    }
+
     private func withLiveTransport(
         channelIdleTimeout: Duration,
         sessionTimeout: TimeInterval = 3600,
@@ -242,6 +293,41 @@ final class HTTPTransportLiveSocketTests: XCTestCase {
         }
         await transport.shutdown()
     }
+}
+
+/// A listener on a free loopback port, as another process would hold it.
+final class HeldPort {
+    let port: Int
+    private var fd: Int32
+
+    init() throws {
+        fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)
+        guard fd >= 0 else { throw SocketError(errno) }
+        var addr = sockaddr_in()
+        addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        addr.sin_family = sa_family_t(AF_INET)
+        addr.sin_addr = in_addr(s_addr: inet_addr("127.0.0.1"))
+        var length = socklen_t(MemoryLayout<sockaddr_in>.size)
+        let descriptor = fd
+        let rc = withUnsafeMutablePointer(to: &addr) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                bind(descriptor, $0, length) == 0 && listen(descriptor, 4) == 0 ? getsockname(descriptor, $0, &length) : -1
+            }
+        }
+        guard rc == 0 else {
+            close(fd)
+            throw SocketError(errno)
+        }
+        port = Int(in_port_t(bigEndian: addr.sin_port))
+    }
+
+    func release() {
+        guard fd >= 0 else { return }
+        close(fd)
+        fd = -1
+    }
+
+    deinit { release() }
 }
 
 private func waitUntilListening(port: Int) async throws {

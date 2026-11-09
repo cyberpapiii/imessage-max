@@ -80,6 +80,10 @@ struct AccessToken: Sendable {
             case .custom(let file): file
             }
         }
+
+        var isAppSupport: Bool {
+            if case .appSupport = self { true } else { false }
+        }
     }
 
     /// Accepts an `Authorization` header value of the form `Bearer <token>`.
@@ -115,8 +119,22 @@ struct AccessToken: Sendable {
         } catch {
             throw LoadError(error)
         }
-        if let existing = try read(path) {
-            return existing
+        do {
+            if let existing = try read(path) {
+                return existing
+            }
+        } catch LoadError.insecurePermissions(_, let mode) where location.isAppSupport {
+            // The standard file, with a mode looser than 0600: refusing to
+            // start would only loop under launchd (088 #15). The server
+            // tightens its own file, as it does the folder, and says so.
+            try tightenMode(path)
+            Log.warning(
+                "Token file \(path) had mode \(String(mode & 0o777, radix: 8)); set it to 600. "
+                    + "If another user could have read it, delete it and restart iMessage Max for a new token, then reconnect your clients."
+            )
+            if let existing = try read(path) {
+                return existing
+            }
         }
         try install(generate(), at: path)
         guard let stored = try read(path) else { throw LoadError.malformed(path: path) }
@@ -146,6 +164,23 @@ struct AccessToken: Sendable {
               let token = AccessToken(String(decoding: buffer.prefix(count), as: UTF8.self))
         else { throw LoadError.malformed(path: path) }
         return token
+    }
+
+    /// Sets 0600 on the token file, only while it is a regular file this
+    /// user owns. The checks and the chmod use one fd, so a link swapped in
+    /// after the read cannot redirect the chmod.
+    private static func tightenMode(_ path: String) throws {
+        let fd = open(path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
+        guard fd >= 0 else {
+            if errno == ELOOP { throw LoadError.notRegularFile(path: path) }
+            throw LoadError.posix(path, "open", errno)
+        }
+        defer { close(fd) }
+        var info = stat()
+        guard fstat(fd, &info) == 0 else { throw LoadError.posix(path, "stat", errno) }
+        guard info.st_mode & S_IFMT == S_IFREG else { throw LoadError.notRegularFile(path: path) }
+        guard info.st_uid == geteuid() else { throw LoadError.wrongOwner(path: path) }
+        guard fchmod(fd, 0o600) == 0 else { throw LoadError.posix(path, "chmod", errno) }
     }
 
     /// Writes a temporary file, then links it into place. `link` never

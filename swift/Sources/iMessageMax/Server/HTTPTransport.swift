@@ -6,6 +6,7 @@ import Logging
 import MCP
 import NIOCore
 import ServiceLifecycle
+import Synchronization
 import UnixSignals
 
 actor HTTPTransport {
@@ -18,6 +19,8 @@ actor HTTPTransport {
         var cleanupInterval: Duration = .seconds(300)
         var sessionTimeout: TimeInterval = 3600
         var sseKeepAliveInterval: Duration = .seconds(30)
+        /// The waits between bind attempts while another process holds the port.
+        var bindRetry = BindRetry()
         var makeServer: @Sendable (ToolCatalog) async -> Server = { await Version.makeServer(catalog: $0) }
     }
 
@@ -37,11 +40,17 @@ actor HTTPTransport {
     private var serverTask: Task<Void, Error>?
     private var serviceGroup: ServiceGroup?
     private var shutdownDeadline: DispatchSourceTimer?
+    /// Resumed with the first bind attempt's outcome, so connect() returns
+    /// only once the port listens or is known to be taken.
+    private var firstBind: CheckedContinuation<BindOutcome, Error>?
+    nonisolated let listenerState: HTTPListenerState
 
     private static let silentLogger = Logger(label: "imessage-max.http", factory: { _ in SwiftLogNoOpLogHandler() })
 
-    /// Bounds a SIGTERM drain. It stays under launchd's default 20 s
+    /// Bounds a SIGTERM drain. It stays under the agent plist's 20 s
     /// ExitTimeOut, so the service exits on its own instead of by SIGKILL.
+    /// launchd's own default is 5 s, so the plist must keep that key;
+    /// ServiceFilesContractTests checks both.
     static let maximumGracefulShutdownDuration: Duration = .seconds(15)
 
     init(
@@ -50,8 +59,10 @@ actor HTTPTransport {
         accessToken: AccessToken,
         catalog: ToolCatalog,
         setupPermissions: SetupPermissionService,
-        configuration: Configuration = .init()
+        configuration: Configuration = .init(),
+        listenerState: HTTPListenerState = HTTPListenerState()
     ) {
+        self.listenerState = listenerState
         self.host = host
         self.port = port
         self.accessToken = accessToken
@@ -63,10 +74,16 @@ actor HTTPTransport {
         self.sseManager = SSEConnectionManager(keepAliveInterval: configuration.sseKeepAliveInterval)
     }
 
-    func connect(gracefulShutdownSignals: [UnixSignal] = [.sigterm, .sigint]) async throws {
-        guard !isConnected else { return }
-
-        let app = await application()
+    /// Starts serving, and returns once the first bind attempt has an
+    /// outcome: `.listening`, or `.portInUse` when another process holds the
+    /// port. Then the service keeps retrying the bind, with backoff, until
+    /// it binds or stops, and the caller keeps the stdio socket serving.
+    /// Any other bind failure throws.
+    @discardableResult
+    func connect(gracefulShutdownSignals: [UnixSignal] = [.sigterm, .sigint]) async throws -> BindOutcome {
+        guard !isConnected else { return listenerState.isListening ? .listening : .portInUse }
+        await configureRoutingIfNeeded()
+        isConnected = true
 
         // ServiceGroup shuts services down last-first, so the stream closer
         // runs before the server starts waiting for open requests to finish.
@@ -75,15 +92,56 @@ actor HTTPTransport {
         // shutdown ends aborts release builds in swift_task_dealloc (#27).
         // GracefulShutdownService arms a Dispatch timer for the bound instead.
         let group = ServiceGroup(configuration: ServiceGroupConfiguration(
-            services: [app, GracefulShutdownService(transport: self)],
+            services: [
+                HTTPListenerService(transport: self, retry: configuration.bindRetry),
+                GracefulShutdownService(transport: self),
+            ],
             gracefulShutdownSignals: gracefulShutdownSignals,
             logger: Self.silentLogger
         ))
         serviceGroup = group
-        serverTask = Task {
-            defer { disarmShutdownDeadline() }
-            try await group.run()
+        return try await withCheckedThrowingContinuation { continuation in
+            firstBind = continuation
+            serverTask = Task {
+                defer { disarmShutdownDeadline() }
+                do {
+                    try await group.run()
+                    reportFirstBind(.failure(CancellationError()))
+                } catch {
+                    reportFirstBind(.failure(error))
+                    throw error
+                }
+            }
         }
+    }
+
+    private func reportFirstBind(_ outcome: Result<BindOutcome, Error>) {
+        firstBind?.resume(with: outcome)
+        firstBind = nil
+    }
+
+    fileprivate func didBind() {
+        if listenerState.set(.listening) == .portInUse {
+            Log.info("HTTP listening addr=\(host):\(port); the port is free again")
+        }
+        reportFirstBind(.success(.listening))
+    }
+
+    fileprivate func portIsInUse() {
+        if listenerState.set(.portInUse) != .portInUse {
+            Log.warning(Self.portInUseMessage(host: host, port: port))
+        }
+        reportFirstBind(.success(.portInUse))
+    }
+
+    fileprivate func bindFailed(_ error: Error) {
+        reportFirstBind(.failure(error))
+    }
+
+    static func portInUseMessage(host: String, port: Int) -> String {
+        "HTTP port \(port) on \(host) is in use by another process, perhaps iMessage Max for another "
+            + "user on this Mac. HTTP clients such as plug cannot connect until it is free. Stdio "
+            + "bridges still connect over the socket. Retrying the bind until the port is free."
     }
 
     func waitForTermination() async throws {
@@ -106,7 +164,9 @@ actor HTTPTransport {
         await pendingRequests.removeAll()
     }
 
-    func application() async -> some ApplicationProtocol {
+    func application(
+        onServerRunning: @escaping @Sendable (any Channel) async -> Void = { _ in }
+    ) async -> some ApplicationProtocol {
         await configureRoutingIfNeeded()
         isConnected = true
 
@@ -130,6 +190,7 @@ actor HTTPTransport {
             router: router,
             server: .http1(configuration: .init(idleTimeout: .nanoseconds(Int64(AsyncTimeout.nanoseconds(for: configuration.channelIdleTimeout))))),
             configuration: .init(address: .hostname(host, port: port)),
+            onServerRunning: onServerRunning,
             logger: Self.silentLogger
         )
     }
@@ -576,6 +637,126 @@ actor HTTPTransport {
 }
 
 private struct DuplicateRequestId: Error {}
+
+/// What the first bind attempt found.
+enum BindOutcome: Sendable, Equatable {
+    case listening
+    /// Another process holds the port. The transport keeps retrying.
+    case portInUse
+}
+
+/// The waits between bind attempts while the port is taken: doubling from
+/// `initial`, capped at `maximum`.
+struct BindRetry: Sendable {
+    var initial: Duration = .seconds(1)
+    var maximum: Duration = .seconds(30)
+
+    func delay(after attempt: Int) -> Duration {
+        var delay = initial
+        for _ in 0..<min(attempt, 32) where delay < maximum {
+            delay *= 2
+        }
+        return min(delay, maximum)
+    }
+}
+
+/// Whether the HTTP listener holds its port, for diagnose. Made before the
+/// transport, because the tool catalog that reads it is.
+final class HTTPListenerState: Sendable {
+    enum Phase: Sendable, Equatable { case starting, listening, portInUse }
+
+    private let phase = Mutex(Phase.starting)
+
+    var current: Phase { phase.withLock { $0 } }
+    var isListening: Bool { current == .listening }
+
+    /// Returns the phase it replaced.
+    @discardableResult
+    func set(_ next: Phase) -> Phase {
+        phase.withLock { phase in
+            defer { phase = next }
+            return phase
+        }
+    }
+
+    /// The `http` field of the diagnose reply.
+    func diagnosis(port: Int) -> DiagnoseResult.HTTPEndpoint {
+        switch current {
+        case .starting: .init(port: port, state: .starting)
+        case .listening: .init(port: port, state: .listening)
+        case .portInUse: .init(port: port, state: .portInUse, fix: Self.portInUseFix(port: port))
+        }
+    }
+
+    static func portInUseFix(port: Int) -> String {
+        "Another process holds port \(port), perhaps iMessage Max for another user on this Mac. "
+            + "HTTP clients such as plug cannot connect until it is free; stdio connections still work. "
+            + "Quit that process or log the other user out. iMessage Max binds the port within 30 seconds of it freeing."
+    }
+}
+
+/// Runs the Hummingbird application. While another process holds the port
+/// it waits on a Dispatch timer and tries again. A bind-only probe comes
+/// first on every attempt, so a taken port never starts the application,
+/// and its date-cache timer, only for it to fail.
+private struct HTTPListenerService: Service {
+    let transport: HTTPTransport
+    let retry: BindRetry
+
+    func run() async throws {
+        var attempt = 0
+        while !Task.isShuttingDownGracefully && !Task.isCancelled {
+            let delay = retry.delay(after: attempt)
+            if PortProbe.isInUse(host: transport.host, port: transport.port) {
+                await transport.portIsInUse()
+            } else {
+                let app = await transport.application(onServerRunning: { [transport] _ in await transport.didBind() })
+                do {
+                    try await app.run()
+                    return
+                } catch where PortProbe.isAddressInUse(error) {
+                    // Another process bound between the probe and this bind.
+                    await transport.portIsInUse()
+                } catch {
+                    await transport.bindFailed(error)
+                    throw error
+                }
+            }
+            attempt += 1
+            try? await cancelWhenGracefulShutdown { await AsyncTimeout.sleep(delay) }
+        }
+    }
+}
+
+/// A bind-only check of the HTTP port. It sets SO_REUSEADDR as the server
+/// does, so a connection left in TIME_WAIT does not read as a taken port.
+enum PortProbe {
+    static func isAddressInUse(_ error: any Error) -> Bool {
+        (error as? IOError)?.errnoCode == EADDRINUSE
+    }
+
+    static func isInUse(host: String, port: Int) -> Bool {
+        var hints = addrinfo()
+        hints.ai_socktype = SOCK_STREAM
+        hints.ai_flags = AI_PASSIVE | AI_NUMERICSERV
+        var list: UnsafeMutablePointer<addrinfo>?
+        guard getaddrinfo(host, String(port), &hints, &list) == 0 else { return false }
+        defer { freeaddrinfo(list) }
+        var entry = list
+        while let info = entry?.pointee {
+            entry = info.ai_next
+            let fd = socket(info.ai_family, info.ai_socktype, info.ai_protocol)
+            guard fd >= 0 else { continue }
+            var one: Int32 = 1
+            setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, socklen_t(MemoryLayout<Int32>.size))
+            let result = bind(fd, info.ai_addr, info.ai_addrlen)
+            let code = errno
+            close(fd)
+            if result != 0 && code == EADDRINUSE { return true }
+        }
+        return false
+    }
+}
 
 private struct GracefulShutdownService: Service {
     let transport: HTTPTransport
