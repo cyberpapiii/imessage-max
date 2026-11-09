@@ -154,6 +154,26 @@ final class SocketListener: Sendable {
             return Array(state.connections.values)
         }
         guard let live else { return }
+        stopAccepting()
+        bound.unlink(at: socket.path)
+        for transport in live {
+            transport.abort()
+        }
+    }
+
+    /// Whether the socket path still names the file this listener bound.
+    /// False once someone deletes or replaces it: no bridge can reach this
+    /// listener any more.
+    var isReachable: Bool { FileIdentity(at: socket.path) == bound }
+
+    /// Stops accepting and closes the listen fd, but leaves live connections
+    /// serving: their bridges never used the path again after connecting.
+    /// For a listener whose socket file vanished. stop() still ends them.
+    func retire() {
+        stopAccepting()
+    }
+
+    private func stopAccepting() {
         queue.async { [self] in
             let (source, backoff) = state.withLock { state in
                 defer { state.acceptSource = nil; state.backoff = nil }
@@ -164,10 +184,6 @@ final class SocketListener: Sendable {
                 source?.resume()
             }
             source?.cancel()
-        }
-        bound.unlink(at: socket.path)
-        for transport in live {
-            transport.abort()
         }
     }
 

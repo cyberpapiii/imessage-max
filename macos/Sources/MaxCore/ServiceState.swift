@@ -15,10 +15,15 @@ public enum ServiceState: Sendable, Equatable {
   /// and a Developer ID app is approved at registration, so this is the case
   /// a user meets. Both need the same step, Open Login Items.
   case blockedInLoginItems
-  /// A process this app does not own listens on the helper's port.
+  /// A process this app does not own listens on the helper's port. The
+  /// helper may still run: it serves stdio bridges over its socket and
+  /// retries the port.
   case portConflict
   case notRegistered
   case stopped
+  /// launchd keeps starting the helper and it keeps stopping at launch, for
+  /// the reason given, such as an unreadable token file.
+  case failing(String)
   /// launchd runs the helper but it does not answer yet.
   case unresponsive
   /// launchd runs the helper and it answers 401: the token file changed after
@@ -39,16 +44,24 @@ public enum ServiceState: Sendable, Equatable {
         observation.agent == .enabled
       {
         self = .running(diagnosis)
-      } else if observation.foreignListener {
+      } else if observation.foreignListener || observation.portTaken {
         self = .portConflict
       } else if observation.agent == .notRegistered {
         self = .notRegistered
+      } else if let job = observation.job, job.lastRunFailed {
+        self = .failing(Self.failureReason(job, logged: observation.startupFailure))
       } else {
         self =
           observation.job?.pid == nil
           ? .stopped : (observation.refused ? .tokenRejected : .unresponsive)
       }
     }
+  }
+
+  static func failureReason(_ job: Job, logged: String?) -> String {
+    if let logged { return logged }
+    if let signal = job.lastSignal { return "It crashed (\(signal))." }
+    return "It exited with code \(job.lastExitCode ?? -1)."
   }
 
   public var diagnosis: DiagnoseResult? {
@@ -58,7 +71,7 @@ public enum ServiceState: Sendable, Equatable {
   /// The helper is registered and launchd may run it.
   public var isRegistered: Bool {
     switch self {
-    case .stopped, .unresponsive, .tokenRejected, .running: true
+    case .stopped, .failing, .unresponsive, .tokenRejected, .running: true
     default: false
     }
   }
@@ -79,11 +92,16 @@ public struct ServiceObservation: Sendable, Equatable {
   public var refused: Bool
   /// A listener on the port that is not launchd's process for the helper.
   public var foreignListener: Bool
+  /// The helper runs but does not listen on its port, and something else
+  /// answers there: another user's helper, whose listener lsof cannot show.
+  public var portTaken: Bool
+  /// The reason the helper's log gives for its last failed launch.
+  public var startupFailure: String?
 
   public init(
     location: AppLocation = .installed, legacy: Bool = false, agent: AgentStatus,
     job: Job? = nil, diagnosis: DiagnoseResult? = nil, refused: Bool = false,
-    foreignListener: Bool = false
+    foreignListener: Bool = false, portTaken: Bool = false, startupFailure: String? = nil
   ) {
     self.location = location
     self.legacy = legacy
@@ -92,6 +110,8 @@ public struct ServiceObservation: Sendable, Equatable {
     self.diagnosis = diagnosis
     self.refused = refused
     self.foreignListener = foreignListener
+    self.portTaken = portTaken
+    self.startupFailure = startupFailure
   }
 }
 
@@ -103,14 +123,43 @@ public enum AgentStatus: Sendable, Equatable { case notRegistered, enabled, requ
 /// loaded but not running.
 public struct Job: Sendable, Equatable {
   public var pid: Int32?
+  /// `last exit code`, nil before the first exit and after a signal.
+  public var lastExitCode: Int32?
+  /// `last terminating signal`, such as "Segmentation fault: 11".
+  public var lastSignal: String?
 
-  public init(pid: Int32?) { self.pid = pid }
+  public init(pid: Int32?, lastExitCode: Int32? = nil, lastSignal: String? = nil) {
+    self.pid = pid
+    self.lastExitCode = lastExitCode
+    self.lastSignal = lastSignal
+  }
 
   public init(launchctlPrint output: String) {
-    pid = output.components(separatedBy: .newlines).lazy
-      .map { $0.trimmingCharacters(in: .whitespaces) }
-      .first { $0.hasPrefix("pid = ") }
-      .flatMap { Int32($0.dropFirst(6)) }
+    // Only the job's own top-level lines: nested blocks such as
+    // `resource coalition` carry their own `state` and similar keys.
+    var fields: [String: String] = [:]
+    for line in output.components(separatedBy: .newlines)
+    where line.hasPrefix("\t") && !line.hasPrefix("\t\t") {
+      let parts = line.trimmingCharacters(in: .whitespaces).components(separatedBy: " = ")
+      guard parts.count == 2, fields[parts[0]] == nil else { continue }
+      fields[parts[0]] = parts[1]
+    }
+    pid = fields["pid"].flatMap { Int32($0) }
+    // launchd may name the code too: "75: EX_TEMPFAIL".
+    lastExitCode = fields["last exit code"].flatMap {
+      Int32($0.prefix { $0 != ":" }.trimmingCharacters(in: .whitespaces))
+    }
+    lastSignal = fields["last terminating signal"]
+  }
+
+  /// launchd will start it again, but its last run ended in failure: a
+  /// non-zero exit other than the Keep running relaunch code, or a signal.
+  /// While a helper stops at launch, launchd shows it between tries this way.
+  public var lastRunFailed: Bool {
+    guard pid == nil else { return false }
+    if lastSignal != nil { return true }
+    guard let lastExitCode else { return false }
+    return lastExitCode != 0 && lastExitCode != ServiceDefaults.relaunchExitCode
   }
 }
 
@@ -191,6 +240,7 @@ public enum CoreError: Error, LocalizedError, Sendable, Equatable {
       case .legacyInstall: "Finish replacing the older iMessage Max first."
       case .blockedInLoginItems: "Turn on iMessage Max in Login Items first."
       case .portConflict: CoreError.conflict.errorDescription
+      case .failing(let reason): "iMessage Max stops as soon as it starts. \(reason)"
       default: "Start iMessage Max before finishing setup."
       }
     }

@@ -11,8 +11,16 @@
 - SIGUSR1 stops the helper for good: it drains as on SIGTERM, then exits 0 whatever Keep running says, so launchd leaves it down. The cask's `uninstall` now sends USR1 instead of TERM, because with Keep running on a SIGTERM exits 75 and launchd would relaunch the helper from the app `brew uninstall --cask` just deleted.
 - A log write that fails, on a full disk, an I/O error or a closed stderr, no longer aborts the helper. The line is dropped, where before the helper crashed and launchd relaunched it into the same failure every 10 s.
 - A NUL character (U+0000) in `send` text, a file path or a recipient no longer crashes the helper. `send` returns `failed` with disposition `not_started` and says why, and nothing is sent.
+- When another process holds port 47821, such as iMessage Max for another user on the same Mac, the helper no longer exits every 10 s and takes the stdio socket down with it. It logs one line naming the port, keeps serving Codex, Claude Desktop and other stdio clients over its socket, and binds the port once it frees, retrying from 1 s up to every 30 s. `diagnose` reports `http.state` `port_in_use` with a fix. The `Started` log line now comes after the bind, with `http=port_in_use` while the port is taken.
+- The helper's launchd plist sets `ExitTimeOut` to 20 s. launchd's 5 s default could SIGKILL a helper still draining a send on SIGTERM, and relaunch it even with Keep running off. The plist changed, so an update registers the helper again once.
+- A token file in `~/Library/Application Support/iMessage Max/` that other users can read (for example mode 644 after a restore) is set to 600 with a warning in the log, instead of stopping the helper at every launch. A `--token-file` with such a mode still stops the server.
+- A helper that cannot start logs one `Startup failed: <reason>` line before it exits.
+- The helper checks its socket file every 30 s and listens again when the file was deleted, or when another helper held it at launch and has since gone. Open stdio sessions keep working.
 
 ### Companion app
+
+- A helper that stops at every launch shows "iMessage Max can't start" with the reason from its log, such as an unusable folder, instead of Stopped. Stop still works.
+- Another user's iMessage Max on the same port shows as a port conflict that says Plug can't connect while Codex and Claude Desktop still can, instead of "access key refused" and a restart that could not help.
 
 - The menu bar bubble opens a plain macOS menu in place of the popover panel. Its header shows Max's face and one status word: Running, Needs attention, Stopped or Setting up. One more line names the next thing to do, such as Turn on Full Disk Access, and opens Settings on the page that fixes it. Below that are Connections (such as "Connections: Plug", or None), Settings… (⌘,) and Quit iMessage Max (⌘Q). Quitting still leaves the helper running.
 - Setup, permissions, connections and help moved to a Settings window with a sidebar, back and forward buttons, and grouped forms built from stock controls, so macOS 26 draws its own Liquid Glass. The sidebar's first row, with the face and the status word, is the iMessage Max page itself, as the account row is in System Settings. Below it are Permissions, Connections, and About & Help. Buttons and switches use the system accent colour. Opening the app shows the window on Permissions.
@@ -27,6 +35,7 @@
 ### Server
 
 - `diagnose` fixes for the helper inside the app name the permission by its System Settings name, such as "Open iMessage Max and turn on Full Disk Access." `assistant_calls` is unchanged.
+- `diagnose` from the HTTP helper, on any lane, has an `http` field: `port`, `state` (`starting`, `listening` or `port_in_use`) and, while the port is taken, a `fix`. A `--direct` stdio server leaves it out.
 
 ## 2.0.0
 

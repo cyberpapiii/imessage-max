@@ -220,6 +220,10 @@ struct PanelState: Equatable {
     case misplaced
     case olderInstall
     case stopped
+    /// launchd keeps starting the helper and it stops at launch, for this reason.
+    case failing(String)
+    /// Another process holds the helper's port.
+    case portInUse
     /// The helper answered 401: it holds another token than this app reads.
     case keyMismatch
     case disconnected
@@ -257,8 +261,10 @@ struct PanelState: Equatable {
       case .blockedInLoginItems: .blocked
       case .notRegistered: .notSetUp
       case .stopped: .stopped
+      case .failing(let reason): .failing(reason)
       case .tokenRejected: .keyMismatch
-      case .portConflict, .unresponsive: .disconnected
+      case .portConflict: .portInUse
+      case .unresponsive: .disconnected
       }
     offersConnect = phase == .ready && facts.connected == [] && !facts.connectSettled
     connections = facts.connected.map { names in
@@ -286,7 +292,8 @@ struct PanelState: Equatable {
     case .ready, .stopped: troubled ? .attention : phase == .ready ? .running : .stopped
     case .notSetUp: .settingUp
     case .setup: settled ? .attention : .settingUp
-    case .blocked, .misplaced, .olderInstall, .keyMismatch, .disconnected: .attention
+    case .blocked, .misplaced, .olderInstall, .keyMismatch, .disconnected, .failing, .portInUse:
+      .attention
     }
   }
 
@@ -306,6 +313,8 @@ struct PanelState: Equatable {
     case .olderInstall: Attention(text: "Finish the update", page: .general)
     case .keyMismatch: Attention(text: "Restart iMessage Max", page: .general)
     case .disconnected: Attention(text: "iMessage Max isn’t answering", page: .general)
+    case .failing: Attention(text: "iMessage Max can’t start", page: .general)
+    case .portInUse: Attention(text: "Another app is using iMessage Max’s port", page: .general)
     case .ready where offersConnect:
       Attention(text: "Connect your assistant", page: .connections, urgent: false)
     case .checking, .ready, .stopped: nil
@@ -331,6 +340,10 @@ struct PanelState: Equatable {
       "iMessage Max is running but turned this app away, because its access key changed. Restart it so both use the same key."
     case .checking: "Checking the connection…"
     case .disconnected: "Your messages stay on this Mac. Let’s check the connection."
+    case .failing(let reason):
+      "macOS keeps starting iMessage Max, and it stops right away. \(reason)"
+    case .portInUse:
+      "Another app, perhaps iMessage Max for another user on this Mac, holds its port, so Plug can’t connect. Codex and Claude Desktop still can. iMessage Max takes the port as soon as it’s free."
     }
   }
 
@@ -342,7 +355,7 @@ struct PanelState: Equatable {
     case .olderInstall: .migrate
     case .stopped: .start
     case .keyMismatch: .restart
-    case .checking, .disconnected: .recheck
+    case .checking, .disconnected, .failing, .portInUse: .recheck
     case .notSetUp, .blocked, .setup, .ready: nil
     }
   }
@@ -366,7 +379,7 @@ struct PanelState: Equatable {
     case .stopped, .notSetUp: .resting
     case .ready: .ready
     case .setup, .blocked, .misplaced, .olderInstall: .needsYou
-    case .checking, .disconnected, .keyMismatch: .trouble
+    case .checking, .disconnected, .keyMismatch, .failing, .portInUse: .trouble
     }
   }
 }

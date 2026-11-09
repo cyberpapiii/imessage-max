@@ -40,7 +40,7 @@ public actor ServiceController {
       switch (action, state) {
       case (_, .misplaced), (_, .legacyInstall), (_, .blockedInLoginItems), (_, .portConflict):
         throw CoreError.notReady(state)
-      case (.stop, .running), (.stop, .unresponsive), (.stop, .tokenRejected):
+      case (.stop, .running), (.stop, .unresponsive), (.stop, .tokenRejected), (.stop, .failing):
         try await system.run(.bootout(label: configuration.label))
         return try await converge { $0 == .stopped }
       case (.stop, _), (.start, .running), (.start, .unresponsive), (.start, .tokenRejected):
@@ -154,12 +154,25 @@ public actor ServiceController {
     let reply = await system.diagnose(endpoint: configuration.endpoint)
     let diagnosis = reply.diagnosis
     var foreign = false
+    var taken = false
     if diagnosis == nil || diagnosis?.processID != job?.pid {
-      foreign = await system.listeners(port: configuration.port).contains { $0 != job?.pid }
+      let listeners = await system.listeners(port: configuration.port)
+      foreign = listeners.contains { $0 != job?.pid }
+      // lsof shows no other user's listener. A running helper that does
+      // not listen while something answers on its port has lost the port
+      // to one: it serves stdio bridges and retries the bind meanwhile.
+      if let pid = job?.pid, !listeners.contains(pid) {
+        taken = reply == .refused || diagnosis != nil
+      }
+    }
+    var failure: String?
+    if let job, job.lastRunFailed {
+      failure = await system.startupFailure(log: configuration.log)
     }
     return ServiceObservation(
       location: location, legacy: legacyPresent, agent: agent, job: job, diagnosis: diagnosis,
-      refused: reply == .refused, foreignListener: foreign)
+      refused: reply == .refused, foreignListener: foreign, portTaken: taken,
+      startupFailure: failure)
   }
 
   /// A job launchd no longer holds, as after a stop, cannot be kickstarted,

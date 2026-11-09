@@ -44,6 +44,32 @@ import Testing
   #expect(result[.permAutomation]?.detail == PermissionStatus.authorized.rawValue)
   #expect(result.capabilities["future_key"]?.state == "new")
   #expect(result.assistantCalls == nil)
+  #expect(result.http == nil)
+}
+
+@Test func httpListenerStateTravelsWithItsFix() throws {
+  let json = """
+    {"version":"2.1.0","process_id":7,"status":"ready",
+     "database":{"accessible":true,"status":"accessible","path":"~/Library/Messages/chat.db"},
+     "contacts":{"authorized":true,"status":"authorized"},
+     "capabilities":{},"http":{"port":47821,"state":"port_in_use","fix":"Quit it."}}
+    """
+  let result = try JSONDecoder().decode(DiagnoseResult.self, from: Data(json.utf8))
+  #expect(result.http == DiagnoseResult.HTTPEndpoint(port: 47821, state: .portInUse, fix: "Quit it."))
+  let listening = try JSONEncoder().encode(DiagnoseResult.HTTPEndpoint(port: 1, state: .listening))
+  #expect(String(decoding: listening, as: UTF8.self).contains(#""state":"listening""#))
+  #expect(!String(decoding: listening, as: UTF8.self).contains("fix"))
+}
+
+@Test func startupFailureIsReadFromTheLastLaunchOnly() {
+  let log = """
+    2026-11-08T10:00:00.000Z [imessage-max] INFO \(StartupFailure.startedMarker)2.1.0 pid=1
+    2026-11-08T10:01:00.000Z [imessage-max] ERROR \(StartupFailure.marker)Cannot create /x: Permission denied
+    Error: Cannot create /x: Permission denied
+    """
+  #expect(StartupFailure.reason(inLog: log) == "Cannot create /x: Permission denied")
+  #expect(StartupFailure.reason(inLog: log + "\nlater \(StartupFailure.startedMarker)2.1.0") == nil)
+  #expect(StartupFailure.reason(inLog: "no launch lines") == nil)
 }
 
 @Test func assistantCallsTravelAsASnakeCaseKey() throws {

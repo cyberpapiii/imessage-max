@@ -40,6 +40,20 @@ public struct DiagnoseResult: Codable, Sendable, Equatable {
     }
   }
 
+  /// The HTTP helper's own listener. A stdio bridge still reaches a helper
+  /// whose port another process holds, so diagnose says so here.
+  public struct HTTPEndpoint: Codable, Sendable, Equatable {
+    public let port: Int
+    public let state: HTTPEndpointState
+    public let fix: String?
+
+    public init(port: Int, state: HTTPEndpointState, fix: String? = nil) {
+      self.port = port
+      self.state = state
+      self.fix = fix
+    }
+  }
+
   public let version: String
   public let processID: Int32
   public let status: DiagnoseStatus
@@ -52,10 +66,13 @@ public struct DiagnoseResult: Codable, Sendable, Equatable {
   /// other than the companion. The companion shows a one-time notice once it
   /// is above zero. nil from a helper older than the field.
   public let assistantCalls: Int?
+  /// nil from a stdio-only server, and from a helper older than the field.
+  public let http: HTTPEndpoint?
 
   public init(
     version: String, processID: Int32, status: DiagnoseStatus, database: DatabaseAccess,
-    contacts: ContactsAccess, capabilities: [String: Capability], assistantCalls: Int? = nil
+    contacts: ContactsAccess, capabilities: [String: Capability], assistantCalls: Int? = nil,
+    http: HTTPEndpoint? = nil
   ) {
     self.version = version
     self.processID = processID
@@ -64,6 +81,7 @@ public struct DiagnoseResult: Codable, Sendable, Equatable {
     self.contacts = contacts
     self.capabilities = capabilities
     self.assistantCalls = assistantCalls
+    self.http = http
   }
 
   enum CodingKeys: String, CodingKey {
@@ -74,6 +92,7 @@ public struct DiagnoseResult: Codable, Sendable, Equatable {
     case contacts
     case capabilities
     case assistantCalls = "assistant_calls"
+    case http
   }
 
   public subscript(key: CapabilityKey) -> Capability? { capabilities[key.rawValue] }
