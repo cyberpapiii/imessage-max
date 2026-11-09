@@ -28,7 +28,30 @@ enum Log {
             capture.append(message())
             return
         }
-        FileHandle.standardError.write(Data(format(level, message()).utf8))
+        writeLine(format(level, message()), to: STDERR_FILENO)
+    }
+
+    /// Writes `line` to `fd` and never fails. `FileHandle.write(_: Data)`
+    /// raises an Objective-C exception on any write error, which aborts the
+    /// helper, and launchd then relaunches it into the same full disk or
+    /// closed stderr every 10 s. A line that cannot be written is dropped.
+    static func writeLine(_ line: String, to fd: Int32) {
+        var line = line
+        line.withUTF8 { bytes in
+            guard var next = bytes.baseAddress else { return }
+            var remaining = bytes.count
+            while remaining > 0 {
+                let written = Darwin.write(fd, next, remaining)
+                if written > 0 {
+                    next += written
+                    remaining -= written
+                } else if written < 0 && errno == EINTR {
+                    continue
+                } else {
+                    return
+                }
+            }
+        }
     }
 
     /// The size above which the log moves to `<path>.1` when the helper starts.

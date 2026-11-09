@@ -91,6 +91,11 @@ actor HTTPTransport {
         try await task.value
     }
 
+    /// Starts the same graceful drain as SIGTERM, without waiting for it.
+    func beginStop() async {
+        await serviceGroup?.triggerGracefulShutdown()
+    }
+
     func shutdown() async {
         await serviceGroup?.triggerGracefulShutdown()
         _ = try? await serverTask?.value

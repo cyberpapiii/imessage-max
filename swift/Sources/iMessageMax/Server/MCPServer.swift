@@ -58,7 +58,7 @@ enum ServerStartup {
 
     static func runHTTP(
         host: String, port: Int, accessToken: AccessToken, contactsPolicy: ContactsAccessPolicy.Override,
-        socketOverride: String?, supportFolder: URL
+        socketOverride: String?, supportFolder: URL, stop: GracefulStop
     ) async throws {
         let resolver = ContactResolver()
         let access = MessagesAccess(memory: AutomationMemory(folder: supportFolder))
@@ -74,6 +74,7 @@ enum ServerStartup {
         )
 
         try await transport.connect()
+        stop.onStop { Task { await transport.beginStop() } }
         // After the HTTP bind, so a second helper on the same port fails
         // there before it touches the socket.
         let listener = await startSocketListener(override: socketOverride, catalog: catalog)

@@ -8,6 +8,9 @@
 - An update that changes the helper's launchd plist now takes effect. macOS keeps a registered helper on the plist it first loaded, so the app records the plist it registered (`registered-agent.sha256` in `~/Library/Application Support/iMessage Max/`) and, when the bundled plist differs, registers the helper again on launch or on `--register-helper`. A Mac updating from 2.0.0 has no record yet and registers again once, which loads the new Keep running behaviour. macOS may show its "background item added" notice that one time. Permissions are unaffected.
 - iMessage Max works without you ever opening Messages. When the helper needs Messages, to check or ask for Automation and before a send, it starts Messages hidden: no Messages window comes on screen and focus stays where it was. A send no longer brings Messages up.
 - `diagnose` no longer reports Automation as `unverified` with detail `messages_not_running` whenever Messages is closed. It reports the last answer macOS gave, which the helper keeps in `automation-answer` beside its token, and with none it starts Messages hidden once to get one. A send that Messages refuses for lack of Automation (-1743) updates the kept answer to denied.
+- SIGUSR1 stops the helper for good: it drains as on SIGTERM, then exits 0 whatever Keep running says, so launchd leaves it down. The cask's `uninstall` now sends USR1 instead of TERM, because with Keep running on a SIGTERM exits 75 and launchd would relaunch the helper from the app `brew uninstall --cask` just deleted.
+- A log write that fails, on a full disk, an I/O error or a closed stderr, no longer aborts the helper. The line is dropped, where before the helper crashed and launchd relaunched it into the same failure every 10 s.
+- A NUL character (U+0000) in `send` text, a file path or a recipient no longer crashes the helper. `send` returns `failed` with disposition `not_started` and says why, and nothing is sent.
 
 ### Companion app
 
