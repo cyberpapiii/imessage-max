@@ -49,15 +49,43 @@ helper_pid = launchctl print gui/$$(id -u)/$(LAUNCHD_LABEL) 2>/dev/null | awk '$
 # companion's own wait for the helper is about 18 seconds.
 HELPER_WAIT  := 45
 # $(call wait_new_helper,<old pid>): wait until launchd runs the helper as
-# another pid. Bounded: a helper that never comes back, as one turned off in
-# Login Items, is left for verify to report.
+# another pid, and fail when it does not. The old helper still answers, so
+# verify would pass against the old binary.
 wait_new_helper = echo "Waiting for the new helper..."; i=0; PID=""; \
 	while [ $$i -lt $(HELPER_WAIT) ]; do \
 		PID=$$($(helper_pid)); \
 		if [ -n "$$PID" ] && [ "$$PID" != "$(1)" ]; then echo "✓ Helper running as pid $$PID"; break; fi; \
 		sleep 1; i=$$((i + 1)); \
 	done; \
-	[ $$i -lt $(HELPER_WAIT) ] || echo "✗ No new helper after $(HELPER_WAIT) s (pid $${PID:-none}). Verifying anyway."
+	[ $$i -lt $(HELPER_WAIT) ] || { \
+		if [ -n "$$PID" ]; then \
+			echo "✗ No new helper after $(HELPER_WAIT) s. launchd still runs pid $$PID, the helper from before the install, on the old binary."; \
+		else \
+			echo "✗ No helper running after $(HELPER_WAIT) s. Check that iMessage Max is on in System Settings → General → Login Items & Extensions."; \
+		fi; \
+		echo "  Run: open -n \"$(APP)\" --args --register-helper, then make verify"; \
+		exit 1; }
+# The installed companion's executable, which pkill and pgrep match.
+COMPANION    = $(APP)/Contents/MacOS/iMessageMaxMenu
+# Seconds install waits for the companion it opened before it opens it again.
+COMPANION_WAIT := 10
+# open_companion: open the installed app with --register-helper and wait for
+# its companion, opening it once more if none starts. -n matters: for a moment
+# after the old companion dies, LaunchServices still lists it, and a plain
+# open sends that dead instance a reopen event (error -600) and launches
+# nothing, so --register-helper never runs (2026-11-09).
+open_companion = try=1; while :; do \
+		open -n "$(APP)" --args --register-helper || echo "✗ open exited $$? for $(APP)"; \
+		i=0; while ! pgrep -f "$(COMPANION)" >/dev/null && [ $$i -lt $$((5 * $(COMPANION_WAIT))) ]; do sleep 0.2; i=$$((i + 1)); done; \
+		if pgrep -f "$(COMPANION)" >/dev/null; then echo "✓ Companion running as pid $$(pgrep -f "$(COMPANION)" | paste -sd ' ' -)"; break; fi; \
+		if [ $$try -ge 2 ]; then \
+			echo "✗ iMessage Max did not start after two tries, so --register-helper never ran."; \
+			echo "  Run: open -n \"$(APP)\" --args --register-helper, then make verify"; \
+			exit 1; \
+		fi; \
+		echo "✗ iMessage Max did not start within $(COMPANION_WAIT) s. Opening it again."; \
+		try=2; \
+	done
 # Per-probe cap, so a server that accepts but never answers fails the probe
 # instead of hanging make.
 CURL_MAX_TIME := 5
@@ -216,18 +244,19 @@ sys.exit(0 if ok else 1)' \
 # only a new launch, so the installed companion quits first. Only that copy:
 # a build running from dist/ or a test variant keeps running. The bundle is removed,
 # then copied: writing over the running helper's file makes macOS kill it.
-# The old helper keeps answering until the restart, so verify waits for a
-# helper pid other than the one running before the copy; otherwise it can
-# pass against the old binary, or probe while no helper runs.
+# The old helper keeps answering until the restart, so install fails unless
+# launchd runs a helper pid other than the one running before the copy;
+# otherwise verify can pass against the old binary.
 # Never put $(MAKE) on a line with rm, ditto or open: `make -n` runs every
 # line that holds $(MAKE), so a dry run would replace the installed app.
 install: app ## Build the app, install it over the released copy or to ~/Applications, register the helper, verify
-	@pkill -f "$(APP)/Contents/MacOS/iMessageMaxMenu" 2>/dev/null || true
-	@i=0; while pgrep -f "$(APP)/Contents/MacOS/iMessageMaxMenu" >/dev/null && [ $$i -lt 50 ]; do sleep 0.1; i=$$((i + 1)); done
+	@pkill -f "$(COMPANION)" 2>/dev/null || true
+	@i=0; while pgrep -f "$(COMPANION)" >/dev/null && [ $$i -lt 50 ]; do sleep 0.1; i=$$((i + 1)); done; \
+	! pgrep -f "$(COMPANION)" >/dev/null || { echo "✗ The running iMessage Max did not quit within 5 s. Quit it, then run make install again."; exit 1; }
 	@OLD_PID=$$($(helper_pid)); \
 	mkdir -p "$(APP_DIR)" && rm -rf "$(APP)" && ditto "$(APP_BUILD)" "$(APP)" || exit 1; \
 	echo "✓ Installed $(APP)"; \
-	open "$(APP)" --args --register-helper; \
+	$(open_companion); \
 	$(call wait_new_helper,$$OLD_PID)
 	@$(MAKE) --no-print-directory verify verify-db
 	@echo "Done. Database access verified."
