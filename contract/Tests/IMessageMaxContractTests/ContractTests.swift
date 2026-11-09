@@ -28,6 +28,7 @@ import Testing
   #expect(unknown.rawValue == "brand-new")
   #expect("\(PermissionStatus.loadFailed(.limited))" == "limited_load_failed")
   #expect(PermissionStatus.checkFailed(-1).rawValue == "check_failed_-1")
+  #expect(PermissionStatus.messagesNotResponding.rawValue == "messages_not_responding")
 }
 
 @Test func diagnoseDecodesWithoutOptionalFields() throws {

@@ -91,14 +91,16 @@ final class CapabilityContractTests: XCTestCase {
         XCTAssertNotNil(caps["perm_automation"]?.fix)
     }
 
+    /// A send never asks for Automation (nobody may be at the screen), so
+    /// "not determined" blocks sends just like "denied", with its own fix.
     func testAutomationNotDeterminedCapabilities() async throws {
         let caps = try await run(automation: CapabilityContractTests.probeAutomationNotDetermined).capabilities
 
-        XCTAssertEqual(caps["send_text_dm"]?.state, "unverified")
-        XCTAssertEqual(caps["send_text_group"]?.state, "unverified")
-        XCTAssertEqual(caps["send_file_dm"]?.state, "unverified")
-        XCTAssertEqual(caps["send_file_group"]?.state, "unverified")
-        XCTAssertEqual(caps["perm_automation"]?.state, "unverified")
+        for key in ["send_text_dm", "send_text_group", "send_file_dm", "send_file_group", "perm_automation"] {
+            XCTAssertEqual(caps[key]?.state, "permission-gated", "\(key) should be permission-gated")
+            XCTAssertNotNil(caps[key]?.fix, "\(key) must include fix text")
+        }
+        XCTAssertEqual(caps["perm_automation"]?.detail, "not_determined")
 
         XCTAssertEqual(caps["verified_send"]?.state, "degraded")
     }

@@ -14,7 +14,15 @@ struct ResolvedSendTarget {
 enum SendResolution {
     case success(ResolvedSendTarget)
     case failure(String)
-    case ambiguous([RecipientCandidate])
+    case ambiguous([RecipientCandidate], AmbiguityReason)
+}
+
+enum AmbiguityReason: Equatable {
+    /// More than one contact number or email matches the name.
+    case multipleMatches
+    /// The one match is a Contacts number or email that chat.db has never
+    /// seen, so nothing proves it reaches the person the agent meant.
+    case notInMessages
 }
 
 struct SendResolver: Sendable {
@@ -77,7 +85,7 @@ struct SendResolver: Sendable {
 
     private func resolvePhoneNumber(_ phone: String) async -> SendResolution {
         let raw = phone.trimmingCharacters(in: .whitespaces)
-        let normalized = PhoneUtils.normalizeToE164(raw)
+        let normalized = PhoneUtils.normalizeToE164(raw, region: resolver.region)
         if normalized == nil && raw.hasPrefix("+") {
             return .failure("Invalid phone number format: \(phone)")
         }
@@ -144,7 +152,16 @@ struct SendResolver: Sendable {
         if matches.count == 1 {
             let match = matches[0]
             do {
-                return .success(try await participantTarget(handle: match.handle, displayName: match.name))
+                // A name sends only to a handle Messages already knows. A
+                // Contacts number alone may be misread (a number saved
+                // without its country code) and reach a stranger.
+                guard let handle = try messagesHandle(for: match.handle) else {
+                    return .ambiguous(
+                        [RecipientCandidate(name: match.name, handle: match.handle, lastContact: "never")],
+                        .notInMessages
+                    )
+                }
+                return .success(try await participantTarget(handle: handle, displayName: match.name))
             } catch {
                 return .failure(ClientErrorMessages.sanitized(error))
             }
@@ -173,8 +190,19 @@ struct SendResolver: Sendable {
                     handle: candidate.handle,
                     lastContact: TimeUtils.formatCompactRelative(candidate.lastContact) ?? "never"
                 )
-            }
+            },
+            .multipleMatches
         )
+    }
+
+    /// The chat.db handle id for a Contacts number or email, or nil when
+    /// Messages has never seen it.
+    private func messagesHandle(for contactHandle: String) throws -> String? {
+        let sql = contactHandle.contains("@")
+            ? "SELECT id FROM handle WHERE LOWER(id) = LOWER(?) LIMIT 1"
+            : "SELECT id FROM handle WHERE id = ? LIMIT 1"
+        let ids: [String?] = try db.query(sql, params: [contactHandle]) { row in row.string(0) }
+        return ids.compactMap { $0 }.first
     }
 
     private func participantTarget(handle: String, displayName: String) async throws -> ResolvedSendTarget {

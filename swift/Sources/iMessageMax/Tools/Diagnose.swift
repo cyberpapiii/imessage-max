@@ -37,8 +37,9 @@ enum DiagnoseTool {
                 user it is coming. "degraded" means the feature works only in part. Show the \
                 fix field to the user when it has one. The database.accessible field tells you whether \
                 all read tools (get_messages, list_chats, search, and the rest) will work. \
-                A top-level status of "needs_setup" means at least one required permission \
-                is missing. Resolve it before you continue. Use chat.name in user-facing \
+                A top-level status of "needs_setup" means the Messages database cannot be read, \
+                so no tool works. Resolve it before you continue. Contacts and Automation do not \
+                change the top-level status: check perm_contacts and the send capabilities. Use chat.name in user-facing \
                 summaries and use chat ids only in follow-up tool calls. Refer to chats by \
                 name when talking to users.
                 """,
@@ -167,6 +168,26 @@ enum DiagnoseTool {
         }
     }
 
+    /// Automation was never asked for. The helper never asks during a send,
+    /// because nobody may be at the screen to answer, so the person sets it
+    /// up once in the app, which asks while they watch.
+    static func automationNotDeterminedFix(holder: GrantHolder) -> String {
+        switch holder {
+        case .app:
+            openStep(.automation)
+                + " macOS asks once, on this Mac's screen; click OK. Until then sends stop before "
+                + "reaching Messages."
+        case .executable(let executable):
+            "macOS has not asked about Automation for Messages yet, and this process "
+                + "(\(executable)) does not ask while nobody may be at the screen. Use the helper "
+                + "inside iMessage Max instead. " + openStep(.automation)
+        }
+    }
+
+    static let messagesNotRespondingNote =
+        "Messages.app is running but did not answer within 2 s. Sends stop before reaching "
+        + "Messages until it answers again."
+
     static func execute(
         resolver: ContactResolver,
         dbProbe: DatabaseProbe = { Database.checkAccess() },
@@ -219,15 +240,20 @@ enum DiagnoseTool {
 
         let (automationOk, automationStatus) = await automationProbe()
 
-        let overallStatus: DiagnoseStatus = dbOk && contactsAuthorized ? .ready : .needsSetup
-
-        let automationFix = automationFix(holder: holder)
+        // Only the database blocks every tool. Without Contacts names are
+        // missing and without Automation sends stop; each shows in its own
+        // capabilities, and a Mac that leaves Contacts off on purpose is ready.
+        let overallStatus: DiagnoseStatus = dbOk ? .ready : .needsSetup
 
         let automation: Capability
         if automationOk {
             automation = Capability(state: .supported)
         } else if automationStatus == .denied {
-            automation = Capability(state: .permissionGated, fix: automationFix)
+            automation = Capability(state: .permissionGated, fix: automationFix(holder: holder))
+        } else if automationStatus == .notDetermined {
+            automation = Capability(state: .permissionGated, fix: automationNotDeterminedFix(holder: holder))
+        } else if automationStatus == .messagesNotResponding {
+            automation = Capability(state: .unverified, note: messagesNotRespondingNote)
         } else {
             automation = Capability(state: .unverified)
         }
@@ -289,7 +315,8 @@ enum DiagnoseTool {
             .permFullDisk: permFullDisk,
             .permContacts: permContacts,
             .permAutomation: Capability(
-                state: automation.state, fix: automation.fix, detail: automationStatus.rawValue),
+                state: automation.state, note: automation.note, fix: automation.fix,
+                detail: automationStatus.rawValue),
             .richBackend: Capability(state: .unavailable),
         ]
 

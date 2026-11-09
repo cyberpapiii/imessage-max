@@ -69,6 +69,10 @@ public struct PermissionStatus: WireWord {
   /// hidden. Older helpers reported it whenever Messages was closed.
   public static let messagesNotRunning: Self = "messages_not_running"
   public static let messagesNotFound: Self = "messages_not_found"
+  /// Automation: Messages.app is running but did not answer the Automation
+  /// probe in time, so the helper cannot tell whether access is granted.
+  /// Sends fail before anything reaches Messages until it answers again.
+  public static let messagesNotResponding: Self = "messages_not_responding"
   /// Contacts: an authorization state newer than this server knows.
   public static let unknown: Self = "unknown"
 

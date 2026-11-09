@@ -109,19 +109,54 @@ enum SendScript {
         }
         let disposition: DeliveryDisposition =
             fields[2] == DeliveryDisposition.notStarted.rawValue ? .notStarted : .mayHaveCompleted
-        let error = classifyStderr(fields[4], sentFileName: sentFileName, missingTargetError: missingTargetError)
+        let error = classifyStderr(
+            fields[4], errorNumber: Int(fields[3].trimmingCharacters(in: .whitespaces)),
+            sentFileName: sentFileName, missingTargetError: missingTargetError)
         return .failure(SendFailure(error, disposition: disposition))
     }
 
+    /// AppleScript error numbers. The message text is localized (and differs
+    /// even between en_US and en_GB), so the number decides wherever it is known.
+    enum ErrorNumber {
+        /// errAEEventNotPermitted, errAEEventWouldRequireUserConsent
+        static let permission: Set<Int> = [-1743, -1744]
+        /// errAENoSuchObject ("Can't get …"), errAECoercionFail
+        static let missingTarget: Set<Int> = [-1728, -1700]
+        /// procNotFound, connectionInvalid
+        static let unavailable: Set<Int> = [-600, -609]
+        /// fnfErr
+        static let fileNotFound: Set<Int> = [-43]
+    }
+
+    /// Classifies a failed script by its AppleScript error number: the
+    /// marker's errno field, or the "(-1728)" osascript puts at the end of
+    /// an execution error. English text decides only when the number is
+    /// missing or not one of `ErrorNumber`'s. A bare "not permitted" is not
+    /// an Automation refusal: it is how a POSIX EPERM reads.
     static func classifyStderr(
         _ rawStderr: String,
+        errorNumber: Int? = nil,
         sentFileName: String,
         missingTargetError: SendError
     ) -> SendError {
         let stderr = Osascript.normalizingApostrophes(rawStderr).lowercased()
 
+        switch errorNumber ?? trailingErrorNumber(rawStderr) {
+        case let number? where ErrorNumber.permission.contains(number):
+            return .automationPermissionRequired
+        case let number? where ErrorNumber.unavailable.contains(number):
+            return .messagesAppUnavailable
+        case let number? where ErrorNumber.fileNotFound.contains(number):
+            return .fileNotFound(sentFileName)
+        case let number? where ErrorNumber.missingTarget.contains(number):
+            // "Can't get file …" is about the attachment, not the target.
+            let namesTheFile = !sentFileName.isEmpty && stderr.contains(sentFileName.lowercased())
+            return namesTheFile ? unclassified(rawStderr) : missingTargetError
+        default:
+            break
+        }
+
         if stderr.contains("not allowed") ||
-            stderr.contains("not permitted") ||
             stderr.contains("not authorized") ||
             stderr.contains("assistive access")
         {
@@ -148,9 +183,25 @@ enum SendScript {
             return missingTargetError
         }
 
+        return unclassified(rawStderr)
+    }
+
+    private static func unclassified(_ rawStderr: String) -> SendError {
         guard let line = Osascript.clientSafeFirstLine(rawStderr, logLabel: "osascript stderr (scrubbed for client)") else {
             return .failed("Send failed. Check the server log for details.")
         }
         return .failed(line)
+    }
+
+    /// The number osascript appends to an execution error: "… (-1728)".
+    static func trailingErrorNumber(_ rawStderr: String) -> Int? {
+        let line = rawStderr.split(separator: "\n", omittingEmptySubsequences: true).first ?? ""
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard trimmed.hasSuffix(")"), let open = trimmed.lastIndex(of: "(") else { return nil }
+        let inner = trimmed[trimmed.index(after: open)..<trimmed.index(before: trimmed.endIndex)]
+        guard inner.first == "-", inner.count > 1, inner.dropFirst().allSatisfy(\.isASCII), inner.dropFirst().allSatisfy(\.isNumber) else {
+            return nil
+        }
+        return Int(inner)
     }
 }

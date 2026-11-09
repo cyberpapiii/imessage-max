@@ -112,6 +112,72 @@ final class AppleScriptSendResultTests: XCTestCase {
             """)
     }
 
+    // MARK: Classified by error number, not by English text
+
+    private func failure(_ errno: String, _ message: String, file: String = "") -> SendFailure? {
+        let result = SendScript.interpretResult(
+            stdout: "IMESSAGE_MAX_RESULT\tfailure\tnot_started\t\(errno)\t\(message)\n",
+            stderr: "", terminationStatus: 0, sentFileName: file, missingTargetError: missing)
+        guard case .failure(let failure) = result else { return nil }
+        return failure
+    }
+
+    func testLocalizedPermissionRefusalsClassifyByNumber() throws {
+        for (errno, message) in [
+            ("-1743", "Nicht berechtigt, Apple-Events an „Nachrichten“ zu senden."),
+            ("-1743", "Non autorisé à envoyer des événements Apple à Messages."),
+            ("-1744", "「メッセージ」にApple Eventを送信するにはユーザの同意が必要です。"),
+        ] {
+            let error = try XCTUnwrap(failure(errno, message)).error
+            guard case .automationPermissionRequired = error else { return XCTFail("\(errno) \(message): \(error)") }
+        }
+    }
+
+    func testLocalizedMissingTargetsClassifyByNumber() throws {
+        for (errno, message) in [
+            ("-1728", "„Nachrichten“ hat einen Fehler erhalten: „chat id \"iMessage;-;x\"“ kann nicht gelesen werden."),
+            ("-1728", "Messages a renvoyé une erreur : Impossible d’obtenir chat id \"iMessage;-;x\"."),
+            ("-1700", "Impossible de convertir \"x\" en type participant."),
+        ] {
+            let error = try XCTUnwrap(failure(errno, message)).error
+            XCTAssertEqual(error.localizedDescription, missing.localizedDescription, message)
+        }
+    }
+
+    func testLocalizedUnavailableAndFileErrorsClassifyByNumber() throws {
+        let unavailable = try XCTUnwrap(failure("-600", "アプリケーションは起動していません。")).error
+        XCTAssertEqual(unavailable.localizedDescription, SendError.messagesAppUnavailable.localizedDescription)
+        let invalid = try XCTUnwrap(failure("-609", "Verbindung ungültig.")).error
+        XCTAssertEqual(invalid.localizedDescription, SendError.messagesAppUnavailable.localizedDescription)
+        let file = try XCTUnwrap(failure("-43", "Datei photo.png wurde nicht gefunden.", file: "photo.png")).error
+        XCTAssertEqual(file.localizedDescription, SendError.fileNotFound("photo.png").localizedDescription)
+    }
+
+    /// A POSIX EPERM reads "Operation not permitted". It is not an
+    /// Automation refusal and must not be remembered as one.
+    func testOperationNotPermittedIsNotAnAutomationRefusal() throws {
+        let error = try XCTUnwrap(failure("1", "Operation not permitted")).error
+        if case .automationPermissionRequired = error { XCTFail("EPERM classified as Automation denied") }
+        XCTAssertTrue(error.localizedDescription.contains("Operation not permitted"), error.localizedDescription)
+    }
+
+    /// A "Can't get" that names the attachment is about the file, not the
+    /// chat or person.
+    func testMissingObjectNamingTheFileIsNotAMissingTarget() throws {
+        let error = try XCTUnwrap(failure("-1728", "Impossible d’obtenir file \"photo.png\".", file: "photo.png")).error
+        XCTAssertNotEqual(error.localizedDescription, missing.localizedDescription)
+    }
+
+    func testStderrWithoutMarkerClassifiesByTrailingNumber() {
+        let error = SendScript.classifyStderr(
+            "12:40: execution error: Nicht berechtigt, Apple-Events an „Nachrichten“ zu senden. (-1743)",
+            sentFileName: "", missingTargetError: missing)
+        guard case .automationPermissionRequired = error else { return XCTFail("got \(error)") }
+        XCTAssertEqual(SendScript.trailingErrorNumber("execution error: x (-609)\nmore"), -609)
+        XCTAssertNil(SendScript.trailingErrorNumber("no number here"))
+        XCTAssertNil(SendScript.trailingErrorNumber("a note (see above)"))
+    }
+
     func testUnknownPhaseIsMayHaveCompleted() {
         let result = interpret("IMESSAGE_MAX_RESULT\tfailure\tsomething_else\t0\tx\n")
         guard case .failure(let failure) = result else { return XCTFail("expected failure") }
