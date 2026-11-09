@@ -325,7 +325,8 @@ func toolFailureBody<T>(
 extension ContactResolver {
     init(
         seedCache: [String: String],
-        authorization: (authorized: Bool, status: PermissionStatus) = (true, "authorized")
+        authorization: (authorized: Bool, status: PermissionStatus) = (true, "authorized"),
+        region: String? = "US"
     ) {
         self.init(
             source: Source(
@@ -334,7 +335,8 @@ extension ContactResolver {
                 requestAccess: { authorization.authorized }
             ),
             refreshInterval: .infinity,
-            now: { 0 }
+            now: { 0 },
+            region: region
         )
     }
 }

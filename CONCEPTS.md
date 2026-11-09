@@ -8,7 +8,9 @@ This file defines the terms that mean something specific in this project: entiti
 
 - **Verified send**: After a send, the server re-reads the Messages database to prove what happened to the message. It does not assume that an accepted send succeeded.
 
-- **Exact destination**: A send target that resolves to exactly one conversation: a known chat id, or a participant lookup with a single match. The server treats anything else as ambiguous and refuses it instead of guessing.
+- **Exact destination**: A send target that resolves to exactly one conversation: a known chat id, or a participant lookup with a single match whose handle is already in chat.db. The server treats anything else as ambiguous and refuses it instead of guessing. A contact name that matches only a Contacts number or email Messages has never seen is ambiguous, because a number misread from Contacts could reach a stranger.
+
+- **Region**: The Mac's region (`Locale.current.region`). A number written without a country code is read the way someone dialling in that region would: +1 only in a North American Numbering Plan region, and elsewhere the trunk prefix (such as the UK's 0) is dropped and the region's calling code added. A number that cannot be read without guessing is left unread.
 
 ## Send statuses
 
@@ -24,7 +26,7 @@ This file defines the terms that mean something specific in this project: entiti
 
 - **pending_confirmation**: Messages accepted a file attachment send, but the file transfer had not finished within the polling window. This is a normal waiting state for attachments only. It is not a failure and not a request to retry.
 
-- **ambiguous**: The server could not resolve the destination to exactly one conversation, so it sent nothing.
+- **ambiguous**: The server could not resolve the destination to exactly one conversation, so it sent nothing. Either several contacts match, or the one match is a Contacts number or email with no conversation in Messages.
 
 - **failed**: The input was invalid, or the send could not be dispatched. Nothing was verified, because nothing reliable was sent.
 

@@ -434,7 +434,7 @@ After a text send, the server checks chat.db for the sent message. Each `status`
 - `status: "sent"` means verification was unavailable because the database was unreadable. The only evidence is that the transport accepted the send.
 - `status: "pending_confirmation"` means Messages accepted an attachment send, but the server could not confirm within the polling window that the file transfer finished.
 - `status: "failed"` means the send failed.
-- `status: "ambiguous"` means the server could not resolve the target safely.
+- `status: "ambiguous"` means the server could not resolve the target safely: several contacts match, or the one matching contact's number or email has no conversation in Messages. `candidates` lists the matches, and nothing was sent.
 
 #### Disposition and retry_safe
 

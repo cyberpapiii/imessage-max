@@ -1,3 +1,4 @@
+import Contacts
 import IMessageMaxContract
 import XCTest
 @testable import iMessageMax
@@ -40,6 +41,54 @@ final class ContactResolverTests: XCTestCase {
             "+15550000002": "Mary Jo Baker",
             "+15550000003": "Major Tom",
         ])
+    }
+
+    func testDisplayNameFallsBackToNicknameThenOrganization() {
+        func name(_ given: String, _ family: String, _ nickname: String, _ organization: String) -> String? {
+            ContactResolver.displayName(givenName: given, familyName: family, nickname: nickname, organization: organization)
+        }
+        XCTAssertEqual(name("Ann", "Lee", "Annie", "Acme"), "Ann Lee")
+        XCTAssertEqual(name("", "Lee", "Annie", "Acme"), "Lee")
+        XCTAssertEqual(name("", "", "Annie", "Acme"), "Annie")
+        XCTAssertEqual(name("", "", " ", "Acme Plumbing"), "Acme Plumbing")
+        XCTAssertNil(name(" ", "", "", ""))
+    }
+
+    func testNicknameAndOrganizationOnlyContactsAreLoaded() {
+        let acme = CNMutableContact()
+        acme.contactType = .organization
+        acme.organizationName = "Acme Plumbing"
+        acme.phoneNumbers = [CNLabeledValue(label: CNLabelWork, value: CNPhoneNumber(stringValue: "020 7946 0958"))]
+        let gran = CNMutableContact()
+        gran.nickname = "Gran"
+        gran.emailAddresses = [CNLabeledValue(label: CNLabelHome, value: "Gran@Example.com" as NSString)]
+        let unnamed = CNMutableContact()
+        unnamed.phoneNumbers = [CNLabeledValue(label: CNLabelHome, value: CNPhoneNumber(stringValue: "07911 123456"))]
+
+        XCTAssertEqual(
+            ContactResolver.names(from: [acme, gran, unnamed], region: "GB"),
+            ["+442079460958": "Acme Plumbing", "gran@example.com": "Gran"]
+        )
+    }
+
+    func testContactNumbersAreReadInTheRegion() {
+        let ana = CNMutableContact()
+        ana.givenName = "Ana"
+        ana.phoneNumbers = [
+            CNLabeledValue(label: CNLabelPhoneNumberMobile, value: CNPhoneNumber(stringValue: "07911 123456")),
+            CNLabeledValue(label: CNLabelHome, value: CNPhoneNumber(stringValue: "555 123 4567")),
+        ]
+        XCTAssertEqual(ContactResolver.names(from: [ana], region: "GB"), ["+447911123456": "Ana"])
+        XCTAssertEqual(ContactResolver.names(from: [ana], region: "US"), ["+15551234567": "Ana"])
+    }
+
+    func testResolveReadsHandlesInTheResolverRegion() async {
+        let resolver = ContactResolver(seedCache: ["+447911123456": "Ana"], region: "GB")
+        let byNational = await resolver.resolve("07911 123456")
+        XCTAssertEqual(byNational, "Ana")
+        let us = ContactResolver(seedCache: ["+447911123456": "Ana"], region: "US")
+        let usNational = await us.resolve("07911 123456")
+        XCTAssertNil(usNational)
     }
 
     func testEmptyQueryMatchesNothing() async {

@@ -154,11 +154,14 @@ struct SendResponse: Encodable, Sendable {
         SendResponse(.failed, disposition: disposition, error: message)
     }
 
-    static func ambiguous(candidates: [RecipientCandidate]) -> SendResponse {
-        SendResponse(
-            .ambiguous, disposition: .notStarted,
-            message: "Multiple contacts match. Please specify using a phone number, email, or chat_id.",
-            candidates: candidates
-        )
+    static func ambiguous(candidates: [RecipientCandidate], reason: AmbiguityReason = .multipleMatches) -> SendResponse {
+        let message: String
+        switch reason {
+        case .multipleMatches:
+            message = "Multiple contacts match. Please specify using a phone number, email, or chat_id."
+        case .notInMessages:
+            message = "The matching contact's number or email has no conversation in Messages, so nothing proves it reaches the person you meant. Nothing was sent. Check the number with the user. To message someone new, start the conversation in Messages first."
+        }
+        return SendResponse(.ambiguous, disposition: .notStarted, message: message, candidates: candidates)
     }
 }
