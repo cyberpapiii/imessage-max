@@ -54,6 +54,26 @@ final class AudioAttachmentTests: XCTestCase {
     /// Typedstream writes a string of 128 bytes or more with a 0x81 length,
     /// and one of 32 KB or more with 0x82.
     @available(*, deprecated)
+    func testATranscriptionThatNeverFinishesIsStoppedAtTheLimit() async {
+        let started = ContinuousClock.now
+        let workCancelled = expectation(description: "the stuck work is cancelled")
+        let result = await AudioTranscript.bounded(within: .milliseconds(200)) {
+            await AsyncTimeout.sleep(.seconds(600))
+            if Task.isCancelled { workCancelled.fulfill() }
+            return .transcript("never", locale: "en-US")
+        }
+        guard case .unavailable(let reason) = result else { return XCTFail("a hung transcription must end at the limit") }
+        XCTAssertTrue(reason.contains("took longer"), reason)
+        XCTAssertLessThan(ContinuousClock.now - started, .seconds(5))
+        await fulfillment(of: [workCancelled], timeout: 5)
+    }
+
+    func testATranscriptionWithinTheLimitReturnsItsResult() async {
+        let result = await AudioTranscript.bounded(within: .seconds(30)) { .transcript("hello", locale: "en-US") }
+        guard case .transcript(let text, _) = result else { return XCTFail("expected the transcript") }
+        XCTAssertEqual(text, "hello")
+    }
+
     func testStoredTranscriptsOfEveryLengthWidth() {
         for count in [1, 127, 128, 32_767, 32_768] {
             let text = String(repeating: "a", count: count - 1) + "!"

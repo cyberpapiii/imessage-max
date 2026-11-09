@@ -2,6 +2,7 @@ import AVFoundation
 import Foundation
 import MCP
 import Speech
+import Synchronization
 
 /// What an audio attachment says. Messages keeps its own transcript of a
 /// voice message in the message's attributedBody; other audio is
@@ -47,7 +48,8 @@ enum AudioTranscript {
         if let seconds, seconds > maxOnDeviceSeconds {
             result = .unavailable("The audio is longer than \(Int(maxOnDeviceSeconds / 60)) minutes, so it is not transcribed on this Mac.")
         } else if #available(macOS 26, *) {
-            result = await OnDeviceTranscriber.transcribe(URL(fileURLWithPath: file.path))
+            let url = URL(fileURLWithPath: file.path)
+            result = await bounded(within: onDeviceTimeLimit) { await OnDeviceTranscriber.transcribe(url) }
         } else {
             result = .unavailable("Transcribing audio on this Mac needs macOS 26 or later.")
         }
@@ -109,6 +111,75 @@ enum AudioTranscript {
         let text = String(data: data[start..<(start + length)], encoding: .utf8)?
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return text?.isEmpty == false ? text : nil
+    }
+}
+
+extension AudioTranscript {
+    /// A hung transcription must not hold the tool call past a client's tool
+    /// timeout, or hold up an update that waits for no call in flight.
+    static let onDeviceTimeLimit: Duration = .seconds(45)
+
+    /// `work`'s result, or `.unavailable` once `limit` passes. The work is
+    /// cancelled then, and never awaited: a task group would wait for a
+    /// transcription that ignores cancellation.
+    static func bounded(
+        within limit: Duration,
+        _ work: @escaping @Sendable () async -> OnDeviceResult
+    ) async -> OnDeviceResult {
+        let run = BoundedRun()
+        let gate = AsyncTimeout.ResumeGate()
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { (continuation: CheckedContinuation<OnDeviceResult, Never>) in
+                run.arm(continuation)
+                run.start(Task {
+                    let result = await work()
+                    gate.cancelAndResume()
+                    run.finish(result)
+                })
+                Task {
+                    await AsyncTimeout.sleep(limit, gate: gate)
+                    run.cancelWork()
+                    run.finish(.unavailable("Transcribing the audio took longer than \(limit.components.seconds) s, so it was stopped."))
+                }
+            }
+        } onCancel: {
+            run.cancelWork()
+        }
+    }
+
+    private final class BoundedRun: Sendable {
+        private struct State {
+            var continuation: CheckedContinuation<OnDeviceResult, Never>?
+            var task: Task<Void, Never>?
+            var cancelled = false
+        }
+        private let state = Mutex(State())
+
+        func arm(_ continuation: CheckedContinuation<OnDeviceResult, Never>) {
+            state.withLock { $0.continuation = continuation }
+        }
+
+        func start(_ task: Task<Void, Never>) {
+            let cancelled = state.withLock { state -> Bool in
+                state.task = task
+                return state.cancelled
+            }
+            if cancelled { task.cancel() }
+        }
+
+        func cancelWork() {
+            state.withLock { state -> Task<Void, Never>? in
+                state.cancelled = true
+                return state.task
+            }?.cancel()
+        }
+
+        func finish(_ result: OnDeviceResult) {
+            state.withLock { state -> CheckedContinuation<OnDeviceResult, Never>? in
+                defer { state.continuation = nil }
+                return state.continuation
+            }?.resume(returning: result)
+        }
     }
 }
 
