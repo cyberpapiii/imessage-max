@@ -154,6 +154,10 @@ final class GetAttachmentToolTests: XCTestCase {
         XCTAssertEqual(body["error"] as? String, "attachment_offloaded")
         let message = body["message"] as? String ?? ""
         XCTAssertTrue(message.contains("iCloud"), message)
+        // Nothing started a download, so nothing tells the agent to retry (088 finding #24).
+        XCTAssertEqual(body["download_started"] as? Bool, false)
+        XCTAssertTrue(message.contains("Do not retry"), message)
+        XCTAssertFalse(message.contains("try again"), message)
     }
 }
 

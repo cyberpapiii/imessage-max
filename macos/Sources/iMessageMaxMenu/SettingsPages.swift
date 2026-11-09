@@ -124,6 +124,12 @@ struct GeneralPage: View {
             Text("If iMessage Max quits, it starts again by itself. Stop iMessage Max… still turns it off.")
           }
         }
+        if let keepAwake = model.keepAwake {
+          Toggle(isOn: Binding(get: { keepAwake }, set: { model.setKeepAwake($0) })) {
+            Text("Keep this Mac awake")
+            Text("Stops this Mac from sleeping on its own. The display can still sleep.")
+          }
+        }
       } footer: {
         Footnote("Quitting this app leaves iMessage Max running for your assistants.")
       }
@@ -536,7 +542,7 @@ struct AboutPage: View {
   let model: AppModel
 
   var body: some View {
-    let inbox = model.diagnosis?[.liveInbox]?.isSupported == true ? "Available" : "Not available"
+    let inbox = model.liveInboxRuns ? "Available" : "Not available"
     Form {
       Section {
         LabeledContent("Version", value: model.diagnosis?.version ?? "Not connected")

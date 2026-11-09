@@ -52,10 +52,14 @@ public struct DiagnoseResult: Codable, Sendable, Equatable {
   /// other than the companion. The companion shows a one-time notice once it
   /// is above zero. nil from a helper older than the field.
   public let assistantCalls: Int?
+  /// Whether this Mac sleeps on its own, and the Keep this Mac awake
+  /// setting. nil from a helper older than the field.
+  public let power: Power?
 
   public init(
     version: String, processID: Int32, status: DiagnoseStatus, database: DatabaseAccess,
-    contacts: ContactsAccess, capabilities: [String: Capability], assistantCalls: Int? = nil
+    contacts: ContactsAccess, capabilities: [String: Capability], assistantCalls: Int? = nil,
+    power: Power? = nil
   ) {
     self.version = version
     self.processID = processID
@@ -64,6 +68,44 @@ public struct DiagnoseResult: Codable, Sendable, Equatable {
     self.contacts = contacts
     self.capabilities = capabilities
     self.assistantCalls = assistantCalls
+    self.power = power
+  }
+
+  /// A sleeping Mac answers no request and pushes no new messages until it
+  /// wakes, so diagnose reports whether this one can sleep while idle.
+  public struct Power: Codable, Sendable, Equatable {
+    public let status: PowerStatus
+    /// Minutes of inactivity before the Mac sleeps on its current power
+    /// source (`pmset -g` "sleep"); 0 means never. nil when macOS did not say.
+    public let sleepMinutes: Int?
+    /// `pmset disablesleep 1`: the Mac never sleeps on its own.
+    public let sleepDisabled: Bool?
+    /// The Keep this Mac awake setting is on.
+    public let keepAwake: Bool
+    /// The helper holds its PreventUserIdleSystemSleep assertion now.
+    public let assertionHeld: Bool
+    public let fix: String?
+
+    public init(
+      status: PowerStatus, sleepMinutes: Int?, sleepDisabled: Bool?, keepAwake: Bool,
+      assertionHeld: Bool, fix: String? = nil
+    ) {
+      self.status = status
+      self.sleepMinutes = sleepMinutes
+      self.sleepDisabled = sleepDisabled
+      self.keepAwake = keepAwake
+      self.assertionHeld = assertionHeld
+      self.fix = fix
+    }
+
+    enum CodingKeys: String, CodingKey {
+      case status
+      case sleepMinutes = "sleep_minutes"
+      case sleepDisabled = "sleep_disabled"
+      case keepAwake = "keep_awake"
+      case assertionHeld = "assertion_held"
+      case fix
+    }
   }
 
   enum CodingKeys: String, CodingKey {
@@ -74,6 +116,7 @@ public struct DiagnoseResult: Codable, Sendable, Equatable {
     case contacts
     case capabilities
     case assistantCalls = "assistant_calls"
+    case power
   }
 
   public subscript(key: CapabilityKey) -> Capability? { capabilities[key.rawValue] }
@@ -108,6 +151,8 @@ public enum CapabilityKey: String, CaseIterable, Sendable {
   case replyThreading = "reply_threading"
   case tapbacks = "tapbacks"
   case editUnsend = "edit_unsend"
+  /// Reported for the connection that asks: only a legacy HTTP session
+  /// receives notifications. `detail` is a `LiveInboxDetail` word.
   case liveInbox = "live_inbox"
   case permFullDisk = "perm_full_disk"
   case permContacts = "perm_contacts"

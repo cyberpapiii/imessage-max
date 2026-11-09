@@ -62,9 +62,14 @@ enum ServerStartup {
     ) async throws {
         let resolver = ContactResolver()
         let access = MessagesAccess(memory: AutomationMemory(folder: supportFolder))
-        let (newRows, newRowsSink) = AsyncStream<Int64>.makeStream()
+        let (newRows, newRowsSink) = AsyncStream<MessageWatcher.NewRows>.makeStream()
         let watcher = MessageWatcher(databasePath: Database.defaultPath) { newRowsSink.yield($0) }
-        let catalog = ToolCatalog(database: Database(), resolver: resolver, access: access, liveInbox: { watcher.isLive })
+        let keepAwake = KeepAwake(folder: supportFolder)
+        keepAwake.start()
+        defer { keepAwake.stop() }
+        let catalog = ToolCatalog(
+            database: Database(), resolver: resolver, access: access, liveInbox: { watcher.isLive },
+            keepAwake: keepAwake)
         let transport = HTTPTransport(
             host: host,
             port: port,
@@ -81,8 +86,8 @@ enum ServerStartup {
         announce(transport: "http addr=\(host):\(port)", resolver: resolver, contactsPolicy: contactsPolicy)
 
         Task {
-            for await rowid in newRows {
-                await transport.notifyNewMessages(maxRowid: rowid)
+            for await rows in newRows {
+                await transport.notifyNewMessages(maxRowid: rows.maxRowid, late: rows.late)
             }
         }
         watcher.start()

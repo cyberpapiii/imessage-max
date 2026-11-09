@@ -290,4 +290,68 @@ final class GetMessagesSinceToolTests: XCTestCase {
         let reacted = try XCTUnwrap(messages.first)
         XCTAssertNotNil(reacted["reactions"], "the tapback still attaches without associated_message_emoji: \(reacted)")
     }
+
+    // MARK: - Late-synced history (088 finding #25)
+
+    private let hour: Int64 = 3_600_000_000_000
+
+    /// One DM whose rows have the given dates, in ROWID order from 1.
+    private func datedFixture(_ name: String, _ dates: [Int64]) throws -> ToolTestDatabase {
+        let fixture = try ToolTestDatabase(name: name)
+        try fixture.insertHandle(rowId: 1, handle: "+15550000001")
+        try fixture.insertChat(rowId: 1, guid: "iMessage;-;+15550000001", displayName: nil)
+        try fixture.joinChatHandle(chatId: 1, handleId: 1)
+        for (index, date) in dates.enumerated() {
+            let rowid = index + 1
+            try fixture.insertMessage(rowId: rowid, guid: "d-\(rowid)", text: "m\(rowid)", date: date, isFromMe: false, handleId: 1)
+            try fixture.joinChatMessage(chatId: 1, messageId: rowid)
+        }
+        return fixture
+    }
+
+    /// Rows 3 and 4 arrive after 2 but are dated before it, as a Messages in
+    /// iCloud backfill does: 3 by years, 4 by half an hour. 5 is new.
+    func testLateHistoryIsFlaggedAgainstRowsAlreadyThere() async throws {
+        let now = AppleTime.fromDate(Date())
+        let fixture = try datedFixture("messages-since-late", [
+            now - 3 * hour, now - 2 * hour, now - 20_000 * hour, now - 2 * hour - hour / 2, now - hour,
+        ])
+        let tool = GetMessagesSinceTool(db: fixture.database(), resolver: makeSeededResolver())
+        let json = try decodeJSONDictionary(from: try await tool.execute(args: ["since_rowid": .int(2)]))
+        let messages = try decodeJSONArray(json["messages"])
+        XCTAssertEqual(messages.map { $0["id"] as? String }, ["msg_3", "msg_4", "msg_5"])
+        XCTAssertEqual(messages.map { $0["late"] as? Bool }, [true, nil, nil])
+        XCTAssertNil(json["skipped_old"], "skipped_old appears only with max_age")
+
+        // The same rows read from an earlier cursor are judged the same way.
+        let wider = try decodeJSONDictionary(from: try await tool.execute(args: ["since_rowid": .int(0)]))
+        let late = try decodeJSONArray(wider["messages"]).filter { $0["late"] as? Bool == true }
+        XCTAssertEqual(late.map { $0["id"] as? String }, ["msg_3"])
+    }
+
+    func testMaxAgeSkipsOldRowsButAdvancesTheCursor() async throws {
+        let now = AppleTime.fromDate(Date())
+        let fixture = try datedFixture("messages-since-max-age", [
+            now - 10 * hour, now - 60_000_000_000, now - 48 * hour, now,
+        ])
+        let tool = GetMessagesSinceTool(db: fixture.database(), resolver: makeSeededResolver())
+        let json = try decodeJSONDictionary(from: try await tool.execute(args: [
+            "since_rowid": .int(1), "max_age": .int(3600),
+        ]))
+        XCTAssertEqual(try decodeJSONArray(json["messages"]).map { $0["id"] as? String }, ["msg_2", "msg_4"])
+        XCTAssertEqual(json["skipped_old"] as? Int, 1)
+        XCTAssertEqual(json["next_rowid"] as? Int, 4)
+        XCTAssertEqual(json["has_more"] as? Bool, false)
+
+        let none = try decodeJSONDictionary(from: try await tool.execute(args: ["since_rowid": .int(4), "max_age": .int(60)]))
+        XCTAssertEqual(none["skipped_old"] as? Int, 0)
+    }
+
+    func testFutureDatedRowsDoNotMarkLaterRowsLate() async throws {
+        let now = AppleTime.fromDate(Date())
+        let fixture = try datedFixture("messages-since-future", [now + 1_000 * hour, now - 60_000_000_000])
+        let tool = GetMessagesSinceTool(db: fixture.database(), resolver: makeSeededResolver())
+        let json = try decodeJSONDictionary(from: try await tool.execute(args: ["since_rowid": .int(0)]))
+        XCTAssertEqual(try decodeJSONArray(json["messages"]).compactMap { $0["late"] as? Bool }, [])
+    }
 }

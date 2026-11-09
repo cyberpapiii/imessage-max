@@ -27,6 +27,35 @@ public struct CapabilityState: WireWord {
   public static let degraded: Self = "degraded"
 }
 
+/// `power.status` in the diagnose reply.
+public struct PowerStatus: WireWord {
+  public let rawValue: String
+  public init(rawValue: String) { self.rawValue = rawValue }
+
+  /// System sleep is off, or the helper holds its keep-awake assertion.
+  public static let staysAwake: Self = "stays_awake"
+  /// The Mac sleeps after `sleep_minutes` of inactivity.
+  public static let idleSleep: Self = "idle_sleep"
+  /// macOS did not report the sleep setting.
+  public static let unknown: Self = "unknown"
+}
+
+/// `capabilities.live_inbox.detail` in the diagnose reply. The state is for
+/// the connection that called diagnose; the detail also says whether the
+/// helper's watcher runs at all.
+public struct LiveInboxDetail: WireWord {
+  public let rawValue: String
+  public init(rawValue: String) { self.rawValue = rawValue }
+
+  /// This legacy HTTP session receives new-message notifications over SSE.
+  public static let sessionSSE: Self = "session_sse"
+  /// The watcher runs, but this connection (stdio, or the stateless modern
+  /// lane) never receives notifications. Poll get_messages_since.
+  public static let pollOnly: Self = "poll_only"
+  /// No watcher runs in this process, so no connection gets notifications.
+  public static let watcherNotRunning: Self = "watcher_not_running"
+}
+
 /// Top-level `status` in the diagnose reply.
 public struct DiagnoseStatus: WireWord {
   public let rawValue: String

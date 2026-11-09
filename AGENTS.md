@@ -34,6 +34,8 @@ Other Makefile targets:
 - `make clean` removes debug artifacts and clears the helper log
 - `make version` checks that the version sites agree, and `make release-check` runs everything that must pass before tagging (see `docs/RELEASING.md`)
 
+The companion's Keep this Mac awake setting (off by default) is the `keep-awake` file beside the token (`ServiceDefaults.keepAwakeFileName`). While it exists, the HTTP helper holds a `PreventUserIdleSystemSleep` power assertion (`Server/KeepAwake.swift`). A Dispatch timer checks the file every 5 s, and `diagnose` checks it again before it reports `power`, so a change needs no restart.
+
 The server runs as the launchd agent `com.cyberpapiii.imessage-max.helper`. The default port is 47821, and the bundled agent plist can pin another with `--port`. It starts at login and restarts after a crash. While Keep running is on (the default) it also restarts after a plain quit. Stop in the companion keeps it down until the next login. System Settings → General → Login Items & Extensions lists it once, as iMessage Max, under "App Background Activity".
 
 Every HTTP request needs `Authorization: Bearer <token>`, on every route and both eras. On first start the server writes a random token to `~/Library/Application Support/iMessage Max/token` (mode 0600, folder 0700) and reuses it after that. It refuses to start if the file is readable by other users, owned by someone else, or holds anything but a token, and it never overwrites that file. `--token-file <path>` points a dev or test server at another file, in a folder that already exists and belongs to you; the server leaves that folder's mode alone. A missing or wrong token gets 401 and one `auth=rejected` stderr line, which never holds the token. Stdio needs no token.

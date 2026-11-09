@@ -135,11 +135,11 @@ actor HTTPTransport {
     }
 
     @discardableResult
-    func notifyNewMessages(maxRowid: Int64) async -> Int {
+    func notifyNewMessages(maxRowid: Int64, late: Bool = false) async -> Int {
         await sessionManager.notifyAllSessions(
             Message<NewMessagesNotification>(
                 method: NewMessagesNotification.name,
-                params: .init(max_rowid: maxRowid)
+                params: .init(max_rowid: maxRowid, late: late ? true : nil)
             )
         )
     }

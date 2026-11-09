@@ -264,6 +264,7 @@ get_messages_since(since_rowid=234000)        # Messages after that row
 get_messages_since(since_rowid=234000, limit=50)
 get_messages_since(since_rowid=234000, chat_id="chat123")
 get_messages_since(since_rowid=234000, include_filtered=True)
+get_messages_since(since_rowid=234000, max_age=86400)   # Skip anything dated over a day ago
 ```
 
 | Parameter | Type | Default | Meaning |
@@ -273,6 +274,7 @@ get_messages_since(since_rowid=234000, include_filtered=True)
 | `limit` | integer | 100 | Maximum messages to return (1–500) |
 | `include_filtered` | boolean | false | Include junk / unknown-sender chats |
 | `include_reactions` | boolean | true | Attach reaction strings to returned messages |
+| `max_age` | integer | omitted | Skip messages dated more than this many seconds before now. Skipped rows still advance `next_rowid` and are counted in `skipped_old`, which appears only when you pass `max_age`. |
 
 Example response:
 
@@ -306,6 +308,8 @@ Example response:
 ```
 
 To poll, call once without `since_rowid` and store `next_rowid`. Then call with it on whatever schedule you choose. When `stalled` is true, wait about one second and retry with the same cursor. Never compare `next_rowid` to message ids.
+
+Messages in iCloud can sync old history into `chat.db` long after it was sent, for example on a newly set-up Mac. Those rows get new ROWIDs, so they come after your cursor. A message with `late: true` is such history: its date is more than an hour older than the newest of the rows already in `chat.db` before it. Do not treat it as new mail. Messages that arrive after the Mac wakes from sleep are dated after the rows before them, so they are not marked late. On a legacy HTTP session the `notifications/imessage/new_messages` notification carries `late: true` when every new row is late.
 
 ### get_attachment
 Retrieve image content by attachment ID with resolution variants.
@@ -422,6 +426,10 @@ diagnose()  # Returns: database status, contacts count, permissions, capabilitie
 
 Every `fix` for the helper inside `iMessage Max.app` names a permission in the app, such as "Open iMessage Max and turn on Full Disk Access." The permissions are Background activity, Full Disk Access, Contacts and Automation. For a bare executable, a fix names the System Settings switch to turn on. No fix names a terminal command.
 
+`capabilities.live_inbox` describes the connection that calls `diagnose`. Only a legacy HTTP session receives `notifications/imessage/new_messages`, so only there is it `supported` (detail `session_sse`). On stdio and on the stateless 2026-07-28 lane it is `unsupported`, with detail `poll_only` while the helper's watcher runs or `watcher_not_running`: poll `get_messages_since` instead.
+
+`power` says whether the Mac sleeps while idle, which stops the endpoint and the live inbox. `status` is `stays_awake`, `idle_sleep` (with `sleep_minutes` and a `fix`) or `unknown`. `keep_awake` is the companion's Keep this Mac awake setting and `assertion_held` whether the helper holds its power assertion now.
+
 `assistant_calls` counts the `tools/call` requests this helper process has received from clients other than the companion app. The app tells you once, the first time it is above zero.
 
 ## Release checks
@@ -521,7 +529,7 @@ receive one message.
 
 ### Images show "attachment_offloaded" error
 
-Some attachments are stored in iCloud, not on disk. `list_attachments` includes nested attachment summaries with `available: true/false` for each file. To download offloaded attachments, open the conversation in Messages.app.
+Some attachments are stored in iCloud, not on disk. `list_attachments` includes nested attachment summaries with `available: true/false` for each file. iMessage Max cannot download them: `get_attachment` returns `attachment_offloaded` with `download_started: false`, and retrying does not help. To download offloaded attachments, open the conversation in Messages.app. `diagnose` reports `attachments_offloaded` as `degraded` for this reason.
 
 ### MCP client not loading the server
 

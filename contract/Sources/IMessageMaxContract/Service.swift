@@ -27,6 +27,11 @@ public enum ServiceDefaults {
   /// file's folder. The helper reads it as it stops: without it a SIGTERM
   /// exits non-zero and launchd starts the helper again.
   public static let stayStoppedFileName = "stay-stopped"
+  /// The Keep this Mac awake setting, on while this file exists, beside the
+  /// token file like `stayStoppedFileName`. While it is on, the running
+  /// helper holds a PreventUserIdleSystemSleep power assertion. The helper
+  /// checks for the file every few seconds, so a change needs no restart.
+  public static let keepAwakeFileName = "keep-awake"
   /// The SHA-256, in hex, of the agent plist the companion last registered,
   /// beside the token file like `stayStoppedFileName`. SMAppService keeps a
   /// registered job on the plist it first loaded, so the companion compares
