@@ -25,7 +25,7 @@ Each privacy rule pins the app by its code requirement. Get it from the installe
 codesign -dr - "/Applications/iMessage Max.app"
 ```
 
-For the released 2.0.0 app (from `iMessage-Max-2.0.0.dmg`) and for local Developer ID builds, it prints:
+For released apps (2.0.0 and later) and for local Developer ID builds, it prints:
 
 ```text
 designated => identifier "com.cyberpapiii.imessage-max.menubar" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] /* exists */ and certificate leaf[field.1.2.840.113635.100.6.1.13] /* exists */ and certificate leaf[subject.OU] = HJF7LN64XX

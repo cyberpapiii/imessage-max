@@ -4,7 +4,7 @@ This guide is for a Mac with no display, keyboard or person nearby, such as a Ma
 
 For MDM deployment to many Macs, see [fleet.md](fleet.md). To remove iMessage Max, see [uninstall.md](uninstall.md).
 
-This guide follows `main`. Some behaviour it describes, such as Keep running, Keep this Mac awake, the bridge's desktop-login message and its reconnect after a helper restart, is newer than 2.0.0. The Unreleased section of [CHANGELOG.md](../CHANGELOG.md) lists it.
+This guide describes 2.1.0. Keep running, Keep this Mac awake, the bridge's desktop-login message and its reconnect after a helper restart need 2.1.0 or later; [CHANGELOG.md](../CHANGELOG.md) lists what changed.
 
 ## Checklist
 
@@ -236,7 +236,7 @@ A healthy Mac prints:
 ```json
 {
   "status": "ready",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "database": "accessible",
   "contacts": "authorized",
   "automation": {

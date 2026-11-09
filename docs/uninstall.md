@@ -64,7 +64,7 @@ For a cask install, use Homebrew instead, and skip step 5:
 brew uninstall --zap --cask imessage-max
 ```
 
-The cask's `uninstall` quits the companion, stops the helper and removes the app and the `imessage-max` link. From the release after 2.0.0, it stops the helper with SIGUSR1, which the helper treats as a stop that stays stopped, so launchd does not start it again from the deleted app. The 2.0.0 cask sends SIGTERM, which stops a 2.0.0 helper for good too, because 2.0.0 has no Keep running setting. `--zap` also removes the launchd job and every path in step 5. Without `--zap`, `brew uninstall --cask imessage-max` leaves those files behind.
+The cask's `uninstall` quits the companion, stops the helper and removes the app and the `imessage-max` link. From 2.1.0, it stops the helper with SIGUSR1, which the helper treats as a stop that stays stopped, so launchd does not start it again from the deleted app. The 2.0.0 cask sends SIGTERM, which stops a 2.0.0 helper for good too, because 2.0.0 has no Keep running setting. `--zap` also removes the launchd job and every path in step 5. Without `--zap`, `brew uninstall --cask imessage-max` leaves those files behind.
 
 ## 5. Remove the files
 
