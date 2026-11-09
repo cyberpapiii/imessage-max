@@ -112,7 +112,7 @@ struct GetAttachment {
 
         return ToolDefinition(
             name: "get_attachment",
-            description: "Get an attachment's content by attachment ID. The first block is JSON metadata. An image comes back at the requested resolution variant: vision (1568px, best for AI analysis), thumb (400px, quick preview), or full (original size). A PDF, or a plain text, RTF, Word or OpenDocument file, comes back as its text, max_chars at a time; when the metadata has next_offset, pass it as offset to read on. A PDF with no text layer, such as a scan, comes back as images of its first \(scannedPagesShown) pages. A video comes back as up to \(VideoFrames.count) still frames spread across its length, each half the variant's size on its long side (full: 1568px), with duration_s and frame_times_s in the metadata.",
+            description: "Get an attachment's content by attachment ID. The first block is JSON metadata. An image comes back at the requested resolution variant: vision (1568px, best for AI analysis), thumb (400px, quick preview), or full (original size). A PDF, or a plain text, RTF, Word or OpenDocument file, comes back as its text, max_chars at a time; when the metadata has next_offset, pass it as offset to read on. A PDF with no text layer, such as a scan, comes back as images of its first \(scannedPagesShown) pages. A video comes back as up to \(VideoFrames.count) still frames spread across its length, each half the variant's size on its long side (full: 1568px), with duration_s and frame_times_s in the metadata. A voice message or other audio comes back as its transcript, with duration_s and transcript_source (messages: the transcript Messages stored; on_device: transcribed on this Mac). When there is no transcript, transcript_unavailable says why.",
             inputSchema: inputSchema,
             annotations: Tool.Annotations(
                 title: "Get Attachment",
@@ -245,7 +245,7 @@ struct GetAttachment {
             return try await VideoFrames.content(of: file, variant: variant, processor: imageProcessor)
 
         case .audio:
-            throw Self.unsupported(file, "Attachment type 'audio' is not supported. Only images are supported.")
+            return try await AudioTranscript.content(of: file, db: db)
 
         case .pdf, .document, .other:
             return try documentContent(file, variant: variant, text: text)

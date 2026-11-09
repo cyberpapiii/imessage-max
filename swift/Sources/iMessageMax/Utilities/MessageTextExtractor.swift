@@ -26,33 +26,30 @@ enum MessageTextExtractor {
             return nil
         }
 
-        let idx = nsStringRange.upperBound + 5
-
-        guard idx < data.count else { return nil }
-
-        let lengthByte = data[idx]
-        let length: Int
-        let dataStart: Int
-
-        if lengthByte == 0x81 {
-            guard idx + 3 <= data.count else { return nil }
-            length = Int(data[idx + 1]) | (Int(data[idx + 2]) << 8)
-            dataStart = idx + 3
-        } else if lengthByte == 0x82 {
-            guard idx + 5 <= data.count else { return nil }
-            length = Int(data[idx + 1]) | (Int(data[idx + 2]) << 8)
-                | (Int(data[idx + 3]) << 16) | (Int(data[idx + 4]) << 24)
-            dataStart = idx + 5
-        } else if lengthByte >= 0x80 {
-            return nil
-        } else {
-            length = Int(lengthByte)
-            dataStart = idx + 1
-        }
-
-        guard length > 0 && dataStart + length <= data.count else { return nil }
+        guard let (length, dataStart) = typedstreamLength(in: data, at: nsStringRange.upperBound + 5),
+              length > 0 && dataStart + length <= data.count
+        else { return nil }
 
         let textData = data[dataStart..<(dataStart + length)]
         return String(data: textData, encoding: .utf8)
+    }
+
+    /// Reads a typedstream integer length at `idx` of zero-based `data`, and
+    /// returns it with the index of the first byte after it.
+    static func typedstreamLength(in data: Data, at idx: Int) -> (length: Int, start: Int)? {
+        guard idx < data.count else { return nil }
+        let lengthByte = data[idx]
+        if lengthByte == 0x81 {
+            guard idx + 3 <= data.count else { return nil }
+            return (Int(data[idx + 1]) | (Int(data[idx + 2]) << 8), idx + 3)
+        }
+        if lengthByte == 0x82 {
+            guard idx + 5 <= data.count else { return nil }
+            let length = Int(data[idx + 1]) | (Int(data[idx + 2]) << 8)
+                | (Int(data[idx + 3]) << 16) | (Int(data[idx + 4]) << 24)
+            return (length, idx + 5)
+        }
+        if lengthByte >= 0x80 { return nil }
+        return (Int(lengthByte), idx + 1)
     }
 }

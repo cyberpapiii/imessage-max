@@ -426,6 +426,12 @@ A video comes back as up to 4 still frames, taken from the middle of four equal 
 {"id":"att5","type":"video","name":"IMG_0412.MOV","chat":{"id":"chat3","name":"Alice Smith"},"available":true,"duration_s":8,"frame_times_s":[1,3,5,7]}
 ```
 
+A voice message or other audio comes back as its transcript, one text block, with `duration_s` and `transcript_source` in the metadata. For a voice message, the transcript is the one Messages shows under it, which Messages keeps in the message's `attributedBody` (`transcript_source: "messages"`). Other audio, and voice messages that Messages never transcribed, are transcribed on this Mac with Apple's `SpeechTranscriber` in the Mac's language (`transcript_source: "on_device"`, plus `locale`). That needs macOS 26 or later and the on-device speech model for the language, and audio over 10 minutes is not transcribed. Neither way needs a permission beyond Full Disk Access. When there is no transcript, `transcript_unavailable` says why and no text block follows.
+
+```json
+{"id":"att4","type":"audio","name":"Audio Message.caf","chat":{"id":"chat3","name":"Alice Smith"},"available":true,"duration_s":3.2,"transcript_source":"messages"}
+```
+
 ### list_chats
 Browse recent chats with previews.
 
