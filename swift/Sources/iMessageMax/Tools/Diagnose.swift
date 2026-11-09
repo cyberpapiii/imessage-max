@@ -12,13 +12,18 @@ typealias LiveInboxProbe = @Sendable () -> Bool
 
 typealias HTTPEndpointProbe = @Sendable () -> DiagnoseResult.HTTPEndpoint?
 
+typealias SleepProbe = @Sendable () -> SleepSettings
+
+typealias KeepAwakeProbe = @Sendable () -> KeepAwake.State
+
 /// nil when the server has no account check to run.
 typealias IMessageAccountProbe = @Sendable () async -> IMessageAccountStatus?
 
 enum DiagnoseTool {
     static func definition(
         db: Database, resolver: ContactResolver, access: MessagesAccess, liveInbox: @escaping LiveInboxProbe,
-        http: @escaping HTTPEndpointProbe = { nil }
+        http: @escaping HTTPEndpointProbe = { nil },
+        keepAwake: KeepAwake? = nil
     ) -> ToolDefinition {
         let inputSchema: Value = .object([
             "type": "object",
@@ -30,8 +35,10 @@ enum DiagnoseTool {
             name: DiagnoseResult.toolName,
             description: """
                 Call diagnose before you attempt any send, attachment, or live inbox operation. \
-                Live inbox means push notifications when new messages arrive. It is `supported` \
-                only in HTTP mode while the watcher runs. \
+                Live inbox means push notifications when new messages arrive. live_inbox describes \
+                the connection that calls diagnose: it is `supported` only on a legacy HTTP session, \
+                which receives notifications over SSE. On stdio and stateless connections it is \
+                `unsupported`: poll get_messages_since instead. \
                 Check capabilities.<key>.state for each feature you plan to use. \
                 "supported" means the feature is available and probed on this install. \
                 "unsupported" means the feature does not exist. Do not attempt it or offer \
@@ -67,7 +74,10 @@ enum DiagnoseTool {
                 accountProbe: { await MessagesAccess.offPool { access.account.status() } },
                 schemaProbe: { try? db.schema() },
                 liveInboxProbe: liveInbox,
-                httpProbe: http
+                httpProbe: http,
+                lane: ToolCallDispatch.lane,
+                sleepProbe: { SleepSettings.current() },
+                keepAwakeProbe: { keepAwake?.refresh() ?? KeepAwake.State() }
             )
             return [.plainText(try FormatUtils.encodeJSON(result))]
         }
@@ -270,6 +280,9 @@ enum DiagnoseTool {
         schemaProbe: SchemaProbe = { nil },
         liveInboxProbe: LiveInboxProbe = { false },
         httpProbe: HTTPEndpointProbe = { nil },
+        lane: ToolCallDispatch.Lane? = nil,
+        sleepProbe: SleepProbe = { SleepSettings() },
+        keepAwakeProbe: KeepAwakeProbe = { KeepAwake.State() },
         usageDescriptionProbe: UsageDescriptionProbe = { ContactResolver.usageDescriptionEmbedded },
         holder: GrantHolder = .current,
         assistantCalls: @Sendable () -> Int = { ToolCallDispatch.assistantCalls.withLock { $0 } }
@@ -363,9 +376,7 @@ enum DiagnoseTool {
             ? Capability(state: .supported)
             : Capability(state: .permissionGated, fix: databaseFix)
         let attachmentsOffloaded = dbOk
-            ? Capability(
-                state: .supported,
-                note: "Requesting an offloaded file starts an iCloud download. Retry get_attachment after a few seconds.")
+            ? Capability(state: .degraded, note: offloadedNote, fix: offloadedFix)
             : Capability(state: .permissionGated)
 
         let permFullDisk: Capability
@@ -395,10 +406,7 @@ enum DiagnoseTool {
             .replyThreading: Capability(state: .unsupported),
             .tapbacks: Capability(state: .unsupported),
             .editUnsend: Capability(state: .unsupported),
-            .liveInbox: Capability(
-                state: liveInboxProbe() ? .supported : .unavailable,
-                detail: "\(NewMessagesNotification.name) over the legacy session SSE stream; stateless clients poll get_messages_since"
-            ),
+            .liveInbox: liveInbox(lane: lane, watcherLive: liveInboxProbe()),
             .permFullDisk: permFullDisk,
             .permContacts: permContacts,
             .permAutomation: Capability(
@@ -427,7 +435,76 @@ enum DiagnoseTool {
             ),
             capabilities: Dictionary(uniqueKeysWithValues: capabilities.map { ($0.key.rawValue, $0.value) }),
             assistantCalls: assistantCalls(),
-            http: httpProbe()
+            http: httpProbe(),
+            power: power(sleep: sleepProbe(), keepAwake: keepAwakeProbe(), holder: holder)
         )
+    }
+
+    static let offloadedNote =
+        "get_attachment cannot download a file that Messages keeps only in iCloud. It returns "
+        + "attachment_offloaded, and retrying does not help unless its reply says a download started."
+    static let offloadedFix =
+        "If assistants need older attachments, keep them on this Mac: open the conversation in "
+        + "Messages to download them, and turn off Optimize Mac Storage in System Settings -> "
+        + "Apple Account -> iCloud."
+
+    static let pollNote =
+        "This connection never receives \(NewMessagesNotification.name). Poll get_messages_since "
+        + "with the next_rowid it returns."
+
+    /// Only `HTTPTransport.notifyNewMessages` sends notifications, and only to
+    /// legacy HTTP sessions, so the answer depends on who asks.
+    static func liveInbox(lane: ToolCallDispatch.Lane?, watcherLive: Bool) -> Capability {
+        let detail: LiveInboxDetail = watcherLive ? .pollOnly : .watcherNotRunning
+        guard case .legacyHTTP = lane else {
+            return Capability(state: .unsupported, note: pollNote, detail: detail.rawValue)
+        }
+        guard watcherLive else {
+            return Capability(
+                state: .degraded,
+                note: "The helper is not watching chat.db, so no notifications arrive. "
+                    + "Poll get_messages_since until it can read the database again.",
+                detail: detail.rawValue)
+        }
+        return Capability(
+            state: .supported,
+            note: "\(NewMessagesNotification.name) arrives on this session's SSE stream with max_rowid; "
+                + "fetch the new rows with get_messages_since. late: true means every new row is "
+                + "late-synced history.",
+            detail: LiveInboxDetail.sessionSSE.rawValue)
+    }
+
+    static func power(sleep: SleepSettings, keepAwake: KeepAwake.State, holder: GrantHolder) -> DiagnoseResult.Power {
+        let status: PowerStatus
+        var fix: String? = nil
+        if keepAwake.held || sleep.sleepDisabled == true || sleep.sleepMinutes == 0 {
+            status = .staysAwake
+        } else if let minutes = sleep.sleepMinutes {
+            status = .idleSleep
+            fix = idleSleepFix(minutes: minutes, keepAwake: keepAwake, holder: holder)
+        } else {
+            status = .unknown
+        }
+        return DiagnoseResult.Power(
+            status: status, sleepMinutes: sleep.sleepMinutes, sleepDisabled: sleep.sleepDisabled,
+            keepAwake: keepAwake.requested, assertionHeld: keepAwake.held, fix: fix)
+    }
+
+    static let turnOffAutomaticSleep =
+        "turn off automatic sleep in System Settings -> Energy (Battery -> Options on a laptop)."
+
+    static func idleSleepFix(minutes: Int, keepAwake: KeepAwake.State, holder: GrantHolder) -> String {
+        let problem = "This Mac sleeps after \(minutes) minutes without activity, and iMessage Max "
+            + "answers nothing and sees no new messages while it sleeps. "
+        if keepAwake.requested {
+            return problem + "Keep this Mac awake is on, but macOS refused its power assertion, so "
+                + turnOffAutomaticSleep
+        }
+        switch holder {
+        case .app:
+            return problem + "Open iMessage Max and turn on Keep this Mac awake, or " + turnOffAutomaticSleep
+        case .executable:
+            return problem + "To keep it awake, " + turnOffAutomaticSleep
+        }
     }
 }

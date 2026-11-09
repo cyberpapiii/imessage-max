@@ -89,6 +89,30 @@ private func model(
     #expect(first.problem == nil)
   }
 
+  @MainActor @Test func keepAwakeIsOffUntilTheUserTurnsItOn() throws {
+    let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: home) }
+    let marker = home.appendingPathComponent(ServiceDefaults.tokenPath).deletingLastPathComponent()
+      .appendingPathComponent(ServiceDefaults.keepAwakeFileName)
+    let first = try model(StuckSystem(running: false), home: home)
+    #expect(first.keepAwake == false)
+
+    first.setKeepAwake(true)
+    #expect(first.keepAwake == true)
+    #expect(FileManager.default.fileExists(atPath: marker.path))
+    #expect(try model(StuckSystem(running: false), home: home).keepAwake == true)
+
+    first.setKeepAwake(false)
+    #expect(first.keepAwake == false)
+    #expect(!FileManager.default.fileExists(atPath: marker.path))
+    #expect(first.problem == nil)
+
+    let detached = AppModel(controller: nil, milestones: Milestones(defaults: nil))
+    #expect(detached.keepAwake == nil)
+    detached.setKeepAwake(true)
+    #expect(detached.keepAwake == nil)
+  }
+
   @MainActor @Test func keepRunningIsHiddenWithoutAHelperToKeep() {
     let model = AppModel(
       controller: nil, milestones: Milestones(defaults: nil))

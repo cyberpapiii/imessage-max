@@ -27,6 +27,11 @@ public enum ServiceDefaults {
   /// file's folder. The helper reads it as it stops: without it a SIGTERM
   /// exits non-zero and launchd starts the helper again.
   public static let stayStoppedFileName = "stay-stopped"
+  /// The Keep this Mac awake setting, on while this file exists, beside the
+  /// token file like `stayStoppedFileName`. While it is on, the running
+  /// helper holds a PreventUserIdleSystemSleep power assertion. The helper
+  /// checks for the file every few seconds, so a change needs no restart.
+  public static let keepAwakeFileName = "keep-awake"
   /// The helper's exit code after a SIGTERM while Keep running is on.
   /// EX_TEMPFAIL: non-zero, so launchd relaunches the helper, and a code the
   /// companion reads as a clean stop, not as a failing launch.

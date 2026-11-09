@@ -51,7 +51,8 @@ final class ToolCatalog: @unchecked Sendable {
         resolver: ContactResolver,
         access: MessagesAccess,
         liveInbox: @escaping @Sendable () -> Bool = { false },
-        http: @escaping HTTPEndpointProbe = { nil }
+        http: @escaping HTTPEndpointProbe = { nil },
+        keepAwake: KeepAwake? = nil
     ) {
         self.init([
             FindChatTool.definition(db: database, resolver: resolver),
@@ -66,7 +67,8 @@ final class ToolCatalog: @unchecked Sendable {
             ListAttachments.definition(db: database, resolver: resolver),
             GetAttachment.definition(db: database, resolver: resolver),
             SendTool.definition(db: database, resolver: resolver, access: access),
-            DiagnoseTool.definition(db: database, resolver: resolver, access: access, liveInbox: liveInbox, http: http),
+            DiagnoseTool.definition(
+                db: database, resolver: resolver, access: access, liveInbox: liveInbox, http: http, keepAwake: keepAwake),
         ])
     }
 

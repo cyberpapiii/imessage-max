@@ -79,7 +79,7 @@ rm -f  "$HOME/Library/Preferences/com.cyberpapiii.imessage-max.menubar.plist"
 rm -f  "$HOME/Library/Logs/imessage-max.stderr.log" "$HOME/Library/Logs/imessage-max.stdout.log"
 ```
 
-- `Application Support/iMessage Max` holds the token, the socket `mcp.sock`, and the `stay-stopped`, `automation-answer` and `registered-agent.sha256` files. A 1.x install also kept a copied helper in its `bin` folder.
+- `Application Support/iMessage Max` holds the token, the socket `mcp.sock`, and the `stay-stopped`, `keep-awake`, `automation-answer` and `registered-agent.sha256` files. A 1.x install also kept a copied helper in its `bin` folder.
 - `Logs/iMessage Max` holds the helper log, `imessage-max.log`.
 - The last line removes the 1.x logs, if any.
 

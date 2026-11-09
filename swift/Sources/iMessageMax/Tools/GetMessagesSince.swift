@@ -16,9 +16,11 @@ struct GetMessagesSinceResponse: Encodable {
         let replyCount: Int?
         let edited: Bool?
         let event: GroupEvent?
+        /// true when the row is late-synced history (see LateHistory); omitted otherwise.
+        let late: Bool?
 
         private enum CodingKeys: String, CodingKey {
-            case id, rowid, chat, from, text, ts, reactions, attachments, links, event, edited
+            case id, rowid, chat, from, text, ts, reactions, attachments, links, event, edited, late
             case replyTo = "reply_to"
             case replyCount = "reply_count"
         }
@@ -31,6 +33,8 @@ struct GetMessagesSinceResponse: Encodable {
     let currentRowid: Int
     let stalled: Bool
     let filteredHidden: Int
+    /// Rows skipped by `max_age`; omitted when the call did not pass it.
+    var skippedOld: Int? = nil
 
     private enum CodingKeys: String, CodingKey {
         case messages, stalled
@@ -39,12 +43,14 @@ struct GetMessagesSinceResponse: Encodable {
         case hasMore = "has_more"
         case currentRowid = "current_rowid"
         case filteredHidden = "filtered_hidden"
+        case skippedOld = "skipped_old"
     }
 }
 
 actor GetMessagesSinceTool {
     static let unresolvedJoinGrace: TimeInterval = 30
     static let limit = IntArgument(name: "limit", defaultValue: 100, range: 1...500)
+    static let maxAgeRange = 1...(3650 * 86_400)
 
     private let db: Database
     private let resolver: ContactResolver
@@ -63,7 +69,7 @@ actor GetMessagesSinceTool {
                 To page or poll, pass the returned next_rowid back as since_rowid. next_rowid can be \
                 larger than the last returned message's rowid, because rows that are read but not \
                 returned (reactions, filtered chats, orphans) still advance it. Omit since_rowid to \
-                get only the current cursor. A cursor is valid only against this Mac's chat.db.
+                get only the current cursor. A cursor is valid only against this Mac's chat.db.                 A message with late: true is old history that synced into chat.db late, often from                 iCloud on a newly set-up Mac: its date is more than an hour older than messages that                 were already there. Do not treat it as new mail. Pass max_age to skip anything                 dated more than that many seconds ago.
                 """,
             inputSchema: InputSchema.object(
                 properties: [
@@ -72,6 +78,7 @@ actor GetMessagesSinceTool {
                     "limit": .integer(description: "Maximum messages to return (\(limit.defaultAndMax))"),
                     "include_filtered": .boolean(description: "Include chats Messages.app has filtered as junk or unknown senders (default false)"),
                     "include_reactions": .boolean(description: "Attach reaction strings to returned messages (default true)"),
+                    "max_age": .integer(description: "Skip messages dated more than this many seconds before now. Skipped rows still advance next_rowid and are counted in skipped_old."),
                 ]
             ),
             outputSchema: OutputSchema.object,
@@ -115,6 +122,15 @@ actor GetMessagesSinceTool {
         let scope = ChatScope(named: chatFilter, includeFiltered: args["include_filtered"]?.boolValue ?? false)
         let includeReactions = args["include_reactions"]?.boolValue ?? true
         let schema = try db.schema()
+        let now = Date()
+        let oldest: Int64? = args["max_age"]?.intValue.map { seconds in
+            let clamped = min(max(seconds, Self.maxAgeRange.lowerBound), Self.maxAgeRange.upperBound)
+            return AppleTime.fromDate(now.addingTimeInterval(-TimeInterval(clamped)))
+        }
+        var skippedOld = 0
+        var lateness = LateHistory.Tracker(
+            baseline: try LateHistory.baseline(db: db, atOrBelow: Int64(sinceRowid), now: now), now: now)
+        var lateRows: Set<Int64> = []
 
         var consumed = sinceRowid
         var kept: [SinceScanRow] = []
@@ -159,10 +175,16 @@ actor GetMessagesSinceTool {
                     continue
                 }
                 consumed = Int(row.message.id)
+                let late = lateness.observe(row.message.date)
                 if scope.hidesChats && row.chatIsFiltered != 0 {
                     hiddenChats.insert(row.chatId ?? 0)
                     continue
                 }
+                if let oldest, (row.message.date ?? 0) < oldest {
+                    skippedOld += 1
+                    continue
+                }
+                if late { lateRows.insert(row.message.id) }
                 kept.append(row)
             }
             if hasMore || stalled { break }
@@ -214,7 +236,8 @@ actor GetMessagesSinceTool {
                 replyTo: message.replyTo,
                 replyCount: message.replyCount,
                 edited: message.edited,
-                event: message.event
+                event: message.event,
+                late: lateRows.contains(scanned.message.id) ? true : nil
             )
         }
 
@@ -225,7 +248,8 @@ actor GetMessagesSinceTool {
             hasMore: hasMore,
             currentRowid: currentRowid,
             stalled: stalled,
-            filteredHidden: scope.filteredHidden { hiddenChats.count } ?? 0
+            filteredHidden: scope.filteredHidden { hiddenChats.count } ?? 0,
+            skippedOld: oldest == nil ? nil : skippedOld
         )
     }
 

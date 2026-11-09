@@ -13,7 +13,7 @@ enum ToolCallDispatch {
         .methodNotFound("Unknown tool: \(name)")
     }
 
-    enum Lane {
+    enum Lane: Sendable {
         case legacyHTTP(session: String)
         case legacyStdio
         case modern(transport: String)
@@ -37,6 +37,10 @@ enum ToolCallDispatch {
     /// it stops (`UpdateWatcher`).
     static let callsInFlight = Mutex(0)
 
+    /// The lane of the tools/call running in this task, so a tool can answer
+    /// for the connection that asked (diagnose's live_inbox).
+    @TaskLocal static var lane: Lane?
+
     static func execute(
         name: String, arguments: [String: Value]?, lane: Lane, catalog: ToolCatalog, fromCompanion: Bool = false
     ) async -> Execution {
@@ -44,7 +48,9 @@ enum ToolCallDispatch {
         callsInFlight.withLock { $0 += 1 }
         defer { callsInFlight.withLock { $0 -= 1 } }
         let start = ContinuousClock.now
-        let (execution, outcome) = await run(name, catalog.handler(named: name), arguments: arguments)
+        let (execution, outcome) = await $lane.withValue(lane) {
+            await run(name, catalog.handler(named: name), arguments: arguments)
+        }
         let elapsed = ContinuousClock.now - start
         let ms = Double(elapsed.components.seconds) * 1000
             + Double(elapsed.components.attoseconds) / 1e15

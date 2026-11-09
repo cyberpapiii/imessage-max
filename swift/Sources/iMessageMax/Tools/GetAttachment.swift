@@ -13,6 +13,12 @@ private struct AttachmentFailure: Encodable, Sendable {
     var type: String?
     var filename: String?
     var size: Int64?
+    var downloadStarted: Bool?
+
+    private enum CodingKeys: String, CodingKey {
+        case error, message, type, filename, size
+        case downloadStarted = "download_started"
+    }
 }
 
 struct AttachmentMetadataSummary: Codable {
@@ -83,6 +89,13 @@ struct GetAttachment {
         }
     }
 
+    /// iMessage Max cannot make Messages download a file it keeps only in
+    /// iCloud, so this reply must not invite a retry.
+    static let offloadedMessage =
+        "The attachment is stored only in iCloud, and iMessage Max cannot download it. Do not retry. "
+        + "It becomes available after someone opens the conversation in Messages on this Mac and "
+        + "Messages downloads it."
+
     func execute(attachmentId: String, variant: String = "vision", allowedRoots: [String] = AttachmentPathPolicy.defaultRoots) async throws -> AttachmentImage {
         guard let imageVariant = ImageVariant(rawValue: variant) else {
             let validVariants = ImageVariant.allCases.map { $0.rawValue }.sorted()
@@ -135,10 +148,10 @@ struct GetAttachment {
         if !FileManager.default.fileExists(atPath: expandedPath) {
             if let downloaded = await tryDownloadFromiCloud(url: fileURL) {
                 if !downloaded {
-                    throw ToolFailure(code: "attachment_offloaded", body: AttachmentFailure(error: "attachment_offloaded", message: "The attachment is stored in iCloud, and a download has started. Try again in a few seconds.", filename: fileURL.lastPathComponent))
+                    throw ToolFailure(code: "attachment_offloaded", body: AttachmentFailure(error: "attachment_offloaded", message: "The attachment is stored in iCloud, and a download has started. Try again in a few seconds.", filename: fileURL.lastPathComponent, downloadStarted: true))
                 }
             } else {
-                throw ToolFailure("attachment_offloaded", "Attachment has been offloaded from this Mac. Open the conversation in Messages.app to download it from iCloud, then try again.")
+                throw ToolFailure(code: "attachment_offloaded", body: AttachmentFailure(error: "attachment_offloaded", message: Self.offloadedMessage, filename: fileURL.lastPathComponent, downloadStarted: false))
             }
         }
 

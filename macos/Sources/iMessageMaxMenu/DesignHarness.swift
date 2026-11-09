@@ -215,7 +215,8 @@ actor FixtureSystem: ServiceSystem {
         capabilities: [
           CapabilityKey.permAutomation.rawValue: Capability(state: sending, detail: detail?.rawValue),
           CapabilityKey.sendTextDM.rawValue: Capability(state: .supported),
-          CapabilityKey.liveInbox.rawValue: Capability(state: .supported),
+          CapabilityKey.liveInbox.rawValue: Capability(
+            state: .unsupported, detail: LiveInboxDetail.pollOnly.rawValue),
         ], assistantCalls: calls)
     }
     return switch name {

@@ -55,4 +55,31 @@ import Testing
     try setting.set(true)
     #expect(setting.isOn)
   }
+
+  @Test func keepAwakeIsOffByDefaultAndOnOnlyWhileItsFileExists() throws {
+    defer { try? FileManager.default.removeItem(at: home) }
+    let config = try configuration()
+    let setting = KeepAwakeSetting(configuration: config)
+    #expect(
+      setting.marker
+        == KeepRunningSetting(configuration: config).marker.deletingLastPathComponent()
+        .appendingPathComponent(ServiceDefaults.keepAwakeFileName))
+    #expect(!setting.isOn)
+
+    try setting.set(true)
+    #expect(setting.isOn)
+    let folder = try FileManager.default.attributesOfItem(
+      atPath: setting.marker.deletingLastPathComponent().path)
+    #expect((folder[.posixPermissions] as? Int) == 0o700)
+    let file = try FileManager.default.attributesOfItem(atPath: setting.marker.path)
+    #expect((file[.posixPermissions] as? Int) == 0o600)
+    // The two settings are separate files.
+    #expect(KeepRunningSetting(configuration: config).isOn)
+
+    try setting.set(true)
+    try setting.set(false)
+    #expect(!setting.isOn)
+    try setting.set(false)
+    #expect(!FileManager.default.fileExists(atPath: setting.marker.path))
+  }
 }
