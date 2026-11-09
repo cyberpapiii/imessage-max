@@ -158,8 +158,8 @@ actor GetMessagesTool {
                         description: "Participant names or handles that identify the chat (alternative to chat_id)",
                         items: .string(description: "Participant name or handle")
                     ),
-                    "since": .string(description: "Lower time bound (ISO, relative like '24h', or natural like 'yesterday')"),
-                    "before": .string(description: "Upper time bound"),
+                    "since": .string(description: "Lower time bound: \(AppleTime.boundFormats)"),
+                    "before": .string(description: "Upper time bound, in the same forms as since"),
                     "limit": .integer(description: "Maximum messages to return (\(Self.limit.defaultAndMax))"),
                     "from_person": .string(description: "Only messages from this person (or 'me')"),
                     "contains": .string(description: "Text to search for within messages"),
@@ -197,8 +197,8 @@ actor GetMessagesTool {
 
         let chatId = args["chat_id"]?.stringValue
         let participants = args["participants"]?.arrayValue?.compactMap { $0.stringValue }
-        let since = args["since"]?.stringValue
-        let before = args["before"]?.stringValue
+        let since = try AppleTime.checkedBound(args["since"]?.stringValue, name: "since")
+        let before = try AppleTime.checkedBound(args["before"]?.stringValue, name: "before")
         let limit = Self.limit.read(args)
         let fromPerson = args["from_person"]?.stringValue
         let contains = args["contains"]?.stringValue

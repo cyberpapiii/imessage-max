@@ -1,4 +1,5 @@
 import Foundation
+import MCP
 import XCTest
 @testable import iMessageMax
 
@@ -25,7 +26,8 @@ final class AppleTimeParseTests: XCTestCase {
             ("24h", 86400),
             ("7d", 604800),
             ("2w", 1209600),
-            ("1m", 2592000),
+            ("30min", 1800),
+            ("3mo", 7776000),
         ]
         for (input, seconds) in table {
             let expected = Date().addingTimeInterval(-seconds)
@@ -110,9 +112,39 @@ final class AppleTimeParseTests: XCTestCase {
     }
 
     func testGarbageReturnsNil() {
-        for input in ["", "soon", "24 hours", "h24", "2026-13-45"] {
+        for input in ["", "soon", "24 hours", "h24", "2026-13-45", "30m", "1m"] {
             XCTAssertNil(AppleTime.parse(input), "\(String(reflecting: input)) should not parse")
         }
+    }
+
+    func testEveryTimeBoundToolRefusesABareM() async throws {
+        let fixture = try ToolTestDatabase(name: "bare-m")
+        let db = fixture.database()
+        let calls: [(tool: String, arguments: [String: Value])] = [
+            ("search", ["query": "x", "since": "30m"]),
+            ("search", ["query": "x", "before": "30m"]),
+            ("get_messages", ["chat_id": "chat1", "since": "30m"]),
+            ("list_chats", ["since": "30m"]),
+            ("list_attachments", ["before": "30m"]),
+            ("get_unread", ["since": "30m"]),
+        ]
+        for (tool, arguments) in calls {
+            let body = try await callTool(tool, arguments, database: db)
+            XCTAssertEqual(body["error"] as? String, "validation_error", "\(tool) \(arguments)")
+            let message = body["message"] as? String ?? ""
+            XCTAssertTrue(message.contains("\"30min\"") && message.contains("\"30mo\""), "\(tool): \(message)")
+        }
+    }
+
+    func testUnparseableTimeBoundIsAnErrorNotAnIgnoredFilter() async throws {
+        let fixture = try ToolTestDatabase(name: "bad-bound")
+        let db = fixture.database()
+        let body = try await callTool("list_chats", ["since": "soon"], database: db)
+        XCTAssertEqual(body["error"] as? String, "validation_error")
+        XCTAssertTrue((body["message"] as? String ?? "").contains("30min"))
+
+        let all = try await callTool("get_unread", ["since": "all"], database: db)
+        XCTAssertNil(all["error"], "get_unread keeps its all-time keyword")
     }
 
     func testHugeRelativeValueDoesNotTrap() {

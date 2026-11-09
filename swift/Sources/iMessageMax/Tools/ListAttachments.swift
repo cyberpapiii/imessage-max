@@ -38,11 +38,11 @@ final class ListAttachments {
                 ]),
                 "since": .object([
                     "type": "string",
-                    "description": "Lower time bound (ISO, relative, or natural)",
+                    "description": "Lower time bound: \(AppleTime.boundFormats)",
                 ]),
                 "before": .object([
                     "type": "string",
-                    "description": "Upper time bound",
+                    "description": "Upper time bound, in the same forms as since",
                 ]),
                 "limit": .object([
                     "type": "integer",
@@ -77,8 +77,8 @@ final class ListAttachments {
             let chatId = arguments?["chat_id"]?.stringValue
             let fromPerson = arguments?["from_person"]?.stringValue
             let type = arguments?["type"]?.stringValue
-            let since = arguments?["since"]?.stringValue
-            let before = arguments?["before"]?.stringValue
+            let since = try AppleTime.checkedBound(arguments?["since"]?.stringValue, name: "since")
+            let before = try AppleTime.checkedBound(arguments?["before"]?.stringValue, name: "before")
             let limit = Self.limit.read(arguments)
             let sort = arguments?["sort"]?.stringValue ?? "recent_first"
             let cursor = arguments?["cursor"]?.stringValue
