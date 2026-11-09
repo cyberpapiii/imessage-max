@@ -51,6 +51,10 @@ func writeLine(_ fd: Int32, _ line: String) {
 final class LineReader {
     let fd: Int32
     private var pending: [UInt8] = []
+    /// Bytes of `pending` already known to hold no newline. Each read scans
+    /// only what it added, so a long line costs linear time, not quadratic:
+    /// a slow reader would otherwise outlast the peer's flush deadline.
+    private var scanned = 0
 
     init(_ fd: Int32) {
         self.fd = fd
@@ -60,11 +64,13 @@ final class LineReader {
     func nextLine(timeout: TimeInterval = 10) throws -> String? {
         let deadline = Date().addingTimeInterval(timeout)
         while true {
-            if let newline = pending.firstIndex(of: 0x0A) {
+            if let newline = pending[scanned...].firstIndex(of: 0x0A) {
                 let line = String(decoding: pending[..<newline], as: UTF8.self)
                 pending.removeSubrange(...newline)
+                scanned = 0
                 return line
             }
+            scanned = pending.count
             let remaining = deadline.timeIntervalSinceNow
             guard remaining > 0 else { throw SocketTestTimeout() }
             var descriptor = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)

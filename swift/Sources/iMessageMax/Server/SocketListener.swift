@@ -408,8 +408,10 @@ struct LogThrottle: Sendable {
 /// - `send` queues the bytes on the channel and returns. A peer that
 ///   leaves more than `maxUnsentBytes` unread is disconnected.
 /// - A line over LineFramer.maxMessageBytes disconnects the peer.
-/// - `disconnect` gives queued writes at most `flushTimeout`, so a peer
-///   that stops reading cannot hold the fd open.
+/// - `disconnect` keeps flushing queued writes while the peer keeps
+///   taking bytes: it closes once `flushTimeout` passes with no progress,
+///   or `maxFlushDuration` after it began, so a peer that stops reading,
+///   or reads a trickle, cannot hold the fd open.
 ///
 /// The DispatchIO handlers run off the actor, so everything they touch sits
 /// in one Mutex, and no method that builds a handler is actor-isolated: a
@@ -419,7 +421,11 @@ struct LogThrottle: Sendable {
 actor SocketTransport: Transport {
     static let maxQueuedMessages = 64
     static let maxUnsentBytes = 16 * 1024 * 1024
+    /// How long a disconnect's flush waits for the peer to take more bytes.
     static let flushTimeout: DispatchTimeInterval = .seconds(2)
+    /// How long a disconnect's flush may run in all, however steadily the
+    /// peer reads.
+    static let maxFlushDuration: DispatchTimeInterval = .seconds(30)
     private static let readChunkBytes = 64 * 1024
 
     nonisolated let logger = Logger(label: "imessage-max.socket", factory: { _ in SwiftLogNoOpLogHandler() })
@@ -440,8 +446,9 @@ actor SocketTransport: Transport {
         case open
         /// disconnect() ran with writes queued. Nothing more is read or
         /// sent. The channel closes when the writes finish or the timer
-        /// fires, whichever comes first.
-        case draining(any DispatchSourceTimer)
+        /// fires, whichever comes first. Each write progress moves the
+        /// timer to `flushTimeout` from then, never past `ends`.
+        case draining(any DispatchSourceTimer, ends: DispatchTime)
         case closed
     }
 
@@ -498,9 +505,12 @@ actor SocketTransport: Transport {
     }
 
     /// Ends the session from the server side. Reading stops at once.
-    /// Writes already queued get up to `flushTimeout` to reach the peer,
-    /// then the fd closes whether or not they did. DualEraStdio queues its
-    /// last send before it disconnects. A second call does nothing.
+    /// Writes already queued keep going while the peer keeps reading; the
+    /// fd closes once they finish, once `flushTimeout` passes with no
+    /// progress, or after `maxFlushDuration`, whichever comes first. A peer
+    /// that is still reading, however slowly the machine runs, gets every
+    /// reply. DualEraStdio queues its last send before it disconnects. A
+    /// second call does nothing.
     func disconnect() async {
         end(flushing: true)
     }
@@ -533,7 +543,8 @@ actor SocketTransport: Transport {
         }
         let payload = bytes.withUnsafeBytes { DispatchData(bytes: $0) }
         channel.write(offset: 0, data: payload, queue: queue) { [self] done, _, error in
-            guard done else { return }
+            // The channel's low water of 1 calls this after each partial write.
+            guard done else { return extendDrain() }
             let flushed = state.withLock { state in
                 state.unsentBytes -= size
                 return state.unsentBytes == 0
@@ -543,6 +554,8 @@ actor SocketTransport: Transport {
                 abort()
             } else if flushed {
                 closeIfDraining()
+            } else {
+                extendDrain()
             }
         }
     }
@@ -644,7 +657,7 @@ actor SocketTransport: Transport {
             switch state.phase {
             case .closed:
                 return (state.waiter, false)
-            case .draining(let timer):
+            case .draining(let timer, _):
                 guard !flushing else { return (state.waiter, false) }
                 timer.cancel()
                 state.phase = .closed
@@ -655,11 +668,12 @@ actor SocketTransport: Transport {
                     return (state.waiter, true)
                 }
                 // Resumed under the lock, so no path can release it unresumed.
+                let now = DispatchTime.now()
                 let timer = DispatchSource.makeTimerSource(queue: queue)
                 timer.setEventHandler { [self] in closeIfDraining() }
-                timer.schedule(deadline: .now() + Self.flushTimeout)
+                timer.schedule(deadline: now + Self.flushTimeout)
                 timer.resume()
-                state.phase = .draining(timer)
+                state.phase = .draining(timer, ends: now + Self.maxFlushDuration)
                 return (state.waiter, false)
             }
         }
@@ -668,10 +682,19 @@ actor SocketTransport: Transport {
         if closesNow { channel.close(flags: .stop) }
     }
 
+    /// The peer took more bytes, so a disconnect's flush waits
+    /// `flushTimeout` from now, never past its overall end.
+    private nonisolated func extendDrain() {
+        state.withLock { state in
+            guard case .draining(let timer, let ends) = state.phase else { return }
+            timer.schedule(deadline: min(.now() + Self.flushTimeout, ends))
+        }
+    }
+
     /// Ends a disconnect's flush: its writes finished, or its time ran out.
     private nonisolated func closeIfDraining() {
         let timer: (any DispatchSourceTimer)? = state.withLock { state in
-            guard case .draining(let timer) = state.phase else { return nil }
+            guard case .draining(let timer, _) = state.phase else { return nil }
             state.phase = .closed
             return timer
         }

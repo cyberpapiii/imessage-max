@@ -118,7 +118,9 @@ final class SocketListenerTests: XCTestCase {
         _ = try await start(peerPolicy: { _ in false }) { _ in served.fulfill() }
 
         let reader = try client()
-        writeLine(reader.fd, "hello")
+        // The helper may close the connection before this write lands, so a
+        // broken pipe is an expected outcome, not a failure.
+        writeUntilError(reader.fd, Array("hello\n".utf8))
         XCTAssertNil(try reader.nextLine(), "the rejected client reads EOF")
         await fulfillment(of: [served], timeout: 0.3)
     }
@@ -327,7 +329,8 @@ final class SocketListenerTests: XCTestCase {
         }
 
         let overflow = try client()
-        writeLine(overflow.fd, "one too many")
+        // Closed on accept, so the write may meet a broken pipe.
+        writeUntilError(overflow.fd, Array("one too many\n".utf8))
         XCTAssertNil(try overflow.nextLine(), "the connection past the cap reads EOF")
         try assertEchoes(live[1], "the others are still served")
 
@@ -335,7 +338,8 @@ final class SocketListenerTests: XCTestCase {
         let deadline = Date().addingTimeInterval(10)
         while true {
             let reader = try client()
-            writeLine(reader.fd, "a freed slot")
+            // Until the slot frees, the helper closes this one on accept.
+            writeUntilError(reader.fd, Array("a freed slot\n".utf8))
             if try reader.nextLine() == "a freed slot" { break }
             guard Date() < deadline else { return XCTFail("the closed connection never freed its slot") }
             usleep(50_000)
@@ -351,8 +355,44 @@ final class SocketListenerTests: XCTestCase {
         })
         let reader = try client()
 
-        XCTAssertEqual(try reader.nextLine()?.count, payload.count, "every queued byte arrives")
+        let line = try reader.nextLine()
+        XCTAssertEqual(line?.count, payload.count, "every queued byte arrives")
+        XCTAssertTrue(line == payload, "and arrives intact")
         XCTAssertNil(try reader.nextLine(), "then EOF")
+    }
+
+    /// The flush deadline counts from the peer's last progress, not from
+    /// disconnect: a bridge that keeps reading, however slowly a loaded
+    /// machine lets it, gets the whole reply. The kernel buffers about 8 KB
+    /// of a Unix stream, so the write cannot finish before the reader has
+    /// paced through most of the payload, well past `flushTimeout`.
+    func testDisconnectKeepsFlushingWhileASlowPeerKeepsReading() async throws {
+        let payload = Data(repeating: 0x61, count: 256 * 1024)
+        _ = try await start(serve: { transport in
+            try? await transport.connect()
+            try? await transport.send(payload)
+            await transport.disconnect()
+        })
+        let fd = try connectClient(socket)
+        clients.append(fd)
+
+        let deadline = ContinuousClock.now + .seconds(30)
+        var received = 0
+        var chunk = [UInt8](repeating: 0, count: 8 * 1024)
+        while true {
+            let remaining = ContinuousClock.now.duration(to: deadline)
+            guard remaining > .zero else { return XCTFail("the helper neither finished the flush nor closed") }
+            var descriptor = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
+            let ready = poll(&descriptor, 1, Int32(remaining.components.seconds * 1000) + 1)
+            if ready < 0, errno == EINTR { continue }
+            guard ready > 0 else { continue }
+            let count = read(fd, &chunk, chunk.count)
+            if count < 0, errno == EINTR { continue }
+            guard count > 0 else { break }
+            received += count
+            usleep(100_000)
+        }
+        XCTAssertEqual(received, payload.count + 1, "every queued byte and the newline arrive before EOF")
     }
 
     func testDisconnectClosesWithinTheFlushDeadlineWhenThePeerNeverReads() async throws {
