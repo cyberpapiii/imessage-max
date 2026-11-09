@@ -93,12 +93,12 @@ final class ListedChatTests: XCTestCase {
         let context = try await callTool("get_context", ["message_id": "msg_1"], database: db)
         XCTAssertEqual((context["chat"] as? [String: Any])?["id"] as? String, "chat3")
 
-        let image = try await GetAttachment(db: db, resolver: makeSeededResolver()).execute(
+        let image = try attachmentReply(try await GetAttachment(db: db, resolver: makeSeededResolver()).execute(
             attachmentId: "att7",
             variant: "thumb",
             allowedRoots: [FileManager.default.temporaryDirectory.path]
-        )
-        XCTAssertEqual(image.metadata.chat?.id, "chat3")
+        ))
+        XCTAssertEqual((image.metadata["chat"] as? [String: Any])?["id"] as? String, "chat3")
     }
 
     func testFilteredHiddenKeepsEachToolsShape() async throws {

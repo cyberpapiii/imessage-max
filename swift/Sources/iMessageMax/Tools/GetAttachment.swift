@@ -1,10 +1,33 @@
 import Foundation
 import MCP
 
-struct AttachmentImage {
+/// What get_attachment returns: one JSON metadata block, then the blocks that
+/// carry the attachment itself (images, or text).
+struct AttachmentContent {
     let metadata: AttachmentMetadataSummary
-    let imageData: String
-    let mimeType: String
+    let blocks: [Tool.Content]
+
+    func toolContent() throws -> [Tool.Content] {
+        [.plainText(try FormatUtils.encodeJSON(metadata))] + blocks
+    }
+}
+
+/// The blocks for one attachment type, plus the fields that type adds to the
+/// metadata block.
+struct TypedAttachmentContent {
+    var detail: (any Encodable & Sendable)?
+    var blocks: [Tool.Content]
+}
+
+/// A file get_attachment has found on disk and may read.
+struct AttachmentFile {
+    let rowId: Int
+    let path: String
+    let type: AttachmentType
+    let uti: String?
+    let mimeType: String?
+    let totalBytes: Int64?
+    let displayName: String
 }
 
 private struct AttachmentFailure: Encodable, Sendable {
@@ -21,12 +44,28 @@ private struct AttachmentFailure: Encodable, Sendable {
     }
 }
 
-struct AttachmentMetadataSummary: Codable {
+struct AttachmentMetadataSummary: Encodable {
     let id: String
     let type: String
     let name: String
     let chat: ChatReference?
     let available: Bool
+    /// Type-specific fields, encoded at the top level beside the ones above.
+    var detail: (any Encodable & Sendable)?
+
+    private enum CodingKeys: String, CodingKey {
+        case id, type, name, chat, available
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(type, forKey: .type)
+        try container.encode(name, forKey: .name)
+        try container.encodeIfPresent(chat, forKey: .chat)
+        try container.encode(available, forKey: .available)
+        try detail?.encode(to: encoder)
+    }
 }
 
 struct GetAttachment {
@@ -81,11 +120,7 @@ struct GetAttachment {
 
             let variant = arguments?["variant"]?.stringValue ?? "vision"
             let tool = GetAttachment(db: db, resolver: resolver)
-            let image = try await tool.execute(attachmentId: attachmentId, variant: variant)
-            return [
-                .plainText(try FormatUtils.encodeJSON(image.metadata)),
-                .plainImage(data: image.imageData, mimeType: image.mimeType),
-            ]
+            return try await tool.execute(attachmentId: attachmentId, variant: variant).toolContent()
         }
     }
 
@@ -96,7 +131,7 @@ struct GetAttachment {
         + "It becomes available after someone opens the conversation in Messages on this Mac and "
         + "Messages downloads it."
 
-    func execute(attachmentId: String, variant: String = "vision", allowedRoots: [String] = AttachmentPathPolicy.defaultRoots) async throws -> AttachmentImage {
+    func execute(attachmentId: String, variant: String = "vision", allowedRoots: [String] = AttachmentPathPolicy.defaultRoots) async throws -> AttachmentContent {
         guard let imageVariant = ImageVariant(rawValue: variant) else {
             let validVariants = ImageVariant.allCases.map { $0.rawValue }.sorted()
             throw ToolFailure("validation_error", "Invalid variant '\(variant)'. Must be one of: \(validVariants.joined(separator: ", "))")
@@ -159,36 +194,56 @@ struct GetAttachment {
             mimeType: attachment.mimeType,
             uti: attachment.uti
         )
-        let attType = attachmentType.rawValue
-        let displayName = attachment.transferName ?? (expandedPath as NSString).lastPathComponent
+        let file = AttachmentFile(
+            rowId: rowId,
+            path: expandedPath,
+            type: attachmentType,
+            uti: attachment.uti,
+            mimeType: attachment.mimeType,
+            totalBytes: attachment.totalBytes,
+            displayName: attachment.transferName ?? (expandedPath as NSString).lastPathComponent
+        )
+        let typed = try await content(of: file, variant: imageVariant)
         let chat = try await resolveAttachmentChat(rowId: rowId)
 
-        switch attachmentType {
+        return AttachmentContent(
+            metadata: AttachmentMetadataSummary(
+                id: AttachmentIdentifier.format(rowId),
+                type: attachmentType.rawValue,
+                name: file.displayName,
+                chat: chat,
+                available: true,
+                detail: typed.detail
+            ),
+            blocks: typed.blocks
+        )
+    }
+
+    private func content(of file: AttachmentFile, variant: ImageVariant) async throws -> TypedAttachmentContent {
+        switch file.type {
         case .image:
-            guard let result = imageProcessor.process(at: expandedPath, variant: imageVariant) else {
-                throw ToolFailure("processing_failed", "Failed to process image")
-            }
-
-            let base64Data = result.data.base64EncodedString()
-
-            return AttachmentImage(
-                metadata: AttachmentMetadataSummary(
-                    id: AttachmentIdentifier.format(rowId),
-                    type: attType,
-                    name: displayName,
-                    chat: chat,
-                    available: true
-                ),
-                imageData: base64Data,
-                mimeType: "image/\(result.format)"
-            )
+            return TypedAttachmentContent(blocks: [try imageBlock(file, variant: variant)])
 
         case .video:
-            throw ToolFailure(code: "unsupported_type", body: AttachmentFailure(error: "unsupported_type", message: "Video attachments are not yet supported with the new variant system. Use list_attachments to see video metadata.", type: attType, filename: displayName, size: attachment.totalBytes))
+            throw Self.unsupported(file, "Video attachments are not yet supported with the new variant system. Use list_attachments to see video metadata.")
 
-        case .audio, .pdf, .document, .other:
-            throw ToolFailure(code: "unsupported_type", body: AttachmentFailure(error: "unsupported_type", message: "Attachment type '\(attType)' is not supported. Only images are supported.", type: attType, filename: displayName, size: attachment.totalBytes))
+        case .audio:
+            throw Self.unsupported(file, "Attachment type 'audio' is not supported. Only images are supported.")
+
+        case .pdf, .document, .other:
+            throw Self.unsupported(file, "Attachment type '\(file.type.rawValue)' is not supported. Only images are supported.")
         }
+    }
+
+    private func imageBlock(_ file: AttachmentFile, variant: ImageVariant) throws -> Tool.Content {
+        guard let result = imageProcessor.process(at: file.path, variant: variant) else {
+            throw ToolFailure("processing_failed", "Failed to process image")
+        }
+        return .plainImage(data: result.data.base64EncodedString(), mimeType: "image/\(result.format)")
+    }
+
+    static func unsupported(_ file: AttachmentFile, _ message: String) -> ToolFailure {
+        ToolFailure(code: "unsupported_type", body: AttachmentFailure(error: "unsupported_type", message: message, type: file.type.rawValue, filename: file.displayName, size: file.totalBytes))
     }
 
     private func resolveAttachmentChat(rowId: Int) async throws -> ChatReference? {

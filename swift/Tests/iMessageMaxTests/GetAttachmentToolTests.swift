@@ -62,14 +62,16 @@ final class GetAttachmentToolTests: XCTestCase {
         try fixture.insertAttachment(rowId: 1, filename: imageURL.path, mimeType: "image/jpeg", uti: "public.jpeg", transferName: "attachment-large.jpg")
 
         let tool = GetAttachment(db: fixture.database(), resolver: ContactResolver(seedCache: [:]))
-        let image = try await tool.execute(attachmentId: "att1", variant: "vision", allowedRoots: [FileManager.default.temporaryDirectory.path])
+        let reply = try attachmentReply(try await tool.execute(attachmentId: "att1", variant: "vision", allowedRoots: [FileManager.default.temporaryDirectory.path]))
 
-        XCTAssertEqual(image.mimeType, "image/jpeg")
-        XCTAssertEqual(image.metadata.id, "att1")
-        XCTAssertEqual(image.metadata.type, "image")
-        XCTAssertEqual(image.metadata.name, "attachment-large.jpg")
-        XCTAssertTrue(image.metadata.available)
-        let jpeg = try XCTUnwrap(Data(base64Encoded: image.imageData))
+        XCTAssertEqual(reply.metadata["id"] as? String, "att1")
+        XCTAssertEqual(reply.metadata["type"] as? String, "image")
+        XCTAssertEqual(reply.metadata["name"] as? String, "attachment-large.jpg")
+        XCTAssertEqual(reply.metadata["available"] as? Bool, true)
+        XCTAssertEqual(reply.images.count, 1)
+        XCTAssertTrue(reply.texts.isEmpty)
+        let (jpeg, mimeType) = try XCTUnwrap(reply.images.first)
+        XCTAssertEqual(mimeType, "image/jpeg")
         let source = try XCTUnwrap(CGImageSourceCreateWithData(jpeg as CFData, nil))
         let properties = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any])
         XCTAssertEqual(properties[kCGImagePropertyPixelWidth] as? Int, 1568, "vision caps the long side at 1568")
@@ -125,15 +127,16 @@ final class GetAttachmentToolTests: XCTestCase {
             db: fixture.database(),
             resolver: ContactResolver(seedCache: ["+15550000022": "Sukhmani Kular"])
         )
-        let image = try await tool.execute(
+        let reply = try attachmentReply(try await tool.execute(
             attachmentId: "att7",
             variant: "thumb",
             allowedRoots: [FileManager.default.temporaryDirectory.path]
-        )
+        ))
+        let chat = try XCTUnwrap(reply.metadata["chat"] as? [String: Any])
 
-        XCTAssertEqual(image.metadata.chat?.id, "chat22")
+        XCTAssertEqual(chat["id"] as? String, "chat22")
         XCTAssertEqual(
-            image.metadata.chat?.name,
+            chat["name"] as? String,
             "Sukhmani Kular",
             "Unnamed DM should use the resolved participant name, not chat{rowid}"
         )
