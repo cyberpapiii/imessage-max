@@ -1,3 +1,4 @@
+import Synchronization
 import XCTest
 @testable import iMessageMax
 
@@ -30,11 +31,68 @@ final class LogTests: XCTestCase {
     }
 
     /// Restores this process's stderr after a test points it at a file.
-    private func keepStandardError() {
+    /// The returned function restores it early, so XCTest's failure lines
+    /// reach the console instead of the test's log file.
+    @discardableResult
+    private func keepStandardError() -> () -> Void {
         let saved = dup(STDERR_FILENO)
         addTeardownBlock {
             dup2(saved, STDERR_FILENO)
             close(saved)
+        }
+        return { _ = dup2(saved, STDERR_FILENO) }
+    }
+
+    /// Waits for `condition`, polling. The deadline only guards against a
+    /// hang; no assertion depends on how long the wait takes.
+    private func waitUntil(_ what: String, _ condition: () -> Bool) throws {
+        let deadline = Date().addingTimeInterval(30)
+        while !condition() {
+            guard Date() < deadline else {
+                XCTFail("timed out waiting until \(what)")
+                throw CancellationError()
+            }
+            usleep(100)
+        }
+    }
+
+    /// True once a rotation has finished: `previous` exists and stderr is
+    /// the file now at `file`. dup2 is the rotation's last step, so this
+    /// never sees one half done, unlike `previous` existing alone.
+    private func rotationFinished(_ file: URL, into previous: URL) -> Bool {
+        var current = stat()
+        var named = stat()
+        return FileManager.default.fileExists(atPath: previous.path)
+            && fstat(STDERR_FILENO, &current) == 0
+            && stat(file.path, &named) == 0
+            && current.st_ino == named.st_ino && current.st_dev == named.st_dev
+    }
+
+    /// Writes `line` to stderr on its own thread until stopped.
+    private final class LineWriter: Sendable {
+        let line: String
+        private let state = Mutex((written: 0, stop: false))
+        private let finished = DispatchSemaphore(value: 0)
+
+        init(line: String) { self.line = line }
+
+        var written: Int { state.withLock { $0.written } }
+
+        func start() {
+            Thread { [self] in
+                while !state.withLock({ $0.stop }) {
+                    Log.writeLine(line, to: STDERR_FILENO)
+                    state.withLock { $0.written += 1 }
+                }
+                finished.signal()
+            }.start()
+        }
+
+        /// Returns the number of lines written, once the thread has stopped.
+        func stop() -> Int {
+            state.withLock { $0.stop = true }
+            finished.wait()
+            return written
         }
     }
 
@@ -120,33 +178,67 @@ final class LogTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: file, encoding: .utf8), "after\n")
     }
 
-    /// The timer, not a test call, rotates while lines are being written,
-    /// and no line is lost or split across the two files.
-    func testTheRotationTimerRotatesWhileWriting() throws {
-        keepStandardError()
+    /// 088 #31: the timer, not a test call, starts the check.
+    func testTheRotationTimerRotates() throws {
+        let restoreStandardError = keepStandardError()
+        addTeardownBlock { Log.stopRotating() }
+        let dir = temporaryDirectory()
+        let file = dir.appendingPathComponent("imessage-max.log")
+        let previous = dir.appendingPathComponent("imessage-max.log.1")
+        let token = UUID().uuidString
+        Log.redirectStandardError(to: file.path, rotateAbove: 64)
+        Log.writeLine("before-\(token)" + String(repeating: "a", count: 100) + "\n", to: STDERR_FILENO)
+
+        Log.rotatePeriodically(file.path, above: 64, every: .milliseconds(1))
+        try waitUntil("the timer rotates") { rotationFinished(file, into: previous) }
+        Log.stopRotating()
+        Log.writeLine("after-\(token)\n", to: STDERR_FILENO)
+        restoreStandardError()
+
+        let rotated = try String(contentsOf: previous, encoding: .utf8)
+        let current = try String(contentsOf: file, encoding: .utf8)
+        XCTAssertTrue(rotated.contains("before-\(token)"), rotated)
+        XCTAssertTrue(current.contains("after-\(token)"), current)
+        XCTAssertFalse(current.contains("before-\(token)"), current)
+    }
+
+    /// A rotation while another thread writes loses no line and splits none
+    /// across the two files. Darwin's dup2 failed writes with EBADF during
+    /// the swap until `standardErrorSwap` covered it. The test fires the
+    /// check itself, so exactly one rotation runs, while the writer is busy.
+    func testARotationWhileWritingLosesAndSplitsNoLine() throws {
+        let restoreStandardError = keepStandardError()
         addTeardownBlock { Log.stopRotating() }
         let dir = temporaryDirectory()
         let file = dir.appendingPathComponent("imessage-max.log")
         let previous = dir.appendingPathComponent("imessage-max.log.1")
         Log.redirectStandardError(to: file.path, rotateAbove: 4096)
-        Log.rotatePeriodically(file.path, above: 4096, every: .milliseconds(5))
+        let trigger = DispatchSource.makeUserDataAddSource(queue: DispatchQueue(label: "log-rotation-test"))
+        Log.rotate(file.path, above: 4096, whenever: trigger)
 
-        let line = String(repeating: "x", count: 99) + "\n"
-        let deadline = Date().addingTimeInterval(10)
-        var written = 0
-        while !FileManager.default.fileExists(atPath: previous.path) && Date() < deadline {
-            Log.writeLine(line, to: STDERR_FILENO)
-            written += 1
-            usleep(200)
-        }
+        let token = "line-\(UUID().uuidString)"
+        let line = token + String(repeating: "x", count: 60) + "\n"
+        let writer = LineWriter(line: line)
+        writer.start()
+        try waitUntil("the log passes the threshold") { writer.written * line.utf8.count > 4096 }
+        trigger.add(data: 1)
+        try waitUntil("the rotation finishes") { rotationFinished(file, into: previous) }
+        let writtenAtRotation = writer.written
+        try waitUntil("lines reach the new file") { writer.written >= writtenAtRotation + 50 }
+        let written = writer.stop()
         Log.stopRotating()
-        XCTAssertTrue(FileManager.default.fileExists(atPath: previous.path), "the timer never rotated")
+        restoreStandardError()
 
-        let lines = try [file, previous].flatMap {
-            try String(contentsOf: $0, encoding: .utf8).split(separator: "\n", omittingEmptySubsequences: false).dropLast()
+        func ours(_ url: URL) throws -> [Substring] {
+            try String(contentsOf: url, encoding: .utf8)
+                .split(separator: "\n").filter { $0.contains(token) }
         }
-        XCTAssertEqual(lines.count, written)
-        XCTAssertTrue(lines.allSatisfy { $0 == line.dropLast() })
+        let before = try ours(previous)
+        let after = try ours(file)
+        XCTAssertGreaterThan(before.count * line.utf8.count, 4096, "the lines before the rotation moved aside")
+        XCTAssertGreaterThanOrEqual(after.count, 50, "the lines after the rotation went to the new file")
+        XCTAssertEqual(before.count + after.count, written, "no line was lost (\(before.count) moved aside, \(after.count) after)")
+        XCTAssertTrue((before + after).allSatisfy { $0 == line.dropLast() }, "no line was split")
     }
 
     func testAnUnopenableLogKeepsStandardErrorAndSaysWhy() throws {

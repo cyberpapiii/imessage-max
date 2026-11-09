@@ -35,7 +35,23 @@ enum Log {
     /// raises an Objective-C exception on any write error, which aborts the
     /// helper, and launchd then relaunches it into the same full disk or
     /// closed stderr every 10 s. A line that cannot be written is dropped.
+    /// A line to stderr holds `standardErrorSwap`, so a rotation never
+    /// swaps the descriptor out from under it.
     static func writeLine(_ line: String, to fd: Int32) {
+        if fd == STDERR_FILENO {
+            standardErrorSwap.withLock { _ in writeAll(line, to: fd) }
+        } else {
+            writeAll(line, to: fd)
+        }
+    }
+
+    /// Held while a line is written to stderr and while `reopen` swaps the
+    /// file under stderr. Darwin's dup2 leaves the descriptor invalid while
+    /// it closes the old file, and a write in that moment fails with EBADF,
+    /// which `writeAll` treats as a closed descriptor and drops the line.
+    private static let standardErrorSwap = Mutex(())
+
+    private static func writeAll(_ line: String, to fd: Int32) {
         var line = line
         line.withUTF8 { bytes in
             guard var next = bytes.baseAddress else { return }
@@ -70,9 +86,9 @@ enum Log {
     }
 
     /// Moves a log over `threshold` to `<path>.1`, then opens `path` and puts
-    /// it on stderr with dup2, which swaps the descriptor in one step. A line
-    /// being written at that moment lands whole in one file or the other, so
-    /// `writeLine` needs no lock.
+    /// it on stderr with dup2, under `standardErrorSwap`. Each line lands
+    /// whole in one file or the other. A line written with no lock, such as
+    /// one from the Swift runtime, can still be lost during the swap.
     private static func reopen(_ path: String, rotateAbove threshold: Int) throws {
         let url = URL(fileURLWithPath: expanded(path))
         try FileManager.default.createDirectory(
@@ -85,12 +101,21 @@ enum Log {
         let file = open(url.path, O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0o600)
         guard file >= 0 else { throw posixError() }
         defer { close(file) }
-        guard fchmod(file, 0o600) == 0, dup2(file, STDERR_FILENO) >= 0 else { throw posixError() }
+        guard fchmod(file, 0o600) == 0,
+              standardErrorSwap.withLock({ _ in dup2(file, STDERR_FILENO) }) >= 0
+        else { throw posixError() }
     }
 
     private static func expanded(_ path: String) -> String { (path as NSString).expandingTildeInPath }
 
-    private static let rotationTimer = Mutex<DispatchSourceTimer?>(nil)
+    /// The source that starts each rotation check, and a semaphore its
+    /// cancel handler signals once no check is running.
+    private struct RotationTrigger: @unchecked Sendable {
+        let source: any DispatchSourceProtocol
+        let stopped: DispatchSemaphore
+    }
+
+    private static let rotationTrigger = Mutex<RotationTrigger?>(nil)
     private static let rotationFailing = Mutex(false)
 
     /// Checks the log's size every `interval` and rotates it past
@@ -104,19 +129,40 @@ enum Log {
     ) {
         let timer = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "com.cyberpapiii.imessage-max.log-rotation", qos: .utility))
         timer.schedule(deadline: .now() + interval, repeating: interval, leeway: .seconds(1))
-        timer.setEventHandler { rotateIfNeeded(path, above: threshold) }
-        rotationTimer.withLock { current in
-            current?.cancel()
-            current = timer
-        }
-        timer.resume()
+        rotate(path, above: threshold, whenever: timer)
     }
 
-    static func stopRotating() {
-        rotationTimer.withLock { current in
-            current?.cancel()
-            current = nil
+    /// Runs `rotateIfNeeded` on each event of `trigger`, in place of any
+    /// earlier trigger. `rotatePeriodically` passes its timer. A test passes
+    /// a source it fires itself, so it decides when a check runs.
+    static func rotate(_ path: String, above threshold: Int, whenever trigger: any DispatchSourceProtocol) {
+        let stopped = DispatchSemaphore(value: 0)
+        trigger.setEventHandler { rotateIfNeeded(path, above: threshold) }
+        trigger.setCancelHandler { stopped.signal() }
+        let previous = rotationTrigger.withLock { current in
+            defer { current = RotationTrigger(source: trigger, stopped: stopped) }
+            return current
         }
+        previous.map(stop)
+        trigger.resume()
+    }
+
+    /// Stops the checks and returns only once none is running, so the
+    /// caller can move stderr without a check that was under way moving it
+    /// back. Never call it from the trigger's own queue.
+    static func stopRotating() {
+        let current = rotationTrigger.withLock { current in
+            defer { current = nil }
+            return current
+        }
+        current.map(stop)
+    }
+
+    /// Dispatch runs the cancel handler after the event handler in progress
+    /// returns, and runs no event handler after it.
+    private static func stop(_ trigger: RotationTrigger) {
+        trigger.source.cancel()
+        trigger.stopped.wait()
     }
 
     /// Rotates when stderr has grown past `threshold`. It measures stderr
