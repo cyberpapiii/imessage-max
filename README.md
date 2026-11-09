@@ -420,6 +420,12 @@ PDFs and documents come back as their text, one text block of at most `max_chars
 {"id":"att5","type":"pdf","name":"lease.pdf","chat":{"id":"chat3","name":"Alice Smith"},"available":true,"pages":12,"chars":48210,"next_offset":9987}
 ```
 
+A video comes back as up to 4 still frames, taken from the middle of four equal spans so none is the black first frame. Each frame is half the variant's size on its long side (`vision` 784px, `thumb` 200px, `full` 1568px), so the four frames together cost about as much as one image of that variant. A clip shorter than 4 seconds gets one frame per second. The metadata gives `duration_s` and `frame_times_s`, the time of each frame in seconds. The video's sound is not transcribed.
+
+```json
+{"id":"att5","type":"video","name":"IMG_0412.MOV","chat":{"id":"chat3","name":"Alice Smith"},"available":true,"duration_s":8,"frame_times_s":[1,3,5,7]}
+```
+
 ### list_chats
 Browse recent chats with previews.
 
