@@ -13,7 +13,7 @@ action, not an executor step.
 
 | Plan | Status |
 |---|---|
-| [088-headless-reliability.md](088-headless-reliability.md) | IN PROGRESS: 13 fix units from the 2026-11-08 headless audit, one PR each |
+| [088-headless-reliability.md](088-headless-reliability.md) | DONE: 13 fix units from the 2026-11-08 headless audit, merged as PRs #48-#58 |
 
 Plan 087 shipped as v2.0.0 on 2026-11-07; see its round below.
 
