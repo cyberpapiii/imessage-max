@@ -1,0 +1,118 @@
+# 088: Headless reliability
+
+Status: IN PROGRESS (2026-11-08). Each fix unit below ships as its own PR; update this header as they land.
+
+Source: a seven-area audit (login sessions and power, TCC, Messages lifecycle, send path, read path, service runtime, install and multi-user) run on 2026-11-08 against main at 3edd8b7, with a lead review that re-read the cited code for every high finding. Rules for every executor: never send a real message, never disturb the installed helper (use a test variant per AGENTS.md), no full-screen captures.
+
+
+## Summary
+- **How it works:** iMessage Max does not use Accessibility or computer-use. It reads `~/Library/Messages/chat.db` directly with SQLite, which needs Full Disk Access. It reads names through `CNContactStore`, which needs Contacts. It sends by running `/usr/bin/osascript` AppleScript against Messages.app, which needs Automation (Apple Events), and starts Messages hidden through `NSWorkspace`. Nothing clicks the screen. But both the helper and Apple's `imagent` live only in a logged-in desktop session (`gui/<uid>`). A headless Mac still needs a desktop login, either automatic login or a Screen Sharing login.
+- **Crashes:** two input or environment cases can kill the whole helper. A NUL character in `text` or a file path makes `Process.run` throw an NSException that Swift cannot catch. Any failed log write, for example on a full disk, makes `FileHandle.write` abort the process. Both are confirmed in code. Both turn into 10 s relaunch loops under KeepAlive.
+- **Hangs nobody sees:** the Automation and readiness probe (`AEDeterminePermissionToAutomateTarget`) has no time limit when Messages is hung. Separately, a first send while Automation is still "not determined" blocks for 30 s on a consent prompt nobody can click. It is then reported as `may_have_completed`, `retry_safe=false`, although nothing was sent.
+- **Wrong recipient:** contact numbers saved without a country code are assumed to be US numbers. A send by contact name can go immediately to a stranger's US number. This is not specific to headless Macs, but it is the most serious correctness finding.
+- **Release blocker:** the unreleased #42/#43 change (exit 75 on SIGTERM means relaunch) breaks the cask's `uninstall signal: TERM`. `brew uninstall` leaves the helper running from the deleted app. This must be fixed before the next tag.
+
+## Ranked findings
+Ranked by headless impact × confidence. "Confirmed" means I read the cited code and it matches the claim. "Accepted" means I rely on the auditor's reproduction, which I did not re-run, either because it needed launchctl on the helper or a send, or because the finding is medium/low.
+
+| # | Title | Area | Sev | Conf | Verdict |
+|---|---|---|---|---|---|
+| 1 | Log write failure (full disk, EIO, closed stderr) aborts the helper and causes a crash loop (`Log.swift:31`, legacy `FileHandle.write`) | service | high | proven | Confirmed |
+| 2 | NUL in `text` or a file path crashes the helper (`Osascript.swift:23`; `SendTypes.build` checks only length) | send | high | proven | Confirmed |
+| 3 | Automation "not determined": diagnose says `unverified`/try it, the send blocks 30 s on an invisible prompt, then returns `timeout`/`may_have_completed`/`retry_safe=false`, and the answer is never remembered. Merges Login#4, TCC#1, Msg#2, Send#3 | TCC/send | high | proven (code), prompt-blocking likely | Confirmed (`LiveScriptRunner.swift:33,86`, `MessagesAccess.swift:59`, `Diagnose.swift:228-233`) |
+| 4 | The probe of a running but hung Messages has no time limit, so diagnose and every send hang, and blocked GCD threads pile up (`MessagesLauncher.swift:39` sits inside the deadline loop; `MessagesAccess.swift:33`) | Messages | high | proven | Confirmed |
+| 5 | `brew uninstall --cask` sends TERM. The helper exits 75, launchd relaunches it from the deleted app, and it keeps the port. The cask comment and docs are stale | install | high | proven | Confirmed (`KeepRunning.swift:12-20`, `generate-cask.sh:7-9,41-42`). Unreleased: v2.0.0 predates #42/#43 |
+| 6 | The service needs a desktop (Aqua) login. Nothing documents this, and the bridge's "Open iMessage Max" advice cannot work over SSH | login | high | proven | Confirmed (plist is a gui-domain SMAppService agent; `StdioBridge.swift:31`) |
+| 7 | Contact numbers without a country code are treated as US numbers, so names go missing and a name send can go to a stranger (`PhoneUtils.swift:15-23`; `SendResolver.swift:144-147` sends to a contact-derived handle with no chat.db check) | read/send | high | likely | Confirmed in code; I did not test it live |
+| 8 | Nothing checks that iMessage is signed in or enabled. Diagnose says send is `supported`, and sends end `uncertain`/`failed` with no cause (`SendScript.swift:24`) | Messages | high | likely | Confirmed that no account check exists. I did not verify the account-enabled behaviour in the sdef. Kept high because sign-out is common on unattended Macs and invisible while Messages runs hidden |
+| 9 | Every helper restart permanently kills stdio bridge sessions, and the 3 s connect grace is shorter than the 10 s throttle (merges Svc#5 and Install#6) | service/install | medium | proven | Confirmed (`StdioBridge.swift:47,58,148`). Ranked high: every update or crash strands Codex and Claude Desktop with nobody there to reconnect them |
+| 10 | Port 47821 conflict (another user's helper or any other process): "Started" is logged before the bind fails, then exit 1 every 10 s, the unix socket goes down too, and the companion gives the wrong advice (merges Login#2, Svc#4, Install#3) | service | medium | proven | Confirmed (`HTTPTransport.connect` only spawns a Task; the comment at `MCPServer.swift:77-78` is wrong) |
+| 11 | A send ending `may_have_completed` (timeout, -609) never checks chat.db against the baseline it already took, and the -609 text says "Try again" (merges Msg#5, Send#5) | send | medium | proven | Accepted (auditor test `testTimeoutIsNeverVerifiedAgainstChatDb`) |
+| 12 | A remembered `denied`/`not_determined` is never re-checked while Messages is closed. A `launchedForDiagnose` set after a failed launch sticks for the helper's lifetime (merges TCC#2, Msg#8) | TCC | medium | proven | Confirmed (`MessagesAccess.swift:34-42`) |
+| 13 | Send errors are classified by English text, and errorNumber (field 3) is ignored. This breaks en_GB and non-English Macs, and an EPERM "not permitted" gets recorded as Automation denied (merges TCC#3, Send#4) | send | medium | proven | Confirmed (`SendScript.swift:103-129`) |
+| 14 | launchd ExitTimeOut is 5 s, but the drain allows 15 s, so a slow drain is SIGKILLed mid-send and relaunched even when Keep running is off | service | medium | proven | Accepted (I did not run `launchctl print` on the helper, per the rules). The code comment and the test doc assume 20 s (`HTTPTransport.swift:43-45`) |
+| 15 | Permanent startup errors (token mode 0644, unwritable folder) loop forever while the companion shows "Stopped" | service | medium | proven | Accepted |
+| 16 | `to:` sends always go through the iMessage participant, even when an SMS/RCS DM exists. Duplicate DMs and degenerate groups give a false `mismatch` (merges Msg#6, Send#2) | send | medium | proven (fakes) | Confirmed (`SendResolver.swift:193-211`, `SendScript.swift:24`) |
+| 17 | Contacts deliberately left off means `needs_setup` forever, and agents are told to stop (`Diagnose.swift:222`) | TCC | medium | likely | Confirmed |
+| 18 | `live_inbox` is reported `supported` on stdio and modern lanes, which never get notifications | read | medium | proven | Confirmed (only `HTTPTransport.notifyNewMessages` fans out) |
+| 19 | After an update with the companion not running, the old binary and plist stay in use indefinitely. `restartIfOutdated` runs only at companion launch | install | medium | proven | Accepted |
+| 20 | Nothing keeps the Mac awake. With idle sleep on, the endpoint and live inbox stall | login | medium | likely | Accepted. Mostly an operator setting; see the checklist |
+| 21 | No fleet/PPPC docs, and the TCC subject is `com.cyberpapiii.imessage-max.menubar`, not the helper id | TCC | medium | proven | Accepted (tccd log evidence) |
+| 22 | Bearer token is sent to whatever holds 127.0.0.1:47821, and lsof cannot see other users' listeners | install | medium | likely | Accepted. Needs a hostile local account, so it ranks low for headless |
+| 23 | Concurrent file sends with the same base name read each other's transfer status (`dropFirst(baseline)`) | Messages | medium | likely | Confirmed (`LiveScriptRunner.swift:63`, no lock) |
+| 24 | Offloaded iCloud attachments cannot be fetched, but diagnose says `supported` and tells agents to retry | read | medium | proven | Confirmed (`GetAttachment.swift:218`, `Diagnose.swift:252-255`) |
+| 25 | Late-synced iCloud history is treated as new mail by `get_messages_since` and notifications | read | medium | likely | Accepted. A risk for auto-reply agents on a freshly set-up Mac |
+| 26 | Contacts reload blocks the request path every 30 s (~0.5 s at 1.7k contacts) | read | medium | likely | Accepted |
+| 27 | Unbounded concurrent osascript exhausts GCD threads (about 100 concurrent runs give false timeouts) | send | low | proven | Accepted; folded into PR 4 |
+| 28 | Transfer-status polls skip the hidden launch, so Messages relaunches visibly after a crash | Messages | low | proven | Confirmed (`LiveScriptRunner.swift:52-54`) |
+| 29 | A pending attachment hides the text's verification result | send | low | proven | Accepted |
+| 30 | Session idle time uses the wall clock: sleep over 1 h or a clock jump expires sessions or keeps dead ones (merges Login#5, Svc#9) | service | low | likely | Confirmed (`SessionManager.swift:16,29,128`) |
+| 31 | Log rotates only at startup | service | low | proven | Confirmed (`Log.swift:41-57`) |
+| 32 | A deleted socket file is never recreated | service | low | proven | Accepted |
+| 33 | 512-session cap with 300 s reclaim and no log line | service | low | proven | Accepted |
+| 34 | `open --args --register-helper` is ignored while the companion runs | TCC | low | proven | Accepted |
+| 35 | Typedstream 0x82 length is misread, so messages of 32 KB or more have no text | read | low | proven | Confirmed (`MessageTextExtractor.swift:40-43`, which reads 3 bytes) |
+| 36 | Contacts with only a company or nickname are not loaded | read | low | proven | Accepted |
+| 37 | Fuzzy search, or any-word search with more than 8 terms, checks only 500 rows and returns total 0 | read | medium | proven | Accepted. Not about headless reliability |
+| 38 | Case-sensitive attributedBody prefilter misses mixed-case words | read | medium | likely | Accepted. Not about headless reliability |
+| 39 | No supported DMG uninstall; leftovers remain | install | low | likely | Accepted |
+
+## Fix plan
+Each item is one PR, in the order to ship them.
+
+1. **Crash-proof the helper** (#1, #2). Change `Log.write` to a `Darwin.write(STDERR_FILENO…)` loop that ignores errors other than EINTR. Make `SendPayload.build` reject `\u{0}` in text and paths, and have `Osascript.run` refuse NUL arguments as a backstop. Files: `Utilities/Log.swift`, `Send/SendTypes.swift`, `Send/Osascript.swift`. Tests: Log against a closed fd returns; a NUL payload gives a `failed`/`not_started` result. Rerun the auditor's full-volume hdiutil test against a scratch helper. Effort: small.
+2. **Cask uninstall really stops the helper** (#5). The helper treats SIGUSR1 as a graceful stop that exits 0. The cask uses `signal: ["USR1", label]`. Fix the comment in `generate-cask.sh`, `macos/README.md:56`, CHANGELOG, and the "exits 0 on SIGTERM" line in AGENTS.md. Add a ServiceFilesContractTests assertion and a SignalShutdownTests case (USR1 gives 0, TERM gives 75). Must ship before the next tag. Effort: small.
+3. **Automation gate and classification** (#3, #12, #13, #17). In `LiveScriptRunner.sendBlocking` and `stage()`, after `prepareForScript`, call `check(false)`. On notDetermined or denied, return `automationPermissionRequired`/`notStarted` and remember the answer. Diagnose maps notDetermined to `permission_gated` with the fix. Re-check a remembered non-authorized answer at most every 5 minutes, and clear `launchedForDiagnose` when the launch fails. Classify by errorNumber (-1743/-1744 permission; -1728/-1700 missing target; -600/-609 unavailable; -43 file); drop the bare "not permitted" match. Base overall `ready` on the database only. Tests: unit tests with an injected check and localized marker lines; extend the existing MessagesAccessTests and AppleScriptSendResultTests. Effort: small to medium.
+4. **Bounded Messages probe and serialized Apple events** (#4, #27, #28). Run `rawStatus` on a dedicated thread with a semaphore timeout of about 2 s and one probe in flight. A timeout returns a `messagesNotResponding` status, so diagnose shows `unverified` with detail and the send fails fast with `notStarted`. Put all osascript runs behind one serial queue or a small semaphore, and replace the waiter thread with `terminationHandler` plus a DispatchSourceTimer. Call `prepareForScript` in the transfer `statusQuery`. Tests: an injected never-returning check; the auditor's `delay 3` concurrency harness. Effort: medium.
+5. **Send outcome truth** (#11, #16, #23, #29). Verify against chat.db on a `mayHaveCompleted` failure of the final text payload. Fix the -609 wording. When a real DM exists (`style = 45`), send through `.chat(guid:)` and choose the chat with the latest message. Track file transfers by pre-dispatch ids, not `dropFirst`, or hold a keyed lock. Verify the text even when a file is pending. Tests: the auditor's AuditSendReproTests cases become regression tests. Effort: medium.
+6. **Phone normalization and safe name sends** (#7, #36). Assume +1 only when the region is NANP. Otherwise turn a leading `00` into `+`, drop the `(0)` trunk digit, and prefix the region's code. A name match whose handle is not in chat.db's handle table returns `ambiguous` and does not send. Load organization and nickname. Tests: a PhoneUtils table across locales; SendResolver with a contact-only handle. Effort: medium.
+7. **Startup, port and launchd hygiene** (#10, #14, #15, #32). `connect()` waits for the bind through `onServerRunning` before the socket starts and before "Started" is logged. On EADDRINUSE, log one clear line, keep the unix socket, and retry the TCP bind on a Dispatch timer. Add `ExitTimeOut 20` to the plist, or lower the drain to 4 s if SMAppService ignores the key. Make a 0644 token in the standard location 0600 and log a warning. Companion parses `last exit code` and shows a `failing` state. Re-check the socket path every 30 s. Tests: two scratch helpers on one port; `launchctl print` on a test-variant label. Effort: medium.
+8. **Resumable stdio bridge** (#9). Raise the grace to 15 s. On disconnect, reconnect, replay `initialize` and `notifications/initialized`, drop the replayed response, and answer in-flight requests with -32000. Tests: a bridge plus scratch helper restart (the auditor's script); then each real client against a test variant. Effort: medium.
+9. **iMessage account health** (#8). Diagnose runs a read-only osascript for `{enabled, connection status}` of the iMessage accounts, bounded and cached for 60 s, and reports `degraded` with a sign-in fix. SendScript picks an enabled account and classifies "can't get account" as a clear not-signed-in error. Test: a test user with a throwaway Apple ID, signed out and with the account disabled. Effort: medium.
+10. **Diagnose tells the truth** (#18, #24, #20, #25). Report `live_inbox` per lane. Report `attachments_offloaded` as `degraded` and stop telling agents to retry. Report the `sleep` setting from `IOPMCopyActivePMPreferences`, and add an opt-in keep-awake assertion. Add `max_age` and a `late` flag to `get_messages_since`. Effort: small to medium.
+11. **Headless and fleet docs** (#6, #21, #34, #39). Add a README section on headless Macs, a PPPC/Managed Login Items doc keyed to `com.cyberpapiii.imessage-max.menubar` and team HJF7LN64XX, and an uninstall doc with `--unregister-helper` and the `tccutil reset` zap line. When the bridge finds no socket, it checks for a console user and explains that someone must be logged in to the desktop. Effort: small.
+12. **Update hygiene** (#19, AG). The helper watches its own executable inode and exits 75 when idle after a replacement. The companion runs `restartIfOutdated` on each periodic check, including when the helper is not answering. `make install` waits for a new pid before verify. Effort: medium.
+13. **Read and service polish** (#26, #30, #31, #33, #35, #37, #38). Reload Contacts in the background. Use monotonic clocks for sessions. Rotate the log periodically. At the session cap, evict the least-recently-active session and log it. Read a 4-byte length for typedstream 0x82. Page fuzzy search within a time budget. Use a lowercase attributedBody prefilter. Effort: small each.
+
+## Running iMessage Max on a headless Mac
+What an operator must do that code cannot:
+1. **Desktop login is required.** Turn on automatic login for the iMessage user. That requires FileVault off. With FileVault on, log in over Screen Sharing after every reboot. Whether a macOS 26 SSH FileVault unlock goes on to a desktop login is unverified.
+2. **Never log out.** Disconnect Screen Sharing instead, and lock the screen if needed. Logging out stops the helper and `imagent`.
+3. **Power:** `sudo pmset -a sleep 0 autorestart 1 womp 1` (display sleep is fine). Optionally also `powernap 0`, and use a UPS.
+4. **One-time grants over Screen Sharing**, or an MDM PPPC profile keyed to `com.cyberpapiii.imessage-max.menubar` with its designated requirement:
+   - Full Disk Access, Contacts, and Automation for Messages. Click the companion's Allow Messages Access while you are watching the screen. Do not leave Automation "not determined".
+   - Background Activity left on under Login Items. With MDM, add a Managed Login Items rule for team HJF7LN64XX.
+5. **Messages:** sign in to iMessage in Messages once, interactively. Re-check after any Apple ID password change or major OS update, because Messages runs hidden and a signed-out alert is never seen.
+6. **Optimize Storage:** turn off Messages in iCloud "Optimize storage" if agents need old attachments.
+7. **One user per port:** do not run a second logged-in user with iMessage Max on the same port.
+8. **Install:** install from the notarized DMG or cask. Open the app once (Gatekeeper) while logged in at the console. If the companion is already running, quit it first before `open … --args --register-helper`.
+9. **Updates:** after an update, open the companion or log in again so the helper moves to the new binary and plist. Stdio clients (Codex, Claude Desktop) may need restarting after any helper restart until PR 8 ships.
+
+## Unverified scenarios
+| Scenario | Test plan | Needs |
+|---|---|---|
+| macOS 26 FileVault SSH unlock: does a desktop session (gui domain, helper, imagent) follow? | Reboot, unlock over SSH, then check `launchctl print gui/$(id -u)/…` and `stat -f%Su /dev/console` | Second Mac (Apple Silicon, FileVault) |
+| No display or dummy plug: do the hidden `NSWorkspace` launch and Apple events work? | Auto-login Mac mini, SSH, test-variant app; quit Messages, run diagnose, look for `Starting Messages hidden` then ready within 10 s; repeat with a dummy plug | Second Mac |
+| Locked screen: hidden launch, probe and send | Lock, then over SSH run diagnose plus a read-only osascript; send only to your own test handle | Test user (imax-test) or second Mac |
+| Fast user switching: background-session user's Apple events and port conflict behaviour | Log in imax-test, switch to the main user, drive a test variant as imax-test; watch the runs counter and errno 48 | Test user |
+| Consent prompt: does osascript block for the full 30 s, and does an unanswered prompt turn into a silent deny? | `tccutil reset AppleEvents <test id>`, read-only `get name` through Osascript, leave the prompt unanswered, then probe with ask=false | Throwaway VM or test user |
+| iMessage signed out or disabled: exact error number and phase | Run only the resolution half of SendScript (no `send` line) | Test user with a throwaway Apple ID |
+| Is `ExitTimeOut` honored for an SMAppService agent? | Test variant with ExitTimeOut 20; `launchctl print` shows `exit timeout`; a slow POST plus TERM exits on its own at about 15 s | Same Mac, test variant |
+| Contacts and FDA revocation at runtime: how fast it is noticed, and whether cached names leak | Poll diagnose and get_messages every second while toggling the grant | Test user or VM |
+| Do Claude Desktop, Codex and mcpb respawn a stdio server that exited 75? | Restart the test variant mid-session and issue a tool call | Same Mac, test variant |
+| Messages arriving during sleep or dark wake: exactly one catch-up notification | `pmset sleepnow`, send from a test account, wake, check SSE | Second Mac or test account |
+| End-to-end PPPC and Managed Login Items: zero clicks from install to send | MDM-enrolled VM; also a negative test with the profile keyed to the helper id | MDM VM |
+| `dropFirst` ordering of `every file transfer whose name is X` | Read-only query of `{id, started}` across a Messages relaunch | Same Mac, read-only |
+| In-flight orphan rows (row before join) skipped by the 30 s date-based grace | Look for join gaps in chat.db copies during a burst after wake | Test account |
+| Worst-case send latency against client tools/call timeouts (about 41 s text, about 115 s file) | Fake ScriptExecutor timing; find plug's and Desktop's timeouts | Same Mac, unit-level |
+
+## Dropped or downgraded findings
+- **Duplicates merged:** Automation not-determined send hang appeared four times and is now #3. Stale remembered answer, twice, now #12. Locale classification, twice, now #13. Port conflict, three times, now #10. Stdio bridge restart, twice, now #9. `may_have_completed` with no verify, twice, now #11. `to:` routed via iMessage with false mismatch, twice, now #16. Wall-clock sessions, twice, now #30. The headless and uninstall docs gap appears in three areas and became one docs PR.
+- **Send#3 (not-determined hang):** raised from medium to high to match the merged #3, since the code path is confirmed.
+- **Install#2 (`make install` verifies the old helper):** downgraded from medium to low. It affects the developer install only, not headless operation.
+- **Install#4 (token sent to a foreign listener):** kept at medium but ranked low. It needs a hostile second local account.
+- **Read#6 and #7 (fuzzy search cap, case-sensitive prefilter):** severity kept, ranked last. They are search correctness issues, not headless reliability.
+- **Login#3 (sleep):** mostly an operator setting. The code part (report it, opt-in assertion) moved into PR 10.
+- **Svc ExitTimeOut (#14):** kept as proven on the auditor's `launchctl print`. I did not re-run it, because the rules forbid launchctl on the live helper label.
+- **Messages#8 `launchedForDiagnose` sticky after a failed launch:** kept and merged into #12. The code sets the flag in a `defer` whether or not the launch succeeds.
+- **Dropped:** none outright. Every high finding held against the code. #8 (iMessage signed out) keeps high severity with "likely" confidence, because the account-property behaviour is from the sdef and was not exercised.
