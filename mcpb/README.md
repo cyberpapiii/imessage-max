@@ -10,8 +10,13 @@ the binary is a stdio bridge. It copies MCP traffic to the iMessage Max helper
 over the socket `~/Library/Application Support/iMessage Max/mcp.sock` and never
 reads Messages itself. The helper holds Full Disk Access, Contacts and
 Automation, so Claude needs none of them, and installing the extension asks for
-no path. When the helper is not running, the extension's first request fails
-with "Open iMessage Max to start it."
+no path. The bridge waits up to 15 s for the helper, and a helper restart
+(update, crash, relaunch) does not end Claude's session: the bridge reconnects
+and replays the handshake, and only a request that was running during the
+restart fails, with a message to retry it. When the helper is not running,
+the extension's first request fails with "Open iMessage Max to start it." When
+no one is logged in to the Mac's desktop, the message says that a desktop
+login is needed, since the helper cannot start without one.
 
 The binary is left out of git. The release workflow builds the bundle with
 `scripts/sign-notarize-app.sh`, which calls the command below and then
