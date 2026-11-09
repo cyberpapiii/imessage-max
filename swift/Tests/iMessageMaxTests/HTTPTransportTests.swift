@@ -1,3 +1,4 @@
+import Synchronization
 import XCTest
 @testable import iMessageMax
 
@@ -157,27 +158,62 @@ final class SSEChannelTests: XCTestCase {
 
 final class SessionManagerLifecycleTests: XCTestCase {
 
-    func testCreateSessionAtCapacityReturnsAtCapacity() async {
+    /// 088 #33: a full table refused every new client until a session had
+    /// been idle 300 s, and said nothing. The least recently active session
+    /// now makes room, with one log line.
+    func testAtTheCapTheLeastRecentlyActiveSessionMakesRoom() async throws {
+        let clock = Mutex<TimeInterval>(1_000)
         let manager = SessionManager(
             catalog: makeTestCatalog(),
-            configuration: .init(
-                maxSessions: 1,
-                cleanupInterval: .milliseconds(20)
-            )
+            configuration: .init(maxSessions: 2, cleanupInterval: .seconds(60)),
+            now: { clock.withLock { $0 } }
         )
 
-        let first = await manager.createSession()
-        guard case .created = first else {
-            return XCTFail("First session should be created, got \(first)")
+        guard case .created(let older) = await manager.createSession() else { return XCTFail("first session") }
+        clock.withLock { $0 += 10 }
+        guard case .created(let idle) = await manager.createSession() else { return XCTFail("second session") }
+        clock.withLock { $0 += 10 }
+        await manager.touch(sessionId: older.id)
+        clock.withLock { $0 += 5 }
+
+        let capture = Log.Capture()
+        let third = await Log.$capture.withValue(capture) { await manager.createSession() }
+        guard case .created(let admitted) = third else {
+            return XCTFail("A new client should get a session at the cap, got \(third)")
         }
 
+        let live = Set(await manager.activeSessionIds())
+        XCTAssertEqual(live, [older.id, admitted.id], "the session idle longest makes room")
+        let evictedRouted = await manager.routeMessage(sessionId: idle.id, data: Data())
+        XCTAssertFalse(evictedRouted, "its client gets 404 and starts a new session")
+        XCTAssertEqual(capture.lines.count, 1, "\(capture.lines)")
+        XCTAssertTrue(capture.lines.first?.contains("Session cap of 2 reached") == true, "\(capture.lines)")
+        XCTAssertTrue(capture.lines.first?.contains(String(idle.id.prefix(8))) == true, "\(capture.lines)")
+        XCTAssertTrue(capture.lines.first?.contains("idle 15 s") == true, "\(capture.lines)")
+
+        for id in live { await manager.terminateSession(sessionId: id) }
+    }
+
+    /// Only slots held by sessions still being created cannot be freed.
+    func testCreateSessionWhileEverySlotIsStillStartingReturnsAtCapacity() async {
+        let started = DispatchSemaphore(value: 0)
+        var configuration = HTTPTransport.Configuration(maxSessions: 1, cleanupInterval: .seconds(60))
+        configuration.makeServer = { catalog in
+            started.signal()
+            await AsyncTimeout.sleep(.milliseconds(500))
+            return await Version.makeServer(catalog: catalog)
+        }
+        let manager = SessionManager(catalog: makeTestCatalog(), configuration: configuration)
+
+        let slow = Task { await manager.createSession() }
+        await MessagesAccess.offPool { _ = started.wait(timeout: .now() + 5) }
         let second = await manager.createSession()
         guard case .atCapacity = second else {
-            return XCTFail("Second session should be refused as .atCapacity, got \(second)")
+            return XCTFail("A slot still starting cannot be reclaimed, got \(second)")
         }
-
-        let count = await manager.sessionCount
-        XCTAssertEqual(count, 1)
+        if case .created(let session) = await slow.value {
+            await manager.terminateSession(sessionId: session.id)
+        }
     }
 
     func testAbandonedSessionIsReclaimedToAdmitANewClient() async {

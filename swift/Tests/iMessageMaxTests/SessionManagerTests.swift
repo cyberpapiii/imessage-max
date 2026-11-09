@@ -5,7 +5,7 @@ import Synchronization
 
 final class SessionManagerTests: XCTestCase {
 
-    func testConcurrentCreatesRespectTheCap() async throws {
+    func testConcurrentCreatesNeverExceedTheCap() async throws {
         let manager = SessionManager(
             catalog: makeTestCatalog(),
             configuration: .init(
@@ -41,15 +41,50 @@ final class SessionManagerTests: XCTestCase {
             }
         }
 
+        let live = await manager.sessionCount
         for session in created {
             await manager.terminateSession(sessionId: session.id)
         }
 
-        XCTAssertEqual(
-            created.count,
-            2,
-            "successes=\(created.count) atCapacity=\(atCapacity) startFailed=\(startFailed)"
+        // At the cap a new session closes the least recently active one, so
+        // more than two can be created, but never more than two are live.
+        XCTAssertLessThanOrEqual(live, 2)
+        XCTAssertGreaterThanOrEqual(created.count, 2)
+        XCTAssertEqual(startFailed, 0, "successes=\(created.count) atCapacity=\(atCapacity)")
+    }
+
+    /// 088 #30: idle time came from the wall clock, so a clock change or an
+    /// hour's sleep expired live sessions. It now comes from the injected
+    /// uptime clock, and the wall clock plays no part.
+    func testIdleTimeIsMeasuredOnTheInjectedUptimeClock() async {
+        let clock = Mutex<TimeInterval>(50)
+        let manager = SessionManager(
+            catalog: makeTestCatalog(),
+            configuration: .init(cleanupInterval: .seconds(60), sessionTimeout: 3600),
+            now: { clock.withLock { $0 } }
         )
+        guard case .created(let session) = await manager.createSession() else { return XCTFail("session") }
+
+        clock.withLock { $0 += 3599 }
+        let stillValid = await manager.validate(sessionId: session.id)
+        XCTAssertTrue(stillValid)
+
+        clock.withLock { $0 += 3599 }
+        await manager.cleanupExpiredSessions()
+        let survived = await manager.routeMessage(sessionId: session.id, data: Data())
+        XCTAssertTrue(survived, "validate counted as activity")
+
+        clock.withLock { $0 += 3601 }
+        await manager.cleanupExpiredSessions()
+        let expired = await manager.routeMessage(sessionId: session.id, data: Data())
+        XCTAssertFalse(expired)
+    }
+
+    func testUptimeClockIsMonotonic() {
+        let first = SessionManager.uptime()
+        let second = SessionManager.uptime()
+        XCTAssertGreaterThan(first, 0)
+        XCTAssertGreaterThanOrEqual(second, first)
     }
 
     func testTerminateStopsServer() async {
