@@ -140,7 +140,7 @@ actor GetMessagesTool {
             name: "get_messages",
             description: """
                 Get messages from one chat, filtered by time, sender, content type, or text. Provide either chat_id or participants.
-                Returns messages with metadata. Images return metadata only; use get_attachment for the image content.
+                Returns messages with metadata. Attachments return metadata only; use get_attachment for an image, or for the text of a PDF or document.
                 The response groups messages into sessions, and a gap of 4 or more hours starts a new session. Use this tool after you know which conversation you want to read closely.
                 Use chat.id or chat_id only in follow-up tool calls. When you explain results to the user, refer to chats by name, using chat.name and participant names, not the chat id.
 

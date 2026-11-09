@@ -229,6 +229,8 @@ get_chat_details(chat_id="chat123", include_shared_summary=false) # Skip recent 
 ### get_messages
 Retrieve messages, filtered by time, sender, or content type. For media, it returns metadata. A lookup by explicit `chat_id` is never filtered.
 
+Time bounds (`since`, `before`) on every tool take ISO 8601 (`2026-01-15T10:30:00Z`), relative (`30min`, `24h`, `7d`, `2w`, `3mo`) or natural (`yesterday`, `last tuesday`, `2 weeks ago`) forms. A bare `m` is refused with an error, because previews write minutes as `5m ago`: write `min` for minutes or `mo` for months. A bound that does not parse is an error, not a filter left out.
+
 ```text
 get_messages(chat_id="chat123", limit=50)           # Recent messages
 get_messages(chat_id="chat123", since="24h")        # Last 24 hours
@@ -355,12 +357,13 @@ Reactions do not end a wait, and neither does late-synced history (see `late` ab
 The 50 s ceiling stays under Codex's default 60 s tool timeout (`tool_timeout_sec`) and the helper's 60 s idle connection timeout. Claude Code allows about 28 hours by default. Through plug, keep this server's `call_timeout_secs` above 50. Plug's per-server `max_concurrent` caps the calls it sends to this server at once, so at `1` a wait holds back every other iMessage call through plug until it returns. Raise it if agents wait while doing other work.
 
 ### get_attachment
-Retrieve image content by attachment ID with resolution variants.
+Retrieve an attachment's content by attachment ID. The first block is always JSON metadata (`id`, `type`, `name`, `chat`, `available`, plus fields for the type). The blocks after it carry the attachment.
 
 ```text
 get_attachment(attachment_id="att123")                 # Default: vision (1568px)
 get_attachment(attachment_id="att123", variant="thumb") # Quick preview (400px)
 get_attachment(attachment_id="att123", variant="full")  # Original resolution
+get_attachment(attachment_id="att456", offset=10000)   # A PDF's text from character 10,000
 ```
 
 | Variant | Resolution | Use Case | Token Cost |
@@ -368,6 +371,12 @@ get_attachment(attachment_id="att123", variant="full")  # Original resolution
 | `vision` (default) | 1568px | AI analysis, OCR | ~1,600 tokens |
 | `thumb` | 400px | Quick preview | ~200 tokens |
 | `full` | Original | Maximum detail | Varies |
+
+PDFs and documents come back as their text, one text block of at most `max_chars` characters (default 10,000, max 50,000). Readable files are PDFs, plain text of any kind (`.txt`, `.csv`, `.json`, source code, contact cards, HTML as its source), RTF, Word (`.doc`, `.docx`) and OpenDocument text (`.odt`). The metadata gives `chars` (the whole text's length), `pages` for a PDF, and `next_offset` while text remains. Pass `next_offset` as `offset` to read on. A PDF's text marks each page with `[page N]`. A PDF with no text layer, such as a scan, comes back as images of its first 3 pages at the requested variant, with `chars: 0` and `rendered_pages`. Spreadsheets and presentations still return `unsupported_type`.
+
+```json
+{"id":"att5","type":"pdf","name":"lease.pdf","chat":{"id":"chat3","name":"Alice Smith"},"available":true,"pages":12,"chars":48210,"next_offset":9987}
+```
 
 ### list_chats
 Browse recent chats with previews.

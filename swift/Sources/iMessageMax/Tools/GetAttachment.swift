@@ -97,6 +97,14 @@ struct GetAttachment {
                     "enum": ["vision", "thumb", "full"],
                     "default": "vision",
                 ]),
+                "offset": .object([
+                    "type": "integer",
+                    "description": "Character offset to read a document from. Pass next_offset from the previous reply to read on (default 0)",
+                ]),
+                "max_chars": .object([
+                    "type": "integer",
+                    "description": "Most characters of document text to return (\(TextRequest.maxCharsArgument.defaultAndMax))",
+                ]),
             ]),
             "required": ["attachment_id"],
             "additionalProperties": false,
@@ -104,7 +112,7 @@ struct GetAttachment {
 
         return ToolDefinition(
             name: "get_attachment",
-            description: "Get an image by attachment ID. Returns the image at the requested resolution variant: vision (1568px, best for AI analysis), thumb (400px, quick preview), or full (original size).",
+            description: "Get an attachment's content by attachment ID. The first block is JSON metadata. An image comes back at the requested resolution variant: vision (1568px, best for AI analysis), thumb (400px, quick preview), or full (original size). A PDF, or a plain text, RTF, Word or OpenDocument file, comes back as its text, max_chars at a time; when the metadata has next_offset, pass it as offset to read on. A PDF with no text layer, such as a scan, comes back as images of its first \(scannedPagesShown) pages.",
             inputSchema: inputSchema,
             annotations: Tool.Annotations(
                 title: "Get Attachment",
@@ -119,8 +127,12 @@ struct GetAttachment {
             }
 
             let variant = arguments?["variant"]?.stringValue ?? "vision"
+            let text = TextRequest(
+                offset: TextRequest.offsetArgument.read(arguments),
+                maxChars: TextRequest.maxCharsArgument.read(arguments)
+            )
             let tool = GetAttachment(db: db, resolver: resolver)
-            return try await tool.execute(attachmentId: attachmentId, variant: variant).toolContent()
+            return try await tool.execute(attachmentId: attachmentId, variant: variant, text: text).toolContent()
         }
     }
 
@@ -131,7 +143,12 @@ struct GetAttachment {
         + "It becomes available after someone opens the conversation in Messages on this Mac and "
         + "Messages downloads it."
 
-    func execute(attachmentId: String, variant: String = "vision", allowedRoots: [String] = AttachmentPathPolicy.defaultRoots) async throws -> AttachmentContent {
+    func execute(
+        attachmentId: String,
+        variant: String = "vision",
+        text: TextRequest = TextRequest(),
+        allowedRoots: [String] = AttachmentPathPolicy.defaultRoots
+    ) async throws -> AttachmentContent {
         guard let imageVariant = ImageVariant(rawValue: variant) else {
             let validVariants = ImageVariant.allCases.map { $0.rawValue }.sorted()
             throw ToolFailure("validation_error", "Invalid variant '\(variant)'. Must be one of: \(validVariants.joined(separator: ", "))")
@@ -203,7 +220,7 @@ struct GetAttachment {
             totalBytes: attachment.totalBytes,
             displayName: attachment.transferName ?? (expandedPath as NSString).lastPathComponent
         )
-        let typed = try await content(of: file, variant: imageVariant)
+        let typed = try await content(of: file, variant: imageVariant, text: text)
         let chat = try await resolveAttachmentChat(rowId: rowId)
 
         return AttachmentContent(
@@ -219,7 +236,7 @@ struct GetAttachment {
         )
     }
 
-    private func content(of file: AttachmentFile, variant: ImageVariant) async throws -> TypedAttachmentContent {
+    private func content(of file: AttachmentFile, variant: ImageVariant, text: TextRequest) async throws -> TypedAttachmentContent {
         switch file.type {
         case .image:
             return TypedAttachmentContent(blocks: [try imageBlock(file, variant: variant)])
@@ -231,8 +248,32 @@ struct GetAttachment {
             throw Self.unsupported(file, "Attachment type 'audio' is not supported. Only images are supported.")
 
         case .pdf, .document, .other:
-            throw Self.unsupported(file, "Attachment type '\(file.type.rawValue)' is not supported. Only images are supported.")
+            return try documentContent(file, variant: variant, text: text)
         }
+    }
+
+    /// Scans with no text layer come back as images of their first pages.
+    static let scannedPagesShown = 3
+
+    private func documentContent(_ file: AttachmentFile, variant: ImageVariant, text: TextRequest) throws -> TypedAttachmentContent {
+        guard let format = DocumentText.format(uti: file.uti, path: file.path) else {
+            throw Self.unsupported(file, "get_attachment reads images, PDFs, and plain text, RTF, Word and OpenDocument text files. This attachment is none of these.")
+        }
+        let extracted = try DocumentText.extract(path: file.path, format: format)
+        if extracted.text.isEmpty, case .pdf = format {
+            let pages = DocumentText.renderPages(
+                path: file.path,
+                maxPages: Self.scannedPagesShown,
+                maxDimension: variant.maxDimension ?? ImageVariant.vision.maxDimension ?? 1568
+            )
+            let blocks = pages.compactMap(imageProcessor.jpeg).map {
+                Tool.Content.plainImage(data: $0.data.base64EncodedString(), mimeType: "image/\($0.format)")
+            }
+            let window = TextWindow(pages: extracted.pages, chars: 0, offset: nil, nextOffset: nil, renderedPages: blocks.count)
+            return TypedAttachmentContent(detail: window, blocks: blocks)
+        }
+        let (window, slice) = try TextWindow.cut(extracted.text, offset: text.offset, maxChars: text.maxChars, pages: extracted.pages)
+        return TypedAttachmentContent(detail: window, blocks: slice.isEmpty ? [] : [.plainText(slice)])
     }
 
     private func imageBlock(_ file: AttachmentFile, variant: ImageVariant) throws -> Tool.Content {
