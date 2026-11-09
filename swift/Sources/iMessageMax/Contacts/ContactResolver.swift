@@ -286,6 +286,32 @@ actor ContactResolver {
         .sorted { ($0.name, $0.handle) < ($1.name, $1.handle) }
     }
 
+    struct Contact: Equatable, Sendable {
+        let name: String
+        let handles: [String]
+    }
+
+    /// The contacts whose name matches `query`, or the contact that owns the
+    /// number or email `query`, each with every number and email it has.
+    /// Contacts that share a display name read as one.
+    func contacts(matching query: String) -> [Contact] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let names: Set<String>
+        if PhoneUtils.normalizeToE164(trimmed, region: region) != nil || PhoneUtils.isEmail(trimmed) {
+            names = resolve(trimmed).map { [$0] } ?? []
+        } else {
+            names = Set(searchByName(trimmed).map(\.name))
+        }
+        guard !names.isEmpty else { return [] }
+        var handlesByName: [String: [String]] = [:]
+        for (handle, name) in cache where names.contains(name) {
+            handlesByName[name, default: []].append(handle)
+        }
+        return handlesByName
+            .map { Contact(name: $0.key, handles: $0.value.sorted()) }
+            .sorted { $0.name < $1.name }
+    }
+
     struct Status: Sendable {
         let authorized: Bool
         let authorization: PermissionStatus

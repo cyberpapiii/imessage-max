@@ -214,7 +214,8 @@ extension SearchTool {
                 reactions: message.reactions,
                 replyTo: message.replyTo,
                 replyCount: message.replyCount,
-                edited: message.edited
+                edited: message.edited,
+                unsent: message.unsent
             )
 
             if let window = windows[MessageWindow.Anchor(chatId: searchRow.chatId, message: searchRow.message)] {

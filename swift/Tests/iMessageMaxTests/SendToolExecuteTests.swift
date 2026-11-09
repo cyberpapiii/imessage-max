@@ -356,7 +356,35 @@ final class SendToolExecuteTests: XCTestCase {
         XCTAssertTrue(stub.invocations.isEmpty, "an ambiguous destination must not send")
     }
 
-    func testNameMatchMissingFromMessagesIsRefusedAndNeverSends() async throws {
+    /// The one number in Contacts that matches the name has never been in
+    /// Messages. The send starts the conversation, which Messages records
+    /// as a new handle, DM and row, and the verifier finds it there.
+    func testNameMatchMissingFromMessagesStartsTheConversation() async throws {
+        let fixture = try makeSendFixture()
+        let stub = StubScriptRunner()
+        stub.onSend = { _ in
+            try fixture.insertHandle(rowId: 9, handle: "+15550009999")
+            try fixture.insertChat(rowId: 9, guid: "iMessage;-;+15550009999")
+            try fixture.joinChatHandle(chatId: 9, handleId: 9)
+            try fixture.insertMessage(
+                rowId: 100, guid: "msg-guid-new", text: "Hi", date: AppleTime.fromDate(Date()),
+                isFromMe: true, handleId: 9
+            )
+            try fixture.joinChatMessage(chatId: 9, messageId: 100)
+        }
+        let resolver = ContactResolver(seedCache: ["+15550009999": "Zed Stranger"])
+        let tool = SendTool(db: fixture.database(), resolver: resolver, runner: stub, verifier: fastVerifier(fixture: fixture))
+
+        let json = try decodeJSONDictionary(from: try await tool.execute(args: ["to": .string("Zed Stranger"), "text": .string("Hi")]))
+
+        XCTAssertEqual(stub.invocations, [.textToParticipant(handle: "+15550009999", message: "Hi")])
+        XCTAssertEqual(json["status"] as? String, "confirmed")
+        XCTAssertEqual(json["verified_message_guid"] as? String, "msg-guid-new")
+        XCTAssertEqual(json["delivered_to"] as? [String], ["Zed Stranger"])
+        XCTAssertEqual(json["message"] as? String, "Messages had no conversation with +15550009999 before this send.")
+    }
+
+    func testPartialNameOfANeverMessagedContactIsRefused() async throws {
         let fixture = try makeSendFixture()
         let stub = StubScriptRunner()
         let resolver = ContactResolver(seedCache: ["+15550009999": "Zed Stranger"])
@@ -367,11 +395,49 @@ final class SendToolExecuteTests: XCTestCase {
         }
         XCTAssertEqual(json["status"] as? String, "ambiguous")
         XCTAssertEqual(json["disposition"] as? String, "not_started")
-        XCTAssertEqual(json["retry_safe"] as? Bool, true)
-        XCTAssertTrue((json["message"] as? String ?? "").contains("no conversation in Messages"))
         let candidates = try decodeJSONArray(json["candidates"])
         XCTAssertEqual(candidates.compactMap { $0["handle"] as? String }, ["+15550009999"])
-        XCTAssertTrue(stub.invocations.isEmpty, "a Contacts-only handle must not send")
+        XCTAssertTrue(stub.invocations.isEmpty, "a partial name must not start a first conversation")
+    }
+
+    func testNameMatchingTwoHandlesOfOneContactIsRefused() async throws {
+        let fixture = try makeSendFixture()
+        let stub = StubScriptRunner()
+        let resolver = ContactResolver(seedCache: ["+15550009999": "Zed Stranger", "zed@example.com": "Zed Stranger"])
+        let tool = SendTool(db: fixture.database(), resolver: resolver, runner: stub)
+
+        let json = try await toolFailureBody {
+            try await tool.execute(args: ["to": .string("Zed"), "text": .string("Hi")])
+        }
+        XCTAssertEqual(json["status"] as? String, "ambiguous")
+        let candidates = try decodeJSONArray(json["candidates"])
+        XCTAssertEqual(Set(candidates.compactMap { $0["handle"] as? String }), ["+15550009999", "zed@example.com"])
+        XCTAssertTrue(stub.invocations.isEmpty, "the tool must never pick between two handles")
+    }
+
+    func testNumberWithNoConversationStartsOneAndSaysSo() async throws {
+        let fixture = try makeSendFixture()
+        let stub = StubScriptRunner()
+        let tool = SendTool(db: fixture.database(), resolver: makeSeededResolver(), runner: stub, verifier: fastVerifier(fixture: fixture))
+
+        let json = try decodeJSONDictionary(from: try await tool.execute(args: [
+            "to": .string("(555) 999-9999"), "text": .string("Hi"),
+        ]))
+
+        XCTAssertEqual(stub.invocations, [.textToParticipant(handle: "+15559999999", message: "Hi")])
+        XCTAssertEqual(json["status"] as? String, "uncertain")
+        XCTAssertTrue((json["message"] as? String ?? "").hasSuffix("Messages had no conversation with +15559999999 before this send."))
+    }
+
+    func testKnownHandleSendCarriesNoNewConversationNote() async throws {
+        let fixture = try makeSendFixture()
+        let stub = StubScriptRunner()
+        let tool = SendTool(db: fixture.database(), resolver: makeSeededResolver(), runner: stub, verifier: fastVerifier(fixture: fixture))
+
+        let json = try decodeJSONDictionary(from: try await tool.execute(args: [
+            "to": .string("+15550000001"), "text": .string("Hi"),
+        ]))
+        XCTAssertFalse((json["message"] as? String ?? "").contains("had no conversation"))
     }
 
     func testRecipientNotFoundDoesNotInvokeRunner() async throws {
@@ -380,21 +446,12 @@ final class SendToolExecuteTests: XCTestCase {
 
         let tool = SendTool(db: fixture.database(), resolver: makeSeededResolver(), runner: stub)
 
-        do {
-            _ = try await tool.execute(args: [
-                "to": .string("+15559999999"),
-                "text": .string("Hi"),
-            ])
-            XCTFail("Expected ToolFailure for unresolvable recipient")
-        } catch let error as ToolFailure {
-            let json = try decodeJSONDictionary(from: error.content)
-            XCTAssertEqual(
-                json["status"] as? String,
-                "failed",
-                "Status should be 'failed' for unresolvable recipient"
-            )
+        for to in ["Zelda", "+55555"] {
+            let json = try await toolFailureBody {
+                try await tool.execute(args: ["to": .string(to), "text": .string("Hi")])
+            }
+            XCTAssertEqual(json["status"] as? String, "failed", to)
         }
-
         XCTAssertTrue(
             stub.invocations.isEmpty,
             "Runner should never be invoked when recipient resolution fails; got \(stub.invocations)"

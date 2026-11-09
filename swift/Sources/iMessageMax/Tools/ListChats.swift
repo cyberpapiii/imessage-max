@@ -52,7 +52,7 @@ enum ListChatsTool {
                 ]),
                 "since": .object([
                     "type": "string",
-                    "description": "Only chats with activity since this time (ISO, relative, or natural). Use it for broad catch-up windows such as \"2d\" or \"yesterday\".",
+                    "description": "Only chats with activity since this time: \(AppleTime.boundFormats). Use it for broad catch-up windows such as \"2d\" or \"yesterday\".",
                 ]),
                 "is_group": .object([
                     "type": "boolean",
@@ -97,7 +97,7 @@ enum ListChatsTool {
             )
         ) { arguments in
             let limit = Self.limit.read(arguments)
-            let since = arguments?["since"]?.stringValue
+            let since = try AppleTime.checkedBound(arguments?["since"]?.stringValue, name: "since")
             let isGroup = arguments?["is_group"]?.boolValue
             let includeFiltered = arguments?["include_filtered"]?.boolValue ?? false
             let minParticipants = arguments?["min_participants"]?.intValue
