@@ -130,9 +130,13 @@ with no transport flag is a bridge: it copies stdin and stdout to the running
 helper (`imessage-max --http`) over the Unix socket
 `~/Library/Application Support/iMessage Max/mcp.sock` (mode 0600), so only the
 helper needs Full Disk Access, Contacts and Automation. Each bridge connection
-is its own stdio session, serving both eras. When the helper is not running,
-the bridge answers the first request with "Open iMessage Max to start it." and
-exits. `imessage-max --direct` serves stdio in process, as before, for
+is its own stdio session, serving both eras. A helper restart does not end
+the session: the bridge reconnects within 15 s, replays the client's
+`initialize`, and answers only a request that was running during the restart
+with an error that says to retry it. When the helper is not running after
+15 s, the bridge answers the first request with "Open iMessage Max to start
+it." and exits. When no one is logged in to the Mac's desktop, it says that a
+desktop login is needed instead, since the helper cannot start without one. `imessage-max --direct` serves stdio in process, as before, for
 development. If the home folder path is too long for a socket address, both
 sides use `imessage-max.sock` in the per-user temporary folder instead.
 

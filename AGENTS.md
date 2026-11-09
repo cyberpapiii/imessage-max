@@ -63,6 +63,17 @@ $BIN --http --port 18484 --token-file /tmp/imax-dev/token --socket-path /tmp/ima
 $BIN --socket-path /tmp/imax-dev/mcp.sock   # a bridge to that helper
 ```
 
+### Stdio bridge across helper restarts
+
+The bridge (`Server/StdioBridge.swift`) outlives helper restarts, so an update, a crash or a Keep running relaunch never strands Codex or Claude Desktop. It waits up to 15 s for the socket, at start and after a drop, which covers launchd's 10 s ThrottleInterval. When the helper drops the connection, the bridge:
+
+- answers each request the old helper had received with -32000 ("iMessage Max restarted while this request was running…"). It never resends them, because a `send` may already have gone out.
+- holds new client messages in order, up to 64 messages or 4 MB, and sends them once it reconnects. A request past that bound gets -32000 at once. Queuing beats failing fast here: a restart takes about 10 s, and those requests have reached no helper, so sending them later runs nothing twice.
+- reconnects with backoff (100 ms doubling to 500 ms), on its own threads, with no Swift task sleep. For a legacy session it replays the client's last successful `initialize` under a bridge-owned id (`imessage-max-bridge-replay-<n>`), drops the reply, sends the client's `notifications/initialized`, and then the queue. Modern-era (2026-07-28) messages are stateless and need no replay. A helper that accepts but never answers the replay is cut off when the grace runs out.
+- gives up after 15 s, answers the queue with the reason, and exits 75. When this user has no desktop login (the State:/Users/ConsoleUser session list in SystemConfiguration), the reason says so: the helper runs only inside a desktop login, so SSH alone cannot start it. Never reaching a helper at start still exits 69.
+
+The bridge parses JSON-RPC only to track replies and the handshake. `StdioBridgeReconnectTests` drives each step against a fake helper, and `BridgeRestartTests` SIGKILLs and restarts a real scratch helper under a real bridge process.
+
 A bare executable cannot hold a Contacts grant of its own. It never prompts when it runs headless, and System Settings cannot add an executable to Contacts by hand. Started from a terminal, it asks, and macOS records the grant for the terminal app, so the grant covers only processes that terminal starts. Work that needs contact names under launchd or an MCP client runs through the helper inside the app (`make install`).
 
 ## Running the test suite
