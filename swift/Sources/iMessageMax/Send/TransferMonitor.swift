@@ -25,8 +25,11 @@ enum TransferMonitor {
     private static let pollInterval: TimeInterval = 0.5
     static let deferredRemovalDelay: Duration = .seconds(30)
 
-    static func outgoingStatuses(named trackingName: String) throws -> [String] {
-        let execution = try Osascript.run(statusesForNameScript, arguments: [trackingName]).get()
+    static func outgoingStatuses(
+        named trackingName: String,
+        runScript: ScriptExecutor = { Osascript.run($0, arguments: $1) }
+    ) throws -> [String] {
+        let execution = try runScript(statusesForNameScript, [trackingName]).get()
         let output = execution.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
 
         guard execution.terminationStatus == 0 else {
@@ -67,7 +70,7 @@ enum TransferMonitor {
         of staged: OutgoingFileStager.StagedFile,
         baseline: Int,
         stager: OutgoingFileStager,
-        statusQuery: (String) throws -> [String] = outgoingStatuses(named:),
+        statusQuery: (String) throws -> [String] = { try outgoingStatuses(named: $0) },
         removalDelay: Duration = deferredRemovalDelay
     ) -> Result<Void, SendFailure> {
         let deadline = Date().addingTimeInterval(pollTimeout)

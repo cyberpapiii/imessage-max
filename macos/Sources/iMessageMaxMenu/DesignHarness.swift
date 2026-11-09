@@ -121,7 +121,7 @@ extension AppModel {
       controller: configuration.map {
         ServiceController(configuration: $0, system: FixtureSystem(name), home: home)
       },
-      milestones: milestones, prepareMessages: {},
+      milestones: milestones,
       clientContext: clientRoot.map(ClientContext.sandbox(root:)))
   }
 }
@@ -228,7 +228,7 @@ actor FixtureSystem: ServiceSystem {
       diagnosis(messages: true, contacts: .denied, sending: .unverified)
     case "setup-sending":
       diagnosis(
-        messages: true, contacts: .authorized, sending: .unverified, detail: .messagesNotRunning)
+        messages: true, contacts: .authorized, sending: .unverified, detail: .notDetermined)
     case "connect": diagnosis(messages: true, contacts: .authorized, sending: .supported)
     case "revoked":
       diagnosis(messages: false, contacts: .authorized, sending: .supported, calls: 1)

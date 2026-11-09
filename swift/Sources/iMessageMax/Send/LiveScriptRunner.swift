@@ -4,29 +4,33 @@ protocol ScriptRunning: Sendable {
     func send(_ payload: SendPayload, to target: SendTarget) async -> Result<Void, SendFailure>
 }
 
-struct LiveScriptRunner: ScriptRunning {
-    let stager: OutgoingFileStager
+typealias ScriptExecutor = @Sendable (_ script: String, _ arguments: [String]) -> Result<Osascript.Output, SendError>
 
-    init(stager: OutgoingFileStager = OutgoingFileStager()) {
+struct LiveScriptRunner: ScriptRunning {
+    let access: MessagesAccess
+    let stager: OutgoingFileStager
+    let runScript: ScriptExecutor
+
+    init(
+        access: MessagesAccess,
+        stager: OutgoingFileStager = OutgoingFileStager(),
+        runScript: @escaping ScriptExecutor = { Osascript.run($0, arguments: $1) }
+    ) {
+        self.access = access
         self.stager = stager
+        self.runScript = runScript
     }
 
-    /// The send blocks its thread while it waits for the process and polls the
-    /// transfer, so run it on a GCD background thread, never on the cooperative
-    /// pool. GCD adds threads to its pool when threads block. The cooperative
-    /// pool does not, so a blocked send there would stall unrelated requests
-    /// across the whole service.
+    /// The send blocks its thread while it starts Messages, waits for the
+    /// process and polls the transfer, so it runs off the cooperative pool.
     func send(_ payload: SendPayload, to target: SendTarget) async -> Result<Void, SendFailure> {
-        await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                continuation.resume(returning: sendBlocking(payload, to: target))
-            }
-        }
+        await MessagesAccess.offPool { sendBlocking(payload, to: target) }
     }
 
     func sendBlocking(_ payload: SendPayload, to target: SendTarget) -> Result<Void, SendFailure> {
         switch payload {
         case .text(let body):
+            access.prepareForScript()
             return dispatch(payload.scriptKind, body, to: target, sentFileName: "")
 
         case .file(let path):
@@ -45,7 +49,9 @@ struct LiveScriptRunner: ScriptRunning {
                 stager.remove(staged)
                 return handoff
             }
-            return TransferMonitor.waitForCompletion(of: staged, baseline: baseline, stager: stager)
+            return TransferMonitor.waitForCompletion(
+                of: staged, baseline: baseline, stager: stager,
+                statusQuery: { try TransferMonitor.outgoingStatuses(named: $0, runScript: runScript) })
         }
     }
 
@@ -53,7 +59,8 @@ struct LiveScriptRunner: ScriptRunning {
         stager.sweepExpired()
         let source = try stager.openSource(path)
         defer { source.close() }
-        let baseline = try TransferMonitor.outgoingStatuses(named: source.trackingName).count
+        access.prepareForScript()
+        let baseline = try TransferMonitor.outgoingStatuses(named: source.trackingName, runScript: runScript).count
         return (try stager.stage(source), baseline)
     }
 
@@ -63,8 +70,19 @@ struct LiveScriptRunner: ScriptRunning {
         to target: SendTarget,
         sentFileName: String
     ) -> Result<Void, SendFailure> {
+        let result = runDispatch(payloadKind, payloadArgument, to: target, sentFileName: sentFileName)
+        access.noteScriptOutcome(result)
+        return result
+    }
+
+    private func runDispatch(
+        _ payloadKind: SendScript.PayloadKind,
+        _ payloadArgument: String,
+        to target: SendTarget,
+        sentFileName: String
+    ) -> Result<Void, SendFailure> {
         let script = SendScript.source(target.scriptKind, payloadKind)
-        switch Osascript.run(script, arguments: [target.scriptArgument, payloadArgument]) {
+        switch runScript(script, [target.scriptArgument, payloadArgument]) {
         case .failure(.timeout):
             return .failure(SendFailure(.timeout, disposition: .mayHaveCompleted))
         case .failure(let error):

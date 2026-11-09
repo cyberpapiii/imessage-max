@@ -32,6 +32,12 @@ public enum ServiceDefaults {
   /// registered job on the plist it first loaded, so the companion compares
   /// this with the bundled plist to know when an update must register again.
   public static let registeredAgentFileName = "registered-agent.sha256"
+  /// The last definite answer macOS gave about the helper's Automation access
+  /// to Messages: one PermissionStatus word (`authorized`, `denied` or
+  /// `not_determined`). macOS can only answer while Messages runs, so
+  /// diagnose reports this word while Messages is closed. It sits beside the
+  /// token file, like `stayStoppedFileName`.
+  public static let automationAnswerFileName = "automation-answer"
   /// The Unix socket stdio bridges connect to. The helper creates it, mode
   /// 0600, in its 0700 app-support folder.
   public static let socketPath = "Library/Application Support/iMessage Max/mcp.sock"

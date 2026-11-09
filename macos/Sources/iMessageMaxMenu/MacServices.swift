@@ -43,17 +43,6 @@ enum MessagesApp {
   static func open() {
     if let url { NSWorkspace.shared.open(url) }
   }
-
-  /// macOS cannot check Automation access for an app that is not running, so
-  /// the sending check opens Messages in the background first.
-  static func ensureRunning() async throws {
-    guard NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier).isEmpty
-    else { return }
-    guard let url else { throw CoreError.commandFailed("Messages is missing from this Mac.") }
-    let configuration = NSWorkspace.OpenConfiguration()
-    configuration.activates = false
-    _ = try await NSWorkspace.shared.openApplication(at: url, configuration: configuration)
-  }
 }
 
 extension ClientContext {

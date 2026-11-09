@@ -64,7 +64,9 @@ public struct PermissionStatus: WireWord {
   /// Contacts: without an embedded Info.plist, macOS can neither prompt for
   /// the executable nor record a grant for it.
   public static let missingUsageDescription: Self = "missing_usage_description"
-  /// Automation: Messages.app is not running, so TCC cannot be asked.
+  /// Automation: Messages.app is not running, so TCC cannot be asked, and
+  /// the helper has no remembered answer and could not start Messages
+  /// hidden. Older helpers reported it whenever Messages was closed.
   public static let messagesNotRunning: Self = "messages_not_running"
   public static let messagesNotFound: Self = "messages_not_found"
   /// Contacts: an authorization state newer than this server knows.

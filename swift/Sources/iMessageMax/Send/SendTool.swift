@@ -11,7 +11,7 @@ struct SendTool: Sendable {
     init(
         db: Database = Database(),
         resolver: ContactResolver,
-        runner: any ScriptRunning = LiveScriptRunner(),
+        runner: any ScriptRunning,
         verifier: SendVerifier? = nil
     ) {
         self.db = db
@@ -21,8 +21,8 @@ struct SendTool: Sendable {
         self.sendResolver = SendResolver(db: db, resolver: resolver)
     }
 
-    static func definition(db: Database, resolver: ContactResolver) -> ToolDefinition {
-        let tool = SendTool(db: db, resolver: resolver)
+    static func definition(db: Database, resolver: ContactResolver, access: MessagesAccess) -> ToolDefinition {
+        let tool = SendTool(db: db, resolver: resolver, runner: LiveScriptRunner(access: access))
 
         return ToolDefinition(
             name: "send",

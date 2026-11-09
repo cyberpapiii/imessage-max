@@ -38,16 +38,17 @@ import Testing
       .authorized)
 }
 
-@Test func sendingCheckNeverSkipsMessagesOrContactsSetup() throws {
+@Test func sendingSetupNeverSkipsMessagesOrContactsSetup() throws {
   for (messages, contacts) in [(false, false), (true, false), (true, true)] {
     let data = Data(
       """
       {"version":"1.8.0","process_id":123,"status":"ready",
       "database":{"path":"~/Library/Messages/chat.db","accessible":\(messages),"status":"accessible"},
       "contacts":{"authorized":\(contacts),"status":"\(contacts ? "authorized" : "denied")"},
-      "capabilities":{"perm_automation":{"state":"unverified","detail":"messages_not_running"}}}
+      "capabilities":{"perm_automation":{"state":"unverified","detail":"not_determined"}}}
       """.utf8)
     let diagnosis = try JSONDecoder().decode(DiagnoseResult.self, from: data)
-    #expect(diagnosis.needsMessagesForSendingCheck == (messages && contacts))
+    let expected: SetupStep = !messages ? .fullDiskAccess : (contacts ? .automation : .contacts)
+    #expect(diagnosis.missingGrant == expected)
   }
 }

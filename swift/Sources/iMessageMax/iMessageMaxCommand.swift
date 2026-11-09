@@ -75,11 +75,14 @@ struct iMessageMax: AsyncParsableCommand {
         let location = tokenFile.map { AccessToken.Location.custom(URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath)) }
             ?? .standard
         let accessToken = try AccessToken.loadOrCreate(location)
+        // The token's folder also holds the helper's settings and state, so
+        // a test helper with --token-file never touches the installed one's.
+        let supportFolder = location.file.deletingLastPathComponent()
         try await ServerStartup.runHTTP(
             host: host, port: port, accessToken: accessToken, contactsPolicy: contactsPolicy,
-            socketOverride: socketPath
+            socketOverride: socketPath, supportFolder: supportFolder
         )
-        let code = KeepRunning.exitCode(folder: location.file.deletingLastPathComponent())
+        let code = KeepRunning.exitCode(folder: supportFolder)
         Log.info("Stopped exit=\(code)")
         if code != 0 { throw ExitCode(code) }
     }

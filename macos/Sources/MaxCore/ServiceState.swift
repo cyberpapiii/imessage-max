@@ -157,11 +157,6 @@ extension DiagnoseResult {
     }
   }
 
-  public var needsMessagesForSendingCheck: Bool {
-    missingGrant == .automation
-      && self[.permAutomation]?.detail == PermissionStatus.messagesNotRunning.rawValue
-  }
-
   /// The missing grant may already be on in System Settings. macOS gives Full
   /// Disk Access, and the helper reads Contacts access, only at launch, so
   /// checking it means starting a new helper.

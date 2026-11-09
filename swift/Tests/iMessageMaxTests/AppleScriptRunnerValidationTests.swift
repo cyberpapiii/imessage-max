@@ -46,7 +46,7 @@ final class AppleScriptRunnerValidationTests: XCTestCase {
     }
 
     func testSendFileToParticipantRejectsMissingFileBeforeAutomation() {
-        let result = LiveScriptRunner(stager: makeStager()).sendBlocking(
+        let result = LiveScriptRunner(access: makeTestMessagesAccess(), stager: makeStager()).sendBlocking(
             .file(path: "/definitely/missing/file.png"),
             to: .participant(handle: "+19175551234", chatId: nil)
         )

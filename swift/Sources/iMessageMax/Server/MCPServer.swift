@@ -32,7 +32,10 @@ enum ServerStartup {
 
     static func runStdio(contactsPolicy: ContactsAccessPolicy.Override) async throws {
         let resolver = ContactResolver()
-        let catalog = ToolCatalog(database: Database(), resolver: resolver)
+        // --direct is for development: its Automation answer stays in memory,
+        // so it never touches the installed helper's.
+        let access = MessagesAccess(memory: AutomationMemory(folder: nil))
+        let catalog = ToolCatalog(database: Database(), resolver: resolver, access: access)
         announce(transport: "stdio", resolver: resolver, contactsPolicy: contactsPolicy)
         try await serveStdio(base: StdioTransport(), catalog: catalog)
     }
@@ -55,18 +58,19 @@ enum ServerStartup {
 
     static func runHTTP(
         host: String, port: Int, accessToken: AccessToken, contactsPolicy: ContactsAccessPolicy.Override,
-        socketOverride: String?
+        socketOverride: String?, supportFolder: URL
     ) async throws {
         let resolver = ContactResolver()
+        let access = MessagesAccess(memory: AutomationMemory(folder: supportFolder))
         let (newRows, newRowsSink) = AsyncStream<Int64>.makeStream()
         let watcher = MessageWatcher(databasePath: Database.defaultPath) { newRowsSink.yield($0) }
-        let catalog = ToolCatalog(database: Database(), resolver: resolver, liveInbox: { watcher.isLive })
+        let catalog = ToolCatalog(database: Database(), resolver: resolver, access: access, liveInbox: { watcher.isLive })
         let transport = HTTPTransport(
             host: host,
             port: port,
             accessToken: accessToken,
             catalog: catalog,
-            setupPermissions: SetupPermissionService(resolver: resolver)
+            setupPermissions: SetupPermissionService(resolver: resolver, access: access)
         )
 
         try await transport.connect()

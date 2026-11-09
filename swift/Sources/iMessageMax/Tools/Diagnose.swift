@@ -11,7 +11,9 @@ typealias SchemaProbe = @Sendable () -> SchemaCapabilities?
 typealias LiveInboxProbe = @Sendable () -> Bool
 
 enum DiagnoseTool {
-    static func definition(db: Database, resolver: ContactResolver, liveInbox: @escaping LiveInboxProbe) -> ToolDefinition {
+    static func definition(
+        db: Database, resolver: ContactResolver, access: MessagesAccess, liveInbox: @escaping LiveInboxProbe
+    ) -> ToolDefinition {
         let inputSchema: Value = .object([
             "type": "object",
             "properties": .object([:]),
@@ -52,6 +54,7 @@ enum DiagnoseTool {
         ) { _ in
             let result = try await execute(
                 resolver: resolver,
+                automationProbe: { await MessagesAccess.offPool { access.automationStatus() } },
                 schemaProbe: { try? db.schema() },
                 liveInboxProbe: liveInbox
             )
@@ -167,7 +170,7 @@ enum DiagnoseTool {
     static func execute(
         resolver: ContactResolver,
         dbProbe: DatabaseProbe = { Database.checkAccess() },
-        automationProbe: AutomationProbe = { AutomationPermission.checkAutomationPermission() },
+        automationProbe: AutomationProbe,
         schemaProbe: SchemaProbe = { nil },
         liveInboxProbe: LiveInboxProbe = { false },
         usageDescriptionProbe: UsageDescriptionProbe = { ContactResolver.usageDescriptionEmbedded },
@@ -214,7 +217,7 @@ enum DiagnoseTool {
             }
         }
 
-        let (automationOk, automationStatus) = automationProbe()
+        let (automationOk, automationStatus) = await automationProbe()
 
         let overallStatus: DiagnoseStatus = dbOk && contactsAuthorized ? .ready : .needsSetup
 

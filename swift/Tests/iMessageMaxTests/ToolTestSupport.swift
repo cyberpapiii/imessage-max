@@ -293,7 +293,16 @@ private func escape(_ input: String) -> String {
 }
 
 func makeTestCatalog() -> ToolCatalog {
-    ToolCatalog(database: Database(), resolver: ContactResolver(seedCache: [:]))
+    ToolCatalog(database: Database(), resolver: ContactResolver(seedCache: [:]), access: makeTestMessagesAccess())
+}
+
+/// Never reaches Messages: Automation reads as authorized and launching
+/// does nothing, so no test starts Messages or waits for it.
+func makeTestMessagesAccess() -> MessagesAccess {
+    MessagesAccess(
+        memory: AutomationMemory(folder: nil),
+        check: { _ in (true, .authorized) },
+        launch: { _ in false })
 }
 
 func makeTestSetupPermissions() -> SetupPermissionService {
@@ -346,7 +355,7 @@ func callTool(
     resolver: ContactResolver = makeSeededResolver(),
     file: StaticString = #filePath, line: UInt = #line
 ) async throws -> [String: Any] {
-    let catalog = ToolCatalog(database: database, resolver: resolver)
+    let catalog = ToolCatalog(database: database, resolver: resolver, access: makeTestMessagesAccess())
     let handler = try XCTUnwrap(catalog.handler(named: name), "\(name) is not registered", file: file, line: line)
     do {
         return try decodeJSONDictionary(from: try await handler(arguments), file: file, line: line)

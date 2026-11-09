@@ -4,7 +4,7 @@ import MCP
 
 final class ToolRegistryTests: XCTestCase {
     func testRegisterAllDoesNotExposeLegacyUpdateTool() async {
-        let catalog = ToolCatalog(database: Database(), resolver: ContactResolver(seedCache: [:]))
+        let catalog = makeTestCatalog()
 
         let tools = catalog.tools
         let names = Set(tools.map(\.name))
