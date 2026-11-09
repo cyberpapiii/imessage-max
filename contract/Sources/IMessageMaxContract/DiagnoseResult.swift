@@ -177,5 +177,8 @@ public enum CapabilityKey: String, CaseIterable, Sendable {
   case permContacts = "perm_contacts"
   /// `detail` carries the raw `PermissionStatus`.
   case permAutomation = "perm_automation"
+  /// Whether Messages has an iMessage account that can send. `detail`
+  /// carries the `IMessageAccountStatus`.
+  case imessageAccount = "imessage_account"
   case richBackend = "rich_backend"
 }

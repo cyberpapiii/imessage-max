@@ -219,7 +219,7 @@ final class CapabilityContractTests: XCTestCase {
         XCTAssertEqual(caps["send_file_group"]?.state, "supported")
     }
 
-    func testJSONContractContainsAll15Keys() async throws {
+    func testJSONContractContainsAll16Keys() async throws {
         let result = try await run()
         let json = try FormatUtils.encodeJSON(result)
         let data = try XCTUnwrap(json.data(using: .utf8))
@@ -232,9 +232,9 @@ final class CapabilityContractTests: XCTestCase {
             "reply_threading", "tapbacks", "edit_unsend",
             "live_inbox",
             "perm_full_disk", "perm_contacts", "perm_automation",
-            "rich_backend",
+            "rich_backend", "imessage_account",
         ]
-        XCTAssertEqual(Set(caps.keys), expectedKeys, "capabilities must contain exactly the 15 contract keys")
+        XCTAssertEqual(Set(caps.keys), expectedKeys, "capabilities must contain exactly the 16 contract keys")
 
         for key in ["send_text_dm", "verified_send", "perm_automation", "rich_backend"] {
             let entry = try XCTUnwrap(caps[key] as? [String: Any], "\(key) must be a JSON object")

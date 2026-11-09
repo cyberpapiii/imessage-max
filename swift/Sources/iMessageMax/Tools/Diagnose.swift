@@ -16,6 +16,9 @@ typealias SleepProbe = @Sendable () -> SleepSettings
 
 typealias KeepAwakeProbe = @Sendable () -> KeepAwake.State
 
+/// nil when the server has no account check to run.
+typealias IMessageAccountProbe = @Sendable () async -> IMessageAccountStatus?
+
 enum DiagnoseTool {
     static func definition(
         db: Database, resolver: ContactResolver, access: MessagesAccess, liveInbox: @escaping LiveInboxProbe,
@@ -49,7 +52,9 @@ enum DiagnoseTool {
                 all read tools (get_messages, list_chats, search, and the rest) will work. \
                 A top-level status of "needs_setup" means the Messages database cannot be read, \
                 so no tool works. Resolve it before you continue. Contacts and Automation do not \
-                change the top-level status: check perm_contacts and the send capabilities. Use chat.name in user-facing \
+                change the top-level status: check perm_contacts and the send capabilities. \
+                imessage_account says whether Messages has an iMessage account that can send; when it is \
+                "degraded", show its fix before you send. Use chat.name in user-facing \
                 summaries and use chat ids only in follow-up tool calls. Refer to chats by \
                 name when talking to users.
                 """,
@@ -66,6 +71,7 @@ enum DiagnoseTool {
             let result = try await execute(
                 resolver: resolver,
                 automationProbe: { await MessagesAccess.offPool { access.automationStatus() } },
+                accountProbe: { await MessagesAccess.offPool { access.account.status() } },
                 schemaProbe: { try? db.schema() },
                 liveInboxProbe: liveInbox,
                 httpProbe: http,
@@ -198,6 +204,70 @@ enum DiagnoseTool {
         }
     }
 
+    /// Messages runs hidden, so on a headless Mac someone has to look at it
+    /// over Screen Sharing.
+    static let iMessageSignInFix =
+        "Open Messages on this Mac (over Screen Sharing on a headless Mac), choose Messages -> "
+        + "Settings -> iMessage, sign in with the Apple Account the assistant should use, and turn on "
+        + "Enable this account."
+
+    static func accountCapability(_ status: IMessageAccountStatus) -> Capability {
+        switch status {
+        case .signedIn:
+            return Capability(state: .supported, detail: status.rawValue)
+        case .connecting:
+            return Capability(
+                state: .degraded,
+                note: "iMessage is still connecting. Sends may wait until it connects. Run diagnose again in a minute.",
+                detail: status.rawValue)
+        case .signedOut:
+            return Capability(
+                state: .degraded,
+                note: "Messages has an iMessage account turned on, but it is not connected: it is signed out, "
+                    + "or this Mac is offline. Messages does not deliver sends until it connects.",
+                fix: iMessageSignInFix, detail: status.rawValue)
+        case .disabled:
+            return Capability(
+                state: .degraded,
+                note: "The iMessage account is turned off in Messages. A send to someone new stops before reaching "
+                    + "Messages, and Messages cannot deliver to existing iMessage chats.",
+                fix: iMessageSignInFix, detail: status.rawValue)
+        case .noAccount:
+            return Capability(
+                state: .degraded,
+                note: "Messages has no iMessage account. A send to someone new stops before reaching Messages, "
+                    + "and Messages cannot deliver to existing iMessage chats.",
+                fix: iMessageSignInFix, detail: status.rawValue)
+        case .smsOnly:
+            return Capability(
+                state: .degraded,
+                note: "No iMessage account is turned on, but SMS through the paired iPhone is. Sends to phone "
+                    + "numbers and existing SMS chats go out as SMS. Email addresses and iMessage chats cannot be reached.",
+                fix: iMessageSignInFix, detail: status.rawValue)
+        case .messagesNotRunning:
+            return Capability(
+                state: .unverified,
+                note: "Messages is not running, so diagnose did not check the iMessage account. A send starts "
+                    + "Messages hidden; diagnose checks the account while Messages runs.",
+                detail: status.rawValue)
+        case .messagesNotResponding:
+            return Capability(
+                state: .unverified,
+                note: "Messages did not list its accounts within 2 s. It may still be starting. Run diagnose again in a moment.",
+                detail: status.rawValue)
+        case .notChecked:
+            return Capability(
+                state: .unverified,
+                note: "Diagnose reads the account through Automation for Messages, which is not available. See perm_automation.",
+                detail: status.rawValue)
+        default:
+            return Capability(
+                state: .unverified,
+                note: "The iMessage account check failed. The server log has the reason.",
+                detail: status.rawValue)
+        }
+    }
+
     static let messagesNotRespondingNote =
         "Messages.app is running but did not answer within 2 s. Sends stop before reaching "
         + "Messages until it answers again."
@@ -206,6 +276,7 @@ enum DiagnoseTool {
         resolver: ContactResolver,
         dbProbe: DatabaseProbe = { Database.checkAccess() },
         automationProbe: AutomationProbe,
+        accountProbe: IMessageAccountProbe = { nil },
         schemaProbe: SchemaProbe = { nil },
         liveInboxProbe: LiveInboxProbe = { false },
         httpProbe: HTTPEndpointProbe = { nil },
@@ -275,11 +346,22 @@ enum DiagnoseTool {
         } else {
             automation = Capability(state: .unverified)
         }
-        let sendFileGroup = automationOk
+        // The account is read through Automation, so without it the check
+        // would stop on the same refusal, or wait on a prompt nobody sees.
+        let accountStatus: IMessageAccountStatus = automationOk ? (await accountProbe() ?? .notChecked) : .notChecked
+        let account = accountCapability(accountStatus)
+        // Signed out, turned off or missing: Messages has nothing to send
+        // through, so the send capabilities say so in place of `supported`.
+        let sendBlockedByAccount = automationOk && account.state == .degraded
+            && accountStatus != .connecting && accountStatus != .smsOnly
+        let send = sendBlockedByAccount
+            ? Capability(state: .degraded, note: account.note, fix: account.fix, detail: CapabilityKey.imessageAccount.rawValue)
+            : automation
+        let sendFileGroup = automationOk && !sendBlockedByAccount
             ? Capability(
                 state: .supported,
                 note: "The server cannot verify group file routing before the send. Check the delivered_to and chat fields in the response.")
-            : automation
+            : send
 
         let verifiedSend: Capability
         if !dbOk {
@@ -314,9 +396,9 @@ enum DiagnoseTool {
         }
 
         let capabilities: [CapabilityKey: Capability] = [
-            .sendTextDM: automation,
-            .sendTextGroup: automation,
-            .sendFileDM: automation,
+            .sendTextDM: send,
+            .sendTextGroup: send,
+            .sendFileDM: send,
             .sendFileGroup: sendFileGroup,
             .verifiedSend: verifiedSend,
             .attachmentsRead: attachmentsRead,
@@ -331,6 +413,7 @@ enum DiagnoseTool {
                 state: automation.state, note: automation.note, fix: automation.fix,
                 detail: automationStatus.rawValue),
             .richBackend: Capability(state: .unavailable),
+            .imessageAccount: account,
         ]
 
         return DiagnoseResult(

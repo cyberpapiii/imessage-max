@@ -136,3 +136,22 @@ import Testing
   #expect(ServiceDefaults.keepAwakeFileName == "keep-awake")
   #expect(ServiceDefaults.keepAwakeFileName != ServiceDefaults.stayStoppedFileName)
 }
+
+@Test func iMessageAccountTravelsAsACapabilityWithItsStatusInDetail() throws {
+  #expect(CapabilityKey.imessageAccount.rawValue == "imessage_account")
+  #expect(
+    [IMessageAccountStatus.signedIn, .connecting, .signedOut, .disabled, .noAccount, .smsOnly,
+     .notChecked, .messagesNotRunning, .messagesNotResponding, .checkFailed].map(\.rawValue)
+      == ["signed_in", "connecting", "signed_out", "disabled", "no_account", "sms_only",
+          "not_checked", "messages_not_running", "messages_not_responding", "check_failed"])
+  let json = """
+    {"version":"2.1.0","process_id":7,"status":"ready",
+     "database":{"accessible":true,"status":"accessible","path":"~/Library/Messages/chat.db"},
+     "contacts":{"authorized":true,"status":"authorized"},
+     "capabilities":{"imessage_account":{"state":"degraded","detail":"signed_out","fix":"Sign in."}}}
+    """
+  let result = try JSONDecoder().decode(DiagnoseResult.self, from: Data(json.utf8))
+  #expect(result[.imessageAccount]?.state == .degraded)
+  #expect(result[.imessageAccount]?.detail == IMessageAccountStatus.signedOut.rawValue)
+  #expect(result[.imessageAccount]?.fix == "Sign in.")
+}
