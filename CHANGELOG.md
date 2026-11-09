@@ -25,6 +25,10 @@
 - A helper that cannot start logs one `Startup failed: <reason>` line before it exits.
 - The helper checks its socket file every 30 s and listens again when the file was deleted, or when another helper held it at launch and has since gone. Open stdio sessions keep working.
 
+### Docs
+
+- New operator guides. [docs/headless.md](docs/headless.md) covers running on a headless Mac: why a desktop login is required, automatic login and FileVault, never logging out, power settings, one-time grants over Screen Sharing, updates, health checks over SSH and troubleshooting by symptom. [docs/fleet.md](docs/fleet.md) covers MDM deployment, with a sample profile that grants Full Disk Access, Contacts and Automation for Messages to `com.cyberpapiii.imessage-max.menubar` and allows its helper through Managed Login Items for team HJF7LN64XX; it is untested end to end. [docs/uninstall.md](docs/uninstall.md) covers removal for DMG and cask installs, including `--unregister-helper`, `tccutil reset` and the cask's zap. README and AGENTS.md link them.
+
 ### Companion app
 
 - A helper that stops at every launch shows "iMessage Max can't start" with the reason from its log, such as an unusable folder, instead of Stopped. Stop still works.

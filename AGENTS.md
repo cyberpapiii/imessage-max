@@ -134,6 +134,7 @@ Swift (tools-version 6.3; builds with the 6.4 toolchain), the modelcontextprotoc
 - `swift/Sources/iMessageMax/Database/` holds each chat.db rule once: `SQLFragments` for the SQL rules, `ChatScope` for which chats are hidden, `ChatLookup` for resolving a chat id. Reuse them instead of writing the rule again in a tool.
 - `swift/Sources/iMessageMax/Tools/` has one file per MCP tool.
 - `swift/Sources/iMessageMax/Utilities/ChatPage.swift` builds the chat summaries that several tools return.
+- `docs/headless.md`, `docs/fleet.md` and `docs/uninstall.md` are the operator guides: running on a headless Mac, MDM deployment, and removal. Update them when a change touches the desktop-login requirement, permissions, the bundle id or signing, the helper label or port, install and update steps, or the files in `~/Library/Application Support/iMessage Max/`.
 
 ### Protocol support (dual-era)
 
