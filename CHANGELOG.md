@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 2.1.0
+
+iMessage Max now runs unattended on a headless Mac. It never shows Messages, keeps running after a quit, takes updates without anyone opening the app, reconnects Codex and Claude Desktop after a restart, and says plainly in `diagnose` what works and what does not, including a signed-out iMessage account. Send results tell the truth: a send that may have gone out is checked against chat.db before the tool answers. New guides cover headless Macs ([docs/headless.md](docs/headless.md)), MDM deployment ([docs/fleet.md](docs/fleet.md)) and removal ([docs/uninstall.md](docs/uninstall.md)). Updating from 2.0.0 registers the helper again once, so macOS may show its "background item added" notice; permissions are unaffected.
+
 ### Service
 
 - New **Keep running** setting on the iMessage Max page of Settings, on by default. While it is on, the helper starts again after a plain quit from Activity Monitor or `kill`, not only after a crash. Turn it off and a quit leaves the helper stopped. The change applies at once, with no restart. Stop iMessage Max… keeps the helper stopped either way, until you start it again or log in again. The setting is the `stay-stopped` file in `~/Library/Application Support/iMessage Max/`.
