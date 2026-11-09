@@ -1,4 +1,5 @@
 import Foundation
+import IMessageMaxContract
 import MCP
 
 struct SendTool: Sendable {
@@ -7,22 +8,27 @@ struct SendTool: Sendable {
     private let runner: any ScriptRunning
     private let verifier: SendVerifier
     private let sendResolver: SendResolver
+    private let accountStatus: IMessageAccountProbe
 
     init(
         db: Database = Database(),
         resolver: ContactResolver,
         runner: any ScriptRunning,
-        verifier: SendVerifier? = nil
+        verifier: SendVerifier? = nil,
+        accountStatus: @escaping IMessageAccountProbe = { nil }
     ) {
         self.db = db
         self.resolver = resolver
         self.runner = runner
         self.verifier = verifier ?? SendVerifier(db: db)
         self.sendResolver = SendResolver(db: db, resolver: resolver)
+        self.accountStatus = accountStatus
     }
 
     static func definition(db: Database, resolver: ContactResolver, access: MessagesAccess) -> ToolDefinition {
-        let tool = SendTool(db: db, resolver: resolver, runner: LiveScriptRunner(access: access))
+        let tool = SendTool(
+            db: db, resolver: resolver, runner: LiveScriptRunner(access: access),
+            accountStatus: { await MessagesAccess.offPool { access.account.status() } })
 
         return ToolDefinition(
             name: "send",
@@ -44,7 +50,7 @@ struct SendTool: Sendable {
                 retry_safe=true means a retry cannot duplicate the message, because nothing reached Messages or chat.db shows that the row failed.
                 retry_safe=false means you must not resend blindly. Check with get_messages first.
                 A send runs immediately when the destination is exact. An ambiguous destination returns status 'ambiguous' and sends nothing. A contact name whose number or email has no conversation in Messages is ambiguous too. Invalid input returns status 'failed' and sends nothing. A file transfer may return 'pending_confirmation' while Messages.app finishes the transfer. When text was sent with that file, text_status reports the text's own result (confirmed or uncertain).
-                With 'to', the tool sends through the person's existing 1:1 chat (iMessage, SMS or RCS, the one with the newest message) and reports that chat. Only a person with no 1:1 chat yet is sent to over iMessage.
+                With 'to', the tool sends through the person's existing 1:1 chat (iMessage, SMS or RCS, the one with the newest message) and reports that chat. Only a person with no 1:1 chat yet is sent to over iMessage, or over SMS when Messages has no iMessage account turned on but SMS is. With no account that can send, the send fails with disposition not_started; diagnose's imessage_account has the fix.
                 """,
             inputSchema: InputSchema.object(
                 properties: [
@@ -72,16 +78,31 @@ struct SendTool: Sendable {
     }
 
     func execute(args: [String: Value]?) async throws -> [Tool.Content] {
-        let response = await send(
+        let response = await explainingAccount(send(
             to: args?["to"]?.stringValue,
             chatId: args?["chat_id"]?.stringValue,
             text: args?["text"]?.stringValue,
             filePaths: args?["file_paths"]?.arrayValue?.compactMap { $0.stringValue }
-        )
+        ))
         if response.status.isError {
             throw ToolFailure(code: response.status.rawValue, body: response)
         }
         return [.plainText(try FormatUtils.encodeJSON(response))]
+    }
+
+    /// A send that Messages took but chat.db does not confirm, or shows as
+    /// failed, most often means iMessage is signed out, which nobody sees
+    /// while Messages runs hidden. Such a result names the account state
+    /// when it is anything but signed in. Only these results ask, so a
+    /// confirmed send never waits on the check.
+    func explainingAccount(_ response: SendResponse) async -> SendResponse {
+        guard [.uncertain, .failedDelivery].contains(response.status),
+              let status = await accountStatus(),
+              [.signedOut, .disabled, .noAccount, .connecting].contains(status)
+        else { return response }
+        return response.adding(
+            note: "Messages reports its iMessage account as \(status.rawValue), which may be why. "
+                + (DiagnoseTool.accountCapability(status).fix ?? "Run diagnose again in a minute."))
     }
 
     private func send(

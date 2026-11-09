@@ -45,7 +45,7 @@ struct SendResponse: Encodable, Sendable {
     let chat: ChatReference?
     let deliveredTo: [String]?
     let chatId: String?
-    let message: String?
+    private(set) var message: String?
     let error: String?
     let candidates: [RecipientCandidate]?
     let verifiedMessageGuid: String?
@@ -117,6 +117,12 @@ struct SendResponse: Encodable, Sendable {
         default:
             self.retrySafe = disposition.retrySafe
         }
+    }
+
+    func adding(note: String) -> SendResponse {
+        var copy = self
+        copy.message = Self.sentences(message, note)
+        return copy
     }
 
     /// Joins the sentences of a message, skipping the missing ones.

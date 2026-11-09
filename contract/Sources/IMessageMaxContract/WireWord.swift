@@ -101,3 +101,37 @@ public struct PermissionStatus: WireWord {
   /// Contacts states in which names resolve.
   public static let namesAvailable: Set<Self> = [.authorized, .limited]
 }
+
+/// `imessage_account.detail` in the diagnose reply: what Messages says about
+/// its iMessage account. Messages runs hidden on a headless Mac, so nobody
+/// sees it sign out; diagnose reads the account instead.
+public struct IMessageAccountStatus: WireWord {
+  public let rawValue: String
+  public init(rawValue: String) { self.rawValue = rawValue }
+
+  /// An iMessage account is turned on and connected.
+  public static let signedIn: Self = "signed_in"
+  /// An iMessage account is turned on and still connecting.
+  public static let connecting: Self = "connecting"
+  /// An iMessage account is turned on but not connected: signed out, or
+  /// offline.
+  public static let signedOut: Self = "signed_out"
+  /// Every iMessage account is turned off in Messages settings.
+  public static let disabled: Self = "disabled"
+  /// Messages has no iMessage account, and no SMS account that can send.
+  public static let noAccount: Self = "no_account"
+  /// No iMessage account is turned on, but an SMS account is turned on and
+  /// connected (Text Message Forwarding), so sends to phone numbers go out
+  /// as SMS.
+  public static let smsOnly: Self = "sms_only"
+  /// Diagnose did not read the account, because Automation for Messages is
+  /// not granted.
+  public static let notChecked: Self = "not_checked"
+  /// Messages is not running, and diagnose does not start it again for this
+  /// check once it has read the account.
+  public static let messagesNotRunning: Self = "messages_not_running"
+  /// Messages did not answer about its accounts in time.
+  public static let messagesNotResponding: Self = "messages_not_responding"
+  /// The account script failed.
+  public static let checkFailed: Self = "check_failed"
+}

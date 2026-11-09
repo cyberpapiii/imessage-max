@@ -72,7 +72,24 @@ final class AppleScriptSendResultTests: XCTestCase {
                 set dispatchPhase to "pre_dispatch"
                 try
                     tell application "Messages"
-                        set targetService to 1st account whose service type = iMessage
+                        set haveService to false
+                        try
+                            set targetService to 1st account whose service type = iMessage and enabled is true and connection status is connected
+                            set haveService to true
+                        end try
+                        if not haveService then
+                            try
+                                set targetService to 1st account whose service type = iMessage and enabled is true
+                                set haveService to true
+                            end try
+                        end if
+                        if not haveService and recipientId does not contain "@" then
+                            try
+                                set targetService to 1st account whose service type = SMS and enabled is true and connection status is connected
+                                set haveService to true
+                            end try
+                        end if
+                        if not haveService then error "No iMessage account is turned on in Messages." number 28100
                         set targetBuddy to participant recipientId of targetService
                         set dispatchPhase to "dispatch_started"
                         send messageText to targetBuddy
