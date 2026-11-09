@@ -5,8 +5,10 @@
 # The upgrade path keeps the helper running: Homebrew skips `signal` on
 # `brew upgrade` but always runs `launchctl`, and the companion that brew
 # reopens restarts an outdated helper only if it is still running. So
-# `uninstall` stops the helper with SIGTERM, which the helper's KeepAlive
-# does not restart, and only `zap` removes the launchd job.
+# `uninstall` stops the helper with SIGUSR1, which makes it drain and exit 0,
+# and KeepAlive does not restart a zero exit; only `zap` removes the launchd
+# job. Not SIGTERM: with Keep running on, the helper exits 75 on SIGTERM and
+# launchd would relaunch it from the app brew just deleted.
 set -euo pipefail
 
 if [[ "$#" -ne 2 ]]; then
@@ -39,7 +41,7 @@ cask "imessage-max" do
   binary "#{appdir}/$APP/Contents/MacOS/imessage-max"
 
   uninstall quit:   "$APP_ID",
-            signal: ["TERM", "$AGENT_LABEL"]
+            signal: ["USR1", "$AGENT_LABEL"]
 
   zap launchctl: "$AGENT_LABEL",
       trash:     [

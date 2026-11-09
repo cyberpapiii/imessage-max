@@ -10,6 +10,12 @@ enum Osascript {
     private static let timeout: DispatchTimeInterval = .seconds(30)
 
     static func run(_ script: String, arguments: [String]) -> Result<Output, SendError> {
+        // Process.run raises an Objective-C exception, which Swift cannot
+        // catch, for an argument holding NUL, and that aborts the helper.
+        // SendPayload.build rejects NUL first; this keeps any other caller safe.
+        guard !containsNUL(script), !arguments.contains(where: containsNUL) else {
+            return .failure(.invalidParams(nulRejection))
+        }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
         process.arguments = ["-e", script] + (arguments.isEmpty ? [] : ["--"] + arguments)
@@ -34,12 +40,12 @@ enum Osascript {
 
             drainGroup.enter()
             DispatchQueue.global().async {
-                drained.stdout = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+                drained.stdout = (try? stdoutPipe.fileHandleForReading.readToEnd()) ?? Data()
                 drainGroup.leave()
             }
             drainGroup.enter()
             DispatchQueue.global().async {
-                drained.stderr = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+                drained.stderr = (try? stderrPipe.fileHandleForReading.readToEnd()) ?? Data()
                 drainGroup.leave()
             }
 
@@ -67,6 +73,12 @@ enum Osascript {
         } catch {
             return .failure(.failed(ClientErrorMessages.internalDetail(error, context: "Running AppleScript")))
         }
+    }
+
+    static let nulRejection = "Text, file paths and recipients cannot contain a NUL character (U+0000)."
+
+    static func containsNUL(_ value: String) -> Bool {
+        value.utf8.contains(0)
     }
 
     /// AppleScript writes "can’t" and other contractions with U+2019.

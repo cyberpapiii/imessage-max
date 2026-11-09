@@ -26,7 +26,8 @@ final class ServiceFilesContractTests: XCTestCase {
             ])
         XCTAssertEqual(plist["RunAtLoad"] as? Bool, true)
         // Any exit but a zero one relaunches the helper, a crash included.
-        // The helper exits zero on SIGTERM only when Keep running is off.
+        // The helper exits zero on SIGTERM only when Keep running is off,
+        // and on SIGUSR1 always.
         let keepAlive = try XCTUnwrap(plist["KeepAlive"] as? [String: Bool])
         XCTAssertEqual(keepAlive, ["SuccessfulExit": false])
         XCTAssertNotEqual(KeepRunning.relaunchExitCode, 0)
@@ -67,6 +68,15 @@ final class ServiceFilesContractTests: XCTestCase {
         ] {
             XCTAssertTrue(script.contains(expected), "scripts/generate-cask.sh lacks \(expected.debugDescription)")
         }
+    }
+
+    /// On SIGTERM a helper with Keep running on exits 75 and launchd starts
+    /// it again, from the app brew just deleted. SIGUSR1 stops it for good.
+    func testCaskUninstallStopsTheHelperWithTheGracefulStopSignal() throws {
+        let script = try String(contentsOf: root.appendingPathComponent("scripts/generate-cask.sh"), encoding: .utf8)
+        XCTAssertEqual(GracefulStop.signal, SIGUSR1)
+        XCTAssertTrue(script.contains("signal: [\"USR1\", \"$AGENT_LABEL\"]"), "the cask must stop the helper with USR1")
+        XCTAssertFalse(script.contains("\"TERM\""), "SIGTERM relaunches the helper while Keep running is on")
     }
 
     func testCompanionAssemblyScriptMatchesContract() throws {

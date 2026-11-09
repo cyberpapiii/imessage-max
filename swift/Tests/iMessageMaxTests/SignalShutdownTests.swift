@@ -9,7 +9,8 @@ import XCTest
 /// report (#27). The exit code carries the Keep running setting: 0 while the
 /// stay-stopped file sits beside the token, so launchd leaves the helper
 /// down, and `KeepRunning.relaunchExitCode` otherwise, so launchd starts it
-/// again.
+/// again. SIGUSR1 drains the same way and always exits 0, so the cask's
+/// uninstall leaves the helper down.
 ///
 /// The abort only showed in optimized builds, so CI and `make release-check`
 /// also run this class with IMESSAGE_MAX_BINARY set to the release binary.
@@ -26,6 +27,39 @@ final class SignalShutdownTests: XCTestCase {
         let server = try SpawnedServer(stayStopped: false)
         try server.terminate(within: 5, expecting: KeepRunning.relaunchExitCode)
         XCTAssertTrue(server.stderr.contains("Stopped exit=\(KeepRunning.relaunchExitCode)"), server.stderr)
+    }
+
+    /// `brew uninstall --cask` sends SIGUSR1, and the helper must stay down
+    /// even with Keep running on, or launchd relaunches it from the deleted
+    /// app (088 #5).
+    func testSIGUSR1ExitsZeroEvenWithKeepRunningOn() throws {
+        let server = try SpawnedServer(stayStopped: false)
+        try server.terminate(within: 5, expecting: 0, signal: GracefulStop.signal)
+        XCTAssertTrue(server.stderr.contains("Received SIGUSR1"), server.stderr)
+        XCTAssertTrue(server.stderr.contains("Stopped exit=0"), server.stderr)
+    }
+
+    func testSIGUSR1DrainsAnOpenSSEStreamAndRemovesTheSocket() throws {
+        let server = try SpawnedServer(stayStopped: false)
+        XCTAssertTrue(server.waitForStderr(containing: "Socket listening path="), server.stderr)
+        let session = try initializeSession(port: server.port, authorization: server.authorization)
+        let stream = try connectLoopback(port: server.port)
+        defer { close(stream) }
+        setRecvTimeout(stream, seconds: 5)
+        try writeAll(stream, """
+            GET / HTTP/1.1\r\n\
+            Host: 127.0.0.1\r\n\
+            Authorization: \(server.authorization)\r\n\
+            Accept: text/event-stream\r\n\
+            Mcp-Session-Id: \(session)\r\n\
+            \r\n
+            """)
+        let head = try readUntilDoubleCRLF(stream)
+        XCTAssertTrue(head.hasPrefix("HTTP/1.1 200"), "SSE stream did not open: \(head)")
+
+        try server.terminate(within: 5, expecting: 0, signal: GracefulStop.signal)
+        var info = stat()
+        XCTAssertEqual(lstat(server.socketPath, &info), -1, "the socket outlived a SIGUSR1 stop")
     }
 
     /// The companion's toggle reaches a running helper, with no restart.
@@ -183,13 +217,13 @@ private final class SpawnedServer {
 
     @discardableResult
     func terminate(
-        within seconds: TimeInterval, expecting status: Int32 = 0,
+        within seconds: TimeInterval, expecting status: Int32 = 0, signal: Int32 = SIGTERM,
         file: StaticString = #filePath, line: UInt = #line
     ) throws -> TimeInterval {
         let start = Date()
-        kill(process.processIdentifier, SIGTERM)
+        kill(process.processIdentifier, signal)
         guard exited.wait(timeout: .now() + seconds) == .success else {
-            throw SpawnError("server still running \(seconds) s after SIGTERM: \(Self.tail(stderrURL))")
+            throw SpawnError("server still running \(seconds) s after signal \(signal): \(Self.tail(stderrURL))")
         }
         let elapsed = Date().timeIntervalSince(start)
         XCTAssertEqual(process.terminationReason, .exit, "server died by signal \(process.terminationStatus) after \(elapsed) s: \(Self.tail(stderrURL))", file: file, line: line)

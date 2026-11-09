@@ -69,4 +69,31 @@ final class SendPayloadTests: XCTestCase {
             XCTAssertEqual(path, "/tmp/a.png")
         }
     }
+
+    /// Process.run aborts the helper on an argument holding NUL (088 #2).
+    func testBuildRejectsNULInTextOrAFilePath() {
+        for (text, paths) in [("a\u{0}b", nil), ("hi", ["/tmp/a\u{0}.png"]), (nil, ["/tmp/a.png", "\u{0}"])] as [(String?, [String]?)] {
+            guard case .failure(let message) = SendPayload.build(text: text, filePaths: paths) else {
+                return XCTFail("Expected NUL to be rejected in \(String(describing: text)) \(String(describing: paths))")
+            }
+            XCTAssertEqual(message, Osascript.nulRejection)
+        }
+    }
+
+    func testRecipientOrChatWithNULIsInvalid() {
+        XCTAssertNotNil(SendTarget.participant(handle: "a\u{0}@x.com", chatId: nil).validationError)
+        XCTAssertNotNil(SendTarget.chat(guid: "iMessage;-;\u{0}", chatId: 1).validationError)
+        XCTAssertNil(SendTarget.participant(handle: "a@x.com", chatId: nil).validationError)
+    }
+
+    /// The backstop refuses before it starts osascript, so no process runs.
+    func testOsascriptRefusesNULArguments() {
+        guard case .failure(.invalidParams(let message)) = Osascript.run("return 1", arguments: ["a\u{0}b"]) else {
+            return XCTFail("Expected osascript to refuse a NUL argument")
+        }
+        XCTAssertEqual(message, Osascript.nulRejection)
+        guard case .failure(.invalidParams) = Osascript.run("return \"\u{0}\"", arguments: []) else {
+            return XCTFail("Expected osascript to refuse a NUL script")
+        }
+    }
 }

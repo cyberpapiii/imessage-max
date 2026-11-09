@@ -30,7 +30,7 @@ Other Makefile targets:
 - `make status` checks process, version, signature, health
 - `make app` builds and signs `dist/iMessage Max.app` without installing it
 - `make logs` tails the helper log, `~/Library/Logs/iMessage Max/imessage-max.log`. launchd cannot expand `~`, so the plist passes `--log-file` and the server opens the file itself
-- `make restart` runs `launchctl kickstart -k` on the helper. A kickstart within the plist's 10 second `ThrottleInterval` of the last launch waits out the rest of it. The plist's `KeepAlive` has `SuccessfulExit` false, so launchd relaunches the helper after any exit but a zero one, a crash included, after the `ThrottleInterval`. On SIGTERM (`launchctl kill`, Activity Monitor) the helper drains, then exits 75 (`KeepRunning.relaunchExitCode`) so launchd starts it again, or exits 0 so it stays down when the companion's Keep running setting is off. That setting is the `stay-stopped` file beside the token (`ServiceDefaults.stayStoppedFileName`), so a helper with `--token-file` reads it from that file's folder. The helper reads it as it stops, so a change needs no restart. The companion stops the helper with `launchctl bootout`, which unloads the job whatever the setting says, until the next login or until it starts it again by registering.
+- `make restart` runs `launchctl kickstart -k` on the helper. A kickstart within the plist's 10 second `ThrottleInterval` of the last launch waits out the rest of it. The plist's `KeepAlive` has `SuccessfulExit` false, so launchd relaunches the helper after any exit but a zero one, a crash included, after the `ThrottleInterval`. On SIGTERM (`launchctl kill`, Activity Monitor) the helper drains, then exits 75 (`KeepRunning.relaunchExitCode`) so launchd starts it again, or exits 0 so it stays down when the companion's Keep running setting is off. That setting is the `stay-stopped` file beside the token (`ServiceDefaults.stayStoppedFileName`), so a helper with `--token-file` reads it from that file's folder. The helper reads it as it stops, so a change needs no restart. SIGUSR1 drains the same way and always exits 0, so the helper stays down whatever the setting says; the Homebrew cask's `uninstall` sends it. The companion stops the helper with `launchctl bootout`, which unloads the job whatever the setting says, until the next login or until it starts it again by registering.
 - `make clean` removes debug artifacts and clears the helper log
 - `make version` checks that the version sites agree, and `make release-check` runs everything that must pass before tagging (see `docs/RELEASING.md`)
 
@@ -199,7 +199,7 @@ The rule covers library code you configure into a sleep too. ServiceGroup's
 (#27), so `HTTPTransport` bounds the drain with its own Dispatch timer.
 `LaunchdSafetyTests` enforces this rule, and `SignalShutdownTests` checks
 that a spawned server exits plainly on SIGTERM, with 0 or the Keep running
-code as the setting says.
+code as the setting says, and with 0 on SIGUSR1.
 
 ### Send contract (no confirmation gate)
 

@@ -437,6 +437,29 @@ final class SendToolExecuteTests: XCTestCase {
         XCTAssertTrue(stub.invocations.isEmpty, "Nothing may be dispatched when any payload is invalid")
     }
 
+    func testNULInTextOrAFilePathFailsBeforeAnythingIsSent() async throws {
+        let fixture = try makeSendFixture()
+        let stub = StubScriptRunner()
+        let tool = SendTool(db: fixture.database(), resolver: makeSeededResolver(), runner: stub)
+
+        for args: [String: Value] in [
+            ["to": .string("+15550000001"), "text": .string("hi\u{0}there")],
+            ["to": .string("+15550000001"), "file_paths": .array([.string("/tmp/a\u{0}.jpg")]), "text": .string("hi")],
+        ] {
+            do {
+                _ = try await tool.execute(args: args)
+                XCTFail("Expected ToolFailure for a NUL payload")
+            } catch let error as ToolFailure {
+                let json = try decodeJSONDictionary(from: error.content)
+                XCTAssertEqual(json["status"] as? String, "failed")
+                XCTAssertEqual(json["error"] as? String, Osascript.nulRejection)
+                XCTAssertEqual(json["disposition"] as? String, "not_started")
+                XCTAssertEqual(json["retry_safe"] as? Bool, true)
+            }
+        }
+        XCTAssertTrue(stub.invocations.isEmpty, "Nothing may be dispatched when a payload holds NUL")
+    }
+
     func testOverlongRecipientHandleFailsBeforeAnythingIsSent() async throws {
         let fixture = try makeSendFixture()
         let longEmail = String(repeating: "a", count: 95) + "@x.com"

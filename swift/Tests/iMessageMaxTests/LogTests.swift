@@ -106,4 +106,53 @@ final class LogTests: XCTestCase {
         XCTAssertEqual(capture.lines.count, 1)
         XCTAssertTrue(capture.lines.first?.contains("logging stays on stderr") == true, "\(capture.lines)")
     }
+
+    /// A failed write used to raise an Objective-C exception and abort the
+    /// helper (088 #1). Each of these must return and drop the line.
+    func testWriteLineToAClosedDescriptorReturns() {
+        var fds: [Int32] = [0, 0]
+        XCTAssertEqual(pipe(&fds), 0)
+        close(fds[0])
+        close(fds[1])
+        Log.writeLine("dropped\n", to: fds[1])
+    }
+
+    func testWriteLineToAPipeWithNoReaderReturns() {
+        let previous = signal(SIGPIPE, SIG_IGN)
+        defer { signal(SIGPIPE, previous) }
+        var fds: [Int32] = [0, 0]
+        XCTAssertEqual(pipe(&fds), 0)
+        close(fds[0])
+        defer { close(fds[1]) }
+        Log.writeLine("dropped\n", to: fds[1])
+    }
+
+    func testWriteLineToAReadOnlyDescriptorReturns() throws {
+        let file = temporaryDirectory().appendingPathComponent("read-only.log")
+        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data().write(to: file)
+        let fd = open(file.path, O_RDONLY)
+        XCTAssertGreaterThanOrEqual(fd, 0)
+        defer { close(fd) }
+        Log.writeLine("dropped\n", to: fd)
+        XCTAssertEqual(try Data(contentsOf: file).count, 0)
+    }
+
+    func testWriteLineWritesEveryByte() throws {
+        var fds: [Int32] = [0, 0]
+        XCTAssertEqual(pipe(&fds), 0)
+        let line = String(repeating: "é", count: 1000) + "\n"
+        Log.writeLine(line, to: fds[1])
+        close(fds[1])
+        let read = FileHandle(fileDescriptor: fds[0], closeOnDealloc: true)
+        XCTAssertEqual(String(data: try XCTUnwrap(read.readToEnd()), encoding: .utf8), line)
+    }
+
+    func testLogWritesThroughToStandardError() throws {
+        keepStandardError()
+        let file = temporaryDirectory().appendingPathComponent("stderr.log")
+        Log.redirectStandardError(to: file.path)
+        Log.info("hello")
+        XCTAssertTrue(try String(contentsOf: file, encoding: .utf8).hasSuffix("INFO hello\n"))
+    }
 }

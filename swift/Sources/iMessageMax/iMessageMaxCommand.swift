@@ -78,11 +78,15 @@ struct iMessageMax: AsyncParsableCommand {
         // The token's folder also holds the helper's settings and state, so
         // a test helper with --token-file never touches the installed one's.
         let supportFolder = location.file.deletingLastPathComponent()
+        // A log write to a stderr pipe nobody reads must fail with EPIPE,
+        // which Log drops, not kill the helper.
+        signal(SIGPIPE, SIG_IGN)
+        let stop = GracefulStop()
         try await ServerStartup.runHTTP(
             host: host, port: port, accessToken: accessToken, contactsPolicy: contactsPolicy,
-            socketOverride: socketPath, supportFolder: supportFolder
+            socketOverride: socketPath, supportFolder: supportFolder, stop: stop
         )
-        let code = KeepRunning.exitCode(folder: supportFolder)
+        let code = KeepRunning.exitCode(folder: supportFolder, stopRequested: stop.wasRequested)
         Log.info("Stopped exit=\(code)")
         if code != 0 { throw ExitCode(code) }
     }
