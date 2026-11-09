@@ -62,11 +62,14 @@ final class ToolTestDatabase {
             """)
     }
 
-    func insertChat(rowId: Int, guid: String, displayName: String? = nil, serviceName: String = "iMessage", isFiltered: Int = 0) throws {
+    /// `style` defaults the way Messages sets it: 43 for a group guid
+    /// (`…;+;…`), 45 for anything else.
+    func insertChat(rowId: Int, guid: String, displayName: String? = nil, serviceName: String = "iMessage", isFiltered: Int = 0, style: Int? = nil) throws {
         let display = displayName.map { "'\(escape($0))'" } ?? "NULL"
+        let chatStyle = style ?? (guid.contains(";+;") ? 43 : 45)
         try execute("""
-            INSERT INTO chat (ROWID, guid, display_name, service_name, is_filtered)
-            VALUES (\(rowId), '\(escape(guid))', \(display), '\(escape(serviceName))', \(isFiltered));
+            INSERT INTO chat (ROWID, guid, display_name, service_name, is_filtered, style)
+            VALUES (\(rowId), '\(escape(guid))', \(display), '\(escape(serviceName))', \(isFiltered), \(chatStyle));
             """)
     }
 
@@ -164,7 +167,8 @@ final class ToolTestDatabase {
             guid TEXT,
             display_name TEXT,
             service_name TEXT,
-            is_filtered INTEGER DEFAULT 0
+            is_filtered INTEGER DEFAULT 0,
+            style INTEGER
         );
         CREATE TABLE handle (
             ROWID INTEGER PRIMARY KEY,
