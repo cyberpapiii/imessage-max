@@ -13,21 +13,33 @@ actor SessionManager {
         let server: Server
         let protocolVersion: String
         let messageContinuation: AsyncThrowingStream<Data, Error>.Continuation
-        var lastActivity: Date
+        /// Seconds on `SessionManager.uptime`, not wall-clock time.
+        var lastActivity: TimeInterval
         var serverTask: Task<Void, Never>?
 
         init(
             id: String,
             server: Server,
             protocolVersion: String,
-            messageContinuation: AsyncThrowingStream<Data, Error>.Continuation
+            messageContinuation: AsyncThrowingStream<Data, Error>.Continuation,
+            now: TimeInterval
         ) {
             self.id = id
             self.server = server
             self.protocolVersion = protocolVersion
             self.messageContinuation = messageContinuation
-            self.lastActivity = Date()
+            self.lastActivity = now
         }
+    }
+
+    /// Idle time is measured on the uptime clock (mach_absolute_time), which
+    /// a clock change cannot move and which stops while the Mac sleeps (088
+    /// #30). Sleep time deliberately does not count: the clients asleep on
+    /// the same Mac did not abandon their sessions, and a wall clock expired
+    /// every session after an hour's sleep, or kept dead ones after the clock
+    /// went back.
+    static let uptime: @Sendable () -> TimeInterval = {
+        TimeInterval(DispatchTime.now().uptimeNanoseconds) / 1_000_000_000
     }
 
     private var sessions: [String: MCPSessionState] = [:]
@@ -46,13 +58,20 @@ actor SessionManager {
 
     private let makeServer: @Sendable () async -> Server
 
+    private let now: @Sendable () -> TimeInterval
+
     private var responseHandler: ((String, Data) async -> Void)?
 
     private var sessionTerminationHandler: ((String) async -> Void)?
 
-    init(catalog: ToolCatalog, configuration: HTTPTransport.Configuration) {
+    init(
+        catalog: ToolCatalog,
+        configuration: HTTPTransport.Configuration,
+        now: @escaping @Sendable () -> TimeInterval = SessionManager.uptime
+    ) {
         let makeServer = configuration.makeServer
         self.makeServer = { await makeServer(catalog) }
+        self.now = now
         self.sessionTimeout = configuration.sessionTimeout
         self.maxSessions = configuration.maxSessions
         self.reclaimableIdle = configuration.reclaimableIdle
@@ -77,6 +96,11 @@ actor SessionManager {
         if sessions.count >= maxSessions {
             await reclaimIdleSessions()
         }
+        while reservedSlots + sessions.count >= maxSessions, let oldest = leastRecentlyActive() {
+            let idle = Int(now() - oldest.lastActivity)
+            Log.warning("Session cap of \(maxSessions) reached: closing the least recently active session \(oldest.id.prefix(8)), idle \(idle) s, to admit a new client")
+            await terminateSession(sessionId: oldest.id)
+        }
 
         guard reservedSlots + sessions.count < maxSessions else {
             return .atCapacity
@@ -97,7 +121,8 @@ actor SessionManager {
             id: sessionId,
             server: server,
             protocolVersion: protocolVersion,
-            messageContinuation: continuation
+            messageContinuation: continuation,
+            now: now()
         )
 
         let transport = LegacyLaneTransport(inbound: messageStream) { [weak self] data in
@@ -125,7 +150,7 @@ actor SessionManager {
             return false
         }
 
-        session.lastActivity = Date()
+        session.lastActivity = now()
         session.messageContinuation.yield(data)
         return true
     }
@@ -139,8 +164,8 @@ actor SessionManager {
             return false
         }
 
-        let now = Date()
-        if now.timeIntervalSince(session.lastActivity) > sessionTimeout {
+        let now = now()
+        if now - session.lastActivity > sessionTimeout {
             await terminateSession(sessionId: sessionId)
             return false
         }
@@ -151,7 +176,7 @@ actor SessionManager {
 
     func touch(sessionId: String) {
         guard let session = sessions[sessionId] else { return }
-        session.lastActivity = Date()
+        session.lastActivity = now()
     }
 
     func notifyAllSessions<N: MCP.Notification>(_ notification: Message<N>) async -> Int {
@@ -206,20 +231,28 @@ actor SessionManager {
     }
 
     private func reclaimIdleSessions() async {
-        let now = Date()
+        let now = now()
         let idleIds = sessions.filter { _, session in
-            now.timeIntervalSince(session.lastActivity) > reclaimableIdle
+            now - session.lastActivity > reclaimableIdle
         }.map(\.key)
+        guard !idleIds.isEmpty else { return }
 
+        Log.info("Session cap of \(maxSessions) reached: closing \(idleIds.count) sessions idle over \(Int(reclaimableIdle)) s")
         for id in idleIds {
             await terminateSession(sessionId: id)
         }
     }
 
+    /// The session that has gone longest without a request. Ties go to the
+    /// lower id so the choice is stable.
+    private func leastRecentlyActive() -> MCPSessionState? {
+        sessions.values.min { ($0.lastActivity, $0.id) < ($1.lastActivity, $1.id) }
+    }
+
     func cleanupExpiredSessions() async {
-        let now = Date()
+        let now = now()
         let expiredIds = sessions.filter { _, session in
-            now.timeIntervalSince(session.lastActivity) > sessionTimeout
+            now - session.lastActivity > sessionTimeout
         }.map(\.key)
 
         for id in expiredIds {

@@ -51,7 +51,10 @@ struct iMessageMax: AsyncParsableCommand {
     }
 
     mutating func run() async throws {
-        if let logFile { Log.redirectStandardError(to: logFile) }
+        if let logFile {
+            Log.redirectStandardError(to: logFile)
+            Log.rotatePeriodically(logFile)
+        }
 
         guard http else {
             if direct {

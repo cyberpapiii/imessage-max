@@ -176,7 +176,8 @@ extension SearchTool {
         nextCursor: String?,
         includeContext: Bool,
         resolver: ContactResolver,
-        filteredHidden: Int?
+        filteredHidden: Int?,
+        stop: SearchScanStop? = nil
     ) async throws -> String {
         var results: [SearchResult] = []
         let chatByID = try await ChatReferences(rows.chats, db: db, resolver: resolver)
@@ -229,7 +230,9 @@ extension SearchTool {
             total: results.count,
             more: nextCursor != nil,
             cursor: nextCursor,
-            filteredHidden: filteredHidden
+            filteredHidden: filteredHidden,
+            partial: stop.map { _ in true },
+            searchedTo: stop?.searchedTo
         )
         return try FormatUtils.encodeJSON(response)
     }
@@ -240,7 +243,8 @@ extension SearchTool {
         query: String?,
         nextCursor: String?,
         resolver: ContactResolver,
-        filteredHidden: Int?
+        filteredHidden: Int?,
+        stop: SearchScanStop? = nil
     ) async throws -> String {
         let page = try await ChatPage.build(
             rows.chats,
@@ -288,7 +292,9 @@ extension SearchTool {
             query: query,
             more: nextCursor != nil,
             cursor: nextCursor,
-            filteredHidden: filteredHidden
+            filteredHidden: filteredHidden,
+            partial: stop.map { _ in true },
+            searchedTo: stop?.searchedTo
         )
         return try FormatUtils.encodeJSON(response)
     }

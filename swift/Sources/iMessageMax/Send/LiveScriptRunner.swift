@@ -36,39 +36,82 @@ struct LiveScriptRunner: ScriptRunning {
             return dispatch(payload.scriptKind, body, to: target, sentFileName: "")
 
         case .file(let path):
-            let staged: OutgoingFileStager.StagedFile
-            let baseline: Int
+            let source: OutgoingFileStager.Source
             do {
-                (staged, baseline) = try stage(path)
-            } catch let error as SendError {
-                return .failure(SendFailure(error, disposition: .notStarted))
+                stager.sweepExpired()
+                source = try stager.openSource(path)
             } catch {
-                return .failure(SendFailure(.failed(ClientErrorMessages.internalDetail(error, context: "Preparing the attachment")), disposition: .notStarted))
+                return .failure(Self.notStarted(error))
             }
 
-            let handoff = dispatch(payload.scriptKind, staged.fileURL.path, to: target, sentFileName: staged.trackingName)
-            guard case .success = handoff else {
-                stager.remove(staged)
-                return handoff
+            // Held until this send's own transfer id is known, so a send of
+            // another file with the same name cannot take it for its own.
+            let key = TransferMonitor.lockKey(source.trackingName)
+            TransferMonitor.nameLocks.lock(key)
+            let handoff = handOff(source, to: target)
+            TransferMonitor.nameLocks.unlock(key)
+
+            switch handoff {
+            case .failure(let failure):
+                return .failure(failure)
+            case .success(let transfer):
+                return TransferMonitor.waitForCompletion(
+                    of: transfer.staged, transferIds: transfer.ids, until: transfer.deadline, stager: stager,
+                    statusQuery: { transferId in
+                        // Messages may have quit or crashed since the handoff.
+                        // Started by the query itself it would show its window.
+                        access.prepareForScript()
+                        return try TransferMonitor.transferStatus(id: transferId, runScript: runScript)
+                    })
             }
-            return TransferMonitor.waitForCompletion(
-                of: staged, baseline: baseline, stager: stager,
-                statusQuery: { name in
-                    // Messages may have quit or crashed since the handoff.
-                    // Started by the query itself it would show its window.
-                    access.prepareForScript()
-                    return try TransferMonitor.outgoingStatuses(named: name, runScript: runScript)
-                })
         }
     }
 
-    private func stage(_ path: String) throws -> (OutgoingFileStager.StagedFile, baseline: Int) {
-        stager.sweepExpired()
-        let source = try stager.openSource(path)
-        defer { source.close() }
-        if let blocked = access.prepareForSend() { throw blocked }
-        let baseline = try TransferMonitor.outgoingStatuses(named: source.trackingName, runScript: runScript).count
-        return (try stager.stage(source), baseline)
+    private struct HandedOffTransfer {
+        let staged: OutgoingFileStager.StagedFile
+        /// The transfers Messages created for this send.
+        let ids: [String]
+        let deadline: Date
+    }
+
+    /// Stages the file, dispatches it, and finds the transfer it created.
+    /// The caller holds the lock for the file's name.
+    private func handOff(_ source: OutgoingFileStager.Source, to target: SendTarget) -> Result<HandedOffTransfer, SendFailure> {
+        let staged: OutgoingFileStager.StagedFile
+        let baseline: Set<String>
+        do {
+            defer { source.close() }
+            if let blocked = access.prepareForSend() { throw blocked }
+            baseline = Set(try TransferMonitor.outgoingTransferIds(named: source.trackingName, runScript: runScript))
+            staged = try stager.stage(source)
+        } catch {
+            return .failure(Self.notStarted(error))
+        }
+
+        let dispatched = dispatch(.file, staged.fileURL.path, to: target, sentFileName: staged.trackingName)
+        if case .failure(let failure) = dispatched {
+            stager.remove(staged)
+            return .failure(failure)
+        }
+
+        let deadline = Date().addingTimeInterval(TransferMonitor.pollTimeout)
+        do {
+            let ids = try TransferMonitor.newTransferIds(
+                named: staged.trackingName, excluding: baseline, until: deadline,
+                idQuery: { name in
+                    access.prepareForScript()
+                    return try TransferMonitor.outgoingTransferIds(named: name, runScript: runScript)
+                })
+            return .success(HandedOffTransfer(staged: staged, ids: ids, deadline: deadline))
+        } catch {
+            return .failure(TransferMonitor.queryFailed(error, staged: staged, stager: stager))
+        }
+    }
+
+    private static func notStarted(_ error: any Error) -> SendFailure {
+        let sendError = (error as? SendError)
+            ?? .failed(ClientErrorMessages.internalDetail(error, context: "Preparing the attachment"))
+        return SendFailure(sendError, disposition: .notStarted)
     }
 
     private func dispatch(

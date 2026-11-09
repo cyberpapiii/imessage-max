@@ -36,10 +36,15 @@ struct TimelineCursor: Equatable {
         return TimelineCursor(date: date, messageId: messageId)
     }
 
+    /// Rows past this cursor in date, then ROWID, order. The leading
+    /// `date <= ?` (or `>=`) is a plain range, so SQLite walks the date index
+    /// from the cursor and stops at the LIMIT. The equivalent `date < ? OR
+    /// (date = ? AND ROWID < ?)` led it to collect and sort every older row:
+    /// 0.89 s against 2 ms per page over 500k messages.
     func predicate(descending: Bool, _ alias: String = "m") -> (sql: String, params: [Any]) {
         let op = descending ? "<" : ">"
         return (
-            "(\(alias).date \(op) ? OR (\(alias).date = ? AND \(alias).ROWID \(op) ?))",
+            "(\(alias).date \(op)= ? AND (\(alias).date \(op) ? OR \(alias).ROWID \(op) ?))",
             [date, date, messageId]
         )
     }

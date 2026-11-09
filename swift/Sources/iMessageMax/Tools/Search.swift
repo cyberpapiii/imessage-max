@@ -65,16 +65,26 @@ struct SearchSampleMessage: Codable {
     let ts: String?
 }
 
+/// Where a search stopped when its time budget ran out before it filled
+/// the page. `searchedTo` is the timestamp of the last message it checked;
+/// the cursor goes on from there.
+struct SearchScanStop: Equatable {
+    let searchedTo: String?
+}
+
 struct SearchFlatResponse: Codable {
     let results: [SearchResult]
     let total: Int
     let more: Bool
     let cursor: String?
     let filteredHidden: Int?
+    var partial: Bool? = nil
+    var searchedTo: String? = nil
 
     enum CodingKeys: String, CodingKey {
-        case results, total, more, cursor
+        case results, total, more, cursor, partial
         case filteredHidden = "filtered_hidden"
+        case searchedTo = "searched_to"
     }
 
     func encode(to encoder: Encoder) throws {
@@ -83,6 +93,8 @@ struct SearchFlatResponse: Codable {
         try container.encode(total, forKey: .total)
         try container.encode(more, forKey: .more)
         try container.encodeIfPresent(cursor, forKey: .cursor)
+        try container.encodeIfPresent(partial, forKey: .partial)
+        try container.encodeIfPresent(searchedTo, forKey: .searchedTo)
         try container.encodeIfPresent(filteredHidden, forKey: .filteredHidden)
     }
 }
@@ -95,11 +107,14 @@ struct SearchGroupedResponse: Codable {
     let more: Bool
     let cursor: String?
     let filteredHidden: Int?
+    var partial: Bool? = nil
+    var searchedTo: String? = nil
 
     enum CodingKeys: String, CodingKey {
-        case chats, total, query, more, cursor
+        case chats, total, query, more, cursor, partial
         case chatCount = "chat_count"
         case filteredHidden = "filtered_hidden"
+        case searchedTo = "searched_to"
     }
 
     func encode(to encoder: Encoder) throws {
@@ -110,12 +125,17 @@ struct SearchGroupedResponse: Codable {
         try container.encodeIfPresent(query, forKey: .query)
         try container.encode(more, forKey: .more)
         try container.encodeIfPresent(cursor, forKey: .cursor)
+        try container.encodeIfPresent(partial, forKey: .partial)
+        try container.encodeIfPresent(searchedTo, forKey: .searchedTo)
         try container.encodeIfPresent(filteredHidden, forKey: .filteredHidden)
     }
 }
 
 enum SearchTool {
     static let limit = IntArgument(name: "limit", defaultValue: 20, range: 1...100)
+    /// How long one call may keep paging through rows that fail the Swift
+    /// check before it answers with what it has and a cursor.
+    static let scanBudget: Duration = .seconds(3)
 
     static func definition(db: Database, resolver: ContactResolver) -> ToolDefinition {
         let inputSchema: Value = .object([
@@ -214,6 +234,7 @@ enum SearchTool {
                 - Multi-word: "costa rica trip" matches ANY word by default
                 - match_all: true requires ALL words to be present
                 - fuzzy: true handles typos ("costarcia" finds "costa rica")
+                - A search that runs out of time before it fills the page returns what it found with partial: true, searched_to (the oldest message time it reached, or the newest with oldest_first), more: true and a cursor. Call again with the cursor to search further back.
 
                 Time filters (since/before):
                 - Relative: "24h", "7d", "2w", "3m"
@@ -300,6 +321,7 @@ enum SearchTool {
         matchAll: Bool = false,
         fuzzy: Bool = false,
         includeFiltered: Bool = false,
+        scanBudget: Duration = SearchTool.scanBudget,
         db: Database,
         resolver: ContactResolver
     ) async throws -> String {
@@ -445,14 +467,31 @@ enum SearchTool {
         let filteredHidden = try ChatScope(named: chatFilter, includeFiltered: includeFiltered)
             .filteredHidden(firstPage: cursor == nil, count: hiddenChatsWithMatch)
 
-        let fetched = try fetch(
-            inChat: chatFilter, includeFiltered: includeFiltered, cursor: cursor.flatMap(TimelineCursor.decode)
-        )
-        let rows = try confirmed(fetched, limit: clampedLimit)
+        // Rows checked in Swift (a query, or unanswered) can fail the check a
+        // page at a time, so keep paging until the page is full, the
+        // messages run out, or the time budget is spent (088 #37: a fuzzy
+        // or many-word search checked 500 rows and answered total 0).
+        let deadline = ContinuousClock.now + scanBudget
+        var resumeAt = cursor.flatMap(TimelineCursor.decode)
+        var rows: [MessageInChat] = []
+        var lastPage: [MessageInChat] = []
+        while true {
+            let page = try fetch(inChat: chatFilter, includeFiltered: includeFiltered, cursor: resumeAt)
+            rows += try confirmed(page, limit: clampedLimit - rows.count)
+            lastPage = page
+            guard confirmsInSwift, rows.count < clampedLimit, page.count >= fetchLimit,
+                  let last = page.last?.message, let date = last.date,
+                  ContinuousClock.now < deadline else { break }
+            resumeAt = TimelineCursor(date: date, messageId: last.id)
+        }
         let nextCursor = TimelineCursor.next(
             kept: rows.map(\.message), limit: clampedLimit,
-            fetched: fetched.map(\.message), fetchLimit: fetchLimit
+            fetched: lastPage.map(\.message), fetchLimit: fetchLimit
         )
+        // A short page with a cursor means the budget ran out mid-scan.
+        let stop = rows.count < clampedLimit && nextCursor != nil
+            ? SearchScanStop(searchedTo: TimeUtils.formatISO(AppleTime.toDate(lastPage.last?.message.date)))
+            : nil
 
         let jsonString: String
         if responseFormat == .groupedByChat {
@@ -462,7 +501,8 @@ enum SearchTool {
                 query: query,
                 nextCursor: nextCursor,
                 resolver: resolver,
-                filteredHidden: filteredHidden
+                filteredHidden: filteredHidden,
+                stop: stop
             )
         } else {
             jsonString = try await buildFlatResponse(
@@ -472,7 +512,8 @@ enum SearchTool {
                 nextCursor: nextCursor,
                 includeContext: includeContext,
                 resolver: resolver,
-                filteredHidden: filteredHidden
+                filteredHidden: filteredHidden,
+                stop: stop
             )
         }
 

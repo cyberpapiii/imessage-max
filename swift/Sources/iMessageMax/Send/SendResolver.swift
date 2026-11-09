@@ -9,6 +9,9 @@ struct ResolvedSendTarget {
     let target: SendTarget
     let deliveredTo: [String]
     let chat: ChatReference?
+    /// The recipient's handle for a `to:` send. Verification also looks for
+    /// the message in the handle's other chats, to catch a misrouted send.
+    var recipientHandle: String? = nil
 }
 
 enum SendResolution {
@@ -205,37 +208,62 @@ struct SendResolver: Sendable {
         return ids.compactMap { $0 }.first
     }
 
+    /// A recipient goes through their existing 1:1 chat when there is one,
+    /// whatever its service, so the send lands where Messages would put it
+    /// and verification reads the chat that was used. A participant send
+    /// always goes over iMessage: with only an SMS or RCS DM it reached a
+    /// different chat, and the check of the DM reported a false mismatch.
+    /// Only a handle with no DM goes through the iMessage participant.
     private func participantTarget(handle: String, displayName: String) async throws -> ResolvedSendTarget {
-        let chatId = try findDirectChatForHandle(handle)
+        guard let direct = try latestDirectChat(for: handle) else {
+            return ResolvedSendTarget(
+                target: .participant(handle: handle, chatId: nil),
+                deliveredTo: [displayName],
+                chat: nil,
+                recipientHandle: handle
+            )
+        }
         var chat: ChatReference? = nil
-        if let chatId, let identity = try await chatIdentity(chatId) {
+        if let identity = try await chatIdentity(direct.chatId) {
             chat = ChatReference(id: identity.mcpId, name: identity.displayName)
         }
         return ResolvedSendTarget(
-            target: .participant(handle: handle, chatId: chatId),
+            target: .chat(guid: direct.guid, chatId: direct.chatId),
             deliveredTo: [displayName],
-            chat: chat
+            chat: chat,
+            recipientHandle: handle
         )
     }
 
-    private func findDirectChatForHandle(_ handle: String) throws -> Int64? {
-        let oneOnOneChats: [Int64] = try db.query(
+    /// A 1:1 chat: `chat.style` 45 (a group is 43) with one participant.
+    static func isDirectChat(_ alias: String = "c") -> String {
+        "(\(alias).style = 45 AND \(SQLFragments.participantCount(alias)) = 1)"
+    }
+
+    /// The handle's 1:1 chat with the newest message. A group that everyone
+    /// else left has one participant too, but it is not the DM. Duplicate
+    /// DMs, one per service or left over from an old thread, are common, and
+    /// the newest one is where the conversation is.
+    private func latestDirectChat(for handle: String) throws -> (chatId: Int64, guid: String)? {
+        let rows: [(chatId: Int64, guid: String)] = try db.query(
             """
-            SELECT c.ROWID
+            SELECT c.ROWID, c.guid
             FROM chat c
-            JOIN chat_handle_join chj ON c.ROWID = chj.chat_id
-            JOIN handle h ON chj.handle_id = h.ROWID
-            WHERE h.id = ?
-              AND \(SQLFragments.participantCount()) = 1
-            ORDER BY c.ROWID DESC
+            WHERE \(Self.isDirectChat())
+              AND COALESCE(c.guid, '') != ''
+              AND EXISTS (
+                  SELECT 1 FROM chat_handle_join chj
+                  JOIN handle h ON chj.handle_id = h.ROWID
+                  WHERE chj.chat_id = c.ROWID AND h.id = ?
+              )
+            ORDER BY \(SQLFragments.newestChatFirst())
             LIMIT 1
             """,
             params: [handle]
         ) { row in
-            row.int(0)
+            (chatId: row.int(0), guid: row.string(1) ?? "")
         }
-
-        return oneOnOneChats.first
+        return rows.first
     }
 
     private func getLastContactTimes(handles: [String]) throws -> [String: Date] {

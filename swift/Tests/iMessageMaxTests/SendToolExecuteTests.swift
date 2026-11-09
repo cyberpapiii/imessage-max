@@ -61,7 +61,7 @@ private func fastVerifier(fixture: ToolTestDatabase) -> SendVerifier {
 
 final class SendToolExecuteTests: XCTestCase {
 
-    func testSendTextToKnownHandleInvokesParticipantSend() async throws {
+    func testSendTextToKnownHandleGoesThroughItsDM() async throws {
         let fixture = try makeSendFixture()
         let stub = StubScriptRunner()
         stub.nextResult = .success(())
@@ -85,10 +85,10 @@ final class SendToolExecuteTests: XCTestCase {
         XCTAssertEqual(json["retry_safe"] as? Bool, false)
 
         XCTAssertEqual(stub.invocations.count, 1, "Stub should have been called exactly once")
-        guard case .textToParticipant(let handle, let message) = stub.invocations.first else {
-            return XCTFail("Expected textToParticipant call, got \(String(describing: stub.invocations.first))")
+        guard case .textToChat(let guid, let message) = stub.invocations.first else {
+            return XCTFail("Expected textToChat call, got \(String(describing: stub.invocations.first))")
         }
-        XCTAssertEqual(handle, "+15550000001", "Handle should be Alice's normalized phone number")
+        XCTAssertEqual(guid, "iMessage;-;alice-send-guid", "A handle with a DM is sent through that DM")
         XCTAssertEqual(message, "Hello Alice", "Message text should be passed through unchanged")
     }
 
@@ -261,10 +261,10 @@ final class SendToolExecuteTests: XCTestCase {
         XCTAssertEqual(json["chat_id"] as? String, "chat1", "The resolved DM is reported as chat_id")
         XCTAssertNil(json["verified_message_guid"], "'sent' carries no verification proof")
         XCTAssertEqual(stub.invocations.count, 1)
-        guard case .fileToParticipant(let handle, let filePath) = stub.invocations.first else {
-            return XCTFail("Expected fileToParticipant call, got \(String(describing: stub.invocations.first))")
+        guard case .fileToChat(let guid, let filePath) = stub.invocations.first else {
+            return XCTFail("Expected fileToChat call, got \(String(describing: stub.invocations.first))")
         }
-        XCTAssertEqual(handle, "+15550000001")
+        XCTAssertEqual(guid, "iMessage;-;alice-send-guid")
         XCTAssertEqual(filePath, "/tmp/a.jpg")
     }
 
@@ -631,23 +631,248 @@ final class SendToolExecuteTests: XCTestCase {
             "A soft outcome must not stop the loop; the second file must still be sent")
     }
 
-    func testMayHaveCompletedFailureIsNotRetrySafe() async throws {
+    func testMayHaveCompletedFileFailureIsNotRetrySafeAndSaysWhy() async throws {
+        let fixture = try makeSendFixture()
+        let stub = StubScriptRunner()
+        stub.nextResult = .failure(SendFailure(.messagesAppUnavailable, disposition: .mayHaveCompleted))
+        let tool = SendTool(db: fixture.database(), resolver: makeSeededResolver(), runner: stub, verifier: fastVerifier(fixture: fixture))
+
+        let json = try await toolFailureBody {
+            try await tool.execute(args: ["to": .string("+15550000001"), "file_paths": .array([.string("/tmp/a.jpg")])])
+        }
+        XCTAssertEqual(json["status"] as? String, "failed")
+        XCTAssertEqual(json["disposition"] as? String, "may_have_completed")
+        XCTAssertEqual(json["retry_safe"] as? Bool, false)
+        assertNeverInvitesABlindRetry(json)
+    }
+
+    // MARK: 088 #11: a send that may have completed is checked against chat.db
+
+    /// The auditor's case: osascript timed out after the Apple event went
+    /// out, and the message is in chat.db. The old result was failed with
+    /// may_have_completed, and agents resent it.
+    func testTimeoutThenRowInChatDbIsConfirmed() async throws {
         let fixture = try makeSendFixture()
         let stub = StubScriptRunner()
         stub.nextResult = .failure(SendFailure(.timeout, disposition: .mayHaveCompleted))
-        let tool = SendTool(db: fixture.database(), resolver: makeSeededResolver(), runner: stub)
-        do {
-            _ = try await tool.execute(args: [
-                "to": .string("+15550000001"),
-                "text": .string("Hello"),
-            ])
-            XCTFail("expected failed")
-        } catch let error as ToolFailure {
-            let json = try decodeJSONDictionary(from: error.content)
-            XCTAssertEqual(json["status"] as? String, "failed")
-            XCTAssertEqual(json["disposition"] as? String, "may_have_completed")
-            XCTAssertEqual(json["retry_safe"] as? Bool, false)
+        stub.onSend = { _ in try insertOutbound(fixture, rowId: 70, text: "Hello Alice", date: Date()) }
+        let tool = SendTool(db: fixture.database(), resolver: makeSeededResolver(), runner: stub, verifier: fastVerifier(fixture: fixture))
+
+        let json = try decodeJSONDictionary(from: try await tool.execute(args: [
+            "to": .string("+15550000001"),
+            "text": .string("Hello Alice"),
+        ]))
+
+        XCTAssertEqual(json["status"] as? String, "confirmed")
+        XCTAssertEqual(json["verified_message_guid"] as? String, "outbound-70")
+        XCTAssertEqual(json["disposition"] as? String, "completed")
+        XCTAssertEqual(json["retry_safe"] as? Bool, false)
+        let message = json["message"] as? String ?? ""
+        XCTAssertTrue(message.contains("timed out"), message)
+        XCTAssertTrue(message.contains("Do not resend"), message)
+        XCTAssertEqual(stub.invocations.count, 1)
+    }
+
+    /// -609 after dispatch with no row: the message may be queued in a hung
+    /// Messages. The result is uncertain, never failed with "Try again".
+    func testUnavailableAfterDispatchWithNoRowIsUncertainAndNeverInvitesARetry() async throws {
+        for error in [SendError.messagesAppUnavailable, .timeout] {
+            let fixture = try makeSendFixture()
+            let stub = StubScriptRunner()
+            stub.nextResult = .failure(SendFailure(error, disposition: .mayHaveCompleted))
+            let tool = SendTool(db: fixture.database(), resolver: makeSeededResolver(), runner: stub, verifier: fastVerifier(fixture: fixture))
+
+            let json = try decodeJSONDictionary(from: try await tool.execute(args: [
+                "chat_id": .string("chat1"),
+                "text": .string("Hello Alice"),
+            ]))
+
+            XCTAssertEqual(json["status"] as? String, "uncertain", "\(error)")
+            XCTAssertEqual(json["disposition"] as? String, "may_have_completed", "\(error)")
+            XCTAssertEqual(json["retry_safe"] as? Bool, false, "\(error)")
+            XCTAssertEqual(json["error"] as? String, error.localizedDescription)
+            XCTAssertTrue((json["message"] as? String ?? "").contains("get_messages on chat1"), "\(json)")
+            assertNeverInvitesABlindRetry(json)
         }
+    }
+
+    func testNotStartedTextFailureIsNotVerified() async throws {
+        let fixture = try makeSendFixture()
+        let stub = StubScriptRunner()
+        stub.nextResult = .failure(SendFailure(.messagesAppUnavailable, disposition: .notStarted))
+        stub.onSend = { _ in try insertOutbound(fixture, rowId: 71, text: "Hello Alice", date: Date()) }
+        let tool = SendTool(db: fixture.database(), resolver: makeSeededResolver(), runner: stub, verifier: fastVerifier(fixture: fixture))
+
+        let json = try await toolFailureBody {
+            try await tool.execute(args: ["to": .string("+15550000001"), "text": .string("Hello Alice")])
+        }
+        XCTAssertEqual(json["status"] as? String, "failed", "a script that never started sent nothing to verify")
+        XCTAssertEqual(json["retry_safe"] as? Bool, true)
+    }
+
+    func testMayHaveCompletedTextAfterFilesIsVerifiedToo() async throws {
+        let fixture = try makeSendFixture()
+        let stub = StubScriptRunner()
+        stub.queuedResults = [.success(()), .failure(SendFailure(.timeout, disposition: .mayHaveCompleted))]
+        stub.onSend = { payload in
+            guard case .text(let text) = payload else { return }
+            try insertOutbound(fixture, rowId: 72, text: text, date: Date())
+        }
+        let tool = SendTool(db: fixture.database(), resolver: makeSeededResolver(), runner: stub, verifier: fastVerifier(fixture: fixture))
+
+        let json = try decodeJSONDictionary(from: try await tool.execute(args: [
+            "to": .string("+15550000001"),
+            "text": .string("Here it is"),
+            "file_paths": .array([.string("/tmp/a.jpg")]),
+        ]))
+        XCTAssertEqual(json["status"] as? String, "confirmed", "not partial_failure: the text is in chat.db")
+        XCTAssertEqual(json["verified_message_guid"] as? String, "outbound-72")
+    }
+
+    // MARK: 088 #16: verification matches the chat the send used
+
+    /// Sent through the newest DM, but the row lands in the person's other
+    /// DM. Same person, so it confirms; it used to be a false mismatch.
+    func testRowInTheRecipientsOtherDMConfirms() async throws {
+        let fixture = try makeSendFixture()
+        try fixture.insertChat(rowId: 3, guid: "SMS;-;+15550000001", serviceName: "SMS")
+        try fixture.joinChatHandle(chatId: 3, handleId: 1)
+        try fixture.insertMessage(rowId: 5, guid: "recent-sms", text: "yo", date: AppleTime.fromDate(Date()), isFromMe: false, handleId: 1)
+        try fixture.joinChatMessage(chatId: 3, messageId: 5)
+        let stub = StubScriptRunner()
+        stub.onSend = { _ in try insertOutbound(fixture, rowId: 73, text: "Hello Alice", date: Date()) }
+        let tool = SendTool(db: fixture.database(), resolver: makeSeededResolver(), runner: stub, verifier: fastVerifier(fixture: fixture))
+
+        let json = try decodeJSONDictionary(from: try await tool.execute(args: [
+            "to": .string("+15550000001"),
+            "text": .string("Hello Alice"),
+        ]))
+
+        XCTAssertEqual(stub.invocations, [.textToChat(guid: "SMS;-;+15550000001", message: "Hello Alice")],
+            "the DM with the newest message is the one used")
+        XCTAssertEqual(json["status"] as? String, "confirmed")
+        XCTAssertEqual(json["verified_message_guid"] as? String, "outbound-73")
+    }
+
+    func testSMSOnlyDMSendConfirmsInThatChat() async throws {
+        let fixture = try ToolTestDatabase(name: "send-sms-only")
+        try fixture.insertHandle(rowId: 1, handle: "+15550000001", service: "SMS")
+        try fixture.insertChat(rowId: 4, guid: "SMS;-;+15550000001", serviceName: "SMS")
+        try fixture.joinChatHandle(chatId: 4, handleId: 1)
+        let stub = StubScriptRunner()
+        stub.onSend = { _ in
+            try fixture.insertMessage(rowId: 80, guid: "sms-out", text: "Hi", date: AppleTime.fromDate(Date()), isFromMe: true)
+            try fixture.joinChatMessage(chatId: 4, messageId: 80)
+        }
+        let tool = SendTool(db: fixture.database(), resolver: makeSeededResolver(), runner: stub, verifier: fastVerifier(fixture: fixture))
+
+        let json = try decodeJSONDictionary(from: try await tool.execute(args: [
+            "to": .string("+15550000001"),
+            "text": .string("Hi"),
+        ]))
+
+        XCTAssertEqual(stub.invocations, [.textToChat(guid: "SMS;-;+15550000001", message: "Hi")])
+        XCTAssertEqual(json["status"] as? String, "confirmed")
+        XCTAssertEqual(json["chat_id"] as? String, "chat4")
+    }
+
+    /// No DM, only a group everyone else left: the send goes to the
+    /// participant, and the row in the new DM Messages makes confirms.
+    func testDegenerateGroupGivesNoFalseMismatch() async throws {
+        let fixture = try ToolTestDatabase(name: "send-degenerate")
+        try fixture.insertHandle(rowId: 1, handle: "+15550000001")
+        try fixture.insertChat(rowId: 3, guid: "iMessage;+;chat-left-behind", displayName: "Old Trip")
+        try fixture.joinChatHandle(chatId: 3, handleId: 1)
+        let stub = StubScriptRunner()
+        stub.onSend = { _ in
+            try fixture.insertChat(rowId: 8, guid: "iMessage;-;+15550000001")
+            try fixture.joinChatHandle(chatId: 8, handleId: 1)
+            try fixture.insertMessage(rowId: 81, guid: "new-dm-out", text: "Hi", date: AppleTime.fromDate(Date()), isFromMe: true)
+            try fixture.joinChatMessage(chatId: 8, messageId: 81)
+        }
+        let tool = SendTool(db: fixture.database(), resolver: makeSeededResolver(), runner: stub, verifier: fastVerifier(fixture: fixture))
+
+        let json = try decodeJSONDictionary(from: try await tool.execute(args: [
+            "to": .string("+15550000001"),
+            "text": .string("Hi"),
+        ]))
+
+        XCTAssertEqual(stub.invocations, [.textToParticipant(handle: "+15550000001", message: "Hi")])
+        XCTAssertEqual(json["status"] as? String, "confirmed")
+    }
+
+    // MARK: 088 #29: a pending file does not hide the text's result
+
+    func testTextIsVerifiedWhileAFileIsPending() async throws {
+        let fixture = try makeSendFixture()
+        let stub = StubScriptRunner()
+        stub.queuedResults = [.failure(SendFailure(.transferPending("a.jpg"), disposition: .mayHaveCompleted)), .success(())]
+        stub.onSend = { payload in
+            guard case .text(let text) = payload else { return }
+            try insertOutbound(fixture, rowId: 74, text: text, date: Date())
+        }
+        let tool = SendTool(db: fixture.database(), resolver: makeSeededResolver(), runner: stub, verifier: fastVerifier(fixture: fixture))
+
+        let json = try decodeJSONDictionary(from: try await tool.execute(args: [
+            "to": .string("+15550000001"),
+            "text": .string("Here is the file"),
+            "file_paths": .array([.string("/tmp/a.jpg")]),
+        ]))
+
+        XCTAssertEqual(json["status"] as? String, "pending_confirmation", "the file is still in transfer")
+        XCTAssertEqual(json["text_status"] as? String, "confirmed")
+        XCTAssertEqual(json["verified_message_guid"] as? String, "outbound-74")
+        XCTAssertEqual(json["retry_safe"] as? Bool, false)
+        let message = json["message"] as? String ?? ""
+        XCTAssertTrue(message.contains("'a.jpg'"), message)
+        XCTAssertTrue(message.contains("text message was confirmed"), message)
+    }
+
+    func testMissingTextIsReportedWhileAFileIsPending() async throws {
+        let fixture = try makeSendFixture()
+        let stub = StubScriptRunner()
+        stub.queuedResults = [.failure(SendFailure(.transferPending("a.jpg"), disposition: .mayHaveCompleted)), .success(())]
+        let tool = SendTool(db: fixture.database(), resolver: makeSeededResolver(), runner: stub, verifier: fastVerifier(fixture: fixture))
+
+        let json = try decodeJSONDictionary(from: try await tool.execute(args: [
+            "to": .string("+15550000001"),
+            "text": .string("Here is the file"),
+            "file_paths": .array([.string("/tmp/a.jpg")]),
+        ]))
+
+        XCTAssertEqual(json["status"] as? String, "pending_confirmation")
+        XCTAssertEqual(json["text_status"] as? String, "uncertain")
+        XCTAssertNil(json["verified_message_guid"])
+    }
+
+    /// Retrying the whole call would send the file again, so a text that
+    /// failed delivery after a file is not retry-safe.
+    func testFailedDeliveryAfterAFileIsNotRetrySafe() async throws {
+        let fixture = try makeSendFixture()
+        let stub = StubScriptRunner()
+        stub.onSend = { payload in
+            guard case .text(let text) = payload else { return }
+            try fixture.insertMessage(rowId: 75, guid: "failed-75", text: text, date: AppleTime.fromDate(Date()), isFromMe: true, error: 22)
+            try fixture.joinChatMessage(chatId: 1, messageId: 75)
+        }
+        let tool = SendTool(db: fixture.database(), resolver: makeSeededResolver(), runner: stub, verifier: fastVerifier(fixture: fixture))
+
+        let json = try await toolFailureBody {
+            try await tool.execute(args: [
+                "to": .string("+15550000001"),
+                "text": .string("Here is the file"),
+                "file_paths": .array([.string("/tmp/a.jpg")]),
+            ])
+        }
+        XCTAssertEqual(json["status"] as? String, "failed_delivery")
+        XCTAssertEqual(json["retry_safe"] as? Bool, false)
+        XCTAssertTrue((json["message"] as? String ?? "").contains("resend only the text"), "\(json)")
+    }
+
+    private func assertNeverInvitesABlindRetry(_ json: [String: Any], file: StaticString = #filePath, line: UInt = #line) {
+        let text = [json["error"], json["message"]].compactMap { $0 as? String }.joined(separator: " ")
+        XCTAssertFalse(text.localizedCaseInsensitiveContains("try again"), text, file: file, line: line)
+        XCTAssertTrue(text.contains("may still have been sent"), text, file: file, line: line)
     }
 
     func testValidationErrorIsNotStartedRetrySafe() async throws {

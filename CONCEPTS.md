@@ -16,7 +16,7 @@ This file defines the terms that mean something specific in this project: entiti
 
 - **confirmed**: The server found the outbound row in chat.db within the verification window, with no error. This is the strongest success state, and it carries the verified message id as evidence. It is not a delivery receipt.
 
-- **uncertain**: The transport accepted the send, but verification could not find the message within the polling window. Follow up by reading the conversation instead of retrying.
+- **uncertain**: Verification could not find the message within the polling window. Either the transport accepted the send, or Messages failed or timed out after the send began (then disposition is `may_have_completed` and the result carries the error). The message may have been sent. Follow up by reading the conversation instead of retrying.
 
 - **mismatch**: Verification found the message in a different conversation than the intended one. Never treat it as success.
 - **failed_delivery**: Verification found the sent message with a delivery error recorded, so the message was not delivered. This is a failure, and the result carries the message id and error code as evidence.
@@ -24,7 +24,9 @@ This file defines the terms that mean something specific in this project: entiti
 
 - **sent**: The transport accepted the send, but verification was unavailable, so delivery is unproven.
 
-- **pending_confirmation**: Messages accepted a file attachment send, but the file transfer had not finished within the polling window. This is a normal waiting state for attachments only. It is not a failure and not a request to retry.
+- **pending_confirmation**: Messages accepted a file attachment send, but the file transfer had not finished within the polling window. This is a normal waiting state for attachments only. It is not a failure and not a request to retry. When text went with the file, `text_status` gives the text's own result (`confirmed` or `uncertain`).
+
+- **Direct chat (DM)**: A 1:1 chat, `chat.style` 45, of any service (iMessage, SMS, RCS). A send with `to:` goes through the person's DM with the newest message. A group that everyone else left also has one participant but is not a DM.
 
 - **ambiguous**: The server could not resolve the destination to exactly one conversation, so it sent nothing. Either several contacts match, or the one match is a Contacts number or email with no conversation in Messages.
 

@@ -85,6 +85,70 @@ final class LogTests: XCTestCase {
                        "a log under the limit stays where it is")
     }
 
+    /// 088 #31: the log rotated only at startup.
+    func testALogThatGrowsWhileRunningMovesAside() throws {
+        keepStandardError()
+        let dir = temporaryDirectory()
+        let file = dir.appendingPathComponent("imessage-max.log")
+        let previous = dir.appendingPathComponent("imessage-max.log.1")
+        Log.redirectStandardError(to: file.path, rotateAbove: 64)
+
+        Log.writeLine("short\n", to: STDERR_FILENO)
+        Log.rotateIfNeeded(file.path, above: 64)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: previous.path), "a log under the limit stays")
+
+        Log.writeLine(String(repeating: "a", count: 100) + "\n", to: STDERR_FILENO)
+        Log.rotateIfNeeded(file.path, above: 64)
+        Log.writeLine("after\n", to: STDERR_FILENO)
+
+        XCTAssertEqual(try String(contentsOf: file, encoding: .utf8), "after\n")
+        XCTAssertEqual(
+            try String(contentsOf: previous, encoding: .utf8),
+            "short\n" + String(repeating: "a", count: 100) + "\n")
+        XCTAssertEqual(try permissions(file), 0o600)
+    }
+
+    func testADeletedLogIsPutBack() throws {
+        keepStandardError()
+        let file = temporaryDirectory().appendingPathComponent("imessage-max.log")
+        Log.redirectStandardError(to: file.path)
+        Log.writeLine("before\n", to: STDERR_FILENO)
+        try FileManager.default.removeItem(at: file)
+
+        Log.rotateIfNeeded(file.path, above: Log.rotationThreshold)
+        Log.writeLine("after\n", to: STDERR_FILENO)
+        XCTAssertEqual(try String(contentsOf: file, encoding: .utf8), "after\n")
+    }
+
+    /// The timer, not a test call, rotates while lines are being written,
+    /// and no line is lost or split across the two files.
+    func testTheRotationTimerRotatesWhileWriting() throws {
+        keepStandardError()
+        addTeardownBlock { Log.stopRotating() }
+        let dir = temporaryDirectory()
+        let file = dir.appendingPathComponent("imessage-max.log")
+        let previous = dir.appendingPathComponent("imessage-max.log.1")
+        Log.redirectStandardError(to: file.path, rotateAbove: 4096)
+        Log.rotatePeriodically(file.path, above: 4096, every: .milliseconds(5))
+
+        let line = String(repeating: "x", count: 99) + "\n"
+        let deadline = Date().addingTimeInterval(10)
+        var written = 0
+        while !FileManager.default.fileExists(atPath: previous.path) && Date() < deadline {
+            Log.writeLine(line, to: STDERR_FILENO)
+            written += 1
+            usleep(200)
+        }
+        Log.stopRotating()
+        XCTAssertTrue(FileManager.default.fileExists(atPath: previous.path), "the timer never rotated")
+
+        let lines = try [file, previous].flatMap {
+            try String(contentsOf: $0, encoding: .utf8).split(separator: "\n", omittingEmptySubsequences: false).dropLast()
+        }
+        XCTAssertEqual(lines.count, written)
+        XCTAssertTrue(lines.allSatisfy { $0 == line.dropLast() })
+    }
+
     func testAnUnopenableLogKeepsStandardErrorAndSaysWhy() throws {
         keepStandardError()
         let dir = temporaryDirectory()

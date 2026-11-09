@@ -35,7 +35,7 @@ struct SendTool: Sendable {
 
                 The status field of a text send takes one of these values:
                   confirmed: an outbound row with error=0 appeared in chat.db within the verification window (about 1 s). This is not a delivery receipt.
-                  uncertain: the transport accepted the send, but no row appeared within the polling window. Follow up with get_messages.
+                  uncertain: no row appeared within the polling window, either after Messages accepted the send or after Messages failed or timed out once the send had begun (then disposition is may_have_completed and error says what Messages reported). The message may have been sent. Follow up with get_messages before any resend.
                   mismatch: the row appeared in a different chat than the intended one. Alert the user, and do not treat it as success.
                   failed_delivery: the row appeared with a recorded delivery error. The message was NOT delivered.
                   partial_failure: some payloads were dispatched before a later one failed. The message field names them. Never retry the whole call blindly.
@@ -43,7 +43,8 @@ struct SendTool: Sendable {
                 Every response also includes disposition (completed, not_started, or may_have_completed) and retry_safe.
                 retry_safe=true means a retry cannot duplicate the message, because nothing reached Messages or chat.db shows that the row failed.
                 retry_safe=false means you must not resend blindly. Check with get_messages first.
-                A send runs immediately when the destination is exact. An ambiguous destination returns status 'ambiguous' and sends nothing. A contact name whose number or email has no conversation in Messages is ambiguous too. Invalid input returns status 'failed' and sends nothing. A file transfer may return 'pending_confirmation' while Messages.app finishes the transfer.
+                A send runs immediately when the destination is exact. An ambiguous destination returns status 'ambiguous' and sends nothing. A contact name whose number or email has no conversation in Messages is ambiguous too. Invalid input returns status 'failed' and sends nothing. A file transfer may return 'pending_confirmation' while Messages.app finishes the transfer. When text was sent with that file, text_status reports the text's own result (confirmed or uncertain).
+                With 'to', the tool sends through the person's existing 1:1 chat (iMessage, SMS or RCS, the one with the newest message) and reports that chat. Only a person with no 1:1 chat yet is sent to over iMessage.
                 """,
             inputSchema: InputSchema.object(
                 properties: [
@@ -126,6 +127,9 @@ struct SendTool: Sendable {
             return payloads.count - 1
         }()
         var verificationBaseline: Int64? = nil
+        /// The error of a final text that failed after the send began. Such a
+        /// text may be in chat.db, so it is verified like any other.
+        var textTransportError: String? = nil
 
         var pendingMessages: [String] = []
         for (index, payload) in payloads.enumerated() {
@@ -154,6 +158,10 @@ struct SendTool: Sendable {
                 pendingMessages.append(errorText)
                 continue
             }
+            if index == verifiedIndex, failure.disposition == .mayHaveCompleted, verificationBaseline != nil {
+                textTransportError = errorText
+                continue
+            }
             if index == 0 {
                 return .error(errorText, disposition: failure.disposition)
             }
@@ -167,45 +175,83 @@ struct SendTool: Sendable {
             )
         }
 
-        if !pendingMessages.isEmpty {
-            return .pending(
-                pendingMessages.joined(separator: " "),
-                deliveredTo: resolved.deliveredTo,
-                chat: resolved.chat
-            )
-        }
+        let pendingNote = pendingMessages.isEmpty ? nil : pendingMessages.joined(separator: " ")
 
         guard let verifiedIndex, case .text(let expectedText) = payloads[verifiedIndex],
               let verificationBaseline else {
+            if let pendingNote {
+                return .pending(pendingNote, deliveredTo: resolved.deliveredTo, chat: resolved.chat)
+            }
             return .sent(deliveredTo: resolved.deliveredTo, chat: resolved.chat)
         }
 
+        // A pending file does not skip this: the text's result is reported
+        // beside the file's, so the caller knows whether to resend the text.
+        let verification: VerificationResult
         do {
-            let verification = try await verifier.verify(
+            verification = try await verifier.verify(
                 intendedChatId: resolved.target.chatId,
-                handle: resolved.target.participantHandle,
+                handle: resolved.recipientHandle,
                 afterRowId: verificationBaseline,
                 expectedText: expectedText
             )
-            switch verification {
-            case .confirmed(let guid, _):
-                return .confirmed(guid: guid, deliveredTo: resolved.deliveredTo, chat: resolved.chat)
-            case .mismatch(let actualChatId, _):
-                return .mismatch(
-                    intendedChat: resolved.chat,
-                    actualChatId: actualChatId,
-                    deliveredTo: resolved.deliveredTo
-                )
-            case .failedDelivery(let guid, let errorCode):
-                return .failedDelivery(
-                    guid: guid, errorCode: errorCode,
-                    deliveredTo: resolved.deliveredTo, chat: resolved.chat
-                )
-            case .notFound:
-                return .uncertain(deliveredTo: resolved.deliveredTo, chat: resolved.chat)
-            }
         } catch {
+            if let textTransportError {
+                if verifiedIndex == 0 {
+                    return .error(textTransportError, disposition: .mayHaveCompleted)
+                }
+                return .partialFailure(
+                    sentDescriptions: payloads.prefix(verifiedIndex).map(\.clientDescription),
+                    failedDescription: payloads[verifiedIndex].clientDescription,
+                    error: textTransportError,
+                    deliveredTo: resolved.deliveredTo,
+                    chat: resolved.chat,
+                    disposition: .mayHaveCompleted
+                )
+            }
+            if let pendingNote {
+                return .pending(pendingNote, deliveredTo: resolved.deliveredTo, chat: resolved.chat)
+            }
             return .sent(deliveredTo: resolved.deliveredTo, chat: resolved.chat)
+        }
+
+        switch verification {
+        case .confirmed(let guid, _):
+            if let pendingNote {
+                return .pending(
+                    pendingNote, deliveredTo: resolved.deliveredTo, chat: resolved.chat,
+                    text: .confirmed(guid: guid)
+                )
+            }
+            return .confirmed(
+                guid: guid, deliveredTo: resolved.deliveredTo, chat: resolved.chat,
+                transportError: textTransportError
+            )
+        case .notFound:
+            if let pendingNote {
+                return .pending(
+                    pendingNote, deliveredTo: resolved.deliveredTo, chat: resolved.chat,
+                    text: .notFound, textTransportError: textTransportError
+                )
+            }
+            return .uncertain(
+                deliveredTo: resolved.deliveredTo, chat: resolved.chat,
+                transportError: textTransportError
+            )
+        case .mismatch(let actualChatId, _):
+            return .mismatch(
+                intendedChat: resolved.chat,
+                actualChatId: actualChatId,
+                deliveredTo: resolved.deliveredTo,
+                note: pendingNote
+            )
+        case .failedDelivery(let guid, let errorCode):
+            return .failedDelivery(
+                guid: guid, errorCode: errorCode,
+                deliveredTo: resolved.deliveredTo, chat: resolved.chat,
+                otherPayloadsDispatched: payloads.count > 1,
+                note: pendingNote
+            )
         }
     }
 }

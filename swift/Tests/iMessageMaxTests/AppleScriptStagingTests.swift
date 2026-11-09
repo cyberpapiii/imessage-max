@@ -76,7 +76,7 @@ final class AppleScriptStagingTests: XCTestCase {
             XCTAssertTrue(FileManager.default.fileExists(atPath: staged.fileURL.path))
 
             let result = TransferMonitor.waitForCompletion(
-                of: staged, baseline: 0, stager: stager,
+                of: staged, transferIds: ["transfer-1"], until: Date().addingTimeInterval(5), stager: stager,
                 statusQuery: { _ in throw error },
                 removalDelay: .zero
             )
