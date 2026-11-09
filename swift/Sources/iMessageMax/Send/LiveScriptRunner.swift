@@ -14,7 +14,7 @@ struct LiveScriptRunner: ScriptRunning {
     init(
         access: MessagesAccess,
         stager: OutgoingFileStager = OutgoingFileStager(),
-        runScript: @escaping ScriptExecutor = { Osascript.run($0, arguments: $1) }
+        runScript: @escaping ScriptExecutor = { ScriptGate.shared.run($0, arguments: $1) }
     ) {
         self.access = access
         self.stager = stager
@@ -30,7 +30,9 @@ struct LiveScriptRunner: ScriptRunning {
     func sendBlocking(_ payload: SendPayload, to target: SendTarget) -> Result<Void, SendFailure> {
         switch payload {
         case .text(let body):
-            access.prepareForScript()
+            if let blocked = access.prepareForSend() {
+                return .failure(SendFailure(blocked, disposition: .notStarted))
+            }
             return dispatch(payload.scriptKind, body, to: target, sentFileName: "")
 
         case .file(let path):
@@ -51,7 +53,12 @@ struct LiveScriptRunner: ScriptRunning {
             }
             return TransferMonitor.waitForCompletion(
                 of: staged, baseline: baseline, stager: stager,
-                statusQuery: { try TransferMonitor.outgoingStatuses(named: $0, runScript: runScript) })
+                statusQuery: { name in
+                    // Messages may have quit or crashed since the handoff.
+                    // Started by the query itself it would show its window.
+                    access.prepareForScript()
+                    return try TransferMonitor.outgoingStatuses(named: name, runScript: runScript)
+                })
         }
     }
 
@@ -59,7 +66,7 @@ struct LiveScriptRunner: ScriptRunning {
         stager.sweepExpired()
         let source = try stager.openSource(path)
         defer { source.close() }
-        access.prepareForScript()
+        if let blocked = access.prepareForSend() { throw blocked }
         let baseline = try TransferMonitor.outgoingStatuses(named: source.trackingName, runScript: runScript).count
         return (try stager.stage(source), baseline)
     }

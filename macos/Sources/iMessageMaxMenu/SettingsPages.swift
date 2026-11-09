@@ -326,7 +326,7 @@ struct PermissionFix: View {
       "Allow iMessage Max to work with Messages. Your assistant sends only when you ask. Setup sends no message."
     )
     buttons {
-      if model.diagnosis?[.permAutomation]?.isPermissionGated == true {
+      if model.diagnosis?.automationRefused == true {
         Button("Open Automation Settings") { model.openSettings("Privacy_Automation") }
           .buttonStyle(.borderedProminent)
       } else {

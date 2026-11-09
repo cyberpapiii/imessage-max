@@ -18,6 +18,10 @@ enum Osascript {
         let stderrPipe = Pipe()
         process.standardOutput = stdoutPipe
         process.standardError = stderrPipe
+        // The exit handler signals instead of a thread parked in
+        // waitUntilExit, so a run costs no thread while the script works.
+        let exited = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in exited.signal() }
 
         do {
             try process.run()
@@ -43,13 +47,7 @@ enum Osascript {
                 drainGroup.leave()
             }
 
-            let semaphore = DispatchSemaphore(value: 0)
-            DispatchQueue.global().async {
-                process.waitUntilExit()
-                semaphore.signal()
-            }
-
-            if semaphore.wait(timeout: .now() + timeout) == .timedOut {
+            if exited.wait(timeout: .now() + timeout) == .timedOut {
                 process.terminate()
                 if drainGroup.wait(timeout: .now() + .seconds(2)) == .timedOut {
                     kill(process.processIdentifier, SIGKILL)
