@@ -15,12 +15,13 @@ struct GetMessagesSinceResponse: Encodable {
         let replyTo: String?
         let replyCount: Int?
         let edited: Bool?
+        let unsent: Bool?
         let event: GroupEvent?
         /// true when the row is late-synced history (see LateHistory); omitted otherwise.
         let late: Bool?
 
         private enum CodingKeys: String, CodingKey {
-            case id, rowid, chat, from, text, ts, reactions, attachments, links, event, edited, late
+            case id, rowid, chat, from, text, ts, reactions, attachments, links, event, edited, unsent, late
             case replyTo = "reply_to"
             case replyCount = "reply_count"
         }
@@ -236,6 +237,7 @@ actor GetMessagesSinceTool {
                 replyTo: message.replyTo,
                 replyCount: message.replyCount,
                 edited: message.edited,
+                unsent: message.unsent,
                 event: message.event,
                 late: lateRows.contains(scanned.message.id) ? true : nil
             )

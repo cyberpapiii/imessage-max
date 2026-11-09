@@ -33,6 +33,7 @@ struct GetMessagesResponse: Encodable {
         let replyTo: String?
         let replyCount: Int?
         let edited: Bool?
+        let unsent: Bool?
 
         init(_ message: RenderedMessage, media: [MediaInfo]?, attachments: [MessageAttachmentSummary]?) {
             id = message.id
@@ -47,6 +48,7 @@ struct GetMessagesResponse: Encodable {
             replyTo = message.replyTo
             replyCount = message.replyCount
             edited = message.edited
+            unsent = message.unsent
         }
 
         private enum CodingKeys: String, CodingKey {
@@ -57,7 +59,7 @@ struct GetMessagesResponse: Encodable {
             case event
             case replyTo = "reply_to"
             case replyCount = "reply_count"
-            case edited
+            case edited, unsent
         }
     }
 

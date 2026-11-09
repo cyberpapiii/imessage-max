@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Server
+
+- A message the sender unsent now shows as `unsent: true` with no `text` in `get_messages`, `get_messages_since`, `search`, `get_context` and `get_unread`. Before, it showed as a blank message, usually with `edited: true`. The server reads the unsent parts that Messages lists in `message.message_summary_info` (`rp`), and `message.date_retracted`. A message whose text stayed after one part was unsent keeps its text and `edited: true`. Edits are shown as before. `diagnose` lists the two columns under `database.features`.
+
 ## 2.1.0
 
 iMessage Max now runs unattended on a headless Mac. It never shows Messages, keeps running after a quit, takes updates without anyone opening the app, reconnects Codex and Claude Desktop after a restart, and says plainly in `diagnose` what works and what does not, including a signed-out iMessage account. Send results tell the truth: a send that may have gone out is checked against chat.db before the tool answers. New guides cover headless Macs ([docs/headless.md](docs/headless.md)), MDM deployment ([docs/fleet.md](docs/fleet.md)) and removal ([docs/uninstall.md](docs/uninstall.md)). Updating from 2.0.0 registers the helper again once, so macOS may show its "background item added" notice; permissions are unaffected.

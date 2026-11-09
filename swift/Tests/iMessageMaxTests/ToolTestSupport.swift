@@ -100,7 +100,9 @@ final class ToolTestDatabase {
         associatedMessageEmoji: String? = nil,
         threadOriginatorGuid: String? = nil,
         dateEdited: Int64 = 0,
-        balloonBundleId: String? = nil
+        balloonBundleId: String? = nil,
+        dateRetracted: Int64 = 0,
+        summaryInfo: Data? = nil
     ) throws {
         let textValue = text.map { "'\(escape($0))'" } ?? "NULL"
         let handleValue = handleId.map(String.init) ?? "NULL"
@@ -109,18 +111,16 @@ final class ToolTestDatabase {
         let assocEmojiValue = associatedMessageEmoji.map { "'\(escape($0))'" } ?? "NULL"
         let threadOriginatorValue = threadOriginatorGuid.map { "'\(escape($0))'" } ?? "NULL"
         let balloonBundleValue = balloonBundleId.map { "'\(escape($0))'" } ?? "NULL"
-        let attributedValue: String
-        if let attributedBody {
-            attributedValue = "X'\(attributedBody.map { String(format: "%02X", $0) }.joined())'"
-        } else {
-            attributedValue = "NULL"
+        func blob(_ data: Data?) -> String {
+            data.map { "X'\($0.map { String(format: "%02X", $0) }.joined())'" } ?? "NULL"
         }
+        let attributedValue = blob(attributedBody)
 
         try execute("""
             INSERT INTO message (
-                ROWID, guid, text, attributedBody, date, is_from_me, is_read, handle_id, associated_message_type, associated_message_guid, error, is_sent, item_type, group_action_type, group_title, other_handle, associated_message_emoji, thread_originator_guid, date_edited, balloon_bundle_id
+                ROWID, guid, text, attributedBody, date, is_from_me, is_read, handle_id, associated_message_type, associated_message_guid, error, is_sent, item_type, group_action_type, group_title, other_handle, associated_message_emoji, thread_originator_guid, date_edited, balloon_bundle_id, date_retracted, message_summary_info
             ) VALUES (
-                \(rowId), '\(escape(guid))', \(textValue), \(attributedValue), \(date), \(isFromMe ? 1 : 0), \(isRead ? 1 : 0), \(handleValue), \(associatedMessageType), \(assocGuidValue), \(error), \(isSent), \(itemType), \(groupActionType), \(groupTitleValue), \(otherHandle), \(assocEmojiValue), \(threadOriginatorValue), \(dateEdited), \(balloonBundleValue)
+                \(rowId), '\(escape(guid))', \(textValue), \(attributedValue), \(date), \(isFromMe ? 1 : 0), \(isRead ? 1 : 0), \(handleValue), \(associatedMessageType), \(assocGuidValue), \(error), \(isSent), \(itemType), \(groupActionType), \(groupTitleValue), \(otherHandle), \(assocEmojiValue), \(threadOriginatorValue), \(dateEdited), \(balloonBundleValue), \(dateRetracted), \(blob(summaryInfo))
             );
             """)
     }
@@ -199,7 +199,9 @@ final class ToolTestDatabase {
             associated_message_emoji TEXT,
             thread_originator_guid TEXT,
             date_edited INTEGER DEFAULT 0,
-            balloon_bundle_id TEXT
+            balloon_bundle_id TEXT,
+            date_retracted INTEGER DEFAULT 0,
+            message_summary_info BLOB
         );
         CREATE TABLE chat_message_join (
             chat_id INTEGER,

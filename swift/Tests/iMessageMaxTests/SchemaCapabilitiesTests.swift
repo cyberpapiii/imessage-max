@@ -34,6 +34,8 @@ final class SchemaCapabilitiesTests: XCTestCase {
         let fragments: [(column: String, sql: KeyPath<SchemaCapabilities, String>)] = [
             ("thread_originator_guid", \.threadOriginatorGuidSQL),
             ("date_edited", \.dateEditedSQL),
+            ("date_retracted", \.dateRetractedSQL),
+            ("message_summary_info", \.summaryInfoSQL),
             ("associated_message_emoji", \.associatedMessageEmojiSQL),
         ]
         for (column, sql) in fragments {

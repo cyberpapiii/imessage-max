@@ -8,6 +8,7 @@ This file defines the terms that mean something specific in this project: entiti
 
 - **Verified send**: After a send, the server re-reads the Messages database to prove what happened to the message. It does not assume that an accepted send succeeded.
 
+- **Unsent message**: A message its sender took back with Undo Send. chat.db keeps the row, clears its text and lists the unsent parts under `rp` in `message_summary_info`. The tools show it as `unsent: true` with no text, never as an edit.
 - **Exact destination**: A send target that resolves to exactly one conversation: a known chat id, or a participant lookup with a single match whose handle is already in chat.db. The server treats anything else as ambiguous and refuses it instead of guessing. A contact name that matches only a Contacts number or email Messages has never seen is ambiguous, because a number misread from Contacts could reach a stranger.
 
 - **Region**: The Mac's region (`Locale.current.region`). A number written without a country code is read the way someone dialling in that region would: +1 only in a North American Numbering Plan region, and elsewhere the trunk prefix (such as the UK's 0) is dropped and the region's calling code added. A number that cannot be read without guessing is left unread.

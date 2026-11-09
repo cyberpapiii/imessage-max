@@ -69,6 +69,7 @@ struct RenderedMessage {
     let replyTo: String?
     let replyCount: Int?
     let edited: Bool?
+    let unsent: Bool?
     let event: GroupEvent?
     let attachments: [MessageAttachmentSummary]?
     let links: [String]?
@@ -107,13 +108,14 @@ struct MessageRenderer {
             id: MessageIdentifier.format(message.id),
             rowid: message.id,
             from: labels.sender(message),
-            text: message.text,
+            text: message.edit == .unsent ? nil : message.text,
             ts: TimeUtils.formatISO(date),
             ago: TimeUtils.formatCompactRelative(date),
             reactions: Self.reactions(annotations.reactions[message.guid] ?? [], reactorName: labels.reactor),
             replyTo: annotations.replyTo(message),
             replyCount: annotations.replyCount(message),
-            edited: message.isEdited ? true : nil,
+            edited: message.edit == .edited ? true : nil,
+            unsent: message.edit == .unsent ? true : nil,
             event: GroupEvent.classify(
                 itemType: message.itemType,
                 groupActionType: message.groupActionType,
@@ -183,12 +185,13 @@ struct ContextMessage: Codable {
     let replyTo: String?
     let replyCount: Int?
     let edited: Bool?
+    let unsent: Bool?
 
     enum CodingKeys: String, CodingKey {
         case id, from, text, ago, ts, reactions
         case replyTo = "reply_to"
         case replyCount = "reply_count"
-        case edited
+        case edited, unsent
     }
 
     init(_ message: RenderedMessage, showAgo: Bool) {
@@ -201,5 +204,6 @@ struct ContextMessage: Codable {
         replyTo = message.replyTo
         replyCount = message.replyCount
         edited = message.edited
+        unsent = message.unsent
     }
 }

@@ -246,14 +246,20 @@ leaving) come back with `text: null` and an `event` object:
 name. Chat previews describe the same events in words
 ("renamed the group to Trip").
 
-For reactions, replies, and edits, each message may include `reactions`
+For reactions, replies, edits, and unsends, each message may include `reactions`
 (`["❤️ alice"]` for standard tapbacks; custom emoji show the emoji
 itself; sticker reactions use the token `🩵 sticker`), `reply_to`
-(`msg_<rowid>` of the originator), `reply_count`, and `edited: true`.
-Removed tapbacks are omitted. All four fields are optional and omitted
-when empty. `search` and `get_context` carry the same four fields.
-The server only reads these. It cannot send them, so `diagnose` still
-reports `tapbacks` and `edit_unsend` as `unsupported`.
+(`msg_<rowid>` of the originator), `reply_count`, `edited: true`, and
+`unsent: true`. A message the sender unsent keeps its place in the
+thread with `unsent: true` and no `text`, so it no longer reads as a
+blank message. It never also carries `edited`. When the sender unsent
+one part of a message, such as a photo, and the text stayed, the
+message shows its text with `edited: true`.
+Removed tapbacks are omitted. All five fields are optional and omitted
+when empty. `search`, `get_context` and `get_messages_since` carry the
+same five fields, and `get_unread` with `format="messages"` carries
+`unsent`. The server only reads these. It cannot send them, so
+`diagnose` still reports `tapbacks` and `edit_unsend` as `unsupported`.
 
 ### get_messages_since
 New messages across all chats after a ROWID cursor, in arrival order. Pass the returned `next_rowid` back as `since_rowid` to page or poll. `next_rowid` may be larger than the last returned message's rowid because consumed rows (reactions, filtered chats, orphans) advance it. Omit `since_rowid` to get only the current cursor. A cursor is valid only against this Mac's `chat.db`.
@@ -420,7 +426,7 @@ diagnose()  # Returns: database status, contacts count, permissions, capabilitie
 
 `capabilities.verified_send` is `supported` when chat.db is readable and Messages Automation is OK, `degraded` when the database is readable but Automation is not OK, and `permission-gated` when the database is not readable.
 
-`database.features` lists which optional `chat.db` columns exist on this Mac, keyed `table.column` (for example `message.date_edited`). When one is `false`, the tools that read it degrade instead of failing: no `reply_to` or `reply_count` without `message.thread_originator_guid`, no `edited` without `message.date_edited`, no custom-emoji reaction text without `message.associated_message_emoji`.
+`database.features` lists which optional `chat.db` columns exist on this Mac, keyed `table.column` (for example `message.date_edited`). When one is `false`, the tools that read it degrade instead of failing: no `reply_to` or `reply_count` without `message.thread_originator_guid`, no `edited` without `message.date_edited`, no `unsent` when neither `message.message_summary_info` nor `message.date_retracted` exists (an unsent message then shows as an edit with no text), no custom-emoji reaction text without `message.associated_message_emoji`.
 
 `contacts.status` is one of `authorized`, `limited`, `denied`, `restricted`, `not_determined`, `not_requested_headless`, or `<status>_load_failed`. A headless process that skipped the prompt reports `not_requested_headless`.
 
