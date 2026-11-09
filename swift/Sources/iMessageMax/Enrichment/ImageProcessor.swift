@@ -75,11 +75,7 @@ struct ImageProcessor {
                 kCGImageSourceThumbnailMaxPixelSize: maxDim,
             ]
             guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
-            let ciImage = CIImage(cgImage: cgImage)
-            guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
-                  let jpegData = context.jpegRepresentation(of: ciImage, colorSpace: colorSpace, options: [:])
-            else { return nil }
-            return ImageResult(data: jpegData, format: "jpeg", width: cgImage.width, height: cgImage.height)
+            return jpeg(cgImage)
         }
 
         if Self.exceedsFullVariantPixels(at: url) {
@@ -107,6 +103,15 @@ struct ImageProcessor {
             width: Int(originalSize.width),
             height: Int(originalSize.height)
         )
+    }
+
+    /// Encodes an image that is already at its final size, such as a video
+    /// frame or a rendered PDF page.
+    func jpeg(_ cgImage: CGImage) -> ImageResult? {
+        guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
+              let jpegData = context.jpegRepresentation(of: CIImage(cgImage: cgImage), colorSpace: colorSpace, options: [:])
+        else { return nil }
+        return ImageResult(data: jpegData, format: "jpeg", width: cgImage.width, height: cgImage.height)
     }
 
     static func exceedsFullVariantPixels(at url: URL) -> Bool {

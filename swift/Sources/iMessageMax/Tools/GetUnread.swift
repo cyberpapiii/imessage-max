@@ -86,7 +86,7 @@ final class GetUnread {
                 ]),
                 "since": .object([
                     "type": "string",
-                    "description": "Time window for unread messages (default \"\(defaultSince)\"; use \"all\" for all time)",
+                    "description": "Time window for unread messages (default \"\(defaultSince)\"; use \"all\" for all time): \(AppleTime.boundFormats)",
                 ]),
                 "format": .object([
                     "type": "string",
@@ -124,6 +124,9 @@ final class GetUnread {
         ) { arguments in
             let chatId = arguments?["chat_id"]?.stringValue
             let since = arguments?["since"]?.stringValue ?? defaultSince
+            if since.lowercased() != "all" {
+                _ = try AppleTime.checkedBound(since, name: "since")
+            }
             let formatStr = arguments?["format"]?.stringValue ?? "summary"
             let limit = Self.limit.read(arguments)
             let includeFiltered = arguments?["include_filtered"]?.boolValue ?? false

@@ -142,7 +142,7 @@ actor GetMessagesTool {
             name: "get_messages",
             description: """
                 Get messages from one chat, filtered by time, sender, content type, or text. Provide either chat_id or participants.
-                Returns messages with metadata. Images return metadata only; use get_attachment for the image content.
+                Returns messages with metadata. Attachments return metadata only; use get_attachment for an image, or for the text of a PDF or document.
                 The response groups messages into sessions, and a gap of 4 or more hours starts a new session. Use this tool after you know which conversation you want to read closely.
                 Use chat.id or chat_id only in follow-up tool calls. When you explain results to the user, refer to chats by name, using chat.name and participant names, not the chat id.
 
@@ -160,8 +160,8 @@ actor GetMessagesTool {
                         description: "Participant names or handles that identify the chat (alternative to chat_id)",
                         items: .string(description: "Participant name or handle")
                     ),
-                    "since": .string(description: "Lower time bound (ISO, relative like '24h', or natural like 'yesterday')"),
-                    "before": .string(description: "Upper time bound"),
+                    "since": .string(description: "Lower time bound: \(AppleTime.boundFormats)"),
+                    "before": .string(description: "Upper time bound, in the same forms as since"),
                     "limit": .integer(description: "Maximum messages to return (\(Self.limit.defaultAndMax))"),
                     "from_person": .string(description: "Only messages from this person (or 'me')"),
                     "contains": .string(description: "Text to search for within messages"),
@@ -199,8 +199,8 @@ actor GetMessagesTool {
 
         let chatId = args["chat_id"]?.stringValue
         let participants = args["participants"]?.arrayValue?.compactMap { $0.stringValue }
-        let since = args["since"]?.stringValue
-        let before = args["before"]?.stringValue
+        let since = try AppleTime.checkedBound(args["since"]?.stringValue, name: "since")
+        let before = try AppleTime.checkedBound(args["before"]?.stringValue, name: "before")
         let limit = Self.limit.read(args)
         let fromPerson = args["from_person"]?.stringValue
         let contains = args["contains"]?.stringValue

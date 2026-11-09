@@ -26,6 +26,22 @@ enum AppleTime {
         return Int64(nanoseconds)
     }
 
+    /// The time-bound forms parse accepts, for tool descriptions.
+    static let boundFormats = "ISO 8601 like \"2026-01-15T10:30:00Z\", relative like \"30min\", \"24h\", \"7d\", \"2w\" or \"3mo\", or natural like \"yesterday\", \"last tuesday\" or \"2 weeks ago\""
+
+    /// Checks a time-bound tool argument at the tool boundary, so the queries
+    /// behind it can parse it without a failure path. A value that does not
+    /// parse is a validation error, never a silently dropped filter.
+    static func checkedBound(_ input: String?, name: String) throws -> String? {
+        guard let input else { return nil }
+        if parse(input) != nil { return input }
+        if let match = input.wholeMatch(of: /(\d+)m/) {
+            // Server output writes "5m ago" for minutes, so a bare m is ambiguous.
+            throw ToolFailure("validation_error", "\(name) \"\(input)\" is ambiguous. Use \"\(match.1)min\" for minutes or \"\(match.1)mo\" for months.")
+        }
+        throw ToolFailure("validation_error", "\(name) \"\(input)\" is not a time. Use \(boundFormats).")
+    }
+
     static func parse(_ input: String) -> Int64? {
         if let relative = parseRelative(input) {
             return fromDate(relative)
@@ -43,7 +59,7 @@ enum AppleTime {
     }
 
     private static func parseRelative(_ input: String) -> Date? {
-        let pattern = #"^(\d+)(h|d|w|m)$"#
+        let pattern = #"^(\d+)(min|h|d|w|mo)$"#
         guard let regex = try? NSRegularExpression(pattern: pattern),
               let match = regex.firstMatch(in: input, range: NSRange(input.startIndex..., in: input)),
               let numRange = Range(match.range(at: 1), in: input),
@@ -55,10 +71,11 @@ enum AppleTime {
         let unit = String(input[unitRange])
         let seconds: Double
         switch unit {
+        case "min": seconds = num * Seconds.minute
         case "h": seconds = num * Seconds.hour
         case "d": seconds = num * Seconds.day
         case "w": seconds = num * Seconds.week
-        case "m": seconds = num * Seconds.month
+        case "mo": seconds = num * Seconds.month
         default: return nil
         }
 

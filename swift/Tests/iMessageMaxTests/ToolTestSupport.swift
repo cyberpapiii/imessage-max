@@ -315,6 +315,32 @@ func makeTestSetupPermissions() -> SetupPermissionService {
     SetupPermissionService(contactsRequest: { (true, "authorized") }, automationRequest: { (true, "authorized") })
 }
 
+/// get_attachment's reply as a client reads it: the metadata JSON, then the
+/// images and texts that follow it.
+struct AttachmentReply {
+    let metadata: [String: Any]
+    let images: [(data: Data, mimeType: String)]
+    let texts: [String]
+}
+
+func attachmentReply(_ content: AttachmentContent, file: StaticString = #filePath, line: UInt = #line) throws -> AttachmentReply {
+    let blocks = try content.toolContent()
+    let metadata = try decodeJSONDictionary(from: blocks, file: file, line: line)
+    var images: [(data: Data, mimeType: String)] = []
+    var texts: [String] = []
+    for block in blocks.dropFirst() {
+        switch block {
+        case .image(let data, let mimeType, _, _):
+            images.append((try XCTUnwrap(Data(base64Encoded: data), file: file, line: line), mimeType))
+        case .text(let text, _, _):
+            texts.append(text)
+        default:
+            XCTFail("unexpected block \(block)", file: file, line: line)
+        }
+    }
+    return AttachmentReply(metadata: metadata, images: images, texts: texts)
+}
+
 func toolFailureBody<T>(
     file: StaticString = #filePath, line: UInt = #line,
     _ call: () async throws -> T

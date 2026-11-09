@@ -169,7 +169,7 @@ enum SearchTool {
                 ]),
                 "since": .object([
                     "type": "string",
-                    "description": "Lower time bound (ISO, relative like \"24h\" or \"7d\", or natural like \"yesterday\", \"last tuesday\", or \"2 weeks ago\")"
+                    "description": "Lower time bound: \(AppleTime.boundFormats)"
                 ]),
                 "match_all": .object([
                     "type": "boolean",
@@ -183,7 +183,7 @@ enum SearchTool {
                 ]),
                 "before": .object([
                     "type": "string",
-                    "description": "Upper time bound"
+                    "description": "Upper time bound, in the same forms as since"
                 ]),
                 "cursor": .object([
                     "type": "string",
@@ -238,7 +238,7 @@ enum SearchTool {
                 - A search that runs out of time before it fills the page returns what it found with partial: true, searched_to (the oldest message time it reached, or the newest with oldest_first), more: true and a cursor. Call again with the cursor to search further back.
 
                 Time filters (since/before):
-                - Relative: "24h", "7d", "2w", "3m"
+                - Relative: "30min", "24h", "7d", "2w", "3mo" (a bare "m" is refused: write "min" or "mo")
                 - Natural: "yesterday", "last tuesday", "2 weeks ago", "this month"
                 - ISO: "2024-01-15T10:30:00Z"
 
@@ -266,8 +266,8 @@ enum SearchTool {
             let isGroup = arguments?["is_group"]?.boolValue
             let includeFiltered = arguments?["include_filtered"]?.boolValue ?? false
             let has = arguments?["has"]?.stringValue
-            let since = arguments?["since"]?.stringValue
-            let before = arguments?["before"]?.stringValue
+            let since = try AppleTime.checkedBound(arguments?["since"]?.stringValue, name: "since")
+            let before = try AppleTime.checkedBound(arguments?["before"]?.stringValue, name: "before")
             let cursor = arguments?["cursor"]?.stringValue
             let limit = Self.limit.read(arguments)
             let sort = arguments?["sort"]?.stringValue ?? "recent_first"
