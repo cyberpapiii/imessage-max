@@ -30,7 +30,7 @@ Confirm a fresh HTTP session works against the running service:
 Expected:
 - initialize succeeds
 - the session id is present
-- `tools/list` returns 13 tools
+- `tools/list` returns 14 tools
 
 Recommended quick check:
 

@@ -56,6 +56,7 @@ final class ToolCatalog: @unchecked Sendable {
     ) {
         self.init([
             FindChatTool.definition(db: database, resolver: resolver),
+            FindContactTool.definition(db: database, resolver: resolver),
             GetChatDetailsTool.definition(db: database, resolver: resolver),
             ListChatsTool.definition(db: database, resolver: resolver),
             GetActiveConversations.definition(db: database, resolver: resolver),

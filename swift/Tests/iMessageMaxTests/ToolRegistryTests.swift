@@ -13,6 +13,7 @@ final class ToolRegistryTests: XCTestCase {
         XCTAssertEqual(names, [
             "diagnose",
             "find_chat",
+            "find_contact",
             "get_active_conversations",
             "get_attachment",
             "get_chat_details",

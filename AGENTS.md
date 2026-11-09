@@ -228,8 +228,13 @@ The `send` tool is agent-native (plan 017):
 - An exact destination sends immediately, then verifies against chat.db.
   The result is `confirmed`, `uncertain`, `mismatch`, `failed_delivery`,
   `partial_failure`, or `sent`.
-- An ambiguous destination returns status `ambiguous` and sends nothing.
-  Invalid input returns status `failed` and sends nothing.
+- An ambiguous destination returns status `ambiguous` and sends nothing:
+  a name that matches more than one number or email in Contacts, even two
+  of one contact. Invalid input returns status `failed` and sends nothing.
+- A phone number, an email, or a name with exactly one Contacts handle is
+  exact even when chat.db has no handle row for it. The send starts the
+  conversation through the participant and its `message` names the handle
+  (`ResolvedSendTarget.handleIsNew`).
 - The `confirm` parameter is deprecated and has no effect. The server
   accepts it for compatibility and ignores it.
 - File transfers keep the bounded Messages.app observation states

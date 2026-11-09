@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Server
+
+- New `find_contact` tool. It looks up a name, phone number or email in Contacts, including people you have never messaged, and returns each contact's numbers and emails. A handle with a 1:1 chat carries its `chat_id` and `last_contact`, so one call answers both "what is Sam's number" and "which chat do I text". It reads the in-memory copy of Contacts the server already keeps, so a large address book stays fast: a 20,000-contact lookup in the tests makes one chat.db query.
+- `send` can start a conversation. A phone number or email Messages has never seen is now an exact destination, and so is a contact name that matches exactly one number or email in Contacts. Before, the number or email failed with "No conversation found", and the name returned `ambiguous`. The response says "Messages had no conversation with <handle> before this send." A name that matches more than one handle, even two of one contact, is still `ambiguous` and sends nothing. Since 2.1.0 a number saved without a country code is read in the Mac's region, and one that cannot be read that way is left out, so the +1 misread that made 2.1.0 refuse these names can no longer happen.
+
 ## 2.1.0
 
 iMessage Max now runs unattended on a headless Mac. It never shows Messages, keeps running after a quit, takes updates without anyone opening the app, reconnects Codex and Claude Desktop after a restart, and says plainly in `diagnose` what works and what does not, including a signed-out iMessage account. Send results tell the truth: a send that may have gone out is checked against chat.db before the tool answers. New guides cover headless Macs ([docs/headless.md](docs/headless.md)), MDM deployment ([docs/fleet.md](docs/fleet.md)) and removal ([docs/uninstall.md](docs/uninstall.md)). Updating from 2.0.0 registers the helper again once, so macOS may show its "background item added" notice; permissions are unaffected.

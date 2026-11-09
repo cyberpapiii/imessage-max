@@ -12,20 +12,16 @@ struct ResolvedSendTarget {
     /// The recipient's handle for a `to:` send. Verification also looks for
     /// the message in the handle's other chats, to catch a misrouted send.
     var recipientHandle: String? = nil
+    /// chat.db has no handle row for `recipientHandle`: this send starts the
+    /// first conversation with it.
+    var handleIsNew = false
 }
 
 enum SendResolution {
     case success(ResolvedSendTarget)
     case failure(String)
-    case ambiguous([RecipientCandidate], AmbiguityReason)
-}
-
-enum AmbiguityReason: Equatable {
     /// More than one contact number or email matches the name.
-    case multipleMatches
-    /// The one match is a Contacts number or email that chat.db has never
-    /// seen, so nothing proves it reaches the person the agent meant.
-    case notInMessages
+    case ambiguous([RecipientCandidate])
 }
 
 struct SendResolver: Sendable {
@@ -86,6 +82,10 @@ struct SendResolver: Sendable {
         return await resolveContactName(to)
     }
 
+    /// "+" and 7 digits, the shortest E.164 numbers in use. A shorter one
+    /// is a short code, which only an existing conversation can reach.
+    static let shortestNewNumber = 8
+
     private func resolvePhoneNumber(_ phone: String) async -> SendResolution {
         let raw = phone.trimmingCharacters(in: .whitespaces)
         let normalized = PhoneUtils.normalizeToE164(raw, region: resolver.region)
@@ -110,14 +110,14 @@ struct SendResolver: Sendable {
                 }
             }
 
-            guard let handle = handles.first else {
-                if normalized == nil {
-                    return await resolveContactName(phone)
-                }
+            if handles.isEmpty, let normalized, normalized.count < Self.shortestNewNumber {
                 return .failure("No conversation found with \(phone)")
             }
+            guard let handle = handles.first ?? normalized else {
+                return await resolveContactName(phone)
+            }
             let name = IdentityDisplayFormatter.displayName(handle: handle, contactName: await resolver.resolve(handle))
-            return .success(try await participantTarget(handle: handle, displayName: name))
+            return .success(try await participantTarget(handle: handle, displayName: name, isNew: handles.isEmpty))
         } catch {
             return .failure(ClientErrorMessages.sanitized(error))
         }
@@ -132,11 +132,9 @@ struct SendResolver: Sendable {
                 row.string(0) ?? ""
             }
 
-            guard let handle = handles.first else {
-                return .failure("No conversation found with \(email)")
-            }
+            let handle = handles.first ?? email.trimmingCharacters(in: .whitespaces).lowercased()
             let name = IdentityDisplayFormatter.displayName(handle: handle, contactName: await resolver.resolve(handle))
-            return .success(try await participantTarget(handle: handle, displayName: name))
+            return .success(try await participantTarget(handle: handle, displayName: name, isNew: handles.isEmpty))
         } catch {
             return .failure(ClientErrorMessages.sanitized(error))
         }
@@ -155,16 +153,13 @@ struct SendResolver: Sendable {
         if matches.count == 1 {
             let match = matches[0]
             do {
-                // A name sends only to a handle Messages already knows. A
-                // Contacts number alone may be misread (a number saved
-                // without its country code) and reach a stranger.
-                guard let handle = try messagesHandle(for: match.handle) else {
-                    return .ambiguous(
-                        [RecipientCandidate(name: match.name, handle: match.handle, lastContact: "never")],
-                        .notInMessages
-                    )
-                }
-                return .success(try await participantTarget(handle: handle, displayName: match.name))
+                // One number or email in all of Contacts matches, so there is
+                // nothing to choose between. A number saved without a country
+                // code is read in the Mac's region, as Messages reads it, and
+                // one that cannot be read that way never reaches the cache.
+                let known = try messagesHandle(for: match.handle)
+                return .success(try await participantTarget(
+                    handle: known ?? match.handle, displayName: match.name, isNew: known == nil))
             } catch {
                 return .failure(ClientErrorMessages.sanitized(error))
             }
@@ -193,8 +188,7 @@ struct SendResolver: Sendable {
                     handle: candidate.handle,
                     lastContact: TimeUtils.formatCompactRelative(candidate.lastContact) ?? "never"
                 )
-            },
-            .multipleMatches
+            }
         )
     }
 
@@ -214,13 +208,14 @@ struct SendResolver: Sendable {
     /// always goes over iMessage: with only an SMS or RCS DM it reached a
     /// different chat, and the check of the DM reported a false mismatch.
     /// Only a handle with no DM goes through the iMessage participant.
-    private func participantTarget(handle: String, displayName: String) async throws -> ResolvedSendTarget {
-        guard let direct = try latestDirectChat(for: handle) else {
+    private func participantTarget(handle: String, displayName: String, isNew: Bool = false) async throws -> ResolvedSendTarget {
+        guard let direct = try Self.latestDirectChat(for: handle, db: db) else {
             return ResolvedSendTarget(
                 target: .participant(handle: handle, chatId: nil),
                 deliveredTo: [displayName],
                 chat: nil,
-                recipientHandle: handle
+                recipientHandle: handle,
+                handleIsNew: isNew
             )
         }
         var chat: ChatReference? = nil
@@ -244,7 +239,7 @@ struct SendResolver: Sendable {
     /// else left has one participant too, but it is not the DM. Duplicate
     /// DMs, one per service or left over from an old thread, are common, and
     /// the newest one is where the conversation is.
-    private func latestDirectChat(for handle: String) throws -> (chatId: Int64, guid: String)? {
+    static func latestDirectChat(for handle: String, db: Database) throws -> (chatId: Int64, guid: String)? {
         let rows: [(chatId: Int64, guid: String)] = try db.query(
             """
             SELECT c.ROWID, c.guid
