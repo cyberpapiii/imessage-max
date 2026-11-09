@@ -27,7 +27,7 @@ final class BridgeRestartTests: XCTestCase {
         XCTAssertNotNil(initialized["result"], "\(initialized)")
         bridge.send(#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#)
         bridge.send(#"{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}"#)
-        XCTAssertEqual(try toolCount(bridge.nextJSON(), id: 2), 13)
+        XCTAssertEqual(try toolCount(bridge.nextJSON(), id: 2), makeTestCatalog().tools.count)
 
         first.kill()
         XCTAssertTrue(bridge.waitForStderr(containing: "reconnecting for up to 15 s"), bridge.stderr)
@@ -36,13 +36,13 @@ final class BridgeRestartTests: XCTestCase {
 
         let second = try ScratchProcess.helper(in: folder, socketPath: socketPath, log: "helper2.log")
         defer { second.kill() }
-        XCTAssertEqual(try toolCount(bridge.nextJSON(timeout: 20), id: 3), 13)
+        XCTAssertEqual(try toolCount(bridge.nextJSON(timeout: 20), id: 3), makeTestCatalog().tools.count)
         XCTAssertTrue(second.stderr.contains("method=initialize"), second.stderr)
         XCTAssertTrue(second.stderr.contains("method=notifications/initialized"), second.stderr)
         XCTAssertTrue(bridge.stderr.contains("Reconnected to iMessage Max; replayed initialize"), bridge.stderr)
 
         bridge.send(#"{"jsonrpc":"2.0","id":4,"method":"tools/list","params":{}}"#)
-        XCTAssertEqual(try toolCount(bridge.nextJSON(), id: 4), 13)
+        XCTAssertEqual(try toolCount(bridge.nextJSON(), id: 4), makeTestCatalog().tools.count)
         bridge.closeInput()
         XCTAssertEqual(bridge.waitForExit(within: 10), 0, bridge.stderr)
     }

@@ -63,7 +63,7 @@ final class StdioBridgeTests: XCTestCase {
         let list = try bridge.output.nextJSON()
         XCTAssertEqual(list["id"] as? Int, 2)
         let tools = try XCTUnwrap((list["result"] as? [String: Any])?["tools"] as? [[String: Any]], "\(list)")
-        XCTAssertEqual(tools.count, 13)
+        XCTAssertEqual(tools.count, makeTestCatalog().tools.count)
         XCTAssertTrue(tools.contains { $0["name"] as? String == "diagnose" })
 
         bridge.send(#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"diagnose","arguments":{}}}"#)
@@ -90,7 +90,7 @@ final class StdioBridgeTests: XCTestCase {
 
         bridge.send(modernBody(id: 2, method: "tools/list"))
         let list = try bridge.output.nextJSON()
-        XCTAssertEqual(((list["result"] as? [String: Any])?["tools"] as? [Any])?.count, 13, "\(list)")
+        XCTAssertEqual(((list["result"] as? [String: Any])?["tools"] as? [Any])?.count, makeTestCatalog().tools.count, "\(list)")
 
         bridge.send(modernBody(id: 3, method: "tools/call", params: #""name":"diagnose","arguments":{}"#))
         let call = try bridge.output.nextJSON()
@@ -150,7 +150,7 @@ final class StdioBridgeTests: XCTestCase {
         let list = try bridge.output.nextJSON()
         XCTAssertEqual(list["id"] as? Int, 3, "the replayed initialize's reply reached the client: \(list)")
         let tools = try XCTUnwrap((list["result"] as? [String: Any])?["tools"] as? [[String: Any]], "\(list)")
-        XCTAssertEqual(tools.count, 13)
+        XCTAssertEqual(tools.count, makeTestCatalog().tools.count)
         XCTAssertTrue(
             restarted.lines.contains { $0.contains("era=legacy transport=stdio version=2025-11-25 method=initialize") },
             "\(restarted.lines)")
