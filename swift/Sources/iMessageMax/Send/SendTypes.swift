@@ -103,6 +103,9 @@ enum SendTarget: Sendable, Equatable {
 enum SendError: LocalizedError {
     case automationPermissionRequired
     case messagesAppUnavailable
+    /// Messages has no account the send could go through: no iMessage
+    /// account is turned on, and no SMS account fits.
+    case noSendingAccount
     case recipientNotFound(String)
     case chatNotFound(String)
     case fileNotFound(String)
@@ -122,6 +125,9 @@ enum SendError: LocalizedError {
             // No "try again": after the send began, this error does not say
             // whether the message went out. retry_safe does.
             return "Messages.app is not responding."
+        case .noSendingAccount:
+            return "Nothing was sent: no iMessage account is turned on in Messages on this Mac. "
+                + DiagnoseTool.iMessageSignInFix
         case .recipientNotFound(let recipient):
             return "Could not find recipient '\(recipient)' in Messages.app."
         case .chatNotFound(let guid):

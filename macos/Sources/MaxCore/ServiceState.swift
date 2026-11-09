@@ -195,8 +195,10 @@ extension DiagnoseResult {
     contacts.authorized && PermissionStatus.namesAvailable.contains(contacts.status)
   }
 
+  /// The Automation grant alone. The send capabilities also turn `degraded`
+  /// when the iMessage account is signed out, which no permission fixes.
   public var sendingReady: Bool {
-    self[.permAutomation]?.isSupported == true && self[.sendTextDM]?.isSupported == true
+    self[.permAutomation]?.isSupported == true
   }
 
   /// Automation is off and only System Settings can turn it on. A helper

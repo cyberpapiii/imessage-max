@@ -125,7 +125,9 @@ On the iMessage Max page of Settings, consider turning on **Open at login**. The
 
 Open Messages over Screen Sharing and sign in to iMessage with the Apple Account the agent should use. Send or receive one message so `chat.db` exists.
 
-The helper starts Messages hidden when it needs it, so nobody sees an alert that iMessage signed out. Check the sign-in again after an Apple Account password change and after every major macOS update.
+The helper starts Messages hidden when it needs it, so nobody sees an alert that iMessage signed out. `diagnose` reads the account for you: `capabilities.imessage_account` is `supported` with detail `signed_in` while it works (see [Check health over SSH](#check-health-over-ssh)). Check it after an Apple Account password change and after every major macOS update.
+
+SMS from a Mac goes through a paired iPhone (Text Message Forwarding), and Apple ties that to iMessage being signed in with the same Apple Account. So plan on iMessage being signed in even if the agent only texts phone numbers. If Messages does report a connected SMS account with no iMessage account turned on, `diagnose` says `sms_only`: sends to phone numbers go out as SMS, and email addresses cannot be reached.
 
 ## Keep attachments on disk
 
@@ -205,7 +207,7 @@ curl -sS -m 15 -K - -X POST http://127.0.0.1:47821 \
   -H "Mcp-Method: tools/call" \
   -H "Mcp-Name: diagnose" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"diagnose","arguments":{},"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{},"io.modelcontextprotocol/clientInfo":{"name":"ssh-check","version":"1.0"}}}}' |
-jq '.result.content[0].text | fromjson | {status, version, database: .database.status, contacts: .contacts.status, automation: .capabilities.perm_automation}'
+jq '.result.content[0].text | fromjson | {status, version, database: .database.status, contacts: .contacts.status, automation: .capabilities.perm_automation, imessage: .capabilities.imessage_account}'
 ```
 
 A healthy Mac prints:
@@ -219,6 +221,10 @@ A healthy Mac prints:
   "automation": {
     "state": "supported",
     "detail": "authorized"
+  },
+  "imessage": {
+    "state": "supported",
+    "detail": "signed_in"
   }
 }
 ```
@@ -264,7 +270,13 @@ Each start logs one `Started version=… pid=… transport=http addr=127.0.0.1:4
 
 **`automation` is `unverified` with detail `messages_not_responding`.** Messages is running but hung. Sends fail at once until it answers. Quit it with `pkill -x Messages`. The helper starts it again, hidden, when it needs it.
 
-**Sends end `uncertain` or `failed` with no clear cause.** iMessage may be signed out or turned off. Diagnose does not check this yet. Open Messages → Settings → iMessage over Screen Sharing and check the account.
+**`imessage` is `degraded` with detail `signed_out`, `disabled` or `no_account`.** iMessage is signed out, turned off, or was never set up, and the send capabilities are `degraded` too. With `disabled` or `no_account`, a send to someone new returns `failed`, `not_started` and sends nothing; with `signed_out`, Messages takes the send but cannot deliver it, so it ends `uncertain` or `failed_delivery` and the result names the account state. Over Screen Sharing, open Messages → Settings → iMessage, sign in with the Apple Account the agent uses, and turn on Enable this account. `diagnose` keeps an answer for 60 s, so check again a minute later. `signed_out` also shows when the Mac is offline.
+
+**`imessage` is `degraded` with detail `connecting`.** iMessage is still connecting, usually just after Messages started. Sends are not blocked. Check again in a minute; if it stays there, treat it as `signed_out`.
+
+**`imessage` is `unverified`.** Diagnose could not read the account. Detail `messages_not_running`: Messages is closed, and diagnose starts it hidden only until it has read the account once; any send starts it again, or run `open -gj -a Messages` as the logged-in user. Detail `messages_not_responding`: Messages did not answer within 2 s, see the hung-Messages entry above. Detail `not_checked`: Automation is not granted, fix that first.
+
+**Sends end `uncertain` or `failed` with no clear cause.** Check `imessage` in `diagnose` first. If it says `signed_in`, the recipient may not reach iMessage; check the chat with `get_messages`.
 
 **The endpoint or the live inbox stops for a while, then catches up.** The Mac slept. Check `pmset -g` for `sleep 0`.
 
@@ -281,3 +293,4 @@ These are open questions, not known failures. The Unverified scenarios table in 
 - Whether sends work while the screen is locked.
 - Whether `open` from SSH reaches the desktop session on a Mac with no display.
 - Which setting decides Messages attachment offload.
+- What Messages reports for an account that signed out on its own: turned on but disconnected, turned off, or gone. `diagnose` reads all three as not signed in (`signed_out`, `disabled`, `no_account`), but only the signed-in case was checked on a real Mac.
