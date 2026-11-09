@@ -272,9 +272,9 @@ struct SendResponse: Encodable, Sendable {
         let message: String
         switch reason {
         case .multipleMatches:
-            message = "Multiple contacts match. Please specify using a phone number, email, or chat_id."
-        case .notInMessages:
-            message = "The matching contact's number or email has no conversation in Messages, so nothing proves it reaches the person you meant. Nothing was sent. Check the number with the user. To message someone new, start the conversation in Messages first."
+            message = "More than one number or email in Contacts matches. Nothing was sent. Pass one candidate's handle as to, or a chat_id."
+        case .partialNameNewHandle:
+            message = "The name is only part of the matching contact's name, and Messages has no conversation with them yet. Nothing was sent. Check with the user that this is the person they meant, then pass the contact's full name or the candidate's handle as to."
         }
         return SendResponse(.ambiguous, disposition: .notStarted, message: message, candidates: candidates)
     }

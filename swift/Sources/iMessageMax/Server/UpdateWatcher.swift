@@ -130,6 +130,8 @@ final class UpdateWatcher: @unchecked Sendable {
         var replacement: ExecutableReplacement
         var timer: (any DispatchSourceTimer)?
         var onReplaced: (@Sendable () -> Void)?
+        var onPending: (@Sendable (Bool) -> Void)?
+        var pending = false
         var fired = false
         var lastDecision: ExecutableReplacement.Decision = .unchanged
     }
@@ -158,10 +160,15 @@ final class UpdateWatcher: @unchecked Sendable {
     /// Whether the watcher asked the helper to stop for an update.
     var requestedRestart: Bool { state.withLock { $0.fired } }
 
-    func start(onReplaced: @escaping @Sendable () -> Void) {
+    /// `onPending(true)` runs when a new file is complete, before the wait
+    /// for idle, so calls that only wait (`wait_for_messages`) return instead
+    /// of holding the update for `idleWait`. `onPending(false)` runs if the
+    /// original comes back before the helper stops.
+    func start(onPending: @escaping @Sendable (Bool) -> Void = { _ in }, onReplaced: @escaping @Sendable () -> Void) {
         let timer = DispatchSource.makeTimerSource(queue: queue)
         timer.setEventHandler { [weak self] in self?.tick() }
         state.withLock { state in
+            state.onPending = onPending
             state.onReplaced = onReplaced
             state.timer?.cancel()
             state.timer = timer
@@ -188,10 +195,16 @@ final class UpdateWatcher: @unchecked Sendable {
         let current = read(path)
         let calls = callsInFlight()
         let now = ProcessInfo.processInfo.systemUptime
-        let (decision, previous, action, timer) = state.withLock { state in
+        let (decision, previous, pendingChange, action, timer) = state.withLock { state in
             let previous = state.lastDecision
             let decision = state.replacement.observe(current, callsInFlight: calls, now: now)
             state.lastDecision = decision
+            var pendingChange: (@Sendable () -> Void)?
+            let pending = decision != .unchanged && decision != .settling
+            if pending != state.pending, let onPending = state.onPending {
+                state.pending = pending
+                pendingChange = { onPending(pending) }
+            }
             var action: (@Sendable () -> Void)?
             if case .restart = decision, !state.fired {
                 state.fired = true
@@ -199,8 +212,9 @@ final class UpdateWatcher: @unchecked Sendable {
                 state.timer?.cancel()
                 state.timer = nil
             }
-            return (decision, previous, action, state.timer)
+            return (decision, previous, pendingChange, action, state.timer)
         }
+        pendingChange?()
         switch decision {
         case .unchanged:
             break

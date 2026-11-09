@@ -22,7 +22,7 @@ There is one Swift implementation, in `swift/`. It ships as:
 
 ## Features
 
-- 13 tools, each shaped around a question people ask rather than around a database table
+- 14 tools, each shaped around a question people ask rather than around a database table
 - Phone numbers resolve to names through macOS Contacts
 - Three image variants: vision (1568px), thumb (400px), and full (original), so an agent can fetch a photo below full size
 - A gap of 4 hours or more starts a new message session
@@ -46,6 +46,9 @@ Most iMessage tools expose raw database structures, so one user request takes 3 
 
 "Find where we discussed the launch timeline"
 → search(query="launch timeline")
+
+"Text Sam that I'm running late" (never messaged before)
+→ send(to="Sam", text="Running late")
 ```
 
 ## Common agent workflows
@@ -90,6 +93,15 @@ get_attachment(attachment_id="att123", variant="vision")
 ```
 
 Use `list_attachments` to find the message where files were shared. It returns exact attachment ids and says whether each file is on disk, so you know before you fetch.
+
+### Message someone new
+
+```text
+find_contact(query="Sam")
+send(to="+15550000009", text="Hi, it's Rob from the climbing gym")
+```
+
+Use this when a name may match more than one person, or when the person has a number and an email. `find_contact` reads Contacts, so it finds people you have never messaged. `send(to="Sam")` alone works when only one number or email in Contacts matches.
 
 ### Send with exact targeting when it matters
 
@@ -218,6 +230,30 @@ find_chat(contains_recent="latest draft")          # Find by recent content
 find_chat(name="Project Group", include_filtered=True)  # Also search junk / unknown-sender chats
 ```
 
+### find_contact
+Look up a person in Contacts by name, phone number, or email, including people you have never messaged.
+
+```text
+find_contact(query="Sam")             # Every contact whose name has a word starting with "sam"
+find_contact(query="(555) 000-0001")  # The contact that owns this number
+find_contact(query="Sam", limit=10)   # Default 5, max 25
+```
+
+```json
+{
+  "contacts": [
+    {"name": "Sam Lee", "handles": [
+      {"handle": "+15550000001", "chat_id": "chat1", "last_contact": "3d ago"},
+      {"handle": "sam@example.com", "last_contact": "Sep 30"}
+    ]},
+    {"name": "Samira Khan", "handles": [{"handle": "+15550000009"}]}
+  ],
+  "more": false
+}
+```
+
+Each contact lists every number and email it has. A handle with a 1:1 chat carries that `chat_id`, the chat `send(to=handle)` would use. `last_contact` is the newest message from or to the handle in any chat. A handle with neither has never been in Messages, and `send(to=handle)` starts the conversation. Contacts messaged most recently come first. Contacts that share a display name are listed as one. The lookup reads the Contacts copy the server already holds in memory, so a large address book does not slow it down. Without Contacts access it fails with `contacts_unavailable`.
+
 ### get_chat_details
 Inspect a known thread without opening the full conversation.
 
@@ -317,6 +353,49 @@ To poll, call once without `since_rowid` and store `next_rowid`. Then call with 
 
 Messages in iCloud can sync old history into `chat.db` long after it was sent, for example on a newly set-up Mac. Those rows get new ROWIDs, so they come after your cursor. A message with `late: true` is such history: its date is more than an hour older than the newest of the rows already in `chat.db` before it. Do not treat it as new mail. Messages that arrive after the Mac wakes from sleep are dated after the rows before them, so they are not marked late. On a legacy HTTP session the `notifications/imessage/new_messages` notification carries `late: true` when every new row is late.
 
+### wait_for_messages
+Wait for a reply in one call. It blocks until a new message that matches the filters arrives, then returns it, or returns `status: "timeout"` when none arrives in time. It answers "tell me when Sam replies" without a polling loop, on every transport and protocol era. MCP clients such as Claude Code and Codex do not act on the server's `notifications/imessage/new_messages`, so before this tool an agent had to poll `get_messages_since`.
+
+```text
+wait_for_messages(from_person="Sam")                          # Sam's next message, in any chat
+wait_for_messages(chat_id="chat123", since_rowid=234000)      # Anything new in one chat after the cursor
+wait_for_messages(since_rowid=234000, include_from_me=True)   # Count my own messages too
+```
+
+| Parameter | Type | Default | Meaning |
+|-----------|------|---------|---------|
+| `since_rowid` | integer | omitted | Exclusive ROWID cursor, such as `next_rowid` from this tool or `get_messages_since`. Omit it to wait for messages that arrive after the call starts. |
+| `chat_id` | string | omitted | Only messages in this chat (`chat123` or `123`) |
+| `from_person` | string | omitted | Only messages from this person: a name, phone number, email, or `me` |
+| `include_from_me` | boolean | false | Also count messages I send. `from_person` overrides it: a person's messages never include mine to them. |
+| `include_filtered` | boolean | false | Include junk / unknown-sender chats |
+| `timeout` | integer | 30 | Seconds to wait (1–50) |
+| `limit` | integer | 100 | Maximum messages to return (1–500) |
+
+The response is the `get_messages_since` response plus `status`:
+
+```json
+{
+  "status": "messages",
+  "since_rowid": 101,
+  "messages": [
+    {"id": "msg_102", "rowid": 102, "chat": {"id": "chat2", "name": "Weekend"},
+     "from": "Bob Brown", "text": "on my way", "ts": "2026-11-09T21:09:57Z"}
+  ],
+  "next_rowid": 102,
+  "has_more": false,
+  "current_rowid": 102,
+  "stalled": false,
+  "filtered_hidden": 0
+}
+```
+
+`status` is `messages` when at least one message matched, `timeout` when none did, or `stopping` when the helper began to stop or restart for an update while the call waited. In every case, pass `next_rowid` back as `since_rowid` to keep waiting: rows the filters skipped are behind it, and rows that arrive between calls are ahead of it, so nothing is missed. The cursor is the same one `get_messages_since` uses.
+
+Reactions do not end a wait, and neither does late-synced history (see `late` above). The wait ends at once when the client cancels the call (`notifications/cancelled`), and when the helper drains on SIGTERM, SIGUSR1, or an installed update, so a wait never delays a restart. At most 32 calls wait at a time; past that a call fails with `too_many_waits`.
+
+The 50 s ceiling stays under Codex's default 60 s tool timeout (`tool_timeout_sec`) and the helper's 60 s idle connection timeout. Claude Code allows about 28 hours by default. Through plug, keep this server's `call_timeout_secs` above 50. Plug's per-server `max_concurrent` caps the calls it sends to this server at once, so at `1` a wait holds back every other iMessage call through plug until it returns. Raise it if agents wait while doing other work.
+
 ### get_attachment
 Retrieve image content by attachment ID with resolution variants.
 
@@ -407,6 +486,8 @@ Rules:
 - Exactly one of `to` or `chat_id`
 - At least one of `text` or `file_paths`
 - If you pass both, `send` sends the files first and the text last
+- `to` takes a contact name, a phone number, or an email. A name must match exactly one number or email in Contacts. A name that matches more, even two handles of one contact, returns `ambiguous` with the candidates and sends nothing. `find_contact` lists them
+- A phone number or email that Messages has never seen starts a new conversation, and so does the full name of a contact whose one handle is such a handle. A partial name ("Sam" for Samira Khan) whose one match Messages has never seen returns `ambiguous` with that candidate, so the agent can check with the user first. The response `message` then says "Messages had no conversation with <handle> before this send." A number written without a country code is read in the Mac's region, and one that cannot be read that way is refused
 
 Attachment paths must be absolute or start with `~/`. `send` checks the
 path one component at a time and refuses it if any component is a symbolic
@@ -432,7 +513,7 @@ diagnose()  # Returns: database status, contacts count, permissions, capabilitie
 
 Every `fix` for the helper inside `iMessage Max.app` names a permission in the app, such as "Open iMessage Max and turn on Full Disk Access." The permissions are Background activity, Full Disk Access, Contacts and Automation. For a bare executable, a fix names the System Settings switch to turn on. No fix names a terminal command.
 
-`capabilities.live_inbox` describes the connection that calls `diagnose`. Only a legacy HTTP session receives `notifications/imessage/new_messages`, so only there is it `supported` (detail `session_sse`). On stdio and on the stateless 2026-07-28 lane it is `unsupported`, with detail `poll_only` while the helper's watcher runs or `watcher_not_running`: poll `get_messages_since` instead.
+`capabilities.live_inbox` describes the connection that calls `diagnose`. Only a legacy HTTP session receives `notifications/imessage/new_messages`, so only there is it `supported` (detail `session_sse`). On stdio and on the stateless 2026-07-28 lane it is `unsupported`, with detail `poll_only` while the helper's watcher runs or `watcher_not_running`. Call `wait_for_messages`, or poll `get_messages_since`, instead.
 
 `power` says whether the Mac sleeps while idle, which stops the endpoint and the live inbox. `status` is `stays_awake`, `idle_sleep` (with `sleep_minutes` and a `fix`) or `unknown`. `keep_awake` is the companion's Keep this Mac awake setting and `assertion_held` whether the helper holds its power assertion now.
 
@@ -458,7 +539,7 @@ After a text send, the server checks chat.db for the sent message. Each `status`
 - `status: "sent"` means verification was unavailable because the database was unreadable. The only evidence is that the transport accepted the send.
 - `status: "pending_confirmation"` means Messages accepted an attachment send, but the server could not confirm within the polling window that the file transfer finished. When text went with the file, `text_status` is the text's own result.
 - `status: "failed"` means the send failed.
-- `status: "ambiguous"` means the server could not resolve the target safely: several contacts match, or the one matching contact's number or email has no conversation in Messages. `candidates` lists the matches, and nothing was sent.
+- `status: "ambiguous"` means the name matches more than one number or email in Contacts. `candidates` lists the matches, and nothing was sent.
 
 #### Disposition and retry_safe
 

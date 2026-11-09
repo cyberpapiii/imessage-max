@@ -296,8 +296,8 @@ Expected:
 - The MCP call comes back as a tool error, not a normal result. The JSON below
   is the error payload
 - `status` is `ambiguous`
-- `message` is "Multiple contacts match. Please specify using a phone number,
-  email, or chat_id."
+- `message` is "More than one number or email in Contacts matches. Nothing
+  was sent. Pass one candidate's handle as to, or a chat_id."
 - `candidates` lists every matching handle, each with `name`, `handle`, and
   `last_contact`
 - The same person appears once per handle, under the same `name`

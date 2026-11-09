@@ -27,7 +27,7 @@ struct GetMessagesSinceResponse: Encodable {
         }
     }
 
-    let sinceRowid: Int
+    var sinceRowid: Int
     let messages: [Item]
     let nextRowid: Int
     let hasMore: Bool
@@ -100,13 +100,31 @@ actor GetMessagesSinceTool {
         return [.plainText(try FormatUtils.encodeJSON(response))]
     }
 
+    /// One read of the rows above a cursor. `wait_for_messages` reads with
+    /// the sender filters and without late history; `get_messages_since`
+    /// reads everything.
+    struct Query {
+        var sinceRowid: Int
+        var scope: ChatScope
+        var limit: Int
+        var includeReactions = true
+        var oldest: Int64? = nil
+        var sender: SenderFilter? = nil
+        var incomingOnly = false
+        var keepLate = true
+    }
+
+    func currentRowid() throws -> Int {
+        Int(try db.query("SELECT COALESCE(MAX(ROWID), 0) FROM message") { $0.int(0) }.first ?? 0)
+    }
+
     private func executeImpl(args: [String: Value]) async throws -> GetMessagesSinceResponse {
 
         let chatFilter = try args["chat_id"]?.stringValue.map { try ChatIdentifier.resolve($0, db: db) }
 
-        let currentRowid = Int(try db.query("SELECT COALESCE(MAX(ROWID), 0) FROM message") { $0.int(0) }.first ?? 0)
         let rawSince = args["since_rowid"]?.intValue
         if rawSince == nil || (rawSince ?? 0) < 0 {
+            let currentRowid = try currentRowid()
             return GetMessagesSinceResponse(
                 sinceRowid: currentRowid,
                 messages: [],
@@ -118,16 +136,27 @@ actor GetMessagesSinceTool {
             )
         }
 
-        let sinceRowid = rawSince ?? currentRowid
-        let limit = Self.limit.read(args)
-        let scope = ChatScope(named: chatFilter, includeFiltered: args["include_filtered"]?.boolValue ?? false)
-        let includeReactions = args["include_reactions"]?.boolValue ?? true
-        let schema = try db.schema()
         let now = Date()
-        let oldest: Int64? = args["max_age"]?.intValue.map { seconds in
-            let clamped = min(max(seconds, Self.maxAgeRange.lowerBound), Self.maxAgeRange.upperBound)
-            return AppleTime.fromDate(now.addingTimeInterval(-TimeInterval(clamped)))
-        }
+        return try await read(Query(
+            sinceRowid: rawSince ?? 0,
+            scope: ChatScope(named: chatFilter, includeFiltered: args["include_filtered"]?.boolValue ?? false),
+            limit: Self.limit.read(args),
+            includeReactions: args["include_reactions"]?.boolValue ?? true,
+            oldest: args["max_age"]?.intValue.map { seconds in
+                let clamped = min(max(seconds, Self.maxAgeRange.lowerBound), Self.maxAgeRange.upperBound)
+                return AppleTime.fromDate(now.addingTimeInterval(-TimeInterval(clamped)))
+            }
+        ), now: now)
+    }
+
+    func read(_ request: Query, now: Date = Date()) async throws -> GetMessagesSinceResponse {
+        let currentRowid = try currentRowid()
+        let sinceRowid = request.sinceRowid
+        let limit = request.limit
+        let scope = request.scope
+        let includeReactions = request.includeReactions
+        let oldest = request.oldest
+        let schema = try db.schema()
         var skippedOld = 0
         var lateness = LateHistory.Tracker(
             baseline: try LateHistory.baseline(db: db, atOrBelow: Int64(sinceRowid), now: now), now: now)
@@ -147,7 +176,7 @@ actor GetMessagesSinceTool {
                 schema: schema,
                 sinceRowid: scanFrom,
                 currentRowid: currentRowid,
-                scope: scope,
+                request: request,
                 limit: batchLimit
             )
             if rows.isEmpty {
@@ -185,7 +214,10 @@ actor GetMessagesSinceTool {
                     skippedOld += 1
                     continue
                 }
-                if late { lateRows.insert(row.message.id) }
+                if late {
+                    guard request.keepLate else { continue }
+                    lateRows.insert(row.message.id)
+                }
                 kept.append(row)
             }
             if hasMore || stalled { break }
@@ -259,9 +291,10 @@ actor GetMessagesSinceTool {
         schema: SchemaCapabilities,
         sinceRowid: Int,
         currentRowid: Int,
-        scope: ChatScope,
+        request: Query,
         limit: Int
     ) throws -> [SinceScanRow] {
+        let scope = request.scope
         let query = QueryBuilder()
             .selectMessages(
                 schema,
@@ -276,6 +309,9 @@ actor GetMessagesSinceTool {
             .where("\(rowid) > ?", sinceRowid)
             .where("\(rowid) <= ?", currentRowid)
             .where(SQLFragments.notReaction())
+        if let sender = request.sender { query.where(sender) }
+        if request.incomingOnly { query.where("m.is_from_me = 0") }
+        query
             .orderBy("\(rowid) ASC")
             .limit(limit)
 

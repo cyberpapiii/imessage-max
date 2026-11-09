@@ -52,15 +52,18 @@ final class ToolCatalog: @unchecked Sendable {
         access: MessagesAccess,
         liveInbox: @escaping @Sendable () -> Bool = { false },
         http: @escaping HTTPEndpointProbe = { nil },
-        keepAwake: KeepAwake? = nil
+        keepAwake: KeepAwake? = nil,
+        arrivals: MessageArrivals = MessageArrivals()
     ) {
         self.init([
             FindChatTool.definition(db: database, resolver: resolver),
+            FindContactTool.definition(db: database, resolver: resolver),
             GetChatDetailsTool.definition(db: database, resolver: resolver),
             ListChatsTool.definition(db: database, resolver: resolver),
             GetActiveConversations.definition(db: database, resolver: resolver),
             GetMessagesTool.definition(db: database, resolver: resolver),
             GetMessagesSinceTool.definition(db: database, resolver: resolver),
+            WaitForMessagesTool.definition(db: database, resolver: resolver, arrivals: arrivals),
             GetContext.definition(db: database, resolver: resolver),
             SearchTool.definition(db: database, resolver: resolver),
             GetUnread.definition(db: database, resolver: resolver),

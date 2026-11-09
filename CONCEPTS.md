@@ -9,7 +9,7 @@ This file defines the terms that mean something specific in this project: entiti
 - **Verified send**: After a send, the server re-reads the Messages database to prove what happened to the message. It does not assume that an accepted send succeeded.
 
 - **Unsent message**: A message its sender took back with Undo Send. chat.db keeps the row, clears its text and lists the unsent parts under `rp` in `message_summary_info`. The tools show it as `unsent: true` with no text, never as an edit.
-- **Exact destination**: A send target that resolves to exactly one conversation: a known chat id, or a participant lookup with a single match whose handle is already in chat.db. The server treats anything else as ambiguous and refuses it instead of guessing. A contact name that matches only a Contacts number or email Messages has never seen is ambiguous, because a number misread from Contacts could reach a stranger.
+- **Exact destination**: A send target with exactly one handle or chat: a known chat id, a phone number or email, or a contact name that matches exactly one number or email in Contacts. The handle need not be in chat.db; a send to a new handle starts the conversation. A name reaches a handle Messages has never seen only when it is the contact's full name, so "Sam" never starts a first conversation with a Samira. The server treats anything else as ambiguous and refuses it instead of guessing, including a name that matches two handles of one contact. A number saved without a country code is read in the Mac's region, and one that cannot be read that way never becomes a handle.
 
 - **Region**: The Mac's region (`Locale.current.region`). A number written without a country code is read the way someone dialling in that region would: +1 only in a North American Numbering Plan region, and elsewhere the trunk prefix (such as the UK's 0) is dropped and the region's calling code added. A number that cannot be read without guessing is left unread.
 
@@ -29,7 +29,7 @@ This file defines the terms that mean something specific in this project: entiti
 
 - **Direct chat (DM)**: A 1:1 chat, `chat.style` 45, of any service (iMessage, SMS, RCS). A send with `to:` goes through the person's DM with the newest message. A group that everyone else left also has one participant but is not a DM.
 
-- **ambiguous**: The server could not resolve the destination to exactly one conversation, so it sent nothing. Either several contacts match, or the one match is a Contacts number or email with no conversation in Messages.
+- **ambiguous**: The server could not resolve the destination to exactly one conversation, so it sent nothing. Either several numbers or emails match, or the name is only part of the one matching contact's name and Messages has no conversation with that contact yet.
 
 - **failed**: The input was invalid, or the send could not be dispatched. Nothing was verified, because nothing reliable was sent.
 

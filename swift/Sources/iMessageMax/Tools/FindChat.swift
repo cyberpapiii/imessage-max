@@ -5,7 +5,7 @@ enum FindChatTool {
     static let limit = IntArgument(name: "limit", defaultValue: 5, range: 1...50)
 
     static let name = "find_chat"
-    static let description = "Find one chat by participants, name, or recent message text when you already know which conversation you want. Use the returned chat ids in follow-up tool calls. When you explain results to the user, refer to chats by name, not by id."
+    static let description = "Find one chat by participants, name, or recent message text when you already know which conversation you want. To find a person, including one you have never messaged, use find_contact. Use the returned chat ids in follow-up tool calls. When you explain results to the user, refer to chats by name, not by id."
 
 
     static let inputSchema: Value = .object([

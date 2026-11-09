@@ -33,7 +33,7 @@ final class HTTPTransportIntegrationTests: XCTestCase {
             XCTAssertEqual(toolsResponse.head.status, .ok)
             let result = try XCTUnwrap(try decodeJSON(from: toolsResponse.body)["result"] as? [String: Any])
             let tools = try XCTUnwrap(result["tools"] as? [[String: Any]])
-            XCTAssertEqual(tools.count, 13)
+            XCTAssertEqual(tools.count, makeTestCatalog().tools.count)
             XCTAssertTrue(tools.contains { $0["name"] as? String == "send" })
             XCTAssertTrue(tools.contains { $0["name"] as? String == "diagnose" })
             XCTAssertTrue(tools.contains { $0["name"] as? String == "get_chat_details" })

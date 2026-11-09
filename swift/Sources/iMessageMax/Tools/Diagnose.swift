@@ -38,7 +38,7 @@ enum DiagnoseTool {
                 Live inbox means push notifications when new messages arrive. live_inbox describes \
                 the connection that calls diagnose: it is `supported` only on a legacy HTTP session, \
                 which receives notifications over SSE. On stdio and stateless connections it is \
-                `unsupported`: poll get_messages_since instead. \
+                `unsupported`: call wait_for_messages, or poll get_messages_since, instead. \
                 Check capabilities.<key>.state for each feature you plan to use. \
                 "supported" means the feature is available and probed on this install. \
                 "unsupported" means the feature does not exist. Do not attempt it or offer \
@@ -449,8 +449,8 @@ enum DiagnoseTool {
         + "Apple Account -> iCloud."
 
     static let pollNote =
-        "This connection never receives \(NewMessagesNotification.name). Poll get_messages_since "
-        + "with the next_rowid it returns."
+        "This connection never receives \(NewMessagesNotification.name). Call wait_for_messages to "
+        + "block until a new message arrives, or poll get_messages_since with the next_rowid it returns."
 
     /// Only `HTTPTransport.notifyNewMessages` sends notifications, and only to
     /// legacy HTTP sessions, so the answer depends on who asks.
