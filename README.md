@@ -46,6 +46,9 @@ Most iMessage tools expose raw database structures, so one user request takes 3 
 
 "Find where we discussed the launch timeline"
 → search(query="launch timeline")
+
+"Text Sam that I'm running late" (never messaged before)
+→ send(to="Sam", text="Running late")
 ```
 
 ## Common agent workflows
@@ -90,6 +93,15 @@ get_attachment(attachment_id="att123", variant="vision")
 ```
 
 Use `list_attachments` to find the message where files were shared. It returns exact attachment ids and says whether each file is on disk, so you know before you fetch.
+
+### Message someone new
+
+```text
+find_contact(query="Sam")
+send(to="+15550000009", text="Hi, it's Rob from the climbing gym")
+```
+
+Use this when a name may match more than one person, or when the person has a number and an email. `find_contact` reads Contacts, so it finds people you have never messaged. `send(to="Sam")` alone works when only one number or email in Contacts matches.
 
 ### Send with exact targeting when it matters
 
@@ -218,6 +230,30 @@ find_chat(contains_recent="latest draft")          # Find by recent content
 find_chat(name="Project Group", include_filtered=True)  # Also search junk / unknown-sender chats
 ```
 
+### find_contact
+Look up a person in Contacts by name, phone number, or email, including people you have never messaged.
+
+```text
+find_contact(query="Sam")             # Every contact whose name has a word starting with "sam"
+find_contact(query="(555) 000-0001")  # The contact that owns this number
+find_contact(query="Sam", limit=10)   # Default 5, max 25
+```
+
+```json
+{
+  "contacts": [
+    {"name": "Sam Lee", "handles": [
+      {"handle": "+15550000001", "chat_id": "chat1", "last_contact": "3d ago"},
+      {"handle": "sam@example.com", "last_contact": "Sep 30"}
+    ]},
+    {"name": "Samira Khan", "handles": [{"handle": "+15550000009"}]}
+  ],
+  "more": false
+}
+```
+
+Each contact lists every number and email it has. A handle with a 1:1 chat carries that `chat_id`, the chat `send(to=handle)` would use. `last_contact` is the newest message from or to the handle in any chat. A handle with neither has never been in Messages, and `send(to=handle)` starts the conversation. Contacts messaged most recently come first. Contacts that share a display name are listed as one. The lookup reads the Contacts copy the server already holds in memory, so a large address book does not slow it down. Without Contacts access it fails with `contacts_unavailable`.
+
 ### get_chat_details
 Inspect a known thread without opening the full conversation.
 
@@ -248,14 +284,20 @@ leaving) come back with `text: null` and an `event` object:
 name. Chat previews describe the same events in words
 ("renamed the group to Trip").
 
-For reactions, replies, and edits, each message may include `reactions`
+For reactions, replies, edits, and unsends, each message may include `reactions`
 (`["❤️ alice"]` for standard tapbacks; custom emoji show the emoji
 itself; sticker reactions use the token `🩵 sticker`), `reply_to`
-(`msg_<rowid>` of the originator), `reply_count`, and `edited: true`.
-Removed tapbacks are omitted. All four fields are optional and omitted
-when empty. `search` and `get_context` carry the same four fields.
-The server only reads these. It cannot send them, so `diagnose` still
-reports `tapbacks` and `edit_unsend` as `unsupported`.
+(`msg_<rowid>` of the originator), `reply_count`, `edited: true`, and
+`unsent: true`. A message the sender unsent keeps its place in the
+thread with `unsent: true` and no `text`, so it no longer reads as a
+blank message. It never also carries `edited`. When the sender unsent
+one part of a message, such as a photo, and the text stayed, the
+message shows its text with `edited: true`.
+Removed tapbacks are omitted. All five fields are optional and omitted
+when empty. `search`, `get_context` and `get_messages_since` carry the
+same five fields, and `get_unread` with `format="messages"` carries
+`unsent`. The server only reads these. It cannot send them, so
+`diagnose` still reports `tapbacks` and `edit_unsend` as `unsupported`.
 
 ### get_messages_since
 New messages across all chats after a ROWID cursor, in arrival order. Pass the returned `next_rowid` back as `since_rowid` to page or poll. `next_rowid` may be larger than the last returned message's rowid because consumed rows (reactions, filtered chats, orphans) advance it. Omit `since_rowid` to get only the current cursor. A cursor is valid only against this Mac's `chat.db`.
@@ -453,6 +495,8 @@ Rules:
 - Exactly one of `to` or `chat_id`
 - At least one of `text` or `file_paths`
 - If you pass both, `send` sends the files first and the text last
+- `to` takes a contact name, a phone number, or an email. A name must match exactly one number or email in Contacts. A name that matches more, even two handles of one contact, returns `ambiguous` with the candidates and sends nothing. `find_contact` lists them
+- A phone number or email that Messages has never seen starts a new conversation, and so does the full name of a contact whose one handle is such a handle. A partial name ("Sam" for Samira Khan) whose one match Messages has never seen returns `ambiguous` with that candidate, so the agent can check with the user first. The response `message` then says "Messages had no conversation with <handle> before this send." A number written without a country code is read in the Mac's region, and one that cannot be read that way is refused
 
 Attachment paths must be absolute or start with `~/`. `send` checks the
 path one component at a time and refuses it if any component is a symbolic
@@ -472,7 +516,7 @@ diagnose()  # Returns: database status, contacts count, permissions, capabilitie
 
 `capabilities.verified_send` is `supported` when chat.db is readable and Messages Automation is OK, `degraded` when the database is readable but Automation is not OK, and `permission-gated` when the database is not readable.
 
-`database.features` lists which optional `chat.db` columns exist on this Mac, keyed `table.column` (for example `message.date_edited`). When one is `false`, the tools that read it degrade instead of failing: no `reply_to` or `reply_count` without `message.thread_originator_guid`, no `edited` without `message.date_edited`, no custom-emoji reaction text without `message.associated_message_emoji`.
+`database.features` lists which optional `chat.db` columns exist on this Mac, keyed `table.column` (for example `message.date_edited`). When one is `false`, the tools that read it degrade instead of failing: no `reply_to` or `reply_count` without `message.thread_originator_guid`, no `edited` without `message.date_edited`, no `unsent` when neither `message.message_summary_info` nor `message.date_retracted` exists (an unsent message then shows as an edit with no text), no custom-emoji reaction text without `message.associated_message_emoji`.
 
 `contacts.status` is one of `authorized`, `limited`, `denied`, `restricted`, `not_determined`, `not_requested_headless`, or `<status>_load_failed`. A headless process that skipped the prompt reports `not_requested_headless`.
 
@@ -504,7 +548,7 @@ After a text send, the server checks chat.db for the sent message. Each `status`
 - `status: "sent"` means verification was unavailable because the database was unreadable. The only evidence is that the transport accepted the send.
 - `status: "pending_confirmation"` means Messages accepted an attachment send, but the server could not confirm within the polling window that the file transfer finished. When text went with the file, `text_status` is the text's own result.
 - `status: "failed"` means the send failed.
-- `status: "ambiguous"` means the server could not resolve the target safely: several contacts match, or the one matching contact's number or email has no conversation in Messages. `candidates` lists the matches, and nothing was sent.
+- `status: "ambiguous"` means the name matches more than one number or email in Contacts. `candidates` lists the matches, and nothing was sent.
 
 #### Disposition and retry_safe
 

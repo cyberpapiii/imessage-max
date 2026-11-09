@@ -31,6 +31,7 @@ struct UnreadMessageItem: Encodable {
     let text: String?
     let ago: String?
     let ts: String?
+    let unsent: Bool?
 }
 
 struct UnreadSummaryResponse: Encodable {
@@ -254,7 +255,8 @@ final class GetUnread {
                 from: message.from,
                 text: message.text,
                 ago: message.ago,
-                ts: message.ts
+                ts: message.ts,
+                unsent: message.unsent
             )
         }
 

@@ -24,6 +24,7 @@ struct SearchResult: Codable {
     let replyTo: String?
     let replyCount: Int?
     let edited: Bool?
+    let unsent: Bool?
 
     enum CodingKeys: String, CodingKey {
         case id, chat, from, excerpt, ago, ts
@@ -32,7 +33,7 @@ struct SearchResult: Codable {
         case reactions
         case replyTo = "reply_to"
         case replyCount = "reply_count"
-        case edited
+        case edited, unsent
     }
 }
 
