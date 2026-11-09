@@ -34,6 +34,12 @@ final class ServiceFilesContractTests: XCTestCase {
         XCTAssertEqual(plist["ThrottleInterval"] as? Int, 10,
                        "kickstart -k waits out the throttle, and a restart must finish inside the companion's wait")
         XCTAssertNil(plist["StandardErrorPath"], "launchd does not expand ~; the helper opens its own log")
+        // launchd SIGKILLs a job that outlives ExitTimeOut, 5 s by default,
+        // and a kill relaunches it even with Keep running off. The drain's
+        // own bound must end first, with room for the exit itself (088 #14).
+        let exitTimeout = try XCTUnwrap(plist["ExitTimeOut"] as? Int, "launchd's 5 s default cuts the drain short")
+        XCTAssertGreaterThanOrEqual(
+            Duration.seconds(exitTimeout), HTTPTransport.maximumGracefulShutdownDuration + .seconds(5))
     }
 
     func testMakefileMatchesContract() throws {

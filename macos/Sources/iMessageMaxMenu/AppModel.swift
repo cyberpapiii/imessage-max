@@ -618,6 +618,7 @@ extension ServiceState {
     case .portConflict: "port in use"
     case .notRegistered: "not set up"
     case .stopped: "stopped"
+    case .failing(let reason): "failing at launch: \(reason)"
     case .unresponsive: "not answering"
     case .tokenRejected: "access key refused"
     case .running: "running"

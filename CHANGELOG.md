@@ -19,12 +19,20 @@
 - A log write that fails, on a full disk, an I/O error or a closed stderr, no longer aborts the helper. The line is dropped, where before the helper crashed and launchd relaunched it into the same failure every 10 s.
 - The stdio bridge that Codex, Claude Desktop and the `.mcpb` extension launch survives a helper restart (update, crash or Keep running relaunch). Before, every restart ended the session for good, and a client on a headless Mac stayed broken until someone reconnected it. The bridge now reconnects, replays the client's `initialize` and `notifications/initialized` for a legacy session, and sends on what the client wrote meanwhile (up to 64 messages). A request that was running when the helper went away gets a -32000 error that says to retry it, and to check the chat before retrying a send. The bridge waits up to 15 s for the helper, at start and after a drop, up from 3 s, which was shorter than launchd's 10 s relaunch throttle. When it gives up (exit 75) and this user is not logged in to the Mac's desktop, the error says that a desktop login is needed, where before it said to open iMessage Max, which cannot work over SSH.
 - A NUL character (U+0000) in `send` text, a file path or a recipient no longer crashes the helper. `send` returns `failed` with disposition `not_started` and says why, and nothing is sent.
+- When another process holds port 47821, such as iMessage Max for another user on the same Mac, the helper no longer exits every 10 s and takes the stdio socket down with it. It logs one line naming the port, keeps serving Codex, Claude Desktop and other stdio clients over its socket, and binds the port once it frees, retrying from 1 s up to every 30 s. `diagnose` reports `http.state` `port_in_use` with a fix. The `Started` log line now comes after the bind, with `http=port_in_use` while the port is taken.
+- The helper's launchd plist sets `ExitTimeOut` to 20 s. launchd's 5 s default could SIGKILL a helper still draining a send on SIGTERM, and relaunch it even with Keep running off. The plist changed, so an update registers the helper again once.
+- A token file in `~/Library/Application Support/iMessage Max/` that other users can read (for example mode 644 after a restore) is set to 600 with a warning in the log, instead of stopping the helper at every launch. A `--token-file` with such a mode still stops the server.
+- A helper that cannot start logs one `Startup failed: <reason>` line before it exits.
+- The helper checks its socket file every 30 s and listens again when the file was deleted, or when another helper held it at launch and has since gone. Open stdio sessions keep working.
 
 ### Docs
 
 - New operator guides. [docs/headless.md](docs/headless.md) covers running on a headless Mac: why a desktop login is required, automatic login and FileVault, never logging out, power settings, one-time grants over Screen Sharing, updates, health checks over SSH and troubleshooting by symptom. [docs/fleet.md](docs/fleet.md) covers MDM deployment, with a sample profile that grants Full Disk Access, Contacts and Automation for Messages to `com.cyberpapiii.imessage-max.menubar` and allows its helper through Managed Login Items for team HJF7LN64XX; it is untested end to end. [docs/uninstall.md](docs/uninstall.md) covers removal for DMG and cask installs, including `--unregister-helper`, `tccutil reset` and the cask's zap. README and AGENTS.md link them.
 
 ### Companion app
+
+- A helper that stops at every launch shows "iMessage Max can't start" with the reason from its log, such as an unusable folder, instead of Stopped. Stop still works.
+- Another user's iMessage Max on the same port shows as a port conflict that says Plug can't connect while Codex and Claude Desktop still can, instead of "access key refused" and a restart that could not help.
 
 - The menu bar bubble opens a plain macOS menu in place of the popover panel. Its header shows Max's face and one status word: Running, Needs attention, Stopped or Setting up. One more line names the next thing to do, such as Turn on Full Disk Access, and opens Settings on the page that fixes it. Below that are Connections (such as "Connections: Plug", or None), Settings… (⌘,) and Quit iMessage Max (⌘Q). Quitting still leaves the helper running.
 - Setup, permissions, connections and help moved to a Settings window with a sidebar, back and forward buttons, and grouped forms built from stock controls, so macOS 26 draws its own Liquid Glass. The sidebar's first row, with the face and the status word, is the iMessage Max page itself, as the account row is in System Settings. Below it are Permissions, Connections, and About & Help. Buttons and switches use the system accent colour. Opening the app shows the window on Permissions.
@@ -48,6 +56,7 @@
 - A text sent with a file is verified even when the file transfer is still pending. The result stays `pending_confirmation`, with a new `text_status` field (`confirmed` or `uncertain`) and `verified_message_guid` when the text was found.
 - A `failed_delivery` text sent after files reports `retry_safe: false` and says to resend only the text, since retrying the whole call would send the files again. A `partial_failure` whose failed payload may have gone out says to check before retrying it.
 - `diagnose` fixes for the helper inside the app name the permission by its System Settings name, such as "Open iMessage Max and turn on Full Disk Access." `assistant_calls` is unchanged.
+- `diagnose` from the HTTP helper, on any lane, has an `http` field: `port`, `state` (`starting`, `listening` or `port_in_use`) and, while the port is taken, a `fix`. A `--direct` stdio server leaves it out.
 
 ## 2.0.0
 

@@ -10,7 +10,7 @@ import Synchronization
 enum KeepRunning {
     /// EX_TEMPFAIL: non-zero, so launchd relaunches the helper, and a code
     /// that reads as "stopped, try again" rather than as a failure.
-    static let relaunchExitCode: Int32 = 75
+    static let relaunchExitCode = ServiceDefaults.relaunchExitCode
 
     /// Read as the helper stops, so a change applies without a restart.
     /// `folder` holds the token file, which keeps a test helper with
