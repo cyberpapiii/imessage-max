@@ -35,8 +35,12 @@ enum ServerStartup {
         // --direct is for development: its Automation answer stays in memory,
         // so it never touches the installed helper's.
         let access = MessagesAccess(memory: AutomationMemory(folder: nil))
-        let catalog = ToolCatalog(database: Database(), resolver: resolver, access: access)
+        let arrivals = MessageArrivals()
+        let watcher = MessageWatcher(databasePath: Database.defaultPath) { arrivals.rowsArrived(maxRowid: $0.maxRowid) }
+        let catalog = ToolCatalog(database: Database(), resolver: resolver, access: access, arrivals: arrivals)
         announce(transport: "stdio", resolver: resolver, contactsPolicy: contactsPolicy)
+        watcher.start()
+        defer { watcher.stop() }
         try await serveStdio(base: StdioTransport(), catalog: catalog)
     }
 
@@ -63,14 +67,18 @@ enum ServerStartup {
         let resolver = ContactResolver()
         let access = MessagesAccess(memory: AutomationMemory(folder: supportFolder))
         let (newRows, newRowsSink) = AsyncStream<MessageWatcher.NewRows>.makeStream()
-        let watcher = MessageWatcher(databasePath: Database.defaultPath) { newRowsSink.yield($0) }
+        let arrivals = MessageArrivals()
+        let watcher = MessageWatcher(databasePath: Database.defaultPath) { rows in
+            arrivals.rowsArrived(maxRowid: rows.maxRowid)
+            newRowsSink.yield(rows)
+        }
         let listenerState = HTTPListenerState()
         let keepAwake = KeepAwake(folder: supportFolder)
         keepAwake.start()
         defer { keepAwake.stop() }
         let catalog = ToolCatalog(
             database: Database(), resolver: resolver, access: access, liveInbox: { watcher.isLive },
-            http: { listenerState.diagnosis(port: port) }, keepAwake: keepAwake
+            http: { listenerState.diagnosis(port: port) }, keepAwake: keepAwake, arrivals: arrivals
         )
         let transport = HTTPTransport(
             host: host,
@@ -78,7 +86,8 @@ enum ServerStartup {
             accessToken: accessToken,
             catalog: catalog,
             setupPermissions: SetupPermissionService(resolver: resolver, access: access),
-            listenerState: listenerState
+            listenerState: listenerState,
+            onDrain: { arrivals.drain() }
         )
 
         // Returns once the port listens, or once it is known to be taken. A
@@ -107,7 +116,7 @@ enum ServerStartup {
             // An update that replaces this binary stops the helper when it is
             // idle, and the exit code makes launchd start the new one, with
             // or without the companion running (088 #19).
-            update.start { Task { await transport.beginStop() } }
+            update.start(onPending: { arrivals.updatePending($0) }) { Task { await transport.beginStop() } }
         }
         defer { update?.stop() }
 

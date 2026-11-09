@@ -25,6 +25,7 @@ final class ToolRegistryTests: XCTestCase {
             "list_chats",
             "search",
             "send",
+            "wait_for_messages",
         ])
     }
 

@@ -84,7 +84,9 @@ final class SendResolverTests: XCTestCase {
             XCTFail("Unexpected failure: \(message)")
         case .success:
             XCTFail("Unexpected success")
-        case .ambiguous(let candidates):
+        case .ambiguous(_, .partialNameNewHandle):
+            XCTFail("Unexpected partial-name refusal")
+        case .ambiguous(let candidates, .multipleMatches):
             XCTAssertEqual(candidates.count, 2)
             XCTAssertEqual(candidates[0].handle, "+15555550123")
             XCTAssertEqual(candidates[1].handle, "+15555550124")
@@ -98,13 +100,32 @@ final class SendResolverTests: XCTestCase {
         let contacts = ContactResolver(seedCache: ["+15555550199": "Zed Stranger"])
         let resolver = SendResolver(db: fixture.database(), resolver: contacts)
 
-        guard case .success(let resolved) = await resolver.resolve(.recipient("Zed")) else {
-            return XCTFail("the one Contacts handle that matches is an exact destination")
+        guard case .success(let resolved) = await resolver.resolve(.recipient("zed stranger")) else {
+            return XCTFail("the full name of the one matching contact is an exact destination")
         }
         XCTAssertEqual(resolved.target, .participant(handle: "+15555550199", chatId: nil))
         XCTAssertEqual(resolved.recipientHandle, "+15555550199")
         XCTAssertEqual(resolved.deliveredTo, ["Zed Stranger"])
         XCTAssertTrue(resolved.handleIsNew)
+    }
+
+    func testPartialNameNeverStartsAFirstConversation() async throws {
+        let fixture = try makeResolverFixture()
+
+        let contacts = ContactResolver(seedCache: ["+15555550199": "Zed Stranger"])
+        let resolver = SendResolver(db: fixture.database(), resolver: contacts)
+
+        guard case .ambiguous(let candidates, .partialNameNewHandle) = await resolver.resolve(.recipient("Zed")) else {
+            return XCTFail("a prefix of a never-messaged contact's name must not send")
+        }
+        XCTAssertEqual(candidates.map(\.handle), ["+15555550199"])
+    }
+
+    func testFullNameMatchIgnoresCaseSpacingAndHyphens() {
+        XCTAssertTrue(SendResolver.isFullName("  zed   STRANGER ", of: "Zed Stranger"))
+        XCTAssertTrue(SendResolver.isFullName("Mary Jane Watson", of: "Mary-Jane Watson"))
+        XCTAssertFalse(SendResolver.isFullName("Zed", of: "Zed Stranger"))
+        XCTAssertFalse(SendResolver.isFullName("Sam", of: "Samira"))
     }
 
     func testOneContactWithTwoHandlesIsAmbiguous() async throws {
@@ -113,7 +134,7 @@ final class SendResolverTests: XCTestCase {
         let contacts = ContactResolver(seedCache: ["+15555550199": "Zed Stranger", "zed@example.com": "Zed Stranger"])
         let resolver = SendResolver(db: fixture.database(), resolver: contacts)
 
-        guard case .ambiguous(let candidates) = await resolver.resolve(.recipient("Zed")) else {
+        guard case .ambiguous(let candidates, .multipleMatches) = await resolver.resolve(.recipient("Zed")) else {
             return XCTFail("two handles of one contact must not be chosen between")
         }
         XCTAssertEqual(Set(candidates.map(\.handle)), ["+15555550199", "zed@example.com"])
@@ -322,7 +343,7 @@ final class SendResolverTests: XCTestCase {
             }
             let resolver = SendResolver(db: fixture.database(), resolver: ContactResolver(seedCache: seed))
             return try await countQueries {
-                guard case .ambiguous(let found) = await resolver.resolve(.recipient("Jo")) else {
+                guard case .ambiguous(let found, .multipleMatches) = await resolver.resolve(.recipient("Jo")) else {
                     return XCTFail("Expected ambiguous name resolution")
                 }
                 XCTAssertEqual(found.count, candidates)

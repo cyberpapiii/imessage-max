@@ -268,11 +268,14 @@ struct SendResponse: Encodable, Sendable {
         return SendResponse(.failed, disposition: disposition, message: caution, error: message)
     }
 
-    static func ambiguous(candidates: [RecipientCandidate]) -> SendResponse {
-        SendResponse(
-            .ambiguous, disposition: .notStarted,
-            message: "More than one number or email in Contacts matches. Nothing was sent. Pass one candidate's handle as to, or a chat_id.",
-            candidates: candidates
-        )
+    static func ambiguous(candidates: [RecipientCandidate], reason: AmbiguityReason = .multipleMatches) -> SendResponse {
+        let message: String
+        switch reason {
+        case .multipleMatches:
+            message = "More than one number or email in Contacts matches. Nothing was sent. Pass one candidate's handle as to, or a chat_id."
+        case .partialNameNewHandle:
+            message = "The name is only part of the matching contact's name, and Messages has no conversation with them yet. Nothing was sent. Check with the user that this is the person they meant, then pass the contact's full name or the candidate's handle as to."
+        }
+        return SendResponse(.ambiguous, disposition: .notStarted, message: message, candidates: candidates)
     }
 }

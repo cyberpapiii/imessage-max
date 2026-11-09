@@ -20,8 +20,16 @@ struct ResolvedSendTarget {
 enum SendResolution {
     case success(ResolvedSendTarget)
     case failure(String)
+    case ambiguous([RecipientCandidate], AmbiguityReason)
+}
+
+enum AmbiguityReason: Equatable {
     /// More than one contact number or email matches the name.
-    case ambiguous([RecipientCandidate])
+    case multipleMatches
+    /// The name is only part of the one matching contact's name, and Messages
+    /// has never seen that contact's handle: "Sam" must not start a first
+    /// conversation with a Samira the user never meant.
+    case partialNameNewHandle
 }
 
 struct SendResolver: Sendable {
@@ -158,6 +166,12 @@ struct SendResolver: Sendable {
                 // code is read in the Mac's region, as Messages reads it, and
                 // one that cannot be read that way never reaches the cache.
                 let known = try messagesHandle(for: match.handle)
+                if known == nil, !Self.isFullName(name, of: match.name) {
+                    return .ambiguous(
+                        [RecipientCandidate(name: match.name, handle: match.handle, lastContact: "never")],
+                        .partialNameNewHandle
+                    )
+                }
                 return .success(try await participantTarget(
                     handle: known ?? match.handle, displayName: match.name, isNew: known == nil))
             } catch {
@@ -188,8 +202,18 @@ struct SendResolver: Sendable {
                     handle: candidate.handle,
                     lastContact: TimeUtils.formatCompactRelative(candidate.lastContact) ?? "never"
                 )
-            }
+            },
+            .multipleMatches
         )
+    }
+
+    /// Whether `query` names every word of `name`, ignoring case, so a
+    /// prefix ("Sam" for "Samira Khan") is not a full name.
+    static func isFullName(_ query: String, of name: String) -> Bool {
+        func words(_ text: String) -> [String] {
+            text.lowercased().split(whereSeparator: { $0.isWhitespace || $0 == "-" }).map(String.init)
+        }
+        return words(query) == words(name)
     }
 
     /// The chat.db handle id for a Contacts number or email, or nil when

@@ -96,6 +96,56 @@ final class UpdateWatcherTests: XCTestCase {
         XCTAssertTrue(watcher.requestedRestart)
     }
 
+    /// A complete update ends message waits before the wait for idle, so a
+    /// wait_for_messages call never holds the restart for idleWait.
+    func testACompleteUpdateEndsMessageWaitsAndRestartsOnceTheyReturn() async throws {
+        let current = Mutex(file(inode: 1))
+        let arrivals = MessageArrivals()
+        let stopped = expectation(description: "stopped for the update")
+        let watcher = try XCTUnwrap(UpdateWatcher(
+            path: "/fake/imessage-max",
+            timing: .init(interval: 0.05, idlePoll: 0.02, idleWait: 60),
+            callsInFlight: { arrivals.waiting },
+            read: { _ in current.withLock { $0 } }))
+        watcher.start(onPending: { arrivals.updatePending($0) }) { stopped.fulfill() }
+        defer { watcher.stop() }
+
+        async let wake = arrivals.wait(above: 1, timeout: .seconds(30))
+        let waiting = await eventually { arrivals.waiting == 1 }
+        XCTAssertTrue(waiting)
+        let start = ContinuousClock.now
+        current.withLock { $0 = self.file(inode: 2) }
+        let ended = await wake
+        XCTAssertEqual(ended, .draining)
+        await fulfillment(of: [stopped], timeout: 5)
+        XCTAssertLessThan(ContinuousClock.now - start, .seconds(5))
+    }
+
+    func testPuttingTheOriginalBackLetsWaitsBlockAgain() async throws {
+        let current = Mutex(file(inode: 1))
+        let arrivals = MessageArrivals()
+        let pending = Mutex<[Bool]>([])
+        let watcher = try XCTUnwrap(UpdateWatcher(
+            path: "/fake/imessage-max",
+            timing: .init(interval: 0.05, idlePoll: 0.02, idleWait: 60),
+            callsInFlight: { 1 },
+            read: { _ in current.withLock { $0 } }))
+        watcher.start(onPending: { value in
+            pending.withLock { $0.append(value) }
+            arrivals.updatePending(value)
+        }) {}
+        defer { watcher.stop() }
+
+        current.withLock { $0 = self.file(inode: 2) }
+        let held = await eventually { pending.withLock { $0 } == [true] }
+        XCTAssertTrue(held)
+        current.withLock { $0 = self.file(inode: 1) }
+        let released = await eventually { pending.withLock { $0 } == [true, false] }
+        XCTAssertTrue(released)
+        let wake = await arrivals.wait(above: 1, timeout: .milliseconds(100))
+        XCTAssertEqual(wake, .deadline)
+    }
+
     func testToolCallsCountWhileTheyRun() async throws {
         let (entered, enteredSink) = AsyncStream<Void>.makeStream()
         let release = DispatchSemaphore(value: 0)

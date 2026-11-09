@@ -49,7 +49,7 @@ struct SendTool: Sendable {
                 Every response also includes disposition (completed, not_started, or may_have_completed) and retry_safe.
                 retry_safe=true means a retry cannot duplicate the message, because nothing reached Messages or chat.db shows that the row failed.
                 retry_safe=false means you must not resend blindly. Check with get_messages first.
-                A send runs immediately when the destination is exact. An ambiguous destination returns status 'ambiguous' and sends nothing: a name that matches more than one number or email, even of one contact. A name that matches exactly one number or email in Contacts is exact, and so is a phone number or email, even when Messages has no conversation with it yet; then the send starts one and message names the handle. Invalid input returns status 'failed' and sends nothing. A file transfer may return 'pending_confirmation' while Messages.app finishes the transfer. When text was sent with that file, text_status reports the text's own result (confirmed or uncertain).
+                A send runs immediately when the destination is exact. An ambiguous destination returns status 'ambiguous' and sends nothing: a name that matches more than one number or email, even of one contact. A name that matches exactly one number or email in Contacts is exact, and so is a phone number or email, even when Messages has no conversation with it yet; then the send starts one and message names the handle. To start a first conversation by name, the name must be the contact's full name; a partial name returns 'ambiguous' with the candidate. Invalid input returns status 'failed' and sends nothing. A file transfer may return 'pending_confirmation' while Messages.app finishes the transfer. When text was sent with that file, text_status reports the text's own result (confirmed or uncertain).
                 With 'to', the tool sends through the person's existing 1:1 chat (iMessage, SMS or RCS, the one with the newest message) and reports that chat. Only a person with no 1:1 chat yet is sent to over iMessage, or over SMS when Messages has no iMessage account turned on but SMS is. With no account that can send, the send fails with disposition not_started; diagnose's imessage_account has the fix.
                 """,
             inputSchema: InputSchema.object(
@@ -135,8 +135,8 @@ struct SendTool: Sendable {
             resolved = target
         case .failure(let errorMsg):
             return .error(errorMsg)
-        case .ambiguous(let candidates):
-            return .ambiguous(candidates: candidates)
+        case .ambiguous(let candidates, let reason):
+            return .ambiguous(candidates: candidates, reason: reason)
         }
         if let invalid = resolved.target.validationError {
             return .error(ClientErrorMessages.sanitized(invalid))

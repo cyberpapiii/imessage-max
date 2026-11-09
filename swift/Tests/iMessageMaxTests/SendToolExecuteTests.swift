@@ -375,13 +375,29 @@ final class SendToolExecuteTests: XCTestCase {
         let resolver = ContactResolver(seedCache: ["+15550009999": "Zed Stranger"])
         let tool = SendTool(db: fixture.database(), resolver: resolver, runner: stub, verifier: fastVerifier(fixture: fixture))
 
-        let json = try decodeJSONDictionary(from: try await tool.execute(args: ["to": .string("Zed"), "text": .string("Hi")]))
+        let json = try decodeJSONDictionary(from: try await tool.execute(args: ["to": .string("Zed Stranger"), "text": .string("Hi")]))
 
         XCTAssertEqual(stub.invocations, [.textToParticipant(handle: "+15550009999", message: "Hi")])
         XCTAssertEqual(json["status"] as? String, "confirmed")
         XCTAssertEqual(json["verified_message_guid"] as? String, "msg-guid-new")
         XCTAssertEqual(json["delivered_to"] as? [String], ["Zed Stranger"])
         XCTAssertEqual(json["message"] as? String, "Messages had no conversation with +15550009999 before this send.")
+    }
+
+    func testPartialNameOfANeverMessagedContactIsRefused() async throws {
+        let fixture = try makeSendFixture()
+        let stub = StubScriptRunner()
+        let resolver = ContactResolver(seedCache: ["+15550009999": "Zed Stranger"])
+        let tool = SendTool(db: fixture.database(), resolver: resolver, runner: stub)
+
+        let json = try await toolFailureBody {
+            try await tool.execute(args: ["to": .string("Zed"), "text": .string("Hi")])
+        }
+        XCTAssertEqual(json["status"] as? String, "ambiguous")
+        XCTAssertEqual(json["disposition"] as? String, "not_started")
+        let candidates = try decodeJSONArray(json["candidates"])
+        XCTAssertEqual(candidates.compactMap { $0["handle"] as? String }, ["+15550009999"])
+        XCTAssertTrue(stub.invocations.isEmpty, "a partial name must not start a first conversation")
     }
 
     func testNameMatchingTwoHandlesOfOneContactIsRefused() async throws {
