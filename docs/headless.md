@@ -182,10 +182,11 @@ To restart the helper on the new binary and plist from SSH at once, quit the com
 
 ```sh
 pkill -x iMessageMaxMenu
-open "/Applications/iMessage Max.app" --args --register-helper
+while pgrep -x iMessageMaxMenu >/dev/null; do sleep 0.2; done
+open -n "/Applications/iMessage Max.app" --args --register-helper
 ```
 
-Quit the companion first. While it runs, `open --args` reaches the running copy and macOS drops the arguments. `--register-helper` also registers the helper again when the update changed its launchd plist.
+Quit the companion first and wait until it is gone. While it runs, `open --args` reaches the running copy and macOS drops the arguments. `-n` starts a new copy, so macOS never hands the launch to a copy that is still quitting, which launches nothing. `--register-helper` also registers the helper again when the update changed its launchd plist.
 
 `open` from SSH reaches the desktop session only when you SSH in as the user who is logged in to the desktop. **Not verified:** this on a Mac with no display or with a dummy display plug.
 

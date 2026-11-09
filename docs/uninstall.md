@@ -10,6 +10,7 @@ Choose Quit iMessage Max (⌘Q) in the menu bar bubble, or run:
 
 ```sh
 pkill -x iMessageMaxMenu
+while pgrep -x iMessageMaxMenu >/dev/null; do sleep 0.2; done
 ```
 
 Quitting leaves the helper running. Quit first anyway: while the companion runs, `open --args` reaches the running copy and macOS drops the arguments, so the next step would do nothing.
@@ -19,7 +20,7 @@ If you turned on **Open at login** on the iMessage Max page of Settings, turn it
 ## 2. Remove the helper
 
 ```sh
-open "/Applications/iMessage Max.app" --args --unregister-helper
+open -n "/Applications/iMessage Max.app" --args --unregister-helper
 ```
 
 This launches the app without a window. It unregisters the helper's background item with macOS and then quits. Run it while the user is logged in to the desktop, since `open` needs that session. Use `~/Applications/iMessage Max.app` if that is where the app lives.
