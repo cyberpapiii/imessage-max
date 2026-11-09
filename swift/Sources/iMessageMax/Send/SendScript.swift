@@ -13,6 +13,34 @@ enum SendScript {
     private static let preDispatchPhase = "pre_dispatch"
     private static let dispatchStartedPhase = "dispatch_started"
 
+    /// Picks the account a participant send goes through, in this order: an
+    /// iMessage account that is turned on and connected, one that is turned
+    /// on, and, for a phone number only, an SMS account that is turned on and
+    /// connected (Text Message Forwarding). With none, the script stops before
+    /// anything reaches Messages with `ErrorNumber.noSendingAccount`. Before,
+    /// it took the first iMessage account even when it was turned off, and a
+    /// Mac with none reported the recipient as missing (-1728).
+    static let participantAccountLines = [
+        "set haveService to false",
+        "try",
+        "    set targetService to 1st account whose service type = iMessage and enabled is true and connection status is connected",
+        "    set haveService to true",
+        "end try",
+        "if not haveService then",
+        "    try",
+        "        set targetService to 1st account whose service type = iMessage and enabled is true",
+        "        set haveService to true",
+        "    end try",
+        "end if",
+        "if not haveService and recipientId does not contain \"@\" then",
+        "    try",
+        "        set targetService to 1st account whose service type = SMS and enabled is true and connection status is connected",
+        "        set haveService to true",
+        "    end try",
+        "end if",
+        "if not haveService then error \"No iMessage account is turned on in Messages.\" number \(ErrorNumber.noSendingAccount)",
+    ]
+
     static func source(_ target: TargetKind, _ payload: PayloadKind) -> String {
         let targetVariable: String
         let resolveTarget: [String]
@@ -20,8 +48,7 @@ enum SendScript {
         switch target {
         case .participant:
             targetVariable = "recipientId"
-            resolveTarget = [
-                "set targetService to 1st account whose service type = iMessage",
+            resolveTarget = participantAccountLines + [
                 "set targetBuddy to participant recipientId of targetService",
             ]
             targetReference = "targetBuddy"
@@ -126,6 +153,10 @@ enum SendScript {
         static let unavailable: Set<Int> = [-600, -609]
         /// fnfErr
         static let fileNotFound: Set<Int> = [-43]
+        /// The send script's own number for "no account can send": no
+        /// iMessage account is turned on, and no SMS account fits. Positive,
+        /// so it is outside the ranges Apple's errors use.
+        static let noSendingAccount = 28_100
     }
 
     /// Classifies a failed script by its AppleScript error number: the
@@ -142,6 +173,8 @@ enum SendScript {
         let stderr = Osascript.normalizingApostrophes(rawStderr).lowercased()
 
         switch errorNumber ?? trailingErrorNumber(rawStderr) {
+        case ErrorNumber.noSendingAccount?:
+            return .noSendingAccount
         case let number? where ErrorNumber.permission.contains(number):
             return .automationPermissionRequired
         case let number? where ErrorNumber.unavailable.contains(number):

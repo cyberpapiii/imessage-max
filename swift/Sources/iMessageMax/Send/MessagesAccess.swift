@@ -18,6 +18,8 @@ final class MessagesAccess: Sendable {
     static let recheckInterval: Duration = .seconds(300)
 
     let memory: AutomationMemory
+    /// Whether Messages has an iMessage account that can send, for diagnose.
+    let account: IMessageAccountMonitor
     private let check: Check
     private let launch: Launch
     private let now: Clock
@@ -30,9 +32,11 @@ final class MessagesAccess: Sendable {
         check: @escaping Check = { AutomationPermission.checkAutomationPermission(askUserIfNeeded: $0) },
         launch: @escaping Launch = { MessagesLauncher.ensureRunningHidden(reason: $0) },
         recheckInterval: Duration = MessagesAccess.recheckInterval,
-        now: @escaping Clock = { ContinuousClock.now }
+        now: @escaping Clock = { ContinuousClock.now },
+        accountRead: IMessageAccountMonitor.Read? = nil
     ) {
         self.memory = memory
+        self.account = IMessageAccountMonitor(read: accountRead ?? IMessageAccountMonitor.liveRead(launch: launch))
         self.check = check
         self.launch = launch
         self.recheckInterval = recheckInterval

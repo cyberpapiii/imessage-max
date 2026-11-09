@@ -27,3 +27,19 @@ import MaxTestSupport
   #expect(!value.namesReady)
   #expect(value.missingGrant == .contacts)
 }
+
+/// A signed-out iMessage account degrades the send capabilities, but no
+/// permission fixes it, so it must not show as missing Automation.
+@Test func signedOutIMessageIsNotAMissingGrant() throws {
+  let data = Data(
+    """
+    {"version":"2.1.0","process_id":123,"status":"ready","database":{"path":"~/Library/Messages/chat.db","accessible":true,"status":"accessible"},
+    "contacts":{"authorized":true,"status":"authorized"},
+    "capabilities":{"perm_automation":{"state":"supported","detail":"authorized"},
+    "send_text_dm":{"state":"degraded","detail":"imessage_account"},
+    "imessage_account":{"state":"degraded","detail":"signed_out"}}}
+    """.utf8)
+  let value = try JSONDecoder().decode(DiagnoseResult.self, from: data)
+  #expect(value.sendingReady)
+  #expect(value.missingGrant == nil)
+}
