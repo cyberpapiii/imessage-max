@@ -10,6 +10,8 @@ typealias SchemaProbe = @Sendable () -> SchemaCapabilities?
 
 typealias LiveInboxProbe = @Sendable () -> Bool
 
+typealias HTTPEndpointProbe = @Sendable () -> DiagnoseResult.HTTPEndpoint?
+
 typealias SleepProbe = @Sendable () -> SleepSettings
 
 typealias KeepAwakeProbe = @Sendable () -> KeepAwake.State
@@ -17,6 +19,7 @@ typealias KeepAwakeProbe = @Sendable () -> KeepAwake.State
 enum DiagnoseTool {
     static func definition(
         db: Database, resolver: ContactResolver, access: MessagesAccess, liveInbox: @escaping LiveInboxProbe,
+        http: @escaping HTTPEndpointProbe = { nil },
         keepAwake: KeepAwake? = nil
     ) -> ToolDefinition {
         let inputSchema: Value = .object([
@@ -65,6 +68,7 @@ enum DiagnoseTool {
                 automationProbe: { await MessagesAccess.offPool { access.automationStatus() } },
                 schemaProbe: { try? db.schema() },
                 liveInboxProbe: liveInbox,
+                httpProbe: http,
                 lane: ToolCallDispatch.lane,
                 sleepProbe: { SleepSettings.current() },
                 keepAwakeProbe: { keepAwake?.refresh() ?? KeepAwake.State() }
@@ -204,6 +208,7 @@ enum DiagnoseTool {
         automationProbe: AutomationProbe,
         schemaProbe: SchemaProbe = { nil },
         liveInboxProbe: LiveInboxProbe = { false },
+        httpProbe: HTTPEndpointProbe = { nil },
         lane: ToolCallDispatch.Lane? = nil,
         sleepProbe: SleepProbe = { SleepSettings() },
         keepAwakeProbe: KeepAwakeProbe = { KeepAwake.State() },
@@ -347,6 +352,7 @@ enum DiagnoseTool {
             ),
             capabilities: Dictionary(uniqueKeysWithValues: capabilities.map { ($0.key.rawValue, $0.value) }),
             assistantCalls: assistantCalls(),
+            http: httpProbe(),
             power: power(sleep: sleepProbe(), keepAwake: keepAwakeProbe(), holder: holder)
         )
     }

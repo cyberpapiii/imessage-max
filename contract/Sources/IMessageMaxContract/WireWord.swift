@@ -65,6 +65,18 @@ public struct DiagnoseStatus: WireWord {
   public static let needsSetup: Self = "needs_setup"
 }
 
+/// `http.state` in the diagnose reply.
+public struct HTTPEndpointState: WireWord {
+  public let rawValue: String
+  public init(rawValue: String) { self.rawValue = rawValue }
+
+  public static let starting: Self = "starting"
+  public static let listening: Self = "listening"
+  /// Another process holds the port. The helper retries the bind, and stdio
+  /// bridges still reach it over the socket.
+  public static let portInUse: Self = "port_in_use"
+}
+
 /// `database.status` in the diagnose reply.
 public struct DatabaseStatus: WireWord {
   public let rawValue: String

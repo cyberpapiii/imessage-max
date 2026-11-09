@@ -176,6 +176,7 @@ private func granted(_ state: PanelState) -> [SetupStep] {
       (.portConflict, .recheck, "Check Again", .general),
       (.unresponsive, .recheck, "Check Again", .general),
       (.tokenRejected, .restart, "Restart iMessage Max", .general),
+      (.failing("Cannot read the token."), .recheck, "Check Again", .general),
     ]
     for (service, primary, title, page) in table {
       let state = panel(service)
@@ -185,6 +186,19 @@ private func granted(_ state: PanelState) -> [SetupStep] {
       #expect(state.attention?.page == page, "\(service)")
       #expect(state.status == (service == .stopped ? .stopped : .attention), "\(service)")
     }
+  }
+
+  /// 088 #10 and #15: a taken port and a helper that stops at launch each
+  /// say what is wrong, not "Stopped" or "isn't answering".
+  @Test func aTakenPortAndAFailingLaunchSayWhatIsWrong() {
+    let failing = panel(.failing("Cannot read the token."))
+    #expect(failing.attention?.text == "iMessage Max can’t start")
+    #expect(failing.subtitle.hasSuffix("Cannot read the token."))
+    #expect(failing.status == .attention)
+
+    let taken = panel(.portConflict)
+    #expect(taken.attention?.text == "Another app is using iMessage Max’s port")
+    #expect(taken.subtitle.contains("Codex and Claude Desktop still can"))
   }
 
   // MARK: - Status menu

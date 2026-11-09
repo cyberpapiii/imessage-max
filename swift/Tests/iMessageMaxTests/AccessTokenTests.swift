@@ -41,15 +41,36 @@ final class AccessTokenTests: XCTestCase {
         XCTAssertNotEqual(AccessToken.generate().encoded, AccessToken.generate().encoded)
     }
 
-    func testGroupOrWorldReadableFileIsRejectedAndLeftAlone() throws {
-        let original = try AccessToken.loadOrCreate(standard)
+    /// A custom --token-file is the developer's file, so a loose mode stops
+    /// the server and the file is left as it was.
+    func testGroupOrWorldReadableCustomFileIsRejectedAndLeftAlone() throws {
+        try FileManager.default.createDirectory(at: customFolder, withIntermediateDirectories: true)
+        let original = try AccessToken.loadOrCreate(.custom(customFile))
         for mode: mode_t in [0o644, 0o640, 0o604] {
-            XCTAssertEqual(chmod(file.path, mode), 0)
-            XCTAssertThrowsError(try AccessToken.loadOrCreate(standard)) { error in
-                XCTAssertEqual(error as? AccessToken.LoadError, .insecurePermissions(path: file.path, mode: S_IFREG | mode))
+            XCTAssertEqual(chmod(customFile.path, mode), 0)
+            XCTAssertThrowsError(try AccessToken.loadOrCreate(.custom(customFile))) { error in
+                XCTAssertEqual(error as? AccessToken.LoadError, .insecurePermissions(path: customFile.path, mode: S_IFREG | mode))
                 XCTAssertTrue("\(error)".contains("chmod 600"), "\(error)")
             }
-            XCTAssertEqual(try String(contentsOf: file, encoding: .utf8), original.encoded + "\n")
+            XCTAssertEqual(try permissions(customFile.path), Int(mode))
+            XCTAssertEqual(try String(contentsOf: customFile, encoding: .utf8), original.encoded + "\n")
+        }
+    }
+
+    /// The standard token file with a loose mode would stop the helper on
+    /// every launchd relaunch, forever (088 #15). The server tightens its
+    /// own file to 0600, keeps the token, and logs a warning.
+    func testGroupOrWorldReadableStandardFileIsTightenedWithAWarning() throws {
+        let original = try AccessToken.loadOrCreate(standard)
+        for mode: mode_t in [0o644, 0o640, 0o604, 0o666] {
+            XCTAssertEqual(chmod(file.path, mode), 0)
+            let capture = Log.Capture()
+            let token = try Log.$capture.withValue(capture) { try AccessToken.loadOrCreate(standard) }
+
+            XCTAssertEqual(token.encoded, original.encoded, "clients keep working with the same token")
+            XCTAssertEqual(try permissions(file.path), 0o600)
+            XCTAssertEqual(capture.lines.count, 1, "\(capture.lines)")
+            XCTAssertTrue(capture.lines.first?.contains("had mode \(String(mode, radix: 8)); set it to 600") == true, "\(capture.lines)")
         }
     }
 

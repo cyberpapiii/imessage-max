@@ -8,7 +8,7 @@ enum ServerStartup {
         resolver: ContactResolver,
         contactsPolicy: ContactsAccessPolicy.Override
     ) {
-        Log.info("Started version=\(Version.current) pid=\(getpid()) transport=\(transport)")
+        Log.info("\(StartupFailure.startedMarker)\(Version.current) pid=\(getpid()) transport=\(transport)")
 
         let (dbOk, dbStatus) = Database.checkAccess()
         if !dbOk {
@@ -64,26 +64,37 @@ enum ServerStartup {
         let access = MessagesAccess(memory: AutomationMemory(folder: supportFolder))
         let (newRows, newRowsSink) = AsyncStream<MessageWatcher.NewRows>.makeStream()
         let watcher = MessageWatcher(databasePath: Database.defaultPath) { newRowsSink.yield($0) }
+        let listenerState = HTTPListenerState()
         let keepAwake = KeepAwake(folder: supportFolder)
         keepAwake.start()
         defer { keepAwake.stop() }
         let catalog = ToolCatalog(
             database: Database(), resolver: resolver, access: access, liveInbox: { watcher.isLive },
-            keepAwake: keepAwake)
+            http: { listenerState.diagnosis(port: port) }, keepAwake: keepAwake
+        )
         let transport = HTTPTransport(
             host: host,
             port: port,
             accessToken: accessToken,
             catalog: catalog,
-            setupPermissions: SetupPermissionService(resolver: resolver, access: access)
+            setupPermissions: SetupPermissionService(resolver: resolver, access: access),
+            listenerState: listenerState
         )
 
-        try await transport.connect()
+        // Returns once the port listens, or once it is known to be taken. A
+        // taken port keeps the helper up: it serves the socket and retries
+        // the bind, instead of exiting into a launchd relaunch loop (088 #10).
+        let bind: BindOutcome
+        do {
+            bind = try await transport.connect()
+        } catch {
+            Log.error("\(StartupFailure.marker)cannot listen on \(host):\(port): \(error)")
+            throw error
+        }
         stop.onStop { Task { await transport.beginStop() } }
-        // After the HTTP bind, so a second helper on the same port fails
-        // there before it touches the socket.
-        let listener = await startSocketListener(override: socketOverride, catalog: catalog)
-        announce(transport: "http addr=\(host):\(port)", resolver: resolver, contactsPolicy: contactsPolicy)
+        let listener = await startSocketSupervisor(override: socketOverride, catalog: catalog)
+        let httpState = bind == .listening ? "" : " http=port_in_use"
+        announce(transport: "http addr=\(host):\(port)\(httpState)", resolver: resolver, contactsPolicy: contactsPolicy)
 
         Task {
             for await rows in newRows {
@@ -101,28 +112,28 @@ enum ServerStartup {
         await listener?.stop()
     }
 
-    /// Starts the socket every stdio bridge connects to. Each connection is
-    /// its own dual-era session over the shared catalog.
+    /// Starts the socket every stdio bridge connects to, and keeps it
+    /// listening (`SocketSupervisor`). Each connection is its own dual-era
+    /// session over the shared catalog.
     ///
-    /// Best effort: returns nil with one warning on any socket problem, and
-    /// HTTP keeps serving. The helper runs under launchd KeepAlive, so a
-    /// helper that exited over its socket would restart into the same
-    /// problem in a loop and take HTTP down with it.
-    static func startSocketListener(override: String?, catalog: ToolCatalog) async -> SocketListener? {
+    /// Best effort: a socket problem logs one warning, and HTTP keeps
+    /// serving. The helper runs under launchd KeepAlive, so a helper that
+    /// exited over its socket would restart into the same problem in a loop
+    /// and take HTTP down with it. nil only when the path itself is unusable.
+    static func startSocketSupervisor(override: String?, catalog: ToolCatalog) async -> SocketSupervisor? {
+        let socket: SocketPath
         do throws(SocketSetupError) {
-            let socket = try SocketPath.resolve(override: override)
-            return try await SocketListener.start(at: socket) { transport in
-                do {
-                    try await serveStdio(base: transport, catalog: catalog)
-                } catch {
-                    Log.warning("socket session ended: \(error)")
-                }
-            }
-        } catch .inUse(let path) {
-            Log.warning("Another iMessage Max answers on \(path); stdio bridges use it. Serving HTTP only.")
+            socket = try SocketPath.resolve(override: override)
         } catch {
             Log.warning("Serving HTTP only; stdio bridges cannot connect. \(error)")
+            return nil
         }
-        return nil
+        return await SocketSupervisor.start(at: socket) { transport in
+            do {
+                try await serveStdio(base: transport, catalog: catalog)
+            } catch {
+                Log.warning("socket session ended: \(error)")
+            }
+        }
     }
 }

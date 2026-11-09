@@ -32,6 +32,10 @@ public enum ServiceDefaults {
   /// helper holds a PreventUserIdleSystemSleep power assertion. The helper
   /// checks for the file every few seconds, so a change needs no restart.
   public static let keepAwakeFileName = "keep-awake"
+  /// The helper's exit code after a SIGTERM while Keep running is on.
+  /// EX_TEMPFAIL: non-zero, so launchd relaunches the helper, and a code the
+  /// companion reads as a clean stop, not as a failing launch.
+  public static let relaunchExitCode: Int32 = 75
   /// The SHA-256, in hex, of the agent plist the companion last registered,
   /// beside the token file like `stayStoppedFileName`. SMAppService keeps a
   /// registered job on the plist it first loaded, so the companion compares
@@ -85,6 +89,27 @@ public enum ServerOption: String, CaseIterable, Sendable {
       return nil
     }
     self = option
+  }
+}
+
+/// The helper's log lines that tell the companion why launchd keeps
+/// restarting it. A helper that cannot start logs one `marker` line, then
+/// exits non-zero; one that starts logs `startedMarker`.
+public enum StartupFailure {
+  public static let marker = "Startup failed: "
+  public static let startedMarker = "Started version="
+
+  /// The reason from the last startup in `log`, nil when that startup did
+  /// not fail or the text holds no startup line.
+  public static func reason(inLog log: String) -> String? {
+    for line in log.split(whereSeparator: \.isNewline).reversed() {
+      if let range = line.range(of: marker) {
+        let reason = line[range.upperBound...].trimmingCharacters(in: .whitespaces)
+        return reason.isEmpty ? nil : reason
+      }
+      if line.contains(startedMarker) { return nil }
+    }
+    return nil
   }
 }
 
