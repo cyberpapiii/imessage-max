@@ -6,6 +6,8 @@ struct SchemaCapabilities: Sendable, Equatable {
         case messageThreadOriginatorGuid = "message.thread_originator_guid"
         case messageThreadOriginatorPart = "message.thread_originator_part"
         case messageDateEdited = "message.date_edited"
+        case messageDateRetracted = "message.date_retracted"
+        case messageSummaryInfo = "message.message_summary_info"
         case messageAssociatedMessageEmoji = "message.associated_message_emoji"
         case messageDateRead = "message.date_read"
         case messageIsDelivered = "message.is_delivered"
@@ -63,6 +65,16 @@ struct SchemaCapabilities: Sendable, Equatable {
     }
     var dateEditedSQL: String {
         has(.messageDateEdited) ? "m.date_edited" : "0 AS date_edited"
+    }
+    var dateRetractedSQL: String {
+        has(.messageDateRetracted) ? "m.date_retracted" : "0 AS date_retracted"
+    }
+    /// Messages clears `text` on an edited or unsent row, so only those rows
+    /// need the blob.
+    var summaryInfoSQL: String {
+        has(.messageSummaryInfo)
+            ? "CASE WHEN m.text IS NULL THEN m.message_summary_info END AS message_summary_info"
+            : "NULL AS message_summary_info"
     }
     var associatedMessageEmojiSQL: String {
         has(.messageAssociatedMessageEmoji) ? "m.associated_message_emoji" : "NULL AS associated_message_emoji"
