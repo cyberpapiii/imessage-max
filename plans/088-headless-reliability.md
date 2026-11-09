@@ -1,6 +1,6 @@
 # 088: Headless reliability
 
-Status: IN PROGRESS (2026-11-08). Each fix unit below ships as its own PR; update this header as they land. Units 1-2: PR #48 (one PR for both). Units 3-4: PR #50 (one PR for both). Unit 5: PR #54. Unit 6: PR #49. Unit 7: PR #52. Unit 8: PR #51. Unit 11: PR #53.
+Status: IN PROGRESS (2026-11-08). Each fix unit ships as its own PR and is marked under Fix plan below.
 
 Source: a seven-area audit (login sessions and power, TCC, Messages lifecycle, send path, read path, service runtime, install and multi-user) run on 2026-11-08 against main at 3edd8b7, with a lead review that re-read the cited code for every high finding. Rules for every executor: never send a real message, never disturb the installed helper (use a test variant per AGENTS.md), no full-screen captures.
 
@@ -72,7 +72,7 @@ Each item is one PR, in the order to ship them.
 10. **Diagnose tells the truth** (#18, #24, #20, #25). Report `live_inbox` per lane. Report `attachments_offloaded` as `degraded` and stop telling agents to retry. Report the `sleep` setting from `IOPMCopyActivePMPreferences`, and add an opt-in keep-awake assertion. Add `max_age` and a `late` flag to `get_messages_since`. Effort: small to medium.
 11. **Headless and fleet docs** (#6, #21, #34, #39). **In review: PR #53** (`docs/headless.md`, `docs/fleet.md`, `docs/uninstall.md`); the bridge half shipped in PR #51. Add a README section on headless Macs, a PPPC/Managed Login Items doc keyed to `com.cyberpapiii.imessage-max.menubar` and team HJF7LN64XX, and an uninstall doc with `--unregister-helper` and the `tccutil reset` zap line. When the bridge finds no socket, it checks for a console user and explains that someone must be logged in to the desktop. Effort: small.
 12. **Update hygiene** (#19, AG). The helper watches its own executable inode and exits 75 when idle after a replacement. The companion runs `restartIfOutdated` on each periodic check, including when the helper is not answering. `make install` waits for a new pid before verify. Effort: medium.
-13. **Read and service polish** (#26, #30, #31, #33, #35, #37, #38). Reload Contacts in the background. Use monotonic clocks for sessions. Rotate the log periodically. At the session cap, evict the least-recently-active session and log it. Read a 4-byte length for typedstream 0x82. Page fuzzy search within a time budget. Use a lowercase attributedBody prefilter. Effort: small each.
+13. **Read and service polish** (#26, #30, #31, #33, #35, #37, #38). **In review: PR #55**, which also fixes the cursor predicate that sorted every older row for each page. Reload Contacts in the background. Use monotonic clocks for sessions. Rotate the log periodically. At the session cap, evict the least-recently-active session and log it. Read a 4-byte length for typedstream 0x82. Page fuzzy search within a time budget. Use a lowercase attributedBody prefilter. Effort: small each.
 
 ## Running iMessage Max on a headless Mac
 What an operator must do that code cannot:

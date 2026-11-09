@@ -34,6 +34,13 @@ actor ContactResolver {
     private var hasLastGoodCache = false
     private var lastLoadFailed = false
     private var accessRequestSkippedHeadless = false
+    /// The reload running off the actor, if any. Requests keep using `cache`
+    /// until it finishes and swaps the new names in.
+    private var reloadTask: Task<Void, Never>?
+    private var reloadAgain = false
+    /// Bumped whenever the names are cleared, so a reload that began before
+    /// access was revoked cannot put them back.
+    private var generation = 0
     nonisolated(unsafe) private var changeObserver: (any NSObjectProtocol)?
 
     init(region: String? = PhoneUtils.currentRegion) {
@@ -110,6 +117,12 @@ actor ContactResolver {
         invalidated = true
     }
 
+    /// Reloads the names when they are older than `refreshInterval`, when
+    /// Contacts changed, or when access changed. Only the first load, which
+    /// has nothing to answer with yet, runs on the request path. Every later
+    /// one runs off the actor while requests use the last good names (088
+    /// #26: a reload of 1.7k contacts held every request for about 0.5 s
+    /// every 30 s). Revoked access clears the names at once.
     private func refresh() {
         checkedAt = now()
         let (authorized, _) = source.authorization()
@@ -121,21 +134,70 @@ actor ContactResolver {
         loadedAt = now()
         lastAuthorized = authorized
         isInitialized = true
-        lastLoadFailed = false
 
         guard authorized else {
+            generation += 1
             cache.removeAll()
             hasLastGoodCache = false
+            lastLoadFailed = false
             return
         }
-        do {
-            cache = try source.load()
-            hasLastGoodCache = true
-        } catch {
-            Log.warning("Contacts: refresh failed, keeping \(cache.count) cached names: \(error.localizedDescription)")
-            if !hasLastGoodCache {
-                lastLoadFailed = true
+        if hasLastGoodCache {
+            startBackgroundReload()
+        } else {
+            apply(Result { try source.load() })
+        }
+    }
+
+    private func startBackgroundReload() {
+        guard reloadTask == nil else {
+            reloadAgain = true
+            return
+        }
+        let source = source
+        let generation = generation
+        reloadTask = Task {
+            let result = await withCheckedContinuation { continuation in
+                Self.loadQueue.async { continuation.resume(returning: Result { try source.load() }) }
             }
+            finishReload(result, generation: generation)
+        }
+    }
+
+    private func finishReload(_ result: Result<[String: String], any Error>, generation: Int) {
+        reloadTask = nil
+        guard generation == self.generation, lastAuthorized else {
+            reloadAgain = false
+            return
+        }
+        apply(result)
+        if reloadAgain {
+            reloadAgain = false
+            startBackgroundReload()
+        }
+    }
+
+    private func apply(_ result: Result<[String: String], any Error>) {
+        switch result {
+        case .success(let names):
+            cache = names
+            hasLastGoodCache = true
+            lastLoadFailed = false
+        case .failure(let error):
+            Log.warning("Contacts: refresh failed, keeping \(cache.count) cached names: \(error.localizedDescription)")
+            lastLoadFailed = !hasLastGoodCache
+        }
+    }
+
+    /// Contacts reads block, so they run here and never on a Swift
+    /// concurrency thread.
+    private static let loadQueue = DispatchQueue(label: "com.cyberpapiii.imessage-max.contacts-load", qos: .utility)
+
+    /// Waits for a reload running off the actor. Tests use it to observe the
+    /// swap.
+    func waitForPendingReload() async {
+        while let task = reloadTask {
+            await task.value
         }
     }
 

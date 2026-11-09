@@ -24,6 +24,9 @@
 - A token file in `~/Library/Application Support/iMessage Max/` that other users can read (for example mode 644 after a restore) is set to 600 with a warning in the log, instead of stopping the helper at every launch. A `--token-file` with such a mode still stops the server.
 - A helper that cannot start logs one `Startup failed: <reason>` line before it exits.
 - The helper checks its socket file every 30 s and listens again when the file was deleted, or when another helper held it at launch and has since gone. Open stdio sessions keep working.
+- HTTP session idle time is measured on the uptime clock, which a clock change cannot move and which stops while the Mac sleeps. Before, it used the wall clock, so an hour's sleep or a clock change expired every session and made each client start again, and a clock set back kept dead sessions. Time asleep does not count, because the clients on the same Mac slept too.
+- At the cap of 512 HTTP sessions, a new client gets a session and the least recently active one is closed, with one log line naming it. Its client gets 404 and starts a new session, as MCP clients do. Before, every new client got 503 until some session had been idle 5 minutes, and nothing was logged. Sessions idle over 5 minutes are still closed first, with a log line.
+- The log file (`~/Library/Logs/iMessage Max/imessage-max.log`) is checked every minute and moves to `imessage-max.log.1` once it passes 10 MB, as it did only at startup before, so a helper that runs for months no longer grows it without bound. A log someone deleted or moved is opened again at the next check.
 
 ### Docs
 
@@ -57,6 +60,11 @@
 - A `failed_delivery` text sent after files reports `retry_safe: false` and says to resend only the text, since retrying the whole call would send the files again. A `partial_failure` whose failed payload may have gone out says to check before retrying it.
 - `diagnose` fixes for the helper inside the app name the permission by its System Settings name, such as "Open iMessage Max and turn on Full Disk Access." `assistant_calls` is unchanged.
 - `diagnose` from the HTTP helper, on any lane, has an `http` field: `port`, `state` (`starting`, `listening` or `port_in_use`) and, while the port is taken, a `fix`. A `--direct` stdio server leaves it out.
+- Contacts reload in the background. Every 30 s, and when Contacts change, the helper used to read every contact while holding all name lookups, so each request waited for the read (about 0.5 s with 1,700 contacts). Requests now use the last names read until the new read is done. Only the very first read, with no names yet, is waited for, and revoked Contacts access still clears the names at once.
+- Messages of 32 KB or more show their text. The length of such a message's text in attributedBody is a 4-byte number, and it was read as 3 bytes, so the text came back empty or shifted by one byte.
+- `search` keeps reading past its first 500 messages within 3 s, so a fuzzy search, or an any-word search of more than 8 words, finds a match further back in one call. Before, it checked only the newest 500 messages and answered `total: 0`. When the 3 s run out first, the answer has `partial: true` and `searched_to`, the time of the last message it checked, with `more: true` and a cursor that carries on from there.
+- `search`, `get_messages` with `contains`, `get_context` and `find_chat` match text stored only in attributedBody in any letter case: "iphone" now finds "iPhone". Before, only the all-lower, Capitalized and ALL-CAPS forms matched. The new check is also faster (0.21 s against 0.34 s over 500,000 messages).
+- Paging with a cursor no longer sorts every older message for each page. `search`, `get_messages` and the other tools that take a cursor walk the date index from the cursor: 2 ms a page against 0.9 s over 500,000 messages.
 
 ## 2.0.0
 
