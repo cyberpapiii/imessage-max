@@ -431,12 +431,12 @@ One more note on sends:
 
 After a text send, the server checks chat.db for the sent message. Each `status` means:
 - `status: "confirmed"` means the server found the outbound row in chat.db within the verification window, with no error. `verified_message_guid` is the evidence. It is not a delivery receipt.
-- `status: "uncertain"` means the transport accepted the send, but the server did not find the row within the polling window. Follow up with `get_messages`.
+- `status: "uncertain"` means the server did not find the row within the polling window, either after the transport accepted the send or after Messages failed or timed out once the send had begun (`disposition: "may_have_completed"`, with the error). The message may have been sent. Follow up with `get_messages` before any resend.
 - `status: "mismatch"` means the message went to a different chat than intended. Do not treat it as success.
 - `status: "failed_delivery"` means the server found the message row with a delivery error recorded. The message did not deliver, and `verified_message_guid` plus the error code are the evidence.
 - `status: "partial_failure"` means a multi-payload send dispatched some payloads before a later one failed. `message` lists what was dispatched and what failed. Retry only the failed payload, never the whole call.
 - `status: "sent"` means verification was unavailable because the database was unreadable. The only evidence is that the transport accepted the send.
-- `status: "pending_confirmation"` means Messages accepted an attachment send, but the server could not confirm within the polling window that the file transfer finished.
+- `status: "pending_confirmation"` means Messages accepted an attachment send, but the server could not confirm within the polling window that the file transfer finished. When text went with the file, `text_status` is the text's own result.
 - `status: "failed"` means the send failed.
 - `status: "ambiguous"` means the server could not resolve the target safely: several contacts match, or the one matching contact's number or email has no conversation in Messages. `candidates` lists the matches, and nothing was sent.
 
@@ -446,8 +446,9 @@ Every `send` response also carries `disposition` and `retry_safe`. `disposition`
 
 | status | disposition | retry_safe |
 |---|---|---|
-| confirmed, uncertain, mismatch, sent | `completed` | `false` |
-| failed_delivery | `completed` | `true` |
+| confirmed, mismatch, sent | `completed` | `false` |
+| uncertain | `completed`, or `may_have_completed` after a Messages error | `false` |
+| failed_delivery | `completed` | `true`, or `false` when files went with the text |
 | pending_confirmation | `may_have_completed` | `false` |
 | failed (transport) | from the send | `true` only when `not_started` |
 | failed (validation / resolution) | `not_started` | `true` |
@@ -456,12 +457,13 @@ Every `send` response also carries `disposition` and `retry_safe`. `disposition`
 
 ```json
 {"status":"failed","disposition":"not_started","retry_safe":true,"error":"Could not find chat 'iMessage;-;does-not-exist' in Messages.app."}
-{"status":"failed","disposition":"may_have_completed","retry_safe":false,"error":"Send operation timed out. Messages.app may be unresponsive."}
+{"status":"uncertain","disposition":"may_have_completed","retry_safe":false,"error":"Send operation timed out. Messages.app may be unresponsive.","message":"Messages.app did not acknowledge the send, and the message did not appear in chat.db within the verification window. The message may still have been sent, so do not resend it blindly. ..."}
 ```
 
 Notes:
 - `pending_confirmation` is a normal, non-fatal attachment state. It is not a hard failure.
 - A send by `chat_id` goes to the existing conversation with that id.
+- A send by `to` goes through the person's existing 1:1 chat, whatever its service (iMessage, SMS or RCS), choosing the one with the newest message. Only a person with no 1:1 chat is sent to over iMessage.
 - JSON-shaped tools return MCP `structuredContent` as well as legacy text content for older clients.
 
 Examples:
