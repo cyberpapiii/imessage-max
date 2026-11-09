@@ -22,7 +22,7 @@ There is one Swift implementation, in `swift/`. It ships as:
 
 ## Features
 
-- 13 tools, each shaped around a question people ask rather than around a database table
+- 14 tools, each shaped around a question people ask rather than around a database table
 - Phone numbers resolve to names through macOS Contacts
 - Three image variants: vision (1568px), thumb (400px), and full (original), so an agent can fetch a photo below full size
 - A gap of 4 hours or more starts a new message session
@@ -311,6 +311,49 @@ To poll, call once without `since_rowid` and store `next_rowid`. Then call with 
 
 Messages in iCloud can sync old history into `chat.db` long after it was sent, for example on a newly set-up Mac. Those rows get new ROWIDs, so they come after your cursor. A message with `late: true` is such history: its date is more than an hour older than the newest of the rows already in `chat.db` before it. Do not treat it as new mail. Messages that arrive after the Mac wakes from sleep are dated after the rows before them, so they are not marked late. On a legacy HTTP session the `notifications/imessage/new_messages` notification carries `late: true` when every new row is late.
 
+### wait_for_messages
+Wait for a reply in one call. It blocks until a new message that matches the filters arrives, then returns it, or returns `status: "timeout"` when none arrives in time. It answers "tell me when Sam replies" without a polling loop, on every transport and protocol era. MCP clients such as Claude Code and Codex do not act on the server's `notifications/imessage/new_messages`, so before this tool an agent had to poll `get_messages_since`.
+
+```text
+wait_for_messages(from_person="Sam")                          # Sam's next message, in any chat
+wait_for_messages(chat_id="chat123", since_rowid=234000)      # Anything new in one chat after the cursor
+wait_for_messages(since_rowid=234000, include_from_me=True)   # Count my own messages too
+```
+
+| Parameter | Type | Default | Meaning |
+|-----------|------|---------|---------|
+| `since_rowid` | integer | omitted | Exclusive ROWID cursor, such as `next_rowid` from this tool or `get_messages_since`. Omit it to wait for messages that arrive after the call starts. |
+| `chat_id` | string | omitted | Only messages in this chat (`chat123` or `123`) |
+| `from_person` | string | omitted | Only messages from this person: a name, phone number, email, or `me` |
+| `include_from_me` | boolean | false | Also count messages I send. `from_person` overrides it: a person's messages never include mine to them. |
+| `include_filtered` | boolean | false | Include junk / unknown-sender chats |
+| `timeout` | integer | 30 | Seconds to wait (1–50) |
+| `limit` | integer | 100 | Maximum messages to return (1–500) |
+
+The response is the `get_messages_since` response plus `status`:
+
+```json
+{
+  "status": "messages",
+  "since_rowid": 101,
+  "messages": [
+    {"id": "msg_102", "rowid": 102, "chat": {"id": "chat2", "name": "Weekend"},
+     "from": "Bob Brown", "text": "on my way", "ts": "2026-11-09T21:09:57Z"}
+  ],
+  "next_rowid": 102,
+  "has_more": false,
+  "current_rowid": 102,
+  "stalled": false,
+  "filtered_hidden": 0
+}
+```
+
+`status` is `messages` when at least one message matched, `timeout` when none did, or `stopping` when the helper began to stop or restart for an update while the call waited. In every case, pass `next_rowid` back as `since_rowid` to keep waiting: rows the filters skipped are behind it, and rows that arrive between calls are ahead of it, so nothing is missed. The cursor is the same one `get_messages_since` uses.
+
+Reactions do not end a wait, and neither does late-synced history (see `late` above). The wait ends at once when the client cancels the call (`notifications/cancelled`), and when the helper drains on SIGTERM, SIGUSR1, or an installed update, so a wait never delays a restart. At most 32 calls wait at a time; past that a call fails with `too_many_waits`.
+
+The 50 s ceiling stays under Codex's default 60 s tool timeout (`tool_timeout_sec`) and the helper's 60 s idle connection timeout. Claude Code allows about 28 hours by default. Through plug, keep this server's `call_timeout_secs` above 50. Plug's per-server `max_concurrent` caps the calls it sends to this server at once, so at `1` a wait holds back every other iMessage call through plug until it returns. Raise it if agents wait while doing other work.
+
 ### get_attachment
 Retrieve image content by attachment ID with resolution variants.
 
@@ -426,7 +469,7 @@ diagnose()  # Returns: database status, contacts count, permissions, capabilitie
 
 Every `fix` for the helper inside `iMessage Max.app` names a permission in the app, such as "Open iMessage Max and turn on Full Disk Access." The permissions are Background activity, Full Disk Access, Contacts and Automation. For a bare executable, a fix names the System Settings switch to turn on. No fix names a terminal command.
 
-`capabilities.live_inbox` describes the connection that calls `diagnose`. Only a legacy HTTP session receives `notifications/imessage/new_messages`, so only there is it `supported` (detail `session_sse`). On stdio and on the stateless 2026-07-28 lane it is `unsupported`, with detail `poll_only` while the helper's watcher runs or `watcher_not_running`: poll `get_messages_since` instead.
+`capabilities.live_inbox` describes the connection that calls `diagnose`. Only a legacy HTTP session receives `notifications/imessage/new_messages`, so only there is it `supported` (detail `session_sse`). On stdio and on the stateless 2026-07-28 lane it is `unsupported`, with detail `poll_only` while the helper's watcher runs or `watcher_not_running`. Call `wait_for_messages`, or poll `get_messages_since`, instead.
 
 `power` says whether the Mac sleeps while idle, which stops the endpoint and the live inbox. `status` is `stays_awake`, `idle_sleep` (with `sleep_minutes` and a `fix`) or `unknown`. `keep_awake` is the companion's Keep this Mac awake setting and `assertion_held` whether the helper holds its power assertion now.
 
