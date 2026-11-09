@@ -90,11 +90,14 @@ struct iMessageMax: AsyncParsableCommand {
         // which Log drops, not kill the helper.
         signal(SIGPIPE, SIG_IGN)
         let stop = GracefulStop()
+        let update = UpdateWatcher.forThisProcess()
         try await ServerStartup.runHTTP(
             host: host, port: port, accessToken: accessToken, contactsPolicy: contactsPolicy,
-            socketOverride: socketPath, supportFolder: supportFolder, stop: stop
+            socketOverride: socketPath, supportFolder: supportFolder, stop: stop, update: update
         )
-        let code = KeepRunning.exitCode(folder: supportFolder, stopRequested: stop.wasRequested)
+        let code = KeepRunning.exitCode(
+            folder: supportFolder, stopRequested: stop.wasRequested,
+            updateInstalled: update?.requestedRestart == true)
         Log.info("Stopped exit=\(code)")
         if code != 0 { throw ExitCode(code) }
     }

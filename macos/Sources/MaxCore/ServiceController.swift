@@ -82,14 +82,40 @@ public actor ServiceController {
 
   /// After an update the running helper is the old binary, and launchd may
   /// hold the old plist, until it restarts. The restart registers again
-  /// only when the plist changed.
+  /// only when the plist changed. The companion runs this at launch and on
+  /// each periodic check, so an update takes effect without anyone opening
+  /// the app (088 #19).
   public func restartIfOutdated() async throws -> ServiceState {
     let state = await inspect()
-    guard let pid = state.diagnosis?.processID else { return state }
-    if definitionIsCurrent, await !system.isOutdated(pid: pid, executable: configuration.helper) {
-      return state
-    }
+    guard await outdated(state) != nil else { return state }
     return try await perform(.restart)
+  }
+
+  public enum Outdated: Sendable, Equatable {
+    /// launchd runs a process older than the executable on disk. The helper
+    /// notices this itself and restarts when idle.
+    case binary
+    /// launchd holds an older plist than the app bundles. Only a new
+    /// registration, which takes the app, loads it.
+    case definition
+  }
+
+  /// Why `state` is a helper an update left behind, answering or not, or nil
+  /// when it is not. A stopped helper stays stopped, and starts on the new
+  /// binary and plist when someone starts it.
+  public func outdated(_ state: ServiceState) async -> Outdated? {
+    switch state {
+    case .running, .unresponsive, .tokenRejected:
+      guard let pid = await system.job(label: configuration.label)?.pid else { return nil }
+      if !definitionIsCurrent { return .definition }
+      return await system.isOutdated(pid: pid, executable: configuration.helper) ? .binary : nil
+    case .failing:
+      // Each launch already runs the new binary. A changed plist needs a
+      // registration, and may be why the launches fail.
+      return definitionIsCurrent ? nil : .definition
+    default:
+      return nil
+    }
   }
 
   /// The helper started under the plist's 10 second ThrottleInterval ago. A

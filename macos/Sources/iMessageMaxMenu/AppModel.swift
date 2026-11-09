@@ -39,6 +39,12 @@ final class AppModel {
   @ObservationIgnored private var sleeping = false
   @ObservationIgnored private var generation = 0
   @ObservationIgnored private var noticeTimer: DispatchWorkItem?
+  /// When `periodicCheck` first saw the helper on an old binary, and when
+  /// it last restarted an outdated helper.
+  @ObservationIgnored private var outdatedSince: ContinuousClock.Instant?
+  @ObservationIgnored private var lastUpdateRestart: ContinuousClock.Instant?
+  @ObservationIgnored private let updateGrace: Duration
+  private static let updateRetry: Duration = .seconds(600)
   /// nil when this copy of the app has no valid agent plist.
   @ObservationIgnored private let controller: ServiceController?
   @ObservationIgnored private let milestones: Milestones
@@ -58,13 +64,15 @@ final class AppModel {
   init(
     controller: ServiceController?, milestones: Milestones,
     clientContext: ClientContext? = nil,
-    changeDeadline: Double = 60, permissionDeadline: Double = 180
+    changeDeadline: Double = 60, permissionDeadline: Double = 180,
+    updateGrace: Duration = .seconds(180)
   ) {
     self.controller = controller
     self.milestones = milestones
     self.clientContext = clientContext
     self.changeDeadline = changeDeadline
     self.permissionDeadline = permissionDeadline
+    self.updateGrace = updateGrace
     keepRunning = controller.map { KeepRunningSetting(configuration: $0.configuration).isOn }
     let tried = milestones.reached(.triedAssistant)
     self.tried = tried
@@ -112,7 +120,7 @@ final class AppModel {
     let timer = DispatchSource.makeTimerSource(queue: .main)
     timer.schedule(deadline: .now() + 60, repeating: 60, leeway: .seconds(10))
     timer.setEventHandler { @Sendable [weak self] in
-      Task { @MainActor [weak self] in await self?.refresh() }
+      Task { @MainActor [weak self] in await self?.periodicCheck() }
     }
     self.timer = timer
     timer.resume()
@@ -163,6 +171,33 @@ final class AppModel {
       await actionTask?.value
       NSApp.terminate(nil)
     }
+  }
+
+  /// The minute timer's check. It also moves a helper an update left on the
+  /// old binary or plist to the new one, whether or not that helper answers,
+  /// so an update takes effect while the companion runs in the background
+  /// (088 #19). The helper restarts itself for a new binary once idle, so the
+  /// companion gives it `updateGrace` first; only the companion can load a
+  /// changed plist, so that restarts at once. At most one try per
+  /// `updateRetry`, so a restart that cannot fix it does not repeat each minute.
+  func periodicCheck() async {
+    await refresh()
+    guard let controller, let service, busy == nil, !sleeping else { return }
+    guard let reason = await controller.outdated(service) else {
+      outdatedSince = nil
+      return
+    }
+    let now = ContinuousClock.now
+    if reason == .binary {
+      let since = outdatedSince ?? now
+      outdatedSince = since
+      guard now - since >= updateGrace else { return }
+    }
+    if let tried = lastUpdateRestart, now - tried < Self.updateRetry { return }
+    lastUpdateRestart = now
+    outdatedSince = nil
+    log.notice("The helper is older than this app (\(String(describing: reason), privacy: .public)); restarting it")
+    change(.starting) { try await $0.restartIfOutdated() }
   }
 
   /// A caller that arrives during a check waits for that check, so it acts

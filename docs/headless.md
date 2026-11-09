@@ -119,7 +119,7 @@ The app opens its Settings window on Permissions. Turn on each permission while 
 
 System Settings lists each one as "iMessage Max". On many Macs, an MDM profile can grant all of these without clicks. See [fleet.md](fleet.md).
 
-On the iMessage Max page of Settings, consider turning on **Open at login**. The helper runs without the companion. But `brew upgrade --cask` restarts the helper on the new binary only when the companion is running (see [Update](#update)).
+On the iMessage Max page of Settings, consider turning on **Open at login**. The helper runs without the companion, and moves to a new binary on its own after an update. Only the companion can load a launchd plist that an update changed, and with Open at login it does that by itself (see [Update](#update)).
 
 ## Sign in to iMessage once
 
@@ -153,9 +153,26 @@ With Homebrew:
 brew upgrade --cask imessage-max
 ```
 
-If the companion was running, brew quits and reopens it, and the reopened companion restarts the helper on the new binary. If it was not running, the old helper keeps running until something restarts it.
+You do not need to open the app. The helper reads its own executable every 5 seconds. When an update replaces it, the helper waits until no tool call is running (at most 2 minutes), stops with exit code 75, and launchd starts the new binary about a second later. This works with the companion closed and with Keep running off. The helper log shows:
 
-To move the helper to the new binary from SSH, quit the companion, then open the app with `--register-helper`:
+```
+INFO Executable replaced on disk at /Applications/iMessage Max.app/Contents/MacOS/imessage-max; waiting for the copy to finish
+INFO Update installed; stopping so launchd starts the new binary
+INFO Stopped exit=75
+INFO Started version=<new version> pid=<new pid> ...
+```
+
+If the companion is running, brew quits and reopens it, and it also checks every minute for a helper older than the app, answering or not.
+
+Some updates also change the helper's launchd plist. launchd keeps the plist it loaded when the helper was registered, and only the app can load the new one. The helper still moves to the new binary on its own, then logs this warning:
+
+```
+WARN This update changed the helper's launchd plist, and launchd still runs the helper under the old one. Open iMessage Max, or run: open "/Applications/iMessage Max.app" --args --register-helper
+```
+
+When you see it, open the app over Screen Sharing, or run the two commands below from SSH. A companion that is running does this by itself within a minute.
+
+To restart the helper on the new binary and plist from SSH at once, quit the companion, then open the app with `--register-helper`:
 
 ```sh
 pkill -x iMessageMaxMenu
@@ -166,7 +183,7 @@ Quit the companion first. While it runs, `open --args` reaches the running copy 
 
 `open` from SSH reaches the desktop session only when you SSH in as the user who is logged in to the desktop. **Not verified:** this on a Mac with no display or with a dummy display plug.
 
-For a DMG update, replace the app as in [Install](#install), then run the two commands above.
+For a DMG update, replace the app as in [Install](#install). The helper moves to the new binary on its own; run the two commands above only if the log shows the plist warning.
 
 Stdio clients (Codex, Claude Desktop) reconnect on their own after a helper restart. The bridge waits up to 15 seconds for the helper.
 
@@ -270,7 +287,7 @@ Each start logs one `Started version=… pid=… transport=http addr=127.0.0.1:4
 
 **`get_attachment` returns `attachment_offloaded` for old files.** The file is only in iCloud. See [Keep attachments on disk](#keep-attachments-on-disk).
 
-**`diagnose` reports an older version after an update.** The old helper is still running. Run the two commands in [Update](#update).
+**`diagnose` reports an older version after an update.** The old helper is still running, usually because a tool call is still running (the helper waits for it up to 2 minutes) or the copy of the app has not finished. Check the log for `Executable replaced on disk`. If it does not change within a few minutes, run the two commands in [Update](#update).
 
 ## Not verified yet
 

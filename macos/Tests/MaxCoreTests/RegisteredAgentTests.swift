@@ -160,3 +160,63 @@ import Testing
     #expect(!controller.definitionIsCurrent)
   }
 }
+
+/// The companion's periodic check restarts a helper an update left behind
+/// whether or not it answers, and leaves a stopped one alone (088 #19).
+@Suite struct OutdatedHelperTests {
+  private func controller(_ system: FakeServiceSystem, home: URL) throws -> ServiceController {
+    let controller = ServiceController(
+      configuration: try configuration(home: home), system: system, home: home)
+    try RegisteredAgent(configuration: controller.configuration).save()
+    return controller
+  }
+
+  @Test func aHelperThatStoppedAnsweringOnTheOldBinaryIsRestarted() async throws {
+    let home = try temporaryHome()
+    defer { try? FileManager.default.removeItem(at: home) }
+    let system = FakeServiceSystem()
+    await system.startRunning()
+    await system.set {
+      $0.answering = false
+      $0.outdated = true
+    }
+    let controller = try controller(system, home: home)
+    let state = await controller.inspect()
+    #expect(state == .unresponsive)
+    #expect(await controller.outdated(state) == .binary)
+
+    // The new helper does not answer either, so the wait for it runs out,
+    // but the restart was made.
+    _ = try? await controller.restartIfOutdated()
+    #expect(await system.commands == [.kickstart(label: controller.configuration.label, restart: true)])
+  }
+
+  @Test func aStoppedHelperIsNeverOutdated() async throws {
+    let home = try temporaryHome()
+    defer { try? FileManager.default.removeItem(at: home) }
+    let system = FakeServiceSystem()
+    await system.set {
+      $0.agent = .enabled
+      $0.outdated = true
+    }
+    let controller = try controller(system, home: home)
+    #expect(await controller.inspect() == .stopped)
+    #expect(await controller.outdated(.stopped) == nil)
+  }
+
+  @Test func aFailingHelperUnderAnOldPlistIsRegisteredAgain() async throws {
+    let home = try temporaryHome()
+    defer { try? FileManager.default.removeItem(at: home) }
+    let system = FakeServiceSystem()
+    await system.startRunning()
+    await system.set { $0.launchFailure = (exitCode: 1, logged: "bad plist") }
+    let controller = ServiceController(
+      configuration: try configuration(home: home), system: system, home: home)
+    let state = await controller.inspect()
+    #expect(state == .failing("bad plist"))
+    #expect(await controller.outdated(state) == .definition)
+
+    try RegisteredAgent(configuration: controller.configuration).save()
+    #expect(await controller.outdated(state) == nil, "each launch already runs the new binary")
+  }
+}

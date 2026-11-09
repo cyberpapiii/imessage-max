@@ -32,10 +32,17 @@ enum ToolCallDispatch {
     /// companion shows a one-time notice when it first rises above zero.
     static let assistantCalls = Mutex(0)
 
+    /// The tools/call requests running now, on every lane. A helper whose
+    /// executable an update replaced waits for this to reach zero before
+    /// it stops (`UpdateWatcher`).
+    static let callsInFlight = Mutex(0)
+
     static func execute(
         name: String, arguments: [String: Value]?, lane: Lane, catalog: ToolCatalog, fromCompanion: Bool = false
     ) async -> Execution {
         if !fromCompanion { assistantCalls.withLock { $0 += 1 } }
+        callsInFlight.withLock { $0 += 1 }
+        defer { callsInFlight.withLock { $0 -= 1 } }
         let start = ContinuousClock.now
         let (execution, outcome) = await run(name, catalog.handler(named: name), arguments: arguments)
         let elapsed = ContinuousClock.now - start
