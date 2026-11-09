@@ -209,6 +209,8 @@ Use `chat_id` values such as `chat123` as internal handles for follow-up tool ca
   `search(query="launch timeline")`, then `get_context(message_id="msg_123", before=5, after=10)`
 - Discover attachments before fetching them:
   `list_attachments(chat_id="chat123", type="image")`, then `get_attachment(attachment_id="att123", variant="vision")`
+- Message someone you have never texted:
+  `find_contact(query="Sam")`, then `send(to="+15550000009", text="Hi")`
 - Resolve an exact target before sending:
   `find_chat(participants=["Contact A", "Contact B"])`, then `send(chat_id="chat456", text="Please use the latest draft")`
 

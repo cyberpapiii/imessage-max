@@ -46,6 +46,9 @@ Most iMessage tools expose raw database structures, so one user request takes 3 
 
 "Find where we discussed the launch timeline"
 → search(query="launch timeline")
+
+"Text Sam that I'm running late" (never messaged before)
+→ send(to="Sam", text="Running late")
 ```
 
 ## Common agent workflows
@@ -90,6 +93,15 @@ get_attachment(attachment_id="att123", variant="vision")
 ```
 
 Use `list_attachments` to find the message where files were shared. It returns exact attachment ids and says whether each file is on disk, so you know before you fetch.
+
+### Message someone new
+
+```text
+find_contact(query="Sam")
+send(to="+15550000009", text="Hi, it's Rob from the climbing gym")
+```
+
+Use this when a name may match more than one person, or when the person has a number and an email. `find_contact` reads Contacts, so it finds people you have never messaged. `send(to="Sam")` alone works when only one number or email in Contacts matches.
 
 ### Send with exact targeting when it matters
 
@@ -217,6 +229,30 @@ find_chat(name="Project Group")                    # Find by chat name
 find_chat(contains_recent="latest draft")          # Find by recent content
 find_chat(name="Project Group", include_filtered=True)  # Also search junk / unknown-sender chats
 ```
+
+### find_contact
+Look up a person in Contacts by name, phone number, or email, including people you have never messaged.
+
+```text
+find_contact(query="Sam")             # Every contact whose name has a word starting with "sam"
+find_contact(query="(555) 000-0001")  # The contact that owns this number
+find_contact(query="Sam", limit=10)   # Default 5, max 25
+```
+
+```json
+{
+  "contacts": [
+    {"name": "Sam Lee", "handles": [
+      {"handle": "+15550000001", "chat_id": "chat1", "last_contact": "3d ago"},
+      {"handle": "sam@example.com", "last_contact": "Sep 30"}
+    ]},
+    {"name": "Samira Khan", "handles": [{"handle": "+15550000009"}]}
+  ],
+  "more": false
+}
+```
+
+Each contact lists every number and email it has. A handle with a 1:1 chat carries that `chat_id`, the chat `send(to=handle)` would use. `last_contact` is the newest message from or to the handle in any chat. A handle with neither has never been in Messages, and `send(to=handle)` starts the conversation. Contacts messaged most recently come first. Contacts that share a display name are listed as one. The lookup reads the Contacts copy the server already holds in memory, so a large address book does not slow it down. Without Contacts access it fails with `contacts_unavailable`.
 
 ### get_chat_details
 Inspect a known thread without opening the full conversation.
@@ -444,6 +480,8 @@ Rules:
 - Exactly one of `to` or `chat_id`
 - At least one of `text` or `file_paths`
 - If you pass both, `send` sends the files first and the text last
+- `to` takes a contact name, a phone number, or an email. A name must match exactly one number or email in Contacts. A name that matches more, even two handles of one contact, returns `ambiguous` with the candidates and sends nothing. `find_contact` lists them
+- A phone number or email that Messages has never seen starts a new conversation, and so does the full name of a contact whose one handle is such a handle. A partial name ("Sam" for Samira Khan) whose one match Messages has never seen returns `ambiguous` with that candidate, so the agent can check with the user first. The response `message` then says "Messages had no conversation with <handle> before this send." A number written without a country code is read in the Mac's region, and one that cannot be read that way is refused
 
 Attachment paths must be absolute or start with `~/`. `send` checks the
 path one component at a time and refuses it if any component is a symbolic
@@ -495,7 +533,7 @@ After a text send, the server checks chat.db for the sent message. Each `status`
 - `status: "sent"` means verification was unavailable because the database was unreadable. The only evidence is that the transport accepted the send.
 - `status: "pending_confirmation"` means Messages accepted an attachment send, but the server could not confirm within the polling window that the file transfer finished. When text went with the file, `text_status` is the text's own result.
 - `status: "failed"` means the send failed.
-- `status: "ambiguous"` means the server could not resolve the target safely: several contacts match, or the one matching contact's number or email has no conversation in Messages. `candidates` lists the matches, and nothing was sent.
+- `status: "ambiguous"` means the name matches more than one number or email in Contacts. `candidates` lists the matches, and nothing was sent.
 
 #### Disposition and retry_safe
 
