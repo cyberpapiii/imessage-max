@@ -17,6 +17,12 @@ actor FakeServiceSystem: ServiceSystem {
   var contactsAnswer: PermissionStatus = .authorized
   var contactsGranted = false
   var outdated = false
+  /// Another user's helper holds the port: it answers 401, and lsof cannot
+  /// see it. Ours runs without listening.
+  var portHeldByAnotherUser = false
+  /// Every launch stops at once with this exit code, as with a token file
+  /// the helper cannot read. launchd shows the job between tries.
+  var launchFailure: (exitCode: Int32, logged: String?)?
   var failNextRegister = false
   /// Registering leaves the helper off in Login Items, as after the user
   /// turned it off there.
@@ -44,11 +50,16 @@ actor FakeServiceSystem: ServiceSystem {
 
   func job(label: String) async -> Job? {
     if label == LegacyInstall.label { return legacyLoaded ? Job(pid: 77) : nil }
-    return loaded ? Job(pid: pid) : nil
+    guard loaded else { return nil }
+    if let launchFailure { return Job(pid: nil, lastExitCode: launchFailure.exitCode) }
+    return Job(pid: pid)
   }
 
+  func startupFailure(log: URL) async -> String? { launchFailure?.logged }
+
   func diagnose(endpoint: URL) async -> DiagnoseReply {
-    guard let pid else { return .silent }
+    if portHeldByAnotherUser { return .refused }
+    guard let pid, launchFailure == nil else { return .silent }
     if refusing { return .refused }
     guard answering, let result = try? diagnosis(contacts: contactsGranted, processID: pid) else {
       return .silent
@@ -58,7 +69,7 @@ actor FakeServiceSystem: ServiceSystem {
 
   func listeners(port: Int) async -> Set<Int32> {
     foreign.union(legacyLoaded && port == ServiceDefaults.port ? [77] : [])
-      .union(pid.map { [$0] } ?? [])
+      .union(portHeldByAnotherUser || launchFailure != nil ? [] : pid.map { [$0] } ?? [])
   }
 
   func run(_ command: SystemCommand) async throws {

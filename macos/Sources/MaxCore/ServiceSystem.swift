@@ -22,10 +22,14 @@ public protocol ServiceSystem: Sendable {
   func requestHelperPermission(_ permission: SetupPermission, endpoint: URL, processID: Int32)
     async throws -> SetupPermissionReply
   func pause() async
+  /// Why the helper's last launch failed, from the end of its log, or nil
+  /// when its last launch logged no failure.
+  func startupFailure(log: URL) async -> String?
 }
 
 extension ServiceSystem {
   public func startTime(pid: Int32) async -> Date? { nil }
+  public func startupFailure(log: URL) async -> String? { nil }
 }
 
 public enum SystemCommand: Sendable, Equatable {
@@ -132,6 +136,17 @@ public struct LiveServiceSystem: ServiceSystem {
     await withCheckedContinuation { continuation in
       DispatchQueue.global().asyncAfter(deadline: .now() + 0.35) { continuation.resume() }
     }
+  }
+
+  /// Reads only the log's last 64 KB: a failing helper logs a few lines a
+  /// launch, and the log can grow to megabytes.
+  public func startupFailure(log: URL) async -> String? {
+    guard let handle = try? FileHandle(forReadingFrom: log) else { return nil }
+    defer { try? handle.close() }
+    guard let size = try? handle.seekToEnd() else { return nil }
+    try? handle.seek(toOffset: size > 65_536 ? size - 65_536 : 0)
+    guard let data = try? handle.readToEnd() else { return nil }
+    return StartupFailure.reason(inLog: String(decoding: data, as: UTF8.self))
   }
 
   private static func target(_ label: String) -> String { "gui/\(getuid())/\(label)" }
