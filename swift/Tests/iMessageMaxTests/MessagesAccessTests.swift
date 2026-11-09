@@ -319,7 +319,9 @@ final class MessagesAccessTests: XCTestCase {
                 count += 1
                 return count
             }
-            return .success(Osascript.Output(stdout: count == 1 ? "" : "finished", stderr: "", terminationStatus: 0))
+            // The id snapshot before the send, the new id after it, then its status.
+            let stdout = [1: "", 2: "transfer-1", 3: "finished"][count] ?? ""
+            return .success(Osascript.Output(stdout: stdout, stderr: "", terminationStatus: 0))
         }
         let runner = LiveScriptRunner(
             access: fake.access(memory: AutomationMemory(folder: folder)),
@@ -330,7 +332,7 @@ final class MessagesAccessTests: XCTestCase {
             runScript: script)
         let result = runner.sendBlocking(.file(path: source.path), to: .participant(handle: "+15555550123", chatId: nil))
         guard case .success = result else { return XCTFail("expected success, got \(result)") }
-        XCTAssertEqual(fake.events, ["launch", "script", "script", "launch", "script"])
+        XCTAssertEqual(fake.events, ["launch", "script", "script", "launch", "script", "launch", "script"])
     }
 
     func testRefusedSendRemembersDenied() {

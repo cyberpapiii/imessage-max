@@ -12,6 +12,9 @@ final class ContactResolverTests: XCTestCase {
         var names: [String: String] = [:]
         var failNext = false
         var clock: TimeInterval = 0
+        /// When set, a load waits for it, standing in for a slow Contacts read.
+        var gate: DispatchSemaphore?
+        let loadStarted = DispatchSemaphore(value: 0)
     }
 
     private func makeInjected(refreshInterval: TimeInterval = 30) -> (ContactResolver, Box) {
@@ -20,6 +23,10 @@ final class ContactResolverTests: XCTestCase {
             source: ContactResolver.Source(
                 authorization: { (box.authorized, box.status) },
                 load: {
+                    if let gate = box.gate {
+                        box.loadStarted.signal()
+                        gate.wait()
+                    }
                     if box.failNext {
                         box.failNext = false
                         throw NSError(domain: "ContactResolverTests", code: 1)
@@ -167,9 +174,73 @@ final class ContactResolverTests: XCTestCase {
         XCTAssertEqual(stillOld, "Old")
         XCTAssertEqual(box.loads, 1)
         box.clock += 31
+        let duringReload = await resolver.resolve("+15550000001")
+        await resolver.waitForPendingReload()
         let refreshed = await resolver.resolve("+15550000001")
         XCTAssertEqual(refreshed, "New")
         XCTAssertEqual(box.loads, 2)
+        XCTAssertNotNil(duringReload)
+    }
+
+    /// 088 #26: a reload held the actor, so every request waited for the
+    /// whole Contacts read every 30 s. Requests now answer from the last
+    /// good names while the reload is still blocked.
+    func testRequestsDuringASlowReloadUseTheLastGoodNames() async {
+        let (resolver, box) = makeInjected()
+        box.names = ["+15550000001": "Old"]
+        _ = await resolver.resolve("+15550000001")
+
+        let gate = DispatchSemaphore(value: 0)
+        box.gate = gate
+        box.names = ["+15550000001": "New"]
+        box.clock += 31
+        let first = await resolver.resolve("+15550000001")
+        XCTAssertEqual(box.loadStarted.wait(timeout: .now() + 5), .success, "the reload never started")
+
+        let started = ContinuousClock.now
+        for _ in 0..<100 {
+            box.clock += 2
+            let name = await resolver.resolve("+15550000001")
+            XCTAssertEqual(name, "Old")
+        }
+        let status = await resolver.status()
+        let elapsed = ContinuousClock.now - started
+        XCTAssertEqual(first, "Old")
+        XCTAssertEqual(status.handleCount, 1)
+        XCTAssertLessThan(elapsed, .seconds(1), "requests waited for the blocked reload")
+        XCTAssertEqual(box.loads, 1, "one reload at a time")
+
+        box.gate = nil
+        gate.signal()
+        await resolver.waitForPendingReload()
+        let swapped = await resolver.resolve("+15550000001")
+        XCTAssertEqual(swapped, "New")
+    }
+
+    func testAReloadThatEndsAfterRevokeDoesNotRestoreNames() async {
+        let (resolver, box) = makeInjected()
+        box.names = ["+15550000001": "Old"]
+        _ = await resolver.resolve("+15550000001")
+
+        let gate = DispatchSemaphore(value: 0)
+        box.gate = gate
+        box.clock += 31
+        _ = await resolver.resolve("+15550000001")
+        XCTAssertEqual(box.loadStarted.wait(timeout: .now() + 5), .success, "the reload never started")
+
+        box.authorized = false
+        box.status = "denied"
+        box.clock += 2
+        let revoked = await resolver.resolve("+15550000001")
+        XCTAssertNil(revoked)
+
+        box.gate = nil
+        gate.signal()
+        await resolver.waitForPendingReload()
+        let after = await resolver.resolve("+15550000001")
+        let status = await resolver.status()
+        XCTAssertNil(after)
+        XCTAssertEqual(status.handleCount, 0)
     }
 
     func testChangeNotificationInvalidatesCache() async {
@@ -178,6 +249,8 @@ final class ContactResolverTests: XCTestCase {
         _ = await resolver.resolve("+15550000001")
         box.names["+15550000001"] = "New"
         await resolver.invalidate()
+        _ = await resolver.resolve("+15550000001")
+        await resolver.waitForPendingReload()
         let name = await resolver.resolve("+15550000001")
         XCTAssertEqual(name, "New")
     }
@@ -203,8 +276,11 @@ final class ContactResolverTests: XCTestCase {
         _ = await resolver.resolve("+15550000001")
         box.failNext = true
         box.clock += 31
+        _ = await resolver.resolve("+15550000001")
+        await resolver.waitForPendingReload()
         let name = await resolver.resolve("+15550000001")
         XCTAssertEqual(name, "Old")
+        XCTAssertFalse(box.failNext, "the failing reload ran")
         let kept = await resolver.status()
         XCTAssertFalse(kept.loadFailed, "a failure after a good load keeps the names")
 

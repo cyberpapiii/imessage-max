@@ -240,6 +240,20 @@ The `send` tool is agent-native (plan 017):
   permission, -1728/-1700 missing target, -600/-609 Messages unavailable,
   -43 file), because the message text is localized. English text is only a
   fallback for lines without a known number.
+- A final text that fails after the send began (`may_have_completed`:
+  timeout, -609 mid-send) is still verified against chat.db. A row means
+  `confirmed`; no row means `uncertain` with `may_have_completed` and the
+  error. No send error text may invite a blind retry.
+- `to:` sends go through the person's existing 1:1 chat (`chat.style` 45,
+  any service, the one with the newest message) as `.chat(guid:)`. Only a
+  handle with no DM goes through the iMessage participant. Verification
+  reads that chat, then the handle's chats: a row in another DM of the same
+  handle confirms, a row in a group is `mismatch`.
+- File sends track the transfer by id. A send holds a per-name lock
+  (`TransferMonitor.nameLocks`) from the id snapshot through dispatch until
+  its new transfer id appears, then polls that id alone.
+- A text sent after a pending file is still verified. The result stays
+  `pending_confirmation` and `text_status` carries the text's result.
 
 The send path deliberately has no interactive human-confirmation popups (MCP
 elicitation) and no server-side send gating. Authorization happens in the

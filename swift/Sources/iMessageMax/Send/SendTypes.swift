@@ -67,11 +67,6 @@ enum SendTarget: Sendable, Equatable {
         }
     }
 
-    var participantHandle: String? {
-        if case .participant(let handle, _) = self { return handle }
-        return nil
-    }
-
     var scriptArgument: String {
         switch self {
         case .participant(let handle, _): return handle
@@ -124,7 +119,9 @@ enum SendError: LocalizedError {
             return "iMessage Max needs Automation permission for Messages.app. "
                 + DiagnoseTool.automationFix(holder: .current)
         case .messagesAppUnavailable:
-            return "Messages.app is not responding. Try again in a moment."
+            // No "try again": after the send began, this error does not say
+            // whether the message went out. retry_safe does.
+            return "Messages.app is not responding."
         case .recipientNotFound(let recipient):
             return "Could not find recipient '\(recipient)' in Messages.app."
         case .chatNotFound(let guid):

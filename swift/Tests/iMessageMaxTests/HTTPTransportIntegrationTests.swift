@@ -502,7 +502,9 @@ final class HTTPTransportIntegrationTests: XCTestCase {
         }
     }
 
-    func testSecondSessionAtCapacityReturns503() async throws {
+    /// At the cap a new client gets a session, and the client of the least
+    /// recently active one gets 404 and starts again (088 #33).
+    func testSecondSessionAtCapacityClosesTheOldestOne() async throws {
         var configuration = HTTPTransport.Configuration.test
         configuration.maxSessions = 1
         let app = await makeTestTransport(configuration: configuration).application()
@@ -512,21 +514,14 @@ final class HTTPTransportIntegrationTests: XCTestCase {
             XCTAssertFalse(firstSessionId.isEmpty)
 
             let secondResponse = try await client.post(initializeBody(id: 2))
-            let secondBody = try decodeJSONString(from: secondResponse.body)
-            XCTAssertEqual(secondResponse.head.status, .serviceUnavailable, secondBody)
-            XCTAssertTrue(secondBody.contains("Session capacity reached"), secondBody)
-            XCTAssertTrue(secondBody.contains("Reuse an existing session"), secondBody)
-            XCTAssertTrue(secondBody.contains("DELETE"), secondBody)
-            XCTAssertTrue(secondBody.contains("Mcp-Session-Id"), secondBody)
-            XCTAssertTrue(secondBody.contains("idle sessions expire"), secondBody)
+            XCTAssertEqual(secondResponse.head.status, .ok, String(buffer: secondResponse.body))
+            let secondSessionId = try XCTUnwrap(secondResponse.head.headerFields[.mcpSessionId])
+            XCTAssertNotEqual(secondSessionId, firstSessionId)
 
             let deleteResponse = try await client.executeRequest(
                 uri: "/", method: .delete, headers: jsonHeaders(sessionId: firstSessionId), body: ByteBuffer()
             )
-            XCTAssertEqual(deleteResponse.head.status, .noContent)
-
-            let recoveredResponse = try await client.post(initializeBody(id: 3))
-            XCTAssertEqual(recoveredResponse.head.status, .ok, String(buffer: recoveredResponse.body))
+            XCTAssertEqual(deleteResponse.head.status, .notFound, "the first session was closed to make room")
         }
     }
 }

@@ -24,7 +24,7 @@ final class SendResolverTests: XCTestCase {
         }
     }
 
-    func testResolvePhoneNumberReturnsParticipantTarget() async throws {
+    func testResolvePhoneNumberTargetsItsDirectChat() async throws {
         let fixture = try makeResolverFixture()
 
         let resolver = SendResolver(db: fixture.database(), resolver: ContactResolver(seedCache: [:]))
@@ -36,16 +36,17 @@ final class SendResolverTests: XCTestCase {
         case .ambiguous:
             XCTFail("Unexpected ambiguity")
         case .success(let resolved):
-            guard case .participant(let handle, let chatId) = resolved.target else {
-                return XCTFail("Expected participant target")
+            guard case .chat(let guid, let chatId) = resolved.target else {
+                return XCTFail("Expected the DM as the target")
             }
-            XCTAssertEqual(handle, "+15555550123")
+            XCTAssertEqual(guid, "any;-;+15555550123")
+            XCTAssertEqual(resolved.recipientHandle, "+15555550123")
             XCTAssertEqual(chatId, 11)
             XCTAssertEqual(resolved.deliveredTo, ["+1 (555) 555-0123"])
         }
     }
 
-    func testResolveNameSingleMatchReturnsParticipant() async throws {
+    func testResolveNameSingleMatchTargetsItsDirectChat() async throws {
         let fixture = try makeResolverFixture()
 
         let contacts = ContactResolver(seedCache: ["+15555550123": "Nick Jones"])
@@ -58,10 +59,11 @@ final class SendResolverTests: XCTestCase {
         case .ambiguous:
             XCTFail("Unexpected ambiguity")
         case .success(let resolved):
-            guard case .participant(let handle, let chatId) = resolved.target else {
-                return XCTFail("Expected participant target")
+            guard case .chat(let guid, let chatId) = resolved.target else {
+                return XCTFail("Expected the DM as the target")
             }
-            XCTAssertEqual(handle, "+15555550123")
+            XCTAssertEqual(guid, "any;-;+15555550123")
+            XCTAssertEqual(resolved.recipientHandle, "+15555550123")
             XCTAssertEqual(chatId, 11)
             XCTAssertEqual(resolved.deliveredTo, ["Nick Jones"])
         }
@@ -149,7 +151,8 @@ final class SendResolverTests: XCTestCase {
                 XCTFail("\(destination) should resolve")
                 continue
             }
-            XCTAssertEqual(resolved.target, .participant(handle: "+447911123456", chatId: 1), destination)
+            XCTAssertEqual(resolved.target, .chat(guid: "iMessage;-;+447911123456", chatId: 1), destination)
+            XCTAssertEqual(resolved.recipientHandle, "+447911123456", destination)
             XCTAssertEqual(resolved.deliveredTo, ["Olivia Hart"], destination)
         }
     }
@@ -167,7 +170,7 @@ final class SendResolverTests: XCTestCase {
         guard case .success(let resolved) = await resolver.resolve(.recipient("Acme")) else {
             return XCTFail("an organization-only contact should resolve by its company name")
         }
-        XCTAssertEqual(resolved.target, .participant(handle: "+15555550123", chatId: 11))
+        XCTAssertEqual(resolved.target, .chat(guid: "any;-;+15555550123", chatId: 11))
         XCTAssertEqual(resolved.deliveredTo, ["Acme Plumbing"])
     }
 
@@ -182,7 +185,8 @@ final class SendResolverTests: XCTestCase {
         guard case .success(let resolved) = await resolver.resolve(.recipient("Nick")) else {
             return XCTFail("an email handle in chat.db should resolve whatever its case")
         }
-        XCTAssertEqual(resolved.target, .participant(handle: "Nick@Example.com", chatId: 1))
+        XCTAssertEqual(resolved.target, .chat(guid: "iMessage;-;Nick@Example.com", chatId: 1))
+        XCTAssertEqual(resolved.recipientHandle, "Nick@Example.com")
     }
 
     func testResolveShortNumericDestinationFallsThroughToContactLookup() async throws {
@@ -227,10 +231,11 @@ final class SendResolverTests: XCTestCase {
         case .ambiguous:
             XCTFail("Unexpected ambiguity")
         case .success(let resolved):
-            guard case .participant(let handle, let chatId) = resolved.target else {
-                return XCTFail("Expected participant target")
+            guard case .chat(let guid, let chatId) = resolved.target else {
+                return XCTFail("Expected the DM as the target")
             }
-            XCTAssertEqual(handle, "+15555550123")
+            XCTAssertEqual(guid, "any;-;+15555550123")
+            XCTAssertEqual(resolved.recipientHandle, "+15555550123")
             XCTAssertEqual(chatId, 11)
             XCTAssertEqual(resolved.deliveredTo, ["55555"])
         }
@@ -299,7 +304,7 @@ final class SendResolverTests: XCTestCase {
         guard case .success(let resolved) = await resolver.resolve(.recipient("12345")) else {
             return XCTFail("a short code with a conversation should resolve")
         }
-        XCTAssertEqual(resolved.target, .participant(handle: "12345", chatId: 9))
+        XCTAssertEqual(resolved.target, .chat(guid: "SMS;-;12345", chatId: 9))
     }
 
     func testChatNameMatchesAcrossEntryPoints() async throws {
@@ -330,6 +335,65 @@ final class SendResolverTests: XCTestCase {
             return XCTFail("should resolve")
         }
         XCTAssertEqual(resolved.chat?.name, "Alice Work")
+    }
+
+    // MARK: 088 #16: a `to:` send goes through the person's real DM
+
+    /// The only DM is SMS. A participant send would go over iMessage into
+    /// another chat, and verifying the SMS chat reported a false mismatch.
+    func testSMSOnlyDMIsTheTarget() async throws {
+        let fixture = try ToolTestDatabase(name: "send-sms-dm")
+        try fixture.insertHandle(rowId: 1, handle: "+15550000001", service: "SMS")
+        try fixture.insertChat(rowId: 4, guid: "SMS;-;+15550000001", serviceName: "SMS")
+        try fixture.joinChatHandle(chatId: 4, handleId: 1)
+        let resolver = SendResolver(db: fixture.database(), resolver: makeSeededResolver())
+
+        guard case .success(let resolved) = await resolver.resolve(.recipient("+15550000001")) else {
+            return XCTFail("should resolve")
+        }
+        XCTAssertEqual(resolved.target, .chat(guid: "SMS;-;+15550000001", chatId: 4))
+        XCTAssertEqual(resolved.chat?.id, "chat4")
+        XCTAssertEqual(resolved.recipientHandle, "+15550000001")
+    }
+
+    /// iMessage and SMS DMs with one person: the one with the newest message
+    /// wins, not the highest ROWID.
+    func testDuplicateDMsPickTheOneWithTheNewestMessage() async throws {
+        let fixture = try ToolTestDatabase(name: "send-duplicate-dm")
+        try fixture.insertHandle(rowId: 1, handle: "+15550000001")
+        try fixture.insertHandle(rowId: 2, handle: "+15550000001", service: "SMS")
+        try fixture.insertChat(rowId: 5, guid: "SMS;-;+15550000001", serviceName: "SMS")
+        try fixture.joinChatHandle(chatId: 5, handleId: 2)
+        try fixture.insertChat(rowId: 9, guid: "iMessage;-;+15550000001")
+        try fixture.joinChatHandle(chatId: 9, handleId: 1)
+        try fixture.insertMessage(rowId: 1, guid: "old-imessage", text: "old", date: 1_000, isFromMe: false, handleId: 1)
+        try fixture.joinChatMessage(chatId: 9, messageId: 1)
+        try fixture.insertMessage(rowId: 2, guid: "new-sms", text: "new", date: 9_000, isFromMe: false, handleId: 2)
+        try fixture.joinChatMessage(chatId: 5, messageId: 2)
+        let resolver = SendResolver(db: fixture.database(), resolver: makeSeededResolver())
+
+        guard case .success(let resolved) = await resolver.resolve(.recipient("+15550000001")) else {
+            return XCTFail("should resolve")
+        }
+        XCTAssertEqual(resolved.target, .chat(guid: "SMS;-;+15550000001", chatId: 5))
+        XCTAssertEqual(resolved.chat?.id, "chat5")
+    }
+
+    /// A group everyone else left has one participant but is not the DM. With
+    /// no DM, the send goes through the iMessage participant and names no chat.
+    func testDegenerateGroupIsNeverTheDM() async throws {
+        let fixture = try ToolTestDatabase(name: "send-degenerate-group")
+        try fixture.insertHandle(rowId: 1, handle: "+15550000001")
+        try fixture.insertChat(rowId: 3, guid: "iMessage;+;chat-left-behind", displayName: "Old Trip")
+        try fixture.joinChatHandle(chatId: 3, handleId: 1)
+        let resolver = SendResolver(db: fixture.database(), resolver: makeSeededResolver())
+
+        guard case .success(let resolved) = await resolver.resolve(.recipient("+15550000001")) else {
+            return XCTFail("should resolve")
+        }
+        XCTAssertEqual(resolved.target, .participant(handle: "+15550000001", chatId: nil))
+        XCTAssertNil(resolved.chat)
+        XCTAssertEqual(resolved.recipientHandle, "+15550000001")
     }
 }
 

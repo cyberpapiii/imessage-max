@@ -24,6 +24,11 @@ struct SendVerifier: Sendable {
         try db.query("SELECT COALESCE(MAX(ROWID), 0) FROM message") { $0.int(0) }.first ?? 0
     }
 
+    /// Looks for the sent text in `intendedChatId`, then in the chats of
+    /// `handle` (a `to:` send). A row in another 1:1 chat with the handle is
+    /// the same person, so it confirms: duplicate DMs (one per service, or an
+    /// old thread) are common, and calling that a mismatch made agents resend.
+    /// A row in a group with the handle is a mismatch.
     func verify(
         intendedChatId: Int64?,
         handle: String?,
@@ -73,17 +78,21 @@ struct SendVerifier: Sendable {
         let attributedBody: Data?
         let error: Int64
         let chatId: Int64
+        /// The row is in a 1:1 chat. Read only for the handle scope.
+        let inDirectChat: Bool
     }
 
     private func candidateRows(_ scope: Scope, afterRowId: Int64) throws -> [MessageRow] {
         let joins: String
         let filter: String
         let scopeParam: Any
+        let direct: String
         switch scope {
         case .chat(let chatId):
             joins = ""
             filter = "cmj.chat_id = ?"
             scopeParam = chatId
+            direct = "0"
         case .handle(let handle):
             joins = """
                 JOIN chat c ON cmj.chat_id = c.ROWID
@@ -92,10 +101,11 @@ struct SendVerifier: Sendable {
                 """
             filter = "h.id = ?"
             scopeParam = handle
+            direct = SendResolver.isDirectChat()
         }
         return try db.query(
             """
-            SELECT m.ROWID, m.guid, m.date, m.text, m.attributedBody, m.error, cmj.chat_id
+            SELECT m.ROWID, m.guid, m.date, m.text, m.attributedBody, m.error, cmj.chat_id, \(direct)
             FROM message m
             JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
             \(joins)
@@ -115,7 +125,8 @@ struct SendVerifier: Sendable {
                 text: row.string(3),
                 attributedBody: row.blob(4),
                 error: row.int(5),
-                chatId: row.int(6)
+                chatId: row.int(6),
+                inDirectChat: row.int(7) != 0
             )
         }
     }
@@ -129,7 +140,7 @@ struct SendVerifier: Sendable {
         var failedMatch: MessageRow? = nil
         for row in try candidateRows(scope, afterRowId: afterRowId) {
             guard textMatches(row: row, expected: expectedText), !claims.isClaimed(row.rowId) else { continue }
-            if let intended = intendedChatId, row.chatId != intended {
+            if row.chatId != intendedChatId, !row.inDirectChat {
                 if row.error == 0 {
                     return .mismatch(actualChatId: row.chatId, guid: row.guid)
                 }
