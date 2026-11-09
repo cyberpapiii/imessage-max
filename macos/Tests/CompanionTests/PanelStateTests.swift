@@ -83,6 +83,19 @@ private func granted(_ state: PanelState) -> [SetupStep] {
     }
   }
 
+  /// A helper reports Automation never asked as permission-gated (a send
+  /// never asks). The app can still ask, so the row offers the request, not
+  /// System Settings, where Messages is not listed yet.
+  @Test func automationNeverAskedIsNotRefused() throws {
+    let notAsked = try diagnosis(automation: "permission-gated", automationDetail: "not_determined")
+    #expect(!notAsked.automationRefused)
+    #expect(words(panel(.running(notAsked)))[.automation] == "Not checked")
+    let denied = try diagnosis(automation: "permission-gated", automationDetail: "denied")
+    #expect(denied.automationRefused)
+    #expect(words(panel(.running(denied)))[.automation] == "Not allowed")
+    #expect(try !diagnosis(automation: "unverified", automationDetail: "messages_not_responding").automationRefused)
+  }
+
   @Test func limitedContactsCountAsGranted() throws {
     let state = panel(.running(try diagnosis(contactsStatus: "limited")))
     #expect(words(state)[.contacts] == "Some contacts")
