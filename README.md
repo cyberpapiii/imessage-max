@@ -109,6 +109,12 @@ Or run `brew install --cask cyberpapiii/tap/imessage-max`.
 
 Version 1.x installed a Homebrew formula and a launch agent you set up by hand. The formula is retired. Run `brew uninstall imessage-max` first, because the cask links the same `imessage-max` command. Then install the app and open it. It offers **Replace the older helper**, which stops the old agent and removes its files. The new helper listens on port 47821 and needs a token, so reconnect each assistant from the app's Connections page.
 
+## Headless Macs, MDM and uninstall
+
+- [docs/headless.md](docs/headless.md): run iMessage Max on a Mac with no display, such as a Mac mini you reach over SSH. The Mac still needs a desktop login that stays logged in, system sleep off, and a one-time setup over Screen Sharing. The guide also covers updates, health checks over SSH and troubleshooting.
+- [docs/fleet.md](docs/fleet.md): grant Full Disk Access, Contacts and Automation, and allow the helper, with an MDM profile keyed to `com.cyberpapiii.imessage-max.menubar`.
+- [docs/uninstall.md](docs/uninstall.md): remove the app, the helper, its files and its privacy grants, for DMG and cask installs.
+
 ## Protocol support
 
 iMessage Max is a dual-era MCP server. Both transports, stdio and HTTP,
