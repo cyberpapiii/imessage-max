@@ -52,11 +52,18 @@ final class SocketSupervisorTests: XCTestCase {
         XCTAssertEqual(try reader.nextLine(), line, file: file, line: number)
     }
 
+    /// Waits until the path accepts a connection, not only until the file
+    /// exists: bind creates the file before listen starts, and a connect in
+    /// between is refused (ECONNREFUSED), which made this test flaky.
     private func waitForSocketFile(within seconds: Double = 5) async -> Bool {
         let deadline = ContinuousClock.now + .milliseconds(Int(seconds * 1000))
         var info = stat()
         while ContinuousClock.now < deadline {
-            if lstat(socket.path, &info) == 0, info.st_mode & S_IFMT == S_IFSOCK { return true }
+            if lstat(socket.path, &info) == 0, info.st_mode & S_IFMT == S_IFSOCK,
+               let fd = try? connectClient(socket) {
+                close(fd)
+                return true
+            }
             await AsyncTimeout.sleep(.milliseconds(20))
         }
         return false
