@@ -23,6 +23,9 @@
 
 ### Server
 
+- Phone numbers saved without a country code are read in the Mac's region. +1 is assumed only in the US, Canada and the rest of the North American Numbering Plan. Elsewhere a leading 00 (or the region's international prefix, such as 0011 in Australia) becomes +, a `(0)` trunk digit is dropped, and a national trunk 0 is replaced by the region's calling code, so "07911 123456" on a UK Mac is +447911123456. Extensions (`x12`, `ext. 12`) are ignored. Contact names now show for numbers saved this way outside the US, and a number that cannot be read without guessing is left unread instead of being taken as a US number.
+- `send` by contact name no longer sends to a number or email that has no conversation in Messages. It returns `ambiguous` with that contact as the one candidate and sends nothing. Before, a contact's number saved without a country code was read as a US number, and a send by name could go at once to a stranger's +1 number.
+- Contacts that have only a company name or a nickname are loaded. A contact's display name is the given and family name, else the nickname, else the company.
 - `diagnose` fixes for the helper inside the app name the permission by its System Settings name, such as "Open iMessage Max and turn on Full Disk Access." `assistant_calls` is unchanged.
 
 ## 2.0.0

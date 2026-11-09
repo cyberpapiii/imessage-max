@@ -15,7 +15,7 @@ enum SenderFilter: Equatable {
     }
 
     static func exactHandles(for person: String, resolver: ContactResolver) async -> [String] {
-        if let normalized = PhoneUtils.normalizeToE164(person) {
+        if let normalized = PhoneUtils.normalizeToE164(person, region: resolver.region) {
             return [normalized]
         }
         if PhoneUtils.isEmail(person) {

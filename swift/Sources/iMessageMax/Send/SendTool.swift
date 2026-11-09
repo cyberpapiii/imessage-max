@@ -43,7 +43,7 @@ struct SendTool: Sendable {
                 Every response also includes disposition (completed, not_started, or may_have_completed) and retry_safe.
                 retry_safe=true means a retry cannot duplicate the message, because nothing reached Messages or chat.db shows that the row failed.
                 retry_safe=false means you must not resend blindly. Check with get_messages first.
-                A send runs immediately when the destination is exact. An ambiguous destination returns status 'ambiguous' and sends nothing. Invalid input returns status 'failed' and sends nothing. A file transfer may return 'pending_confirmation' while Messages.app finishes the transfer.
+                A send runs immediately when the destination is exact. An ambiguous destination returns status 'ambiguous' and sends nothing. A contact name whose number or email has no conversation in Messages is ambiguous too. Invalid input returns status 'failed' and sends nothing. A file transfer may return 'pending_confirmation' while Messages.app finishes the transfer.
                 """,
             inputSchema: InputSchema.object(
                 properties: [
@@ -113,8 +113,8 @@ struct SendTool: Sendable {
             resolved = target
         case .failure(let errorMsg):
             return .error(errorMsg)
-        case .ambiguous(let candidates):
-            return .ambiguous(candidates: candidates)
+        case .ambiguous(let candidates, let reason):
+            return .ambiguous(candidates: candidates, reason: reason)
         }
         if let invalid = resolved.target.validationError {
             return .error(ClientErrorMessages.sanitized(invalid))

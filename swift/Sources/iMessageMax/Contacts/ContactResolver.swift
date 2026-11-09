@@ -8,17 +8,20 @@ actor ContactResolver {
         let load: () throws -> [String: String]
         let requestAccess: () async -> Bool
 
-        static func live() -> Source {
+        static func live(region: String?) -> Source {
             let store = CNContactStore()
             return Source(
                 authorization: { ContactResolver.authorizationStatus() },
-                load: { try ContactResolver.loadNames(from: store) },
+                load: { try ContactResolver.loadNames(from: store, region: region) },
                 requestAccess: { (try? await store.requestAccess(for: .contacts)) ?? false }
             )
         }
     }
 
     private let source: Source
+    /// The region that numbers without a country code are read in, for
+    /// both Contacts numbers and the handles and numbers looked up.
+    nonisolated let region: String?
     private let refreshInterval: TimeInterval
     private let now: () -> TimeInterval
 
@@ -33,12 +36,13 @@ actor ContactResolver {
     private var accessRequestSkippedHeadless = false
     nonisolated(unsafe) private var changeObserver: (any NSObjectProtocol)?
 
-    init() {
+    init(region: String? = PhoneUtils.currentRegion) {
         self.init(
-            source: .live(),
+            source: .live(region: region),
             refreshInterval: 30,
             now: { ProcessInfo.processInfo.systemUptime },
-            observeChanges: true
+            observeChanges: true,
+            region: region
         )
     }
 
@@ -46,9 +50,11 @@ actor ContactResolver {
         source: Source,
         refreshInterval: TimeInterval,
         now: @escaping () -> TimeInterval,
-        observeChanges: Bool = false
+        observeChanges: Bool = false,
+        region: String? = PhoneUtils.currentRegion
     ) {
         self.source = source
+        self.region = region
         self.refreshInterval = refreshInterval
         self.now = now
         if observeChanges {
@@ -138,44 +144,65 @@ actor ContactResolver {
         refresh()
     }
 
-    private static func loadNames(from store: CNContactStore) throws -> [String: String] {
-        let keys: [CNKeyDescriptor] = [
-            CNContactGivenNameKey as CNKeyDescriptor,
-            CNContactFamilyNameKey as CNKeyDescriptor,
-            CNContactPhoneNumbersKey as CNKeyDescriptor,
-            CNContactEmailAddressesKey as CNKeyDescriptor,
-        ]
+    private static func loadNames(from store: CNContactStore, region: String?) throws -> [String: String] {
+        let keys = [
+            CNContactGivenNameKey,
+            CNContactFamilyNameKey,
+            CNContactNicknameKey,
+            CNContactOrganizationNameKey,
+            CNContactPhoneNumbersKey,
+            CNContactEmailAddressesKey,
+        ].map { $0 as CNKeyDescriptor }
+        var contacts: [CNContact] = []
+        try store.enumerateContacts(with: CNContactFetchRequest(keysToFetch: keys)) { contact, _ in
+            contacts.append(contact)
+        }
+        return names(from: contacts, region: region)
+    }
 
-        let request = CNContactFetchRequest(keysToFetch: keys)
+    /// Maps each phone number (E.164, read in `region`) and lowercased email
+    /// of `contacts` to the contact's display name. A number that cannot be
+    /// read without guessing is left out.
+    static func names(from contacts: [CNContact], region: String?) -> [String: String] {
         var names: [String: String] = [:]
-
-        try store.enumerateContacts(with: request) { contact, _ in
-            let name = [contact.givenName, contact.familyName]
-                .filter { !$0.isEmpty }
-                .joined(separator: " ")
-
-            guard !name.isEmpty else { return }
+        for contact in contacts {
+            guard let name = displayName(
+                givenName: contact.givenName,
+                familyName: contact.familyName,
+                nickname: contact.nickname,
+                organization: contact.organizationName
+            ) else { continue }
 
             for phone in contact.phoneNumbers {
-                let number = phone.value.stringValue
-                if let normalized = PhoneUtils.normalizeToE164(number) {
+                if let normalized = PhoneUtils.normalizeToE164(phone.value.stringValue, region: region) {
                     names[normalized] = name
                 }
             }
 
             for email in contact.emailAddresses {
-                let addr = (email.value as String).lowercased()
-                names[addr] = name
+                names[(email.value as String).lowercased()] = name
             }
         }
-
         return names
+    }
+
+    /// Given and family name, else the nickname, else the organization.
+    static func displayName(givenName: String, familyName: String, nickname: String, organization: String) -> String? {
+        let candidates = [
+            [givenName, familyName]
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+                .joined(separator: " "),
+            nickname.trimmingCharacters(in: .whitespacesAndNewlines),
+            organization.trimmingCharacters(in: .whitespacesAndNewlines),
+        ]
+        return candidates.first { !$0.isEmpty }
     }
 
     func resolve(_ handle: String) -> String? {
         refreshIfStale()
         if let name = cache[handle] { return name }
-        if let normalized = PhoneUtils.normalizeToE164(handle),
+        if let normalized = PhoneUtils.normalizeToE164(handle, region: region),
            let name = cache[normalized]
         { return name }
         if handle.contains("@"),
