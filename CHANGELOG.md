@@ -15,6 +15,9 @@
 - A file send's transfer-status polls start Messages hidden first, so a Messages that quit mid-transfer does not come back with its window.
 - Send errors are classified by AppleScript error number, not English text, so they read the same on every language and region. "Operation not permitted" is no longer taken for an Automation refusal.
 - `diagnose` reports `ready` whenever chat.db is readable. A Mac with Contacts left off is no longer `needs_setup`; `perm_contacts` and the send capabilities report Contacts and Automation.
+- SIGUSR1 stops the helper for good: it drains as on SIGTERM, then exits 0 whatever Keep running says, so launchd leaves it down. The cask's `uninstall` now sends USR1 instead of TERM, because with Keep running on a SIGTERM exits 75 and launchd would relaunch the helper from the app `brew uninstall --cask` just deleted.
+- A log write that fails, on a full disk, an I/O error or a closed stderr, no longer aborts the helper. The line is dropped, where before the helper crashed and launchd relaunched it into the same failure every 10 s.
+- A NUL character (U+0000) in `send` text, a file path or a recipient no longer crashes the helper. `send` returns `failed` with disposition `not_started` and says why, and nothing is sent.
 
 ### Companion app
 

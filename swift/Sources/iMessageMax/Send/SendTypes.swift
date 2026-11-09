@@ -15,6 +15,12 @@ enum SendPayload: Sendable, Equatable {
     ) -> BuildResult {
         var payloads: [SendPayload] = []
 
+        // osascript takes these as arguments, and Process.run aborts the
+        // helper on an argument that holds NUL.
+        if text.map(Osascript.containsNUL) == true || (filePaths ?? []).contains(where: Osascript.containsNUL) {
+            return .failure(Osascript.nulRejection)
+        }
+
         if let filePaths, !filePaths.isEmpty {
             for path in filePaths where !path.isEmpty {
                 payloads.append(.file(path: path))
@@ -90,8 +96,10 @@ enum SendTarget: Sendable, Equatable {
     var validationError: SendError? {
         switch self {
         case .participant(let handle, _):
+            if Osascript.containsNUL(handle) { return .invalidParams(Osascript.nulRejection) }
             return handle.count > 100 ? .invalidParams("Recipient too long") : nil
         case .chat(let guid, _):
+            if Osascript.containsNUL(guid) { return .invalidParams(Osascript.nulRejection) }
             return guid.isEmpty ? .invalidParams("Chat guid is required") : nil
         }
     }
