@@ -20,11 +20,21 @@ enum MessagesLauncher {
 
     /// Returns once Messages answers Apple events: true when it does, false
     /// when it is missing, failed to launch, or did not answer in time.
-    /// Blocks its thread, so call it from a GCD thread, never the
-    /// cooperative pool. `reason` goes to the log.
-    static func ensureRunningHidden(reason: String, timeout: TimeInterval = readyTimeout) -> Bool {
+    /// Blocks its thread, so call it off the cooperative pool. `reason` goes
+    /// to the log.
+    ///
+    /// Each probe is bounded (`AutomationPermission.boundedProbe`). A Messages
+    /// that was already running and lets a probe time out is hung, and this
+    /// returns false at once instead of waiting out `timeout`. One that is
+    /// still starting gets until the deadline.
+    static func ensureRunningHidden(
+        reason: String,
+        timeout: TimeInterval = readyTimeout,
+        probe: () -> OSStatus? = { AutomationPermission.boundedProbe.run() }
+    ) -> Bool {
         let launchError = Mutex<String?>(nil)
-        if !isRunning {
+        let wasRunning = isRunning
+        if !wasRunning {
             guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else {
                 Log.warning("Messages is missing from this Mac; cannot start it for \(reason)")
                 return false
@@ -36,7 +46,15 @@ enum MessagesLauncher {
         }
         let deadline = Date().addingTimeInterval(timeout)
         while true {
-            if AutomationPermission.rawStatus(askUserIfNeeded: false) != OSStatus(procNotFound) { return true }
+            switch probe() {
+            case .none where wasRunning:
+                Log.warning("Messages is running but did not answer within 2 s for \(reason)")
+                return false
+            case .none, .some(OSStatus(procNotFound)):
+                break
+            case .some:
+                return true
+            }
             if let error = launchError.withLock({ $0 }) {
                 Log.warning("Messages did not start for \(reason): \(error)")
                 return false

@@ -8,7 +8,9 @@ This file defines the terms that mean something specific in this project: entiti
 
 - **Verified send**: After a send, the server re-reads the Messages database to prove what happened to the message. It does not assume that an accepted send succeeded.
 
-- **Exact destination**: A send target that resolves to exactly one conversation: a known chat id, or a participant lookup with a single match. The server treats anything else as ambiguous and refuses it instead of guessing.
+- **Exact destination**: A send target that resolves to exactly one conversation: a known chat id, or a participant lookup with a single match whose handle is already in chat.db. The server treats anything else as ambiguous and refuses it instead of guessing. A contact name that matches only a Contacts number or email Messages has never seen is ambiguous, because a number misread from Contacts could reach a stranger.
+
+- **Region**: The Mac's region (`Locale.current.region`). A number written without a country code is read the way someone dialling in that region would: +1 only in a North American Numbering Plan region, and elsewhere the trunk prefix (such as the UK's 0) is dropped and the region's calling code added. A number that cannot be read without guessing is left unread.
 
 ## Send statuses
 
@@ -24,7 +26,7 @@ This file defines the terms that mean something specific in this project: entiti
 
 - **pending_confirmation**: Messages accepted a file attachment send, but the file transfer had not finished within the polling window. This is a normal waiting state for attachments only. It is not a failure and not a request to retry.
 
-- **ambiguous**: The server could not resolve the destination to exactly one conversation, so it sent nothing.
+- **ambiguous**: The server could not resolve the destination to exactly one conversation, so it sent nothing. Either several contacts match, or the one match is a Contacts number or email with no conversation in Messages.
 
 - **failed**: The input was invalid, or the send could not be dispatched. Nothing was verified, because nothing reliable was sent.
 
@@ -34,6 +36,6 @@ This file defines the terms that mean something specific in this project: entiti
 
 ## Diagnostics
 
-- **Capability contract**: The fixed set of capability keys that the diagnose tool reports. Each key gives a state for what the install can do right now (supported, permission-gated, degraded, unverified, unsupported, unavailable), instead of a single healthy or unhealthy verdict. When the server cannot probe a capability, the key reports "unverified" instead of guessing. Automation is the one probe that needs Messages running: while Messages is closed, diagnose reports the last definite answer macOS gave (the remembered Automation answer), and with none it starts Messages hidden once to get one. The keys and state words live in `contract/Sources/IMessageMaxContract/`, which the server and the companion app share.
+- **Capability contract**: The fixed set of capability keys that the diagnose tool reports. Each key gives a state for what the install can do right now (supported, permission-gated, degraded, unverified, unsupported, unavailable), instead of a single healthy or unhealthy verdict. When the server cannot probe a capability, the key reports "unverified" instead of guessing. Automation is the one probe that needs Messages running: while Messages is closed, diagnose reports the last definite answer macOS gave (the remembered Automation answer). With none, or with one other than authorized, it starts Messages hidden to ask again, at most once every 5 minutes. Automation `not_determined` is `permission-gated` like `denied`, because a send never asks: on a headless Mac nobody could click the prompt. A Messages that is running but does not answer within 2 s reports `unverified` with detail `messages_not_responding`. The top-level `status` is `needs_setup` only when chat.db cannot be read; Contacts and Automation show in their own keys. The keys and state words live in `contract/Sources/IMessageMaxContract/`, which the server and the companion app share.
 
 - **Setup step**: One of the four permissions the companion's home page lists, in order: Background activity, Full Disk Access, Contacts, Automation. Each title is the name System Settings uses. A diagnose `fix` for the helper inside the app names the permission to turn on ("Open iMessage Max and turn on Full Disk Access."), never a terminal command. The titles live in `contract/Sources/IMessageMaxContract/SetupStep.swift`. Connecting an assistant is not a setup step.

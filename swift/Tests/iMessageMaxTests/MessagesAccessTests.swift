@@ -105,13 +105,75 @@ final class MessagesAccessTests: XCTestCase {
         XCTAssertEqual(fake.launches.count, 1)
     }
 
-    func testFailedLaunchReportsNotRunningAndNeverRetriesFromDiagnose() {
+    func testFailedLaunchIsRetriedAfterTheRecheckInterval() {
         let fake = FakeMessages(running: false, answer: .authorized, launchSucceeds: false)
-        let access = fake.access(memory: AutomationMemory(folder: folder))
+        let clock = FakeClock()
+        let access = fake.access(memory: AutomationMemory(folder: folder), clock: clock)
         XCTAssertEqual(access.automationStatus().status, .messagesNotRunning)
         XCTAssertEqual(access.automationStatus().status, .messagesNotRunning)
-        XCTAssertEqual(fake.launches.count, 1)
+        XCTAssertEqual(fake.launches.count, 1, "a poll must not start Messages again and again")
         XCTAssertNil(AutomationMemory(folder: folder).answer)
+
+        clock.advance(by: MessagesAccess.recheckInterval - .seconds(1))
+        _ = access.automationStatus()
+        XCTAssertEqual(fake.launches.count, 1)
+
+        fake.launchSucceeds(true)
+        clock.advance(by: .seconds(1))
+        XCTAssertEqual(access.automationStatus().status, .authorized, "a failed launch must not stick for the helper's lifetime")
+        XCTAssertEqual(fake.launches.count, 2)
+    }
+
+    /// The person turns Automation on in System Settings while Messages is
+    /// closed. Diagnose must see it within the recheck interval.
+    func testRememberedDenialIsRecheckedAtMostEveryInterval() {
+        AutomationMemory(folder: folder).remember(.denied)
+        let fake = FakeMessages(running: false, answer: .denied)
+        let clock = FakeClock()
+        let access = fake.access(memory: AutomationMemory(folder: folder), clock: clock)
+
+        XCTAssertEqual(access.automationStatus().status, .denied)
+        XCTAssertEqual(fake.launches.count, 1)
+        fake.quit()
+        fake.setAnswer(.authorized)
+
+        for _ in 0..<3 {
+            XCTAssertEqual(access.automationStatus().status, .denied, "the remembered answer stands between rechecks")
+        }
+        clock.advance(by: .seconds(299))
+        XCTAssertEqual(access.automationStatus().status, .denied)
+        XCTAssertEqual(fake.launches.count, 1)
+
+        clock.advance(by: .seconds(1))
+        let result = access.automationStatus()
+        XCTAssertTrue(result.ok)
+        XCTAssertEqual(result.status, .authorized)
+        XCTAssertEqual(fake.launches.count, 2)
+        XCTAssertEqual(AutomationMemory(folder: folder).answer, .authorized)
+
+        fake.quit()
+        clock.advance(by: .seconds(3600))
+        XCTAssertEqual(access.automationStatus().status, .authorized)
+        XCTAssertEqual(fake.launches.count, 2, "a remembered grant is never rechecked by starting Messages")
+    }
+
+    func testRememberedNotDeterminedIsRechecked() {
+        AutomationMemory(folder: folder).remember(.notDetermined)
+        let fake = FakeMessages(running: false, answer: .authorized)
+        let access = fake.access(memory: AutomationMemory(folder: folder))
+        XCTAssertEqual(access.automationStatus().status, .authorized)
+        XCTAssertEqual(fake.launches.count, 1)
+    }
+
+    func testHungMessagesIsReportedAndNotRemembered() {
+        AutomationMemory(folder: folder).remember(.authorized)
+        let fake = FakeMessages(running: true, answer: .messagesNotResponding)
+        let access = fake.access(memory: AutomationMemory(folder: folder))
+        let result = access.automationStatus()
+        XCTAssertFalse(result.ok)
+        XCTAssertEqual(result.status, .messagesNotResponding)
+        XCTAssertEqual(fake.launches, [])
+        XCTAssertEqual(AutomationMemory(folder: folder).answer, .authorized)
     }
 
     // MARK: Setup request
@@ -159,6 +221,116 @@ final class MessagesAccessTests: XCTestCase {
             runScript: fake.script(output: ""))
         _ = runner.sendBlocking(.file(path: "/definitely/missing/file.png"), to: .participant(handle: "+15555550123", chatId: nil))
         XCTAssertEqual(fake.events, [])
+    }
+
+    // MARK: Automation gate before a send
+
+    /// Nobody can answer a consent prompt on a headless Mac. The send must
+    /// stop before any script, say nothing was sent, and remember why.
+    func testNotDeterminedSendStopsBeforeAnyScript() {
+        let fake = FakeMessages(running: false, answer: .notDetermined)
+        let runner = LiveScriptRunner(
+            access: fake.access(memory: AutomationMemory(folder: folder)),
+            runScript: fake.script(output: Self.resultLine("ok", "completed", "0", "")))
+        let started = ContinuousClock.now
+        let result = runner.sendBlocking(.text("hello"), to: .participant(handle: "+15555550123", chatId: nil))
+        XCTAssertLessThan(ContinuousClock.now - started, .seconds(1))
+        guard case .failure(let failure) = result, case .automationPermissionRequired = failure.error else {
+            return XCTFail("expected an Automation stop, got \(result)")
+        }
+        XCTAssertEqual(failure.disposition, .notStarted)
+        XCTAssertTrue(failure.disposition.retrySafe)
+        XCTAssertEqual(fake.events, ["launch"], "no script may run, so no prompt can appear")
+        XCTAssertEqual(fake.prompts, [false])
+        XCTAssertEqual(AutomationMemory(folder: folder).answer, .notDetermined)
+    }
+
+    func testDeniedSendStopsBeforeAnyScript() {
+        let fake = FakeMessages(running: true, answer: .denied)
+        let runner = LiveScriptRunner(
+            access: fake.access(memory: AutomationMemory(folder: folder)),
+            runScript: fake.script(output: Self.resultLine("ok", "completed", "0", "")))
+        let result = runner.sendBlocking(.text("hello"), to: .chat(guid: "iMessage;-;x", chatId: 1))
+        guard case .failure(let failure) = result, case .automationPermissionRequired = failure.error else {
+            return XCTFail("expected an Automation stop, got \(result)")
+        }
+        XCTAssertEqual(failure.disposition, .notStarted)
+        XCTAssertFalse(fake.events.contains("script"))
+        XCTAssertEqual(AutomationMemory(folder: folder).answer, .denied)
+    }
+
+    func testNotDeterminedFileSendStopsBeforeStaging() throws {
+        let fake = FakeMessages(running: true, answer: .notDetermined)
+        let stagingRoot = folder.appendingPathComponent("staging", isDirectory: true)
+        let source = folder.appendingPathComponent("photo.txt")
+        try Data("x".utf8).write(to: source)
+        let runner = LiveScriptRunner(
+            access: fake.access(memory: AutomationMemory(folder: folder)),
+            stager: OutgoingFileStager(root: stagingRoot),
+            runScript: fake.script(output: ""))
+        let result = runner.sendBlocking(.file(path: source.path), to: .participant(handle: "+15555550123", chatId: nil))
+        guard case .failure(let failure) = result, case .automationPermissionRequired = failure.error else {
+            return XCTFail("expected an Automation stop, got \(result)")
+        }
+        XCTAssertEqual(failure.disposition, .notStarted)
+        XCTAssertFalse(fake.events.contains("script"))
+        let staged = (try? FileManager.default.contentsOfDirectory(atPath: stagingRoot.path)) ?? []
+        XCTAssertEqual(staged, [], "nothing may be staged for a send that never starts")
+    }
+
+    func testHungMessagesFailsTheSendFastAsNotStarted() {
+        let fake = FakeMessages(running: true, answer: .messagesNotResponding)
+        let runner = LiveScriptRunner(
+            access: fake.access(memory: AutomationMemory(folder: folder)),
+            runScript: fake.script(output: Self.resultLine("ok", "completed", "0", "")))
+        let result = runner.sendBlocking(.text("hello"), to: .participant(handle: "+15555550123", chatId: nil))
+        guard case .failure(let failure) = result, case .messagesAppUnavailable = failure.error else {
+            return XCTFail("expected Messages unavailable, got \(result)")
+        }
+        XCTAssertEqual(failure.disposition, .notStarted)
+        XCTAssertFalse(fake.events.contains("script"))
+    }
+
+    /// When macOS cannot answer (Messages did not start hidden), the script
+    /// still runs and reports for itself, as before.
+    func testUnansweredCheckStillRunsTheScript() {
+        let fake = FakeMessages(running: false, answer: .authorized, launchSucceeds: false)
+        let runner = LiveScriptRunner(
+            access: fake.access(memory: AutomationMemory(folder: folder)),
+            runScript: fake.script(output: Self.resultLine("ok", "completed", "0", "")))
+        let result = runner.sendBlocking(.text("hello"), to: .participant(handle: "+15555550123", chatId: nil))
+        guard case .success = result else { return XCTFail("expected success, got \(result)") }
+        XCTAssertEqual(fake.events, ["launch", "script"])
+    }
+
+    /// Messages may quit between polls. A poll that let the query start it
+    /// would show its window, so each poll starts it hidden first.
+    func testTransferPollsStartMessagesHiddenFirst() throws {
+        let fake = FakeMessages(running: true, answer: .authorized)
+        let source = folder.appendingPathComponent("photo.txt")
+        try Data("x".utf8).write(to: source)
+        let transferQueries = Mutex(0)
+        let sendScript = fake.script(output: Self.resultLine("ok", "completed", "0", ""))
+        let emptyScript = fake.script(output: "")
+        let script: ScriptExecutor = { script, arguments in
+            guard script.contains("file transfer") else { return sendScript(script, arguments) }
+            _ = emptyScript(script, arguments)
+            let count = transferQueries.withLock { count in
+                count += 1
+                return count
+            }
+            return .success(Osascript.Output(stdout: count == 1 ? "" : "finished", stderr: "", terminationStatus: 0))
+        }
+        let runner = LiveScriptRunner(
+            access: fake.access(memory: AutomationMemory(folder: folder)),
+            // The stager refuses a root under a symlink, and /var is one.
+            stager: OutgoingFileStager(
+                root: URL(fileURLWithPath: try XCTUnwrap(SecurePath.absoluteLexicalPath(folder.path)))
+                    .appendingPathComponent("staging", isDirectory: true)),
+            runScript: script)
+        let result = runner.sendBlocking(.file(path: source.path), to: .participant(handle: "+15555550123", chatId: nil))
+        guard case .success = result else { return XCTFail("expected success, got \(result)") }
+        XCTAssertEqual(fake.events, ["launch", "script", "script", "launch", "script"])
     }
 
     func testRefusedSendRemembersDenied() {
@@ -235,6 +407,8 @@ final class MessagesAccessTests: XCTestCase {
 private final class FakeMessages: Sendable {
     private struct State {
         var running: Bool
+        var answer: PermissionStatus
+        var launchSucceeds: Bool
         var events: [String] = []
         var launches: [String] = []
         var prompts: [Bool] = []
@@ -242,27 +416,26 @@ private final class FakeMessages: Sendable {
     }
 
     private let state: Mutex<State>
-    private let answer: PermissionStatus
     private let answerAfterPrompt: PermissionStatus?
-    private let launchSucceeds: Bool
 
     init(running: Bool, answer: PermissionStatus, answerAfterPrompt: PermissionStatus? = nil, launchSucceeds: Bool = true) {
-        state = Mutex(State(running: running))
-        self.answer = answer
+        state = Mutex(State(running: running, answer: answer, launchSucceeds: launchSucceeds))
         self.answerAfterPrompt = answerAfterPrompt
-        self.launchSucceeds = launchSucceeds
     }
 
     var events: [String] { state.withLock { $0.events } }
     var launches: [String] { state.withLock { $0.launches } }
     var prompts: [Bool] { state.withLock { $0.prompts } }
     func quit() { state.withLock { $0.running = false } }
+    func setAnswer(_ answer: PermissionStatus) { state.withLock { $0.answer = answer } }
+    func launchSucceeds(_ succeeds: Bool) { state.withLock { $0.launchSucceeds = succeeds } }
 
-    func access(memory: AutomationMemory) -> MessagesAccess {
+    func access(memory: AutomationMemory, clock: FakeClock = FakeClock()) -> MessagesAccess {
         MessagesAccess(
             memory: memory,
             check: { prompt in self.check(prompt: prompt) },
-            launch: { reason in self.launch(reason) })
+            launch: { reason in self.launch(reason) },
+            now: { clock.now })
     }
 
     func script(output: String) -> ScriptExecutor {
@@ -278,7 +451,7 @@ private final class FakeMessages: Sendable {
             if prompt { state.events.append("check prompt=true") }
             guard state.running else { return (false, .messagesNotRunning) }
             if prompt { state.prompted = true }
-            let status = state.prompted ? (answerAfterPrompt ?? answer) : answer
+            let status = state.prompted ? (answerAfterPrompt ?? state.answer) : state.answer
             return (status == .authorized, status)
         }
     }
@@ -287,8 +460,15 @@ private final class FakeMessages: Sendable {
         state.withLock { state in
             state.events.append("launch")
             state.launches.append(reason)
-            if launchSucceeds { state.running = true }
+            if state.launchSucceeds { state.running = true }
+            return state.launchSucceeds
         }
-        return launchSucceeds
     }
+}
+
+/// A clock the test moves by hand.
+private final class FakeClock: Sendable {
+    private let current = Mutex(ContinuousClock.now)
+    var now: ContinuousClock.Instant { current.withLock { $0 } }
+    func advance(by duration: Duration) { current.withLock { $0 += duration } }
 }

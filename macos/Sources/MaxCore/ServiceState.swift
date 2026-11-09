@@ -199,6 +199,14 @@ extension DiagnoseResult {
     self[.permAutomation]?.isSupported == true && self[.sendTextDM]?.isSupported == true
   }
 
+  /// Automation is off and only System Settings can turn it on. A helper
+  /// also reports `not_determined` as permission-gated, because a send never
+  /// asks, but then the app's own request still shows the macOS prompt.
+  public var automationRefused: Bool {
+    guard let automation = self[.permAutomation], automation.isPermissionGated else { return false }
+    return automation.detail != PermissionStatus.notDetermined.rawValue
+  }
+
   public func grants(_ permission: SetupPermission) -> Bool {
     switch permission {
     case .automation: self[.permAutomation]?.isSupported == true

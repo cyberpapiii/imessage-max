@@ -356,6 +356,24 @@ final class SendToolExecuteTests: XCTestCase {
         XCTAssertTrue(stub.invocations.isEmpty, "an ambiguous destination must not send")
     }
 
+    func testNameMatchMissingFromMessagesIsRefusedAndNeverSends() async throws {
+        let fixture = try makeSendFixture()
+        let stub = StubScriptRunner()
+        let resolver = ContactResolver(seedCache: ["+15550009999": "Zed Stranger"])
+        let tool = SendTool(db: fixture.database(), resolver: resolver, runner: stub)
+
+        let json = try await toolFailureBody {
+            try await tool.execute(args: ["to": .string("Zed"), "text": .string("Hi")])
+        }
+        XCTAssertEqual(json["status"] as? String, "ambiguous")
+        XCTAssertEqual(json["disposition"] as? String, "not_started")
+        XCTAssertEqual(json["retry_safe"] as? Bool, true)
+        XCTAssertTrue((json["message"] as? String ?? "").contains("no conversation in Messages"))
+        let candidates = try decodeJSONArray(json["candidates"])
+        XCTAssertEqual(candidates.compactMap { $0["handle"] as? String }, ["+15550009999"])
+        XCTAssertTrue(stub.invocations.isEmpty, "a Contacts-only handle must not send")
+    }
+
     func testRecipientNotFoundDoesNotInvokeRunner() async throws {
         let fixture = try makeSendFixture()
         let stub = StubScriptRunner()

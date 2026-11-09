@@ -27,7 +27,7 @@ enum TransferMonitor {
 
     static func outgoingStatuses(
         named trackingName: String,
-        runScript: ScriptExecutor = { Osascript.run($0, arguments: $1) }
+        runScript: ScriptExecutor = { ScriptGate.shared.run($0, arguments: $1) }
     ) throws -> [String] {
         let execution = try runScript(statusesForNameScript, [trackingName]).get()
         let output = execution.stdout.trimmingCharacters(in: .whitespacesAndNewlines)

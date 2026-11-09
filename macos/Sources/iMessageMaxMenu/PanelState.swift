@@ -111,7 +111,7 @@ extension SetupStep {
       return .missing(diagnosis.contacts.authorized ? Grant.notChecked : "Not allowed")
     case .automation:
       if diagnosis.sendingReady { return .granted("Allowed") }
-      return .missing(diagnosis[.permAutomation]?.isPermissionGated == true ? "Not allowed" : Grant.notChecked)
+      return .missing(diagnosis.automationRefused ? "Not allowed" : Grant.notChecked)
     }
   }
 }

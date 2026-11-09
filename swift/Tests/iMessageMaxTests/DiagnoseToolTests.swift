@@ -275,9 +275,76 @@ final class DiagnoseToolTests: XCTestCase {
         XCTAssertEqual(result.contacts.status, "not_requested_headless")
         XCTAssertFalse(result.contacts.authorized)
         XCTAssertTrue(result.contacts.fix?.contains("Open iMessage Max and turn on Contacts.") == true)
-        XCTAssertEqual(result.status, "needs_setup")
+        XCTAssertEqual(result.status, "ready", "Contacts off degrades names only; every tool still works")
         XCTAssertEqual(result.capabilities["perm_contacts"]?.state, "permission-gated")
         XCTAssertNotNil(result.capabilities["perm_contacts"]?.fix)
+    }
+
+    /// Only the database decides the top-level status. A Mac that leaves
+    /// Contacts off, or has no Automation yet, is still ready to read.
+    func testOverallStatusFollowsTheDatabaseOnly() async throws {
+        for (contacts, automation) in [
+            (PermissionStatus.denied, PermissionStatus.denied), (.notDetermined, .notDetermined),
+            (.authorized, .messagesNotResponding),
+        ] {
+            let ready = try await DiagnoseTool.execute(
+                resolver: ContactResolver(seedCache: [:], authorization: (false, contacts)),
+                dbProbe: DiagnoseToolTests.dbAccessible,
+                automationProbe: { (false, automation) },
+                usageDescriptionProbe: { true }
+            )
+            XCTAssertEqual(ready.status, .ready, "contacts \(contacts), automation \(automation)")
+        }
+        let blocked = try await DiagnoseTool.execute(
+            resolver: ContactResolver(seedCache: [:]),
+            dbProbe: DiagnoseToolTests.dbDenied,
+            automationProbe: DiagnoseToolTests.automationGranted
+        )
+        XCTAssertEqual(blocked.status, .needsSetup)
+    }
+
+    /// Automation never asked: sends stop before reaching Messages, so the
+    /// agent must show the fix instead of trying.
+    func testAutomationNotDeterminedIsPermissionGatedWithTheAppFix() async throws {
+        for holder in [DiagnoseToolTests.inApp, DiagnoseToolTests.bareExecutable] {
+            let result = try await DiagnoseTool.execute(
+                resolver: ContactResolver(seedCache: [:]),
+                dbProbe: DiagnoseToolTests.dbAccessible,
+                automationProbe: { (false, .notDetermined) },
+                holder: holder
+            )
+            let automation = try XCTUnwrap(result.capabilities["perm_automation"])
+            XCTAssertEqual(automation.state, .permissionGated)
+            XCTAssertEqual(automation.detail, "not_determined")
+            let fix = try XCTUnwrap(automation.fix)
+            XCTAssertTrue(fix.contains("Open iMessage Max and turn on Automation."), fix)
+            for key in ["send_text_dm", "send_text_group", "send_file_dm", "send_file_group"] {
+                XCTAssertEqual(result.capabilities[key]?.state, .permissionGated, key)
+                XCTAssertEqual(result.capabilities[key]?.fix, fix, key)
+            }
+            for word in ["make", "swift build", "terminal", "--request-"] {
+                XCTAssertFalse(fix.lowercased().contains(word), "fix names \(word): \(fix)")
+            }
+            if holder == DiagnoseToolTests.inApp {
+                XCTAssertTrue(fix.hasPrefix("Open iMessage Max and turn on Automation."), fix)
+                XCTAssertFalse(fix.contains("imessage-max"), fix)
+            }
+        }
+    }
+
+    func testHungMessagesIsUnverifiedWithDetail() async throws {
+        let result = try await DiagnoseTool.execute(
+            resolver: ContactResolver(seedCache: [:]),
+            dbProbe: DiagnoseToolTests.dbAccessible,
+            automationProbe: { (false, .messagesNotResponding) }
+        )
+        let automation = try XCTUnwrap(result.capabilities["perm_automation"])
+        XCTAssertEqual(automation.state, .unverified)
+        XCTAssertEqual(automation.detail, "messages_not_responding")
+        XCTAssertEqual(automation.note, DiagnoseTool.messagesNotRespondingNote)
+        XCTAssertNil(automation.fix)
+        XCTAssertEqual(result.capabilities["send_text_dm"]?.state, .unverified)
+        XCTAssertEqual(result.status, .ready)
     }
 
     func testNotDeterminedWithoutSkipIsUnchanged() async throws {

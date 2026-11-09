@@ -65,6 +65,17 @@ $BIN --http --port 18484 --token-file /tmp/imax-dev/token --socket-path /tmp/ima
 $BIN --socket-path /tmp/imax-dev/mcp.sock   # a bridge to that helper
 ```
 
+### Stdio bridge across helper restarts
+
+The bridge (`Server/StdioBridge.swift`) outlives helper restarts, so an update, a crash or a Keep running relaunch never strands Codex or Claude Desktop. It waits up to 15 s for the socket, at start and after a drop, which covers launchd's 10 s ThrottleInterval. When the helper drops the connection, the bridge:
+
+- answers each request the old helper had received with -32000 ("iMessage Max restarted while this request was running…"). It never resends them, because a `send` may already have gone out.
+- holds new client messages in order, up to 64 messages or 4 MB, and sends them once it reconnects. A request past that bound gets -32000 at once. Queuing beats failing fast here: a restart takes about 10 s, and those requests have reached no helper, so sending them later runs nothing twice.
+- reconnects with backoff (100 ms doubling to 500 ms), on its own threads, with no Swift task sleep. For a legacy session it replays the client's last successful `initialize` under a bridge-owned id (`imessage-max-bridge-replay-<n>`), drops the reply, sends the client's `notifications/initialized`, and then the queue. Modern-era (2026-07-28) messages are stateless and need no replay. A helper that accepts but never answers the replay is cut off when the grace runs out.
+- gives up after 15 s, answers the queue with the reason, and exits 75. When this user has no desktop login (the State:/Users/ConsoleUser session list in SystemConfiguration), the reason says so: the helper runs only inside a desktop login, so SSH alone cannot start it. Never reaching a helper at start still exits 69.
+
+The bridge parses JSON-RPC only to track replies and the handshake. `StdioBridgeReconnectTests` drives each step against a fake helper, and `BridgeRestartTests` SIGKILLs and restarts a real scratch helper under a real bridge process.
+
 A bare executable cannot hold a Contacts grant of its own. It never prompts when it runs headless, and System Settings cannot add an executable to Contacts by hand. Started from a terminal, it asks, and macOS records the grant for the terminal app, so the grant covers only processes that terminal starts. Work that needs contact names under launchd or an MCP client runs through the helper inside the app (`make install`).
 
 ## Running the test suite
@@ -216,6 +227,16 @@ The `send` tool is agent-native (plan 017):
   accepts it for compatibility and ignores it.
 - File transfers keep the bounded Messages.app observation states
   (`pending_confirmation` while a transfer hasn't completed).
+- Before its first script a send checks Automation without asking
+  (`MessagesAccess.prepareForSend`). Denied or not determined returns
+  status `failed`, `not_started`, `retry_safe=true` with the Automation fix,
+  and nothing reaches Messages. A send never waits on a consent prompt,
+  because on a headless Mac nobody can click it. A Messages that does not
+  answer the probe within 2 s fails the same way as `messagesAppUnavailable`.
+- Send errors are classified by AppleScript error number (-1743/-1744
+  permission, -1728/-1700 missing target, -600/-609 Messages unavailable,
+  -43 file), because the message text is localized. English text is only a
+  fallback for lines without a known number.
 
 The send path deliberately has no interactive human-confirmation popups (MCP
 elicitation) and no server-side send gating. Authorization happens in the
@@ -252,7 +273,7 @@ macOS charges the helper's grants to `iMessage Max.app`, so the app is where a u
 - Background activity, so launchd runs the helper (the app's Login Items registration)
 - Full Disk Access, for ~/Library/Messages/chat.db
 - Contacts, for AddressBook resolution. The companion asks in its own process and then restarts the helper, which reads Contacts access only at launch. A helper inside an app that asks for itself is denied with no prompt. A bare executable cannot hold a Contacts grant of its own (see the build section above). A bare `swift build` also omits the embedded Info.plist, and diagnose then reports `missing_usage_description`
-- Automation, for Messages.app, sending only. The helper's own request shows a prompt that names the app. The user never has to open Messages. macOS answers an Automation check only while Messages runs, and `tell application "Messages"` would start it with its window, so the helper starts Messages hidden first (`MessagesLauncher`: `NSWorkspace` with `activates` false and `hides` true; no window comes on screen and focus stays put). It does that before the setup request and before every send or transfer-status script (`MessagesAccess`). Diagnose never starts Messages on a poll: while Messages is closed it reports the last definite answer (authorized, denied or not determined), which the helper keeps in `automation-answer` beside the token file (the name is `ServiceDefaults.automationAnswerFileName`). With no answer kept, it starts Messages hidden once per helper to get one. A send that Messages runs records authorized, and one refused with -1743 records denied. Tests reach Messages only through the fakes in `MessagesAccessTests` and `makeTestMessagesAccess()`
+- Automation, for Messages.app, sending only. The helper's own request shows a prompt that names the app. The user never has to open Messages. macOS answers an Automation check only while Messages runs, and `tell application "Messages"` would start it with its window, so the helper starts Messages hidden first (`MessagesLauncher`: `NSWorkspace` with `activates` false and `hides` true; no window comes on screen and focus stays put). It does that before the setup request and before every send or transfer-status script (`MessagesAccess`). Diagnose never starts Messages on a poll: while Messages is closed it reports the last definite answer (authorized, denied or not determined), which the helper keeps in `automation-answer` beside the token file (the name is `ServiceDefaults.automationAnswerFileName`). With no answer kept, or a kept answer other than authorized, or after a failed start, it starts Messages hidden to ask again, at most once every 5 minutes (`MessagesAccess.recheckInterval`, on a monotonic clock), so a grant made in System Settings while Messages is closed shows up. A send's own check (never asking) records the live answer, a send that Messages runs records authorized, and one refused with -1743 records denied. Only the setup request may prompt. Every probe that does not ask goes through `AutomationPermission.boundedProbe`: one probe thread at a time, 2 s per caller, because `AEDeterminePermissionToAutomateTarget` against a hung Messages never returns; a timeout reports `messages_not_responding`. Every osascript run goes through `ScriptGate.shared` (4 at a time; a script's 30 s timeout starts when it gets a slot), and blocking Messages work runs on threads of its own (`MessagesAccess.offPool`), not GCD workers, so a burst of sends cannot starve the pipe readers and exit handlers into false timeouts. Tests reach Messages only through the fakes in `MessagesAccessTests` and `makeTestMessagesAccess()`
 
 ## Maintainer notes
 
