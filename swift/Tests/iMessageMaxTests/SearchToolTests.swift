@@ -701,7 +701,9 @@ final class SearchToolTests: XCTestCase {
         for args: [String: Value] in [["query": "string", "limit": 1], ["query": "strng", "fuzzy": true, "limit": 1]] {
             let found = try await collectPages("search", args, resultsKey: "results", database: fixture.database())
             XCTAssertEqual(found.ids, ["msg_1"], "\(args)")
-            XCTAssertGreaterThan(found.pages, 1)
+            // The first call reads past the full fetch and finds it; a full
+            // page always carries a cursor, so a second call finds nothing older.
+            XCTAssertEqual(found.pages, 2)
         }
     }
 
