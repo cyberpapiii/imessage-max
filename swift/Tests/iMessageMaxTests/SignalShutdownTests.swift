@@ -221,6 +221,42 @@ final class PortInUseTests: XCTestCase {
     }
 }
 
+/// An update that replaces the helper's executable on disk must take effect
+/// with nobody opening the app: the helper stops by itself once idle and
+/// exits with the relaunch code, so launchd starts the new binary (088 #19).
+final class UpdateRestartTests: XCTestCase {
+    func testReplacingTheExecutableExitsWithTheRelaunchCodeEvenWithKeepRunningOff() throws {
+        let folder = URL(fileURLWithPath: try makeShortTempFolder())
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let executable = folder.appendingPathComponent("imessage-max")
+        try FileManager.default.copyItem(at: try SpawnedServer.binary(), to: executable)
+        // Keep running off: a quit would leave the helper down, an update must not.
+        let server = try SpawnedServer(stayStopped: true, executable: executable)
+        Thread.sleep(forTimeInterval: 1)
+        XCTAssertTrue(server.isRunning, server.stderr)
+
+        // As brew and ditto do: a new file, so a new inode, at the same path.
+        let staged = folder.appendingPathComponent("imessage-max.new")
+        try FileManager.default.copyItem(at: try SpawnedServer.binary(), to: staged)
+        XCTAssertEqual(rename(staged.path, executable.path), 0)
+
+        // One read to see it, one to see the copy finished, then a drain.
+        let status = try server.waitForExit(within: 30)
+        XCTAssertEqual(status, KeepRunning.relaunchExitCode, server.stderr)
+        XCTAssertTrue(server.stderr.contains("Executable replaced on disk"), server.stderr)
+        XCTAssertTrue(server.stderr.contains("Update installed; stopping so launchd starts the new binary"), server.stderr)
+        XCTAssertTrue(server.stderr.contains("Stopped exit=\(KeepRunning.relaunchExitCode)"), server.stderr)
+    }
+
+    func testAnUnchangedExecutableKeepsRunning() throws {
+        let server = try SpawnedServer()
+        Thread.sleep(forTimeInterval: 6)
+        XCTAssertTrue(server.isRunning, server.stderr)
+        XCTAssertFalse(server.stderr.contains("Executable replaced"), server.stderr)
+        try server.terminate(within: 5)
+    }
+}
+
 private final class SpawnedServer {
     let port: Int
     let authorization: String
@@ -236,7 +272,7 @@ private final class SpawnedServer {
     /// `port` nil picks a free one. With `waitsForHTTP` false, init returns
     /// once the server logs its start, whether or not it holds the port.
     init(
-        stayStopped: Bool = true, port: Int? = nil, waitsForHTTP: Bool = true,
+        stayStopped: Bool = true, port: Int? = nil, waitsForHTTP: Bool = true, executable: URL? = nil,
         prepare: (String) throws -> Void = { _ in }
     ) throws {
         // Short, so the socket path fits sun_path.
@@ -249,7 +285,7 @@ private final class SpawnedServer {
         FileManager.default.createFile(atPath: stderrURL.path, contents: nil)
 
         self.port = try port ?? freeLoopbackPort()
-        process.executableURL = try Self.binary()
+        process.executableURL = try executable ?? Self.binary()
         process.arguments = [
             "--http", "--port", String(self.port),
             "--token-file", tokenURL.path,
@@ -313,6 +349,15 @@ private final class SpawnedServer {
 
     var stderr: String { (try? String(contentsOf: stderrURL, encoding: .utf8)) ?? "" }
 
+    /// Waits for the server to exit on its own, and returns its exit status.
+    func waitForExit(within seconds: TimeInterval) throws -> Int32 {
+        guard exited.wait(timeout: .now() + seconds) == .success else {
+            throw SpawnError("server still running after \(seconds) s: \(Self.tail(stderrURL))")
+        }
+        XCTAssertEqual(process.terminationReason, .exit, "server died by signal: \(Self.tail(stderrURL))")
+        return process.terminationStatus
+    }
+
     var isRunning: Bool { process.isRunning }
 
     func waitForStderr(containing text: String, within seconds: TimeInterval = 5) -> Bool {
@@ -344,7 +389,7 @@ private final class SpawnedServer {
         return (process.terminationStatus, text)
     }
 
-    private static func binary() throws -> URL {
+    static func binary() throws -> URL {
         if let path = ProcessInfo.processInfo.environment["IMESSAGE_MAX_BINARY"] {
             return URL(fileURLWithPath: path)
         }

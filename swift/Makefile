@@ -42,6 +42,22 @@ TOKEN_FILE   := $(HOME)/Library/Application Support/iMessage Max/token
 # process's arguments with ps. printf is a shell builtin, so it adds none.
 AUTH_CURL     = printf 'header = "Authorization: Bearer %s"\n' "$$(cat "$(TOKEN_FILE)" 2>/dev/null)" | curl -K -
 VERIFY_ATTEMPTS := 45
+# The pid launchd runs the helper as now, empty when none.
+helper_pid = launchctl print gui/$$(id -u)/$(LAUNCHD_LABEL) 2>/dev/null | awk '$$1 == "pid" && $$2 == "=" { print $$3; exit }'
+# Seconds install waits for a helper other than the one it replaced. A
+# restart can wait out the plist's 10 second ThrottleInterval, and the
+# companion's own wait for the helper is about 18 seconds.
+HELPER_WAIT  := 45
+# $(call wait_new_helper,<old pid>): wait until launchd runs the helper as
+# another pid. Bounded: a helper that never comes back, as one turned off in
+# Login Items, is left for verify to report.
+wait_new_helper = echo "Waiting for the new helper..."; i=0; PID=""; \
+	while [ $$i -lt $(HELPER_WAIT) ]; do \
+		PID=$$($(helper_pid)); \
+		if [ -n "$$PID" ] && [ "$$PID" != "$(1)" ]; then echo "✓ Helper running as pid $$PID"; break; fi; \
+		sleep 1; i=$$((i + 1)); \
+	done; \
+	[ $$i -lt $(HELPER_WAIT) ] || echo "✗ No new helper after $(HELPER_WAIT) s (pid $${PID:-none}). Verifying anyway."
 # Per-probe cap, so a server that accepts but never answers fails the probe
 # instead of hanging make.
 CURL_MAX_TIME := 5
@@ -71,7 +87,7 @@ require_server = LISTENER=$$(lsof -nP +c 0 -iTCP:$(PORT) -sTCP:LISTEN -Fc 2>/dev
 # initialize reply on stdin.
 server_info = python3 -c "import sys,json; print(json.load(sys.stdin)['result']['serverInfo']['$(1)'])"
 
-.PHONY: build test sign app install restart status logs clean verify verify-db help version release-check
+.PHONY: build test sign app install wait-helper restart status logs clean verify verify-db help version release-check
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
@@ -200,16 +216,24 @@ sys.exit(0 if ok else 1)' \
 # only a new launch, so the installed companion quits first. Only that copy:
 # a build running from dist/ or a test variant keeps running. The bundle is removed,
 # then copied: writing over the running helper's file makes macOS kill it.
+# The old helper keeps answering until the restart, so verify waits for a
+# helper pid other than the one running before the copy; otherwise it can
+# pass against the old binary, or probe while no helper runs.
+# Never put $(MAKE) on a line with rm, ditto or open: `make -n` runs every
+# line that holds $(MAKE), so a dry run would replace the installed app.
 install: app ## Build the app, install it over the released copy or to ~/Applications, register the helper, verify
 	@pkill -f "$(APP)/Contents/MacOS/iMessageMaxMenu" 2>/dev/null || true
 	@i=0; while pgrep -f "$(APP)/Contents/MacOS/iMessageMaxMenu" >/dev/null && [ $$i -lt 50 ]; do sleep 0.1; i=$$((i + 1)); done
-	@mkdir -p "$(APP_DIR)"
-	@rm -rf "$(APP)"
-	@ditto "$(APP_BUILD)" "$(APP)"
-	@echo "✓ Installed $(APP)"
-	@open "$(APP)" --args --register-helper
+	@OLD_PID=$$($(helper_pid)); \
+	mkdir -p "$(APP_DIR)" && rm -rf "$(APP)" && ditto "$(APP_BUILD)" "$(APP)" || exit 1; \
+	echo "✓ Installed $(APP)"; \
+	open "$(APP)" --args --register-helper; \
+	$(call wait_new_helper,$$OLD_PID)
 	@$(MAKE) --no-print-directory verify verify-db
 	@echo "Done. Database access verified."
+
+wait-helper: ## Wait until launchd runs the helper as a pid other than OLD_PID
+	@$(call wait_new_helper,$(OLD_PID))
 
 status: ## Show service status and version
 	@echo "=== Agent ==="

@@ -58,7 +58,7 @@ enum ServerStartup {
 
     static func runHTTP(
         host: String, port: Int, accessToken: AccessToken, contactsPolicy: ContactsAccessPolicy.Override,
-        socketOverride: String?, supportFolder: URL, stop: GracefulStop
+        socketOverride: String?, supportFolder: URL, stop: GracefulStop, update: UpdateWatcher? = nil
     ) async throws {
         let resolver = ContactResolver()
         let access = MessagesAccess(memory: AutomationMemory(folder: supportFolder))
@@ -95,6 +95,21 @@ enum ServerStartup {
         let listener = await startSocketSupervisor(override: socketOverride, catalog: catalog)
         let httpState = bind == .listening ? "" : " http=port_in_use"
         announce(transport: "http addr=\(host):\(port)\(httpState)", resolver: resolver, contactsPolicy: contactsPolicy)
+        if let update {
+            // launchd names the job in XPC_SERVICE_NAME, so a test variant
+            // compares its own plist.
+            if let warning = AgentDefinitionCheck.staleRegistrationWarning(
+                executablePath: update.path, label: ProcessInfo.processInfo.environment["XPC_SERVICE_NAME"],
+                supportFolder: supportFolder)
+            {
+                Log.warning(warning)
+            }
+            // An update that replaces this binary stops the helper when it is
+            // idle, and the exit code makes launchd start the new one, with
+            // or without the companion running (088 #19).
+            update.start { Task { await transport.beginStop() } }
+        }
+        defer { update?.stop() }
 
         Task {
             for await rows in newRows {

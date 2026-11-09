@@ -15,9 +15,12 @@ enum KeepRunning {
     /// Read as the helper stops, so a change applies without a restart.
     /// `folder` holds the token file, which keeps a test helper with
     /// `--token-file` away from the installed helper's setting. A stop asked
-    /// for with `GracefulStop.signal` exits 0 whatever the setting says.
-    static func exitCode(folder: URL, stopRequested: Bool = false) -> Int32 {
+    /// for with `GracefulStop.signal` exits 0 whatever the setting says. A
+    /// stop for an update (`UpdateWatcher`) relaunches whatever it says, so
+    /// the new binary runs: the setting is about quits, not updates.
+    static func exitCode(folder: URL, stopRequested: Bool = false, updateInstalled: Bool = false) -> Int32 {
         if stopRequested { return 0 }
+        if updateInstalled { return relaunchExitCode }
         var info = stat()
         let stayStopped = lstat(folder.appendingPathComponent(ServiceDefaults.stayStoppedFileName).path, &info) == 0
         return stayStopped ? 0 : relaunchExitCode
