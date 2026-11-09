@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Tools
+
+- New `wait_for_messages` tool. An agent can wait for a reply ("tell me when Sam replies") in one call instead of polling `get_messages_since` in a loop. It blocks until a new message that matches `chat_id`, `from_person` or `include_from_me` arrives (by default only messages from other people count), or until `timeout` passes (default 30 s, at most 50 s, under Codex's 60 s tool timeout). It returns the `get_messages_since` response plus `status` (`messages`, `timeout` or `stopping`), and its `next_rowid` is a cursor that misses nothing between calls. Reactions and late-synced history do not end a wait. A wait ends at once when the client cancels it and when the helper stops or restarts for an update, so it never holds up a restart. At most 32 calls wait at a time. It works on stdio and HTTP, on both protocol eras.
+- `diagnose` now points at `wait_for_messages` for connections that receive no new-message notifications.
+
 ## 2.1.0
 
 iMessage Max now runs unattended on a headless Mac. It never shows Messages, keeps running after a quit, takes updates without anyone opening the app, reconnects Codex and Claude Desktop after a restart, and says plainly in `diagnose` what works and what does not, including a signed-out iMessage account. Send results tell the truth: a send that may have gone out is checked against chat.db before the tool answers. New guides cover headless Macs ([docs/headless.md](docs/headless.md)), MDM deployment ([docs/fleet.md](docs/fleet.md)) and removal ([docs/uninstall.md](docs/uninstall.md)). Updating from 2.0.0 registers the helper again once, so macOS may show its "background item added" notice; permissions are unaffected.

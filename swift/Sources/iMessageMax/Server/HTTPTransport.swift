@@ -44,6 +44,9 @@ actor HTTPTransport {
     /// only once the port listens or is known to be taken.
     private var firstBind: CheckedContinuation<BindOutcome, Error>?
     nonisolated let listenerState: HTTPListenerState
+    /// Runs when a drain starts, on every stop path (SIGTERM, SIGUSR1, an
+    /// update), so calls that wait on chat.db return instead of holding it up.
+    private let onDrain: @Sendable () -> Void
 
     private static let silentLogger = Logger(label: "imessage-max.http", factory: { _ in SwiftLogNoOpLogHandler() })
 
@@ -60,8 +63,10 @@ actor HTTPTransport {
         catalog: ToolCatalog,
         setupPermissions: SetupPermissionService,
         configuration: Configuration = .init(),
-        listenerState: HTTPListenerState = HTTPListenerState()
+        listenerState: HTTPListenerState = HTTPListenerState(),
+        onDrain: @escaping @Sendable () -> Void = {}
     ) {
+        self.onDrain = onDrain
         self.listenerState = listenerState
         self.host = host
         self.port = port
@@ -206,6 +211,7 @@ actor HTTPTransport {
     }
 
     fileprivate func beginGracefulShutdown() async {
+        onDrain()
         armShutdownDeadline()
         await sseManager.closeAll()
     }
