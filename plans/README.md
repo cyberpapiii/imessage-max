@@ -9,9 +9,13 @@ Verification baseline for all plans: `cd swift && swift build && swift test`.
 Deploying to the local launchd service (`make install`) is an operator
 action, not an executor step.
 
-## Current (2026-11-07): v2.0.0
+## Current (2026-11-08): headless reliability
 
-No plan is open. Plan 087 shipped as v2.0.0 on 2026-11-07; see its round below.
+| Plan | Status |
+|---|---|
+| [088-headless-reliability.md](088-headless-reliability.md) | IN PROGRESS: 13 fix units from the 2026-11-08 headless audit, one PR each |
+
+Plan 087 shipped as v2.0.0 on 2026-11-07; see its round below.
 
 ## Previous (2026-10-12): v1.8.0
 
