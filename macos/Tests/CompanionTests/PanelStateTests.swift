@@ -249,6 +249,6 @@ private func granted(_ state: PanelState) -> [SetupStep] {
   }
 
   @Test func thePagesAreInSidebarOrder() {
-    #expect(SettingsPage.allCases.map(\.title) == ["General", "Permissions", "Connections", "About & Help"])
+    #expect(SettingsPage.allCases.map(\.title) == ["iMessage Max", "Permissions", "Connections", "About & Help"])
   }
 }

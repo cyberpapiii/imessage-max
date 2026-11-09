@@ -147,6 +147,7 @@ struct GeneralPage: View {
         .disabled(!state.primaryEnabled)
     } else if model.service?.isRunning == true {
       Button("Stop iMessage Max…") { confirmingStop = true }
+        .tint(.red)
         .disabled(!model.canControl)
     } else if state.step != nil {
       Button("Show Permissions") { model.show(.permissions) }

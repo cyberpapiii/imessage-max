@@ -152,7 +152,7 @@ enum SettingsPage: String, CaseIterable, Identifiable {
 
   var title: String {
     switch self {
-    case .general: "General"
+    case .general: "iMessage Max"
     case .permissions: "Permissions"
     case .connections: "Connections"
     case .about: "About & Help"

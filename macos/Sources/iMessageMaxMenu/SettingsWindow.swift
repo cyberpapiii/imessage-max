@@ -189,9 +189,8 @@ struct SettingsSidebar: View {
         get: { model.history.current },
         set: { if let page = $0 { model.show(page) } })
     ) {
-      IdentityRow(model: model)
+      IdentityRow(model: model).tag(SettingsPage.general)
       Section {
-        SidebarRow(page: .general, symbol: "gearshape.fill", color: .gray)
         SidebarRow(page: .permissions, symbol: "hand.raised.fill", color: Design.blue)
         SidebarRow(page: .connections, symbol: "link", color: .green)
       }
@@ -200,7 +199,6 @@ struct SettingsSidebar: View {
       }
     }
     .listStyle(.sidebar)
-    .tint(Design.blue)
   }
 }
 
@@ -217,13 +215,12 @@ struct SettingsDetail: View {
       }
     }
     .formStyle(.grouped)
-    .tint(Design.blue)
   }
 }
 
 /// The top of the sidebar: who this is and how it is doing, like the account
-/// row in System Settings. It is not a page of its own: clicking it opens the
-/// page that needs the user, or General.
+/// row in System Settings. It is the app's own page, with the service,
+/// Open at login and Keep running.
 struct IdentityRow: View {
   let model: AppModel
 
@@ -239,11 +236,8 @@ struct IdentityRow: View {
       }
     }
     .padding(.vertical, 4)
-    .contentShape(Rectangle())
-    .onTapGesture { model.show(state.attention?.page ?? .general) }
     .accessibilityElement(children: .combine)
     .accessibilityLabel("iMessage Max, \(state.status.word)")
-    .accessibilityAddTraits(.isButton)
   }
 }
 
