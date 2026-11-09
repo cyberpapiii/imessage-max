@@ -104,7 +104,7 @@ struct GetAttachment {
 
         return ToolDefinition(
             name: "get_attachment",
-            description: "Get an image by attachment ID. Returns the image at the requested resolution variant: vision (1568px, best for AI analysis), thumb (400px, quick preview), or full (original size).",
+            description: "Get an attachment's content by attachment ID. The first block is JSON metadata. An image comes back at the requested resolution variant: vision (1568px, best for AI analysis), thumb (400px, quick preview), or full (original size). A video comes back as up to \(VideoFrames.count) still frames spread across its length, each half the variant's size on its long side (full: 1568px), with duration_s and frame_times_s in the metadata.",
             inputSchema: inputSchema,
             annotations: Tool.Annotations(
                 title: "Get Attachment",
@@ -225,7 +225,7 @@ struct GetAttachment {
             return TypedAttachmentContent(blocks: [try imageBlock(file, variant: variant)])
 
         case .video:
-            throw Self.unsupported(file, "Video attachments are not yet supported with the new variant system. Use list_attachments to see video metadata.")
+            return try await VideoFrames.content(of: file, variant: variant, processor: imageProcessor)
 
         case .audio:
             throw Self.unsupported(file, "Attachment type 'audio' is not supported. Only images are supported.")

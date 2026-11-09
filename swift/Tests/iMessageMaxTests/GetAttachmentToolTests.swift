@@ -78,25 +78,6 @@ final class GetAttachmentToolTests: XCTestCase {
         XCTAssertEqual(properties[kCGImagePropertyPixelHeight] as? Int, 784)
     }
 
-    func testExecuteReturnsUnsupportedTypeForVideoAttachment() async throws {
-        let videoURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString)-attachment-video.mp4")
-        try Data("video".utf8).write(to: videoURL)
-        defer { try? FileManager.default.removeItem(at: videoURL) }
-
-        let fixture = try ToolTestDatabase(name: "get-attachment-video")
-        try fixture.insertAttachment(rowId: 2, filename: videoURL.path, mimeType: "video/mp4", uti: "public.mpeg-4", totalBytes: 5, transferName: "attachment-video.mp4")
-
-        let tool = GetAttachment(db: fixture.database(), resolver: ContactResolver(seedCache: [:]))
-        let body = try await toolFailureBody {
-            try await tool.execute(attachmentId: "2", variant: "full", allowedRoots: [FileManager.default.temporaryDirectory.path])
-        }
-
-        XCTAssertEqual(body["error"] as? String, "unsupported_type")
-        XCTAssertTrue((body["message"] as? String ?? "").contains("Video attachments are not yet supported"))
-        XCTAssertEqual(body["type"] as? String, "video")
-        XCTAssertEqual(body["size"] as? Int, 5)
-    }
-
     func testUnnamedDMChatNameUsesResolvedParticipant() async throws {
         let imageURL = try makeFixtureImage(name: "unnamed-dm.jpg", width: 200, height: 100)
         defer { try? FileManager.default.removeItem(at: imageURL) }

@@ -355,7 +355,7 @@ Reactions do not end a wait, and neither does late-synced history (see `late` ab
 The 50 s ceiling stays under Codex's default 60 s tool timeout (`tool_timeout_sec`) and the helper's 60 s idle connection timeout. Claude Code allows about 28 hours by default. Through plug, keep this server's `call_timeout_secs` above 50. Plug's per-server `max_concurrent` caps the calls it sends to this server at once, so at `1` a wait holds back every other iMessage call through plug until it returns. Raise it if agents wait while doing other work.
 
 ### get_attachment
-Retrieve image content by attachment ID with resolution variants.
+Retrieve an attachment's content by attachment ID. The first block is always JSON metadata (`id`, `type`, `name`, `chat`, `available`, plus fields for the type). The blocks after it carry the attachment.
 
 ```text
 get_attachment(attachment_id="att123")                 # Default: vision (1568px)
@@ -368,6 +368,12 @@ get_attachment(attachment_id="att123", variant="full")  # Original resolution
 | `vision` (default) | 1568px | AI analysis, OCR | ~1,600 tokens |
 | `thumb` | 400px | Quick preview | ~200 tokens |
 | `full` | Original | Maximum detail | Varies |
+
+A video comes back as up to 4 still frames, taken from the middle of four equal spans so none is the black first frame. Each frame is half the variant's size on its long side (`vision` 784px, `thumb` 200px, `full` 1568px), so the four frames together cost about as much as one image of that variant. A clip shorter than 4 seconds gets one frame per second. The metadata gives `duration_s` and `frame_times_s`, the time of each frame in seconds. The video's sound is not transcribed.
+
+```json
+{"id":"att5","type":"video","name":"IMG_0412.MOV","chat":{"id":"chat3","name":"Alice Smith"},"available":true,"duration_s":8,"frame_times_s":[1,3,5,7]}
+```
 
 ### list_chats
 Browse recent chats with previews.
