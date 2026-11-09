@@ -104,7 +104,7 @@ struct GetAttachment {
 
         return ToolDefinition(
             name: "get_attachment",
-            description: "Get an image by attachment ID. Returns the image at the requested resolution variant: vision (1568px, best for AI analysis), thumb (400px, quick preview), or full (original size).",
+            description: "Get an attachment's content by attachment ID. The first block is JSON metadata. An image comes back at the requested resolution variant: vision (1568px, best for AI analysis), thumb (400px, quick preview), or full (original size). A voice message or other audio comes back as its transcript, with duration_s and transcript_source (messages: the transcript Messages stored; on_device: transcribed on this Mac). When there is no transcript, transcript_unavailable says why.",
             inputSchema: inputSchema,
             annotations: Tool.Annotations(
                 title: "Get Attachment",
@@ -228,7 +228,7 @@ struct GetAttachment {
             throw Self.unsupported(file, "Video attachments are not yet supported with the new variant system. Use list_attachments to see video metadata.")
 
         case .audio:
-            throw Self.unsupported(file, "Attachment type 'audio' is not supported. Only images are supported.")
+            return try await AudioTranscript.content(of: file, db: db)
 
         case .pdf, .document, .other:
             throw Self.unsupported(file, "Attachment type '\(file.type.rawValue)' is not supported. Only images are supported.")

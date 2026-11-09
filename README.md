@@ -355,7 +355,7 @@ Reactions do not end a wait, and neither does late-synced history (see `late` ab
 The 50 s ceiling stays under Codex's default 60 s tool timeout (`tool_timeout_sec`) and the helper's 60 s idle connection timeout. Claude Code allows about 28 hours by default. Through plug, keep this server's `call_timeout_secs` above 50. Plug's per-server `max_concurrent` caps the calls it sends to this server at once, so at `1` a wait holds back every other iMessage call through plug until it returns. Raise it if agents wait while doing other work.
 
 ### get_attachment
-Retrieve image content by attachment ID with resolution variants.
+Retrieve an attachment's content by attachment ID. The first block is always JSON metadata (`id`, `type`, `name`, `chat`, `available`, plus fields for the type). The blocks after it carry the attachment.
 
 ```text
 get_attachment(attachment_id="att123")                 # Default: vision (1568px)
@@ -368,6 +368,12 @@ get_attachment(attachment_id="att123", variant="full")  # Original resolution
 | `vision` (default) | 1568px | AI analysis, OCR | ~1,600 tokens |
 | `thumb` | 400px | Quick preview | ~200 tokens |
 | `full` | Original | Maximum detail | Varies |
+
+A voice message or other audio comes back as its transcript, one text block, with `duration_s` and `transcript_source` in the metadata. For a voice message, the transcript is the one Messages shows under it, which Messages keeps in the message's `attributedBody` (`transcript_source: "messages"`). Other audio, and voice messages that Messages never transcribed, are transcribed on this Mac with Apple's `SpeechTranscriber` in the Mac's language (`transcript_source: "on_device"`, plus `locale`). That needs macOS 26 or later and the on-device speech model for the language, and audio over 10 minutes is not transcribed. Neither way needs a permission beyond Full Disk Access. When there is no transcript, `transcript_unavailable` says why and no text block follows.
+
+```json
+{"id":"att4","type":"audio","name":"Audio Message.caf","chat":{"id":"chat3","name":"Alice Smith"},"available":true,"duration_s":3.2,"transcript_source":"messages"}
+```
 
 ### list_chats
 Browse recent chats with previews.

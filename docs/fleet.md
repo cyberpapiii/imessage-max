@@ -17,6 +17,8 @@ macOS charges the helper's privacy access to the app that contains it. The helpe
 | Automation for Messages | `AppleEvents`, receiver `com.apple.MobileSMS` | Send through Messages |
 | Background activity | Managed Login Items (`com.apple.servicemanagement`) | Let launchd run the helper and keep the user from turning it off |
 
+Reading attachments needs nothing more. `get_attachment` transcribes audio on the Mac with `SpeechTranscriber`, which does not use the Speech Recognition service, so the profile has no `SpeechRecognition` rule.
+
 ## The app's designated requirement
 
 Each privacy rule pins the app by its code requirement. Get it from the installed app:
@@ -226,3 +228,4 @@ Replace each `REPLACE-…` value. Generate the three UUIDs with `uuidgen`. Chang
 - That `AddressBook` Allow reads as authorized through `CNContactStore` in the helper.
 - That the `AppleEvents` rule covers the `osascript` runs the helper starts. macOS shows the helper's own Automation prompt under the app's name, so the rule names the app.
 - That a profile keyed to the helper's identifier, `com.cyberpapiii.imessage-max`, does not work.
+- That on-device audio transcription runs in the launchd helper without a Speech Recognition grant. It works on macOS 27.2 in a binary started from a terminal and signed with hardened runtime and the app's entitlements.

@@ -6,6 +6,7 @@
 
 - New `wait_for_messages` tool. An agent can wait for a reply ("tell me when Sam replies") in one call instead of polling `get_messages_since` in a loop. It blocks until a new message that matches `chat_id`, `from_person` or `include_from_me` arrives (by default only messages from other people count), or until `timeout` passes (default 30 s, at most 50 s, under Codex's 60 s tool timeout). It returns the `get_messages_since` response plus `status` (`messages`, `timeout` or `stopping`), and its `next_rowid` is a cursor that misses nothing between calls. Reactions and late-synced history do not end a wait. A wait ends at once when the client cancels it and when the helper stops or restarts for an update, so it never holds up a restart. At most 32 calls wait at a time. It works on stdio and HTTP, on both protocol eras.
 - `diagnose` now points at `wait_for_messages` for connections that receive no new-message notifications.
+- `get_attachment` returns what a voice message or other audio says. For a voice message it returns the transcript Messages already stored in the message (`transcript_source: "messages"`). Other audio is transcribed on the Mac with `SpeechTranscriber` on macOS 26 or later (`transcript_source: "on_device"`, with `locale`). Neither needs a new permission: the on-device path does not use the Speech Recognition grant. The metadata gives `duration_s`, and `transcript_unavailable` with the reason when there is no transcript. Before, audio returned `unsupported_type`.
 
 ## 2.1.0
 
