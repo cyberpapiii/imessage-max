@@ -24,6 +24,8 @@ final class AppModel {
   /// Settings → General → Keep running. nil when this copy of the app has no
   /// valid agent plist, so there is no helper to keep running.
   private(set) var keepRunning: Bool?
+  /// Settings → General → Keep this Mac awake, nil like `keepRunning`.
+  private(set) var keepAwake: Bool?
   /// The clients found on this Mac, in table order. Empty until the first scan.
   private(set) var clients: [ClientRow] = []
   private(set) var clientsScanned = false
@@ -66,6 +68,7 @@ final class AppModel {
     self.changeDeadline = changeDeadline
     self.permissionDeadline = permissionDeadline
     keepRunning = controller.map { KeepRunningSetting(configuration: $0.configuration).isOn }
+    keepAwake = controller.map { KeepAwakeSetting(configuration: $0.configuration).isOn }
     let tried = milestones.reached(.triedAssistant)
     self.tried = tried
     connectSettled =
@@ -193,6 +196,7 @@ final class AppModel {
     checkMilliseconds = Int(elapsed.seconds * 1000 + elapsed.attoseconds / 1_000_000_000_000_000)
     loginStatus = SMAppService.mainApp.status
     keepRunning = KeepRunningSetting(configuration: controller.configuration).isOn
+    keepAwake = KeepAwakeSetting(configuration: controller.configuration).isOn
     if awake { await refreshClients() }
   }
 
@@ -467,6 +471,27 @@ final class AppModel {
     keepRunning = setting.isOn
   }
 
+  /// The helper checks for the setting every few seconds, so this needs no
+  /// restart.
+  func setKeepAwake(_ on: Bool) {
+    guard let controller else { return }
+    let setting = KeepAwakeSetting(configuration: controller.configuration)
+    do {
+      try setting.set(on)
+    } catch {
+      problem = error.localizedDescription
+    }
+    keepAwake = setting.isOn
+  }
+
+  /// The helper's live inbox works for HTTP sessions while its watcher runs.
+  /// The companion asks over the stateless lane, which never gets
+  /// notifications itself, so the detail says whether the watcher runs.
+  var liveInboxRuns: Bool {
+    guard let inbox = diagnosis?[.liveInbox] else { return false }
+    return inbox.isSupported || inbox.detail == LiveInboxDetail.pollOnly.rawValue
+  }
+
   func copy(_ text: String, acknowledgement: String = "Copied.") {
     NSPasteboard.general.clearContents()
     NSPasteboard.general.setString(text, forType: .string)
@@ -601,7 +626,8 @@ final class AppModel {
     Messages: \(diagnosis?.database.status.rawValue ?? "Unknown")
     Contacts: \(diagnosis?.contacts.status.rawValue ?? "Unknown")
     Sending permission: \(diagnosis?[.permAutomation]?.state.rawValue ?? "unknown")
-    Live inbox: \(diagnosis?[.liveInbox]?.state.rawValue ?? "Unknown")
+    Live inbox: \(diagnosis?[.liveInbox].map { "\($0.state.rawValue) (\($0.detail ?? "no detail"))" } ?? "Unknown")
+    Sleep: \(diagnosis?.power.map { "\($0.status.rawValue), keep awake \($0.keepAwake ? "on" : "off")" } ?? "Unknown")
     Local connection: \(endpoint)
     Check duration: \(checkMilliseconds.map { "\($0) ms" } ?? "Unknown")
     """

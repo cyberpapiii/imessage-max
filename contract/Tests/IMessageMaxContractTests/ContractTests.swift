@@ -103,6 +103,40 @@ import Testing
   ])
 }
 
+@Test func powerTravelsAsSnakeCaseAndIsOptional() throws {
+  let power = DiagnoseResult.Power(
+    status: .idleSleep, sleepMinutes: 10, sleepDisabled: false, keepAwake: false,
+    assertionHeld: false, fix: "Turn it on.")
+  let object = try JSONSerialization.jsonObject(with: JSONEncoder().encode(power)) as? NSDictionary
+  #expect(object == [
+    "status": "idle_sleep", "sleep_minutes": 10, "sleep_disabled": false, "keep_awake": false,
+    "assertion_held": false, "fix": "Turn it on.",
+  ])
+  let unread = DiagnoseResult.Power(
+    status: .unknown, sleepMinutes: nil, sleepDisabled: nil, keepAwake: true, assertionHeld: true)
+  let json = String(decoding: try JSONEncoder().encode(unread), as: UTF8.self)
+  #expect(!json.contains("sleep_minutes") && !json.contains("fix"))
+
+  let older = """
+    {"version":"2.0.0","process_id":7,"status":"ready",
+     "database":{"accessible":true,"status":"accessible","path":"~/Library/Messages/chat.db"},
+     "contacts":{"authorized":true,"status":"authorized"},"capabilities":{}}
+    """
+  #expect(try JSONDecoder().decode(DiagnoseResult.self, from: Data(older.utf8)).power == nil)
+}
+
+@Test func powerAndLiveInboxWordsAreStable() {
+  #expect([PowerStatus.staysAwake, .idleSleep, .unknown].map(\.rawValue)
+    == ["stays_awake", "idle_sleep", "unknown"])
+  #expect([LiveInboxDetail.sessionSSE, .pollOnly, .watcherNotRunning].map(\.rawValue)
+    == ["session_sse", "poll_only", "watcher_not_running"])
+}
+
+@Test func keepAwakeMarkerSitsBesideTheOtherSettings() {
+  #expect(ServiceDefaults.keepAwakeFileName == "keep-awake")
+  #expect(ServiceDefaults.keepAwakeFileName != ServiceDefaults.stayStoppedFileName)
+}
+
 @Test func iMessageAccountTravelsAsACapabilityWithItsStatusInDetail() throws {
   #expect(CapabilityKey.imessageAccount.rawValue == "imessage_account")
   #expect(

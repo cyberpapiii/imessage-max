@@ -4,13 +4,13 @@ This guide is for a Mac with no display, keyboard or person nearby, such as a Ma
 
 For MDM deployment to many Macs, see [fleet.md](fleet.md). To remove iMessage Max, see [uninstall.md](uninstall.md).
 
-This guide follows `main`. Some behaviour it describes, such as Keep running, the bridge's desktop-login message and its reconnect after a helper restart, is newer than 2.0.0. The Unreleased section of [CHANGELOG.md](../CHANGELOG.md) lists it.
+This guide follows `main`. Some behaviour it describes, such as Keep running, Keep this Mac awake, the bridge's desktop-login message and its reconnect after a helper restart, is newer than 2.0.0. The Unreleased section of [CHANGELOG.md](../CHANGELOG.md) lists it.
 
 ## Checklist
 
 1. Log in to the desktop automatically, or over Screen Sharing after each restart.
 2. Never log out. Disconnect Screen Sharing or lock the screen instead.
-3. Turn off system sleep: `sudo pmset -a sleep 0 autorestart 1 womp 1`.
+3. Turn off system sleep: `sudo pmset -a sleep 0 autorestart 1 womp 1`, or turn on **Keep this Mac awake** in the companion.
 4. Turn on Remote Login (SSH) and Screen Sharing.
 5. Install iMessage Max and grant its four permissions once, over Screen Sharing.
 6. Sign in to iMessage in Messages once.
@@ -79,6 +79,10 @@ sudo pmset -a sleep 0 autorestart 1 womp 1
 
 Optionally also run `sudo pmset -a powernap 0`, and put the Mac on a UPS. Check the result with `pmset -g`. The `pmset` man page documents each setting (`man pmset`).
 
+Without `sudo`, turn on **Keep this Mac awake** on the iMessage Max page of the companion's Settings. It is off by default. While it is on, the running helper holds a `PreventUserIdleSystemSleep` power assertion, so the Mac does not sleep while idle; the display can still sleep. It does not stop sleep from a closed lid, the Apple menu or a low battery, and it does nothing while the helper is stopped. The setting is the file `keep-awake` in `~/Library/Application Support/iMessage Max/`: present means on. The helper checks for it every 5 seconds, so a change needs no restart. `pmset -g assertions` lists the assertion as "iMessage Max: Keep this Mac awake". `autorestart` and `womp` still need `pmset`.
+
+`diagnose` reports the sleep setting under `power`: `status` is `stays_awake` when system sleep is off or the helper holds its assertion, and `idle_sleep` with `sleep_minutes` and a `fix` when the Mac sleeps while idle.
+
 ## Turn on remote access
 
 In System Settings → General → Sharing:
@@ -131,7 +135,7 @@ SMS from a Mac goes through a paired iPhone (Text Message Forwarding), and Apple
 
 ## Keep attachments on disk
 
-With Messages in iCloud on, macOS can keep older attachments only in iCloud. `get_attachment` then returns `attachment_offloaded` and asks for a download. The 088 plan (finding #24) found that such files often cannot be fetched this way. If agents need old attachments, keep plenty of free disk space and turn off Optimize Mac Storage under System Settings → your Apple Account → iCloud. **Not verified:** which setting decides Messages attachment offload on macOS 15 and later.
+With Messages in iCloud on, macOS can keep older attachments only in iCloud. `get_attachment` then returns `attachment_offloaded` with `download_started: false`: iMessage Max cannot download the file, and retrying does not help. Messages downloads it when someone opens the conversation in Messages on this Mac. `diagnose` reports `attachments_offloaded` as `degraded` for this reason. If agents need old attachments, keep plenty of free disk space and turn off Optimize Mac Storage under System Settings → your Apple Account → iCloud. **Not verified:** which setting decides Messages attachment offload on macOS 15 and later.
 
 ## One user per Mac
 
@@ -278,7 +282,9 @@ Each start logs one `Started version=… pid=… transport=http addr=127.0.0.1:4
 
 **Sends end `uncertain` or `failed` with no clear cause.** Check `imessage` in `diagnose` first. If it says `signed_in`, the recipient may not reach iMessage; check the chat with `get_messages`.
 
-**The endpoint or the live inbox stops for a while, then catches up.** The Mac slept. Check `pmset -g` for `sleep 0`.
+**The endpoint or the live inbox stops for a while, then catches up.** The Mac slept. Check `power.status` in `diagnose`, or `pmset -g` for `sleep 0`, and turn on Keep this Mac awake or turn off system sleep.
+
+**An agent answers old messages as if they were new.** Messages in iCloud synced old history into `chat.db`. `get_messages_since` marks those rows `late: true`, and its `max_age` parameter skips anything older than you choose. See `get_messages_since` in the [README](../README.md).
 
 **`get_attachment` returns `attachment_offloaded` for old files.** The file is only in iCloud. See [Keep attachments on disk](#keep-attachments-on-disk).
 

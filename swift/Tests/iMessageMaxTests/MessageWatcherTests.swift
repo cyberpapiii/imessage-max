@@ -31,7 +31,8 @@ final class MessageWatcherTests: XCTestCase {
             databasePath: fixture.path,
             debounce: .milliseconds(50),
             fallbackInterval: .milliseconds(400)
-        ) { rowid in
+        ) { rows in
+            let rowid = rows.maxRowid
             collected.withLock { $0.append(rowid) }
         }
         watcher.start()
@@ -49,7 +50,8 @@ final class MessageWatcherTests: XCTestCase {
             databasePath: fixture.path,
             debounce: .milliseconds(80),
             fallbackInterval: .seconds(30)
-        ) { rowid in
+        ) { rows in
+            let rowid = rows.maxRowid
             collected.withLock { $0.append(rowid) }
         }
         watcher.start()
@@ -77,7 +79,8 @@ final class MessageWatcherTests: XCTestCase {
             databasePath: fixture.path,
             debounce: .milliseconds(50),
             fallbackInterval: .seconds(30)
-        ) { rowid in
+        ) { rows in
+            let rowid = rows.maxRowid
             collected.withLock { $0.append(rowid) }
         }
         watcher.start()
@@ -120,7 +123,8 @@ final class MessageWatcherTests: XCTestCase {
             databasePath: path,
             debounce: .milliseconds(50),
             fallbackInterval: .seconds(30)
-        ) { rowid in
+        ) { rows in
+            let rowid = rows.maxRowid
             collected.withLock { $0.append(rowid) }
         }
         watcher.start()
@@ -151,7 +155,8 @@ final class MessageWatcherTests: XCTestCase {
             databasePath: fixture.path,
             debounce: .milliseconds(50),
             fallbackInterval: .seconds(30)
-        ) { rowid in
+        ) { rows in
+            let rowid = rows.maxRowid
             collected.withLock { $0.append(rowid) }
         }
         watcher.start()
@@ -180,7 +185,8 @@ final class MessageWatcherTests: XCTestCase {
             databasePath: fixture.path,
             debounce: .milliseconds(50),
             fallbackInterval: .milliseconds(200)
-        ) { rowid in
+        ) { rows in
+            let rowid = rows.maxRowid
             collected.withLock { $0.append(rowid) }
         }
         watcher.start()
@@ -192,5 +198,40 @@ final class MessageWatcherTests: XCTestCase {
         try fixture.insertMessage(rowId: 9, guid: "w-9", text: "late", date: 3, isFromMe: false, handleId: 1)
         let fired = await waitUntil(.seconds(1)) { !collected.withLock { $0.isEmpty } }
         XCTAssertFalse(fired, "stopped watcher still fired: \(collected.withLock { $0 })")
+    }
+
+    /// 088 finding #25: a batch of nothing but late-synced history is
+    /// flagged, so a client can skip it; a batch with one fresh row is not.
+    func testFlagsABatchOfOnlyLateHistory() async throws {
+        let fixture = try makeWalFixture()
+        let hour: Int64 = 3_600_000_000_000
+        let recent: Int64 = 800_000_000_000_000_000
+        try fixture.insertMessage(rowId: 1, guid: "w-1", text: "seen", date: recent, isFromMe: false, handleId: 1)
+        let collected = Mutex<[MessageWatcher.NewRows]>([])
+        let watcher = MessageWatcher(
+            databasePath: fixture.path, debounce: .seconds(30), fallbackInterval: .seconds(30)
+        ) { rows in collected.withLock { $0.append(rows) } }
+        watcher.start()
+        defer { watcher.stop() }
+
+        try fixture.insertMessage(rowId: 2, guid: "w-2", text: "2019", date: recent - 900 * hour, isFromMe: false, handleId: 1)
+        try fixture.insertMessage(rowId: 3, guid: "w-3", text: "2020", date: recent - 2 * hour, isFromMe: false, handleId: 1)
+        watcher.pollNow()
+        try fixture.insertMessage(rowId: 4, guid: "w-4", text: "old", date: recent - 5 * hour, isFromMe: false, handleId: 1)
+        try fixture.insertMessage(rowId: 5, guid: "w-5", text: "new", date: recent + 1, isFromMe: false, handleId: 1)
+        watcher.pollNow()
+
+        XCTAssertEqual(collected.withLock { $0 }, [
+            MessageWatcher.NewRows(maxRowid: 3, late: true),
+            MessageWatcher.NewRows(maxRowid: 5, late: false),
+        ])
+    }
+
+    func testTheNotificationCarriesLateOnlyWhenSet() throws {
+        let plain = try JSONEncoder().encode(NewMessagesNotification.Parameters(max_rowid: 7))
+        XCTAssertEqual(String(decoding: plain, as: UTF8.self), #"{"max_rowid":7}"#)
+        let late = try JSONSerialization.jsonObject(
+            with: JSONEncoder().encode(NewMessagesNotification.Parameters(max_rowid: 7, late: true))) as? NSDictionary
+        XCTAssertEqual(late, ["max_rowid": 7, "late": true])
     }
 }

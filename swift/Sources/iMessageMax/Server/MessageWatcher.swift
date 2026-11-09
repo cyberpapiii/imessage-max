@@ -2,6 +2,14 @@ import Darwin
 import Foundation
 
 final class MessageWatcher: @unchecked Sendable {
+    /// New rows above the last poll's MAX(ROWID).
+    struct NewRows: Equatable, Sendable {
+        let maxRowid: Int64
+        /// Every new row is late-synced history (see LateHistory), so a
+        /// client can skip this notification.
+        var late = false
+    }
+
     struct FileIdentity: Equatable {
         let device: UInt64
         let inode: UInt64
@@ -17,7 +25,7 @@ final class MessageWatcher: @unchecked Sendable {
     private let databasePath: String
     private let debounce: DispatchTimeInterval
     private let fallbackInterval: DispatchTimeInterval
-    private let onNewRows: @Sendable (Int64) -> Void
+    private let onNewRows: @Sendable (NewRows) -> Void
     private let queue = DispatchQueue(label: "imessage-max.watcher")
 
     private var sources: [String: DispatchSourceFileSystemObject] = [:]
@@ -37,7 +45,7 @@ final class MessageWatcher: @unchecked Sendable {
         databasePath: String,
         debounce: DispatchTimeInterval = .milliseconds(250),
         fallbackInterval: DispatchTimeInterval = .seconds(5),
-        onNewRows: @escaping @Sendable (Int64) -> Void
+        onNewRows: @escaping @Sendable (NewRows) -> Void
     ) {
         self.databasePath = databasePath
         self.debounce = debounce
@@ -160,7 +168,22 @@ final class MessageWatcher: @unchecked Sendable {
         guard maxRowid != previous else { return }
         lastMax = maxRowid
         if maxRowid > previous {
-            onNewRows(maxRowid)
+            onNewRows(NewRows(maxRowid: maxRowid, late: allLate(after: previous, through: maxRowid)))
+        }
+    }
+
+    /// Whether every row in (previous, maxRowid] is late against the rows at
+    /// or below `previous`. On a read error the rows count as new.
+    private func allLate(after previous: Int64, through maxRowid: Int64) -> Bool {
+        let db = Database(path: databasePath)
+        do {
+            let baseline = try LateHistory.baseline(db: db, atOrBelow: previous)
+            let newest = try db.query(
+                "SELECT MAX(date) FROM message WHERE ROWID > ? AND ROWID <= ?", params: [previous, maxRowid]
+            ) { $0.optionalInt(0) }.first ?? nil
+            return LateHistory.isLate(newest, highWater: baseline)
+        } catch {
+            return false
         }
     }
 
