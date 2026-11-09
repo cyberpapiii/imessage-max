@@ -83,6 +83,9 @@ final class ServiceFilesContractTests: XCTestCase {
         XCTAssertEqual(GracefulStop.signal, SIGUSR1)
         XCTAssertTrue(script.contains("signal: [\"USR1\", \"$AGENT_LABEL\"]"), "the cask must stop the helper with USR1")
         XCTAssertFalse(script.contains("\"TERM\""), "SIGTERM relaunches the helper while Keep running is on")
+        XCTAssertFalse(
+            script.contains("on_upgrade:"),
+            "brew upgrade must not send USR1: the helper would stay stopped until the next login")
     }
 
     func testCompanionAssemblyScriptMatchesContract() throws {

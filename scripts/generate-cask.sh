@@ -9,6 +9,10 @@
 # and KeepAlive does not restart a zero exit; only `zap` removes the launchd
 # job. Not SIGTERM: with Keep running on, the helper exits 75 on SIGTERM and
 # launchd would relaunch it from the app brew just deleted.
+# Never give `uninstall` an on_upgrade list that includes signal:
+# then `brew upgrade` would send USR1 and leave the helper stopped until
+# the next login. Homebrew skips `signal` on upgrade only without it
+# (cask/artifact/abstract_uninstall.rb, UPGRADE_REINSTALL_SKIP_DIRECTIVES).
 set -euo pipefail
 
 if [[ "$#" -ne 2 ]]; then
